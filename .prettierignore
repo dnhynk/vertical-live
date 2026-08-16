@@ -1,0 +1,10 @@
+node_modules
+**/dist
+package-lock.json
+
+# Prototype snapshot kept for reference only (spec §10.4). Not on the product path.
+legacy
+
+# Markdown is authored by hand (spec/BOARD/tickets are the canonical documents and
+# BOARD.md is committed to main by the coordinator). Doc formatting is decided in T16.
+**/*.md

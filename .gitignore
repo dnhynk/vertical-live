@@ -11,6 +11,8 @@ node_modules
 dist
 dist-ssr
 *.local
+*.tsbuildinfo
+coverage
 
 # Editor directories and files
 .vscode/*
@@ -28,6 +30,7 @@ __pycache__/
 *.pyc
 
 # Local data / secrets
+data/
 *.db
 *.db-wal
 *.db-shm

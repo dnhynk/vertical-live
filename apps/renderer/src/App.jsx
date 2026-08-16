@@ -1,16 +1,16 @@
-﻿import React, { Suspense, useEffect, useMemo } from 'react';
-import { Canvas } from '@react-three/fiber';
-import { Html } from '@react-three/drei';
-import usePetStore from './store';
-import Pet from './components/Pet';
-import Background from './components/Background';
+﻿import React, { Suspense, useEffect, useMemo } from 'react'
+import { Canvas } from '@react-three/fiber'
+import { Html } from '@react-three/drei'
+import usePetStore from './store'
+import Pet from './components/Pet'
+import Background from './components/Background'
 
 const stats = [
   { key: 'hunger', label: 'Energy', tone: 'energy' },
   { key: 'happiness', label: 'Mood', tone: 'mood' },
   { key: 'cleanliness', label: 'Clean', tone: 'clean' },
   { key: 'life', label: 'Life', tone: 'life' },
-];
+]
 
 const localEvents = [
   { type: 'LIKE', label: 'Like', detail: '+small pulse' },
@@ -37,14 +37,14 @@ const localEvents = [
     amount: { valueMicros: 5000000000, currency: 'JPY', display: 'JPY 5,000' },
   },
   { type: 'REVIVE', label: 'Revive', detail: '+life' },
-];
+]
 
-const localNames = ['Sora', 'Yuki', 'Hana', 'Ren', 'Aoi'];
+const localNames = ['Sora', 'Yuki', 'Hana', 'Ren', 'Aoi']
 
 function randomLocalUser() {
   return {
     name: localNames[Math.floor(Math.random() * localNames.length)],
-  };
+  }
 }
 
 function StatBar({ label, value, tone }) {
@@ -58,7 +58,7 @@ function StatBar({ label, value, tone }) {
         <div className={`stat-fill ${tone}`} style={{ width: `${Math.max(value, 3)}%` }} />
       </div>
     </div>
-  );
+  )
 }
 
 function BroadcastOverlay() {
@@ -73,9 +73,9 @@ function BroadcastOverlay() {
     lastEvent,
     eventLog,
     totalEvents,
-  } = usePetStore();
+  } = usePetStore()
 
-  const values = { hunger, happiness, cleanliness, life };
+  const values = { hunger, happiness, cleanliness, life }
 
   return (
     <div className="broadcast-overlay">
@@ -122,7 +122,7 @@ function BroadcastOverlay() {
         </div>
       </footer>
     </div>
-  );
+  )
 }
 
 function BroadcastStage() {
@@ -143,7 +143,7 @@ function BroadcastStage() {
         <BroadcastOverlay />
       </div>
     </section>
-  );
+  )
 }
 
 function LocalEventPanel() {
@@ -159,7 +159,7 @@ function LocalEventPanel() {
     evolutionXp,
     totalEvents,
     totalRevenueMicros,
-  } = usePetStore();
+  } = usePetStore()
 
   const fire = (event) => {
     dispatchEvent({
@@ -167,8 +167,8 @@ function LocalEventPanel() {
       user: randomLocalUser(),
       source: 'local-panel',
       timestamp: new Date().toISOString(),
-    });
-  };
+    })
+  }
 
   return (
     <aside className="control-panel">
@@ -221,33 +221,37 @@ function LocalEventPanel() {
       </div>
 
       <div className="panel-actions">
-        <button className="utility-button danger" onClick={forceDeath}>Force faint</button>
-        <button className="utility-button" onClick={resetPet}>Reset pet</button>
+        <button className="utility-button danger" onClick={forceDeath}>
+          Force faint
+        </button>
+        <button className="utility-button" onClick={resetPet}>
+          Reset pet
+        </button>
       </div>
 
       <div className="panel-note">
         OBS target URL: <code>?mode=broadcast</code>
       </div>
     </aside>
-  );
+  )
 }
 
 export default function App() {
-  const tick = usePetStore((state) => state.tick);
+  const tick = usePetStore((state) => state.tick)
   const isBroadcastMode = useMemo(() => {
-    const params = new URLSearchParams(window.location.search);
-    return params.get('mode') === 'broadcast';
-  }, []);
+    const params = new URLSearchParams(window.location.search)
+    return params.get('mode') === 'broadcast'
+  }, [])
 
   useEffect(() => {
-    const timer = window.setInterval(() => tick(), 1000);
-    return () => window.clearInterval(timer);
-  }, [tick]);
+    const timer = window.setInterval(() => tick(), 1000)
+    return () => window.clearInterval(timer)
+  }, [tick])
 
   return (
     <div className={`app-shell ${isBroadcastMode ? 'broadcast-mode' : ''}`}>
       <BroadcastStage />
       {!isBroadcastMode && <LocalEventPanel />}
     </div>
-  );
+  )
 }
