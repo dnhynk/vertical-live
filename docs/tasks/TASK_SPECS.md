@@ -27,14 +27,14 @@
 - **범위**
   - npm workspaces: `packages/contract`, `apps/server`, `apps/renderer`, `tools/simulator`. Node 24(`.nvmrc`, `engines`), TypeScript 5 strict, ESM(`"type":"module"`), tsconfig base + project references, vitest, eslint 9 flat config + prettier, `.editorconfig`.
   - 루트 스크립트: `npm run lint`, `typecheck`, `test`, `build`, `format:check` — 모두 워크스페이스 전체를 돈다.
-  - 기존 Vite 앱(`src/`, `index.html`, `public/`, `vite.config.js`, `eslint.config.js`)을 `apps/renderer`로 이동(동작 유지, JSX 그대로; TS 전환은 T5). `server.py`, `extension/`, `artifacts/`는 `legacy/`로 이동하고 `legacy/README.md`에 "스펙 §10.4에 따라 production 경로에서 제외, 참고용"이라고 적는다.
+  - 기존 Vite 앱 중 **R3F 장면 자산만** `apps/renderer`로 이동한다(`components/Pet.jsx`, `components/Background.jsx`, `main.jsx`, css, `public/pet.glb`, `index.html`, `vite.config.js`; JSX 그대로, TS 전환은 T5). `Pet.jsx`의 store 의존은 props 기본값(idle)으로 최소 수정하고, 새 최소 `App.jsx`는 9:16 캔버스에 Background+Pet idle만 마운트한다(게임 로직·이름·결제·사망·Pokemon 문자열 0). 프로토타입 게임 로직·로컬 테스트 패널·overlay(`store.js`, 구 `App.jsx`)와 `server.py`, `extension/`, `artifacts/`는 `legacy/`(렌더러는 `legacy/renderer-prototype/`)로 이동하고 `legacy/README.md`에 "스펙 §10.4·§16에 따라 production 경로에서 제외, 참고용"이라고 적는다. (2026-08-16 R-T0-1 리뷰 결과로 재기술: 스펙 §16이 재사용을 인정한 것은 렌더링 경험뿐이며 CLAUDE.md §3 불변조건은 활성 워크스페이스에서 예외 없이 적용한다.)
   - `packages/contract`: `CONTRACT_VERSION = 1` export + 테스트 1개. `apps/server`: `GET /health` 반환 `{status:"ok"}` 최소 서버 + 테스트 1개. `tools/simulator`: 빈 CLI 뼈대.
   - GitHub Actions `.github/workflows/ci.yml`: PR과 `main` push에서 Node 24, `npm ci`, lint, typecheck, test, build. job 이름 `ci`.
   - `README.md` 상단에 새 구조·실행법 요약(정식 재작성은 T16).
 - **범위 밖**: 기능 구현, 계약 정의, 렌더러 개편.
 - **합격 기준**
   1. 새 clone에서 `npm ci && npm run lint && npm run typecheck && npm run test && npm run build`가 통과한다(출력을 티켓에 첨부).
-  2. `apps/renderer`가 `npm run dev -w @vl/renderer`로 기존과 같이 뜬다(스크린샷 또는 로그).
+  2. `apps/renderer`가 `npm run dev -w @vl/renderer`로 떠서 R3F 장면(Background+Pet idle)을 9:16으로 렌더한다(스크린샷 또는 로그). `apps/renderer` 안에 이름 표시·결제 처리·사망·Pokemon 문자열이 없다(grep 증빙).
   3. CI가 PR에서 녹색이다.
   4. `legacy/`로 이동한 코드는 어떤 워크스페이스에서도 import되지 않는다.
 
@@ -110,7 +110,7 @@
 - slug `t5-renderer-readmodel` · PR 접두 `feat(renderer):` · 의존 T1
 - **읽을 것**: 스펙 §5.2, §7.3(6)(7), §9.2(degraded CTA), §9.4(4), §10.2, §11 "화면", §12.3, §16
 - **범위**
-  - `apps/renderer`를 TypeScript로 전환하고 `@vl/contract` 타입 사용. 기존 R3F 장면(`Pet.jsx`, `Background.jsx`)은 시각 자산으로 유지(TSX 전환), `store.js`의 게임 로직·이름 생성·수익 합계는 **삭제**(권위는 서버).
+  - `apps/renderer`를 TypeScript로 전환하고 `@vl/contract` 타입 사용. 기존 R3F 장면(`Pet.jsx`, `Background.jsx`)은 시각 자산으로 유지(TSX 전환). 프로토타입 게임 로직·테스트 패널은 T0에서 `legacy/renderer-prototype/`로 이미 격리됐으므로 참고만 하고 import하지 않는다(권위는 서버).
   - WS 클라이언트: 재연결 backoff, `hello`(마지막 적용 revision), `snapshot` 전체 치환, `effect`는 `effectId` 집합으로 1회만 시작(재수신 무시), `ack_state`/`ack_effect`는 실제 프레임에 적용된 뒤 전송, `renderer_health` 주기 송신(rAF 프레임 카운터, FPS, WebGL `webglcontextlost/restored` 처리와 보고).
   - 9:16 1080x1920 고정 캔버스, §5.2의 4개 고정 정보 슬롯을 `snapshot.display`에서만 그린다. raw chat·이름 표시 UI 없음. `interactionEnabled=false`면 CTA를 숨기고 "相互作用一時停止"(ja.json, nativeReview pending) 표시.
   - `?mode=broadcast`(OBS용, 패널 없음)와 `?mode=dev`(디버그 패널: 연결 상태·revision·effect 로그; 이벤트 주입 UI는 T11).

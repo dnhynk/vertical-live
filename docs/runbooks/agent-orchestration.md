@@ -73,6 +73,8 @@ orca orchestration worker-start --task <task_id> --worktree new-top-level \
 # worktree: C:/Users/dongh/orca/workspaces/vertical-live/<slug>, 브랜치 dnhynk/<slug> (origin/main 기준), setup hook: npm install
 ```
 
+**기동 직후 반드시 확인(2026-08-16 T0 사례)**: `worker-start`가 `dispatch_input: accepted`를 반환해도 주입된 프리앰블+TASK가 Claude Code composer에 **제출되지 않은 채** 남을 수 있다(터미널 tail에 `❯ coordinator has more for you …` 텍스트가 보이고 아래에 `bypass permissions on` 상태줄만 있음). `orca terminal wait --terminal <handle> --for tui-idle --timeout-ms 20000` 뒤 `orca terminal send --terminal <handle> --enter`로 Enter 1회를 보내고, 30초 후 `terminal read`로 `● …` 응답이 시작됐는지 확인한다. 빈 composer에 Enter는 무해하므로 확인이 어려우면 보낸다.
+
 기동 후 `orca terminal show --terminal <handle>` preview에 `bypass permissions on`이 없으면 그 worker는 프롬프트에서 멈출 수 있다. 그 경우에만 2단계 경로(`worktree create` → `terminal create --command "claude --dangerously-skip-permissions"` → `terminal wait --for tui-idle` → `dispatch --task --to <handle> --inject`)를 쓴다.
 
 task `--spec`에는 반드시 넣는다: T-ID, 한 줄 목표, `docs/tasks/TASK_SPECS.md`의 절 이름, 브랜치 slug, PR 제목 접두어, `[contract]` 여부, "3장 worker 계약을 먼저 읽는다", 핵심 합격 기준 요약.
@@ -108,9 +110,12 @@ orca terminal wait --terminal <handle> --for tui-idle --timeout-ms 90000 --json
 orca orchestration dispatch --task <review_task_id> --to <handle> --inject --json
 ```
 
+`dispatch --inject` 뒤 codex 화면에 `[Pasted Content N chars]`가 composer에 남으면(2026-08-16 R-T0-1 사례) `orca terminal send --terminal <handle> --enter`로 Enter 1회를 보내고 30초 뒤 `terminal read`로 `• Ran …`/`Working` 표시를 확인한다(2.2와 같은 gotcha).
+
 `review` worktree는 처음 한 번 `orca worktree create --repo id:f5dd… --name review --no-parent --setup run --json`으로 만든다(브랜치는 리뷰어가 PR마다 `gh pr checkout <n> --branch review/pr-<n> --force`로 바꾼다; worker worktree에 checkout된 브랜치는 다른 worktree에서 checkout할 수 없으므로 반드시 `--branch`로 별도 이름을 쓴다). 리뷰는 **한 번에 하나**만 돌린다(같은 worktree).
 
 4. 리뷰어 worker_done을 받으면 body의 verdict를 읽는다:
+   - (리뷰는 GitHub에 `--comment`로만 남는다. `gh pr view <n> --json reviews`의 APPROVED를 기대하지 않는다.)
    - `approve` → 2.6 최종 게이트
    - `request_changes` → findings를 그대로 worker에게 fix task로 재디스패치(같은 터미널, `worker-start --task <fix_task> --terminal <handle>`), 다음 round는 새 리뷰어. **round 3에 도달하면**(fix 2회 실패) 사용자 에스컬레이션.
    - `escalate` → 리뷰어가 스펙 모순·정책 위험을 발견한 경우. 코디네이터가 스펙으로 판단하거나 2.5로 올린다.
@@ -133,7 +138,7 @@ orca orchestration dispatch --task <review_task_id> --to <handle> --inject --jso
 
 리뷰어 approve 뒤 코디네이터가 직접 확인한다:
 
-1. `gh pr view <n> --json state,mergeStateStatus,statusCheckRollup,files,additions,deletions,reviews` — OPEN, CI 성공, 리뷰어 APPROVED
+1. `gh pr view <n> --json state,mergeStateStatus,statusCheckRollup,files,additions,deletions,comments` — OPEN, CI 성공, 리뷰어 코멘트의 `## Verdict: approve`(worker_done verdict와 일치)
 2. `gh pr diff <n>`을 훑어(1,500줄 초과 시 하위 에이전트에 위임 가능, 판단은 코디네이터):
    - 티켓 `docs/tasks/TASK-<T-ID>-*.md`가 있고 `## Result`에 실행 명령·결과가 있는가, "실행하지 않았음"이 정직하게 적혔는가
    - TASK_SPECS 합격 기준마다 테스트 또는 재현 근거가 있는가
@@ -265,7 +270,7 @@ PR을 **읽고·실행하고·판정**한다. 코드를 고치지 않고, push·
 ### 4.2 절차
 
 1. `CLAUDE.md` → 이 절 → 대상 task의 `docs/tasks/TASK_SPECS.md` 절 → 그 절이 지정한 스펙 절 → PR의 티켓 `docs/tasks/TASK-<T-ID>-*.md`를 읽는다.
-2. `gh pr checkout <n> --branch review/pr-<n> --force` (반드시 `--branch`; worker의 브랜치를 그대로 checkout하면 다른 worktree와 충돌한다). `git log --oneline origin/main..HEAD`로 범위를 본다.
+2. review worktree는 리뷰 전용 일회용 checkout이다. 먼저 `git reset --hard && git clean -fd -e node_modules`로 정리한다(setup hook의 lockfile 변경 등이 남아 있을 수 있음; 이는 PR 코드 수정이 아니다). 그다음 `gh pr checkout <n> --branch review/pr-<n> --force` (반드시 `--branch`; worker의 브랜치를 그대로 checkout하면 다른 worktree와 충돌한다). `git log --oneline origin/main..HEAD`로 범위를 본다.
 3. 게이트를 직접 실행한다: `npm ci`(또는 `npm install`), `npm run format:check`, `npm run lint`, `npm run typecheck`, `npm run test`, `npm run build`. 결과를 그대로 기록한다(요약 금지, 실패 로그 인용).
 4. 합격 기준을 **하나씩** 대조한다: 만족(근거: 테스트 파일/명령/출력) · 불만족(무엇이 없는가) · 확인 불가(왜).
 5. 금지 항목 검사(3.9 마지막 줄, `CLAUDE.md` 불변조건): grep·코드 읽기로 확인하고 결과를 적는다.
@@ -274,7 +279,7 @@ PR을 **읽고·실행하고·판정**한다. 코드를 고치지 않고, push·
    - `approve`: 모든 합격 기준 만족(또는 확인 불가 항목이 코디네이터가 수용 가능한 이유로 문서화됨) + 금지 0건 + 범위 정상
    - `request_changes`: 위반이 하나라도 있음. finding마다 `파일:줄`, 심각도(blocker/major/minor), 무엇이 왜 문제인지, 어떤 합격 기준·스펙 절에 걸리는지
    - `escalate`: 스펙 자체의 모순·정책/권리/개인정보 위험·명세로 판단 불가한 설계 갈림 — 코디네이터 판단 필요
-8. `gh pr review <n> --approve|--request-changes --body-file <review.md>` (escalate는 `--comment`). 본문 형식은 4.3.
+8. `gh pr review <n> --comment --body-file <review.md>` — **항상 `--comment`**. 리뷰어와 worker가 같은 GitHub 계정(`dnhynk`)이라 GitHub가 자기 PR에 대한 approve/request-changes를 거부한다(2026-08-16 R-T0-1: "Can not request changes on your own pull request"). verdict는 본문 첫 줄 `## Verdict:`와 `worker_done` body로 전달하고, 최종 게이트는 코디네이터가 맡는다. 본문 형식은 4.3.
 9. `worker_done` 1회:
 
 ```bash
