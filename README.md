@@ -2,51 +2,44 @@
 
 # Vertical Live
 
-24시간 무인 유튜브 세로 라이브를 위한 인터랙티브 펫 방송 프로토타입입니다.
+24시간 무인 유튜브 세로 라이브와 서버 권위 크리처 세계. 제품 요구의 정본은 `docs/PROJECT_SPEC.md`, 구현 작업 단위는 `docs/tasks/TASK_SPECS.md`(T0–T17)입니다.
 
-시청자의 좋아요, 채팅, 슈퍼챗, 슈퍼 스티커, 멤버십, 기프트 같은 이벤트를 받아 화면 속 펫의 상태와 연출을 바꾸는 구조를 목표로 합니다. 현재 코드는 로컬 브라우저 기반 3D 펫 화면, FastAPI 중계 서버, YouTube 페이지 이벤트 감지용 Chrome 확장 프로토타입으로 구성되어 있습니다.
+## 저장소 구조 (T0 스캐폴드 기준)
 
-## 현재 구성
+npm workspaces 모노레포입니다. Node 24(`.nvmrc`), TypeScript 5 strict, ESM(`"type": "module"`), vitest, ESLint 9 flat config + Prettier.
 
-- `src/`: React + Vite + Three.js 프론트엔드
-- `server.py`: 이벤트를 받아 WebSocket으로 브로드캐스트하는 FastAPI 서버
-- `extension/`: YouTube 페이지에서 좋아요/채팅 이벤트를 감지하는 Chrome 확장 프로토타입
-- `public/pet.glb`: 현재 3D 펫 모델
-- `docs/PROJECT_SPEC.md`: 제품 명세
-- `docs/ROADMAP.md`: 구현 로드맵
-- `docs/ACCOUNT_SETUP_FROM_ZERO.md`: Google/YouTube 계정이 없는 상태에서 시작하는 계정 생성 절차
-- `docs/YOUTUBE_MONETIZATION_RUNBOOK.md`: 실제 YouTube 계정 수익화 런칭 런북
+```text
+packages/contract   @vl/contract   계약 정본(T0: CONTRACT_VERSION만, 스키마는 T1)
+apps/server         @vl/server     서버(T0: GET /health 최소 서버)
+apps/renderer       @vl/renderer   React + React Three Fiber 렌더러(프로토타입 Vite 앱 이동, TS 전환은 T5)
+tools/simulator     @vl/simulator  시나리오 주입 CLI 뼈대(구현은 T11)
+scripts/                           저장소 게이트 스크립트
+legacy/                            프로토타입 스냅샷 — 참고용, import 금지(`legacy/README.md`)
+docs/                              PROJECT_SPEC(정본) · tasks · runbooks
+```
 
 ## 실행
 
-PowerShell 실행 정책 때문에 `npm`이 막히면 `npm.cmd`를 사용합니다.
-
-```powershell
-python server.py
-npm.cmd run dev
+```bash
+npm install              # 워크스페이스 전체 설치 (CI·새 clone은 npm ci)
+npm run dev              # = npm run dev -w @vl/renderer (Vite)
+node apps/server/dist/main.js   # npm run build 후. 포트는 VL_PORT, 기본 127.0.0.1:8787
 ```
 
-기본 포트:
+렌더러 개발 URL: `http://127.0.0.1:5173/`. 포트가 겹치면 `npm run dev -w @vl/renderer -- --port <n>`.
 
-- 프론트엔드: Vite 기본 개발 서버
-- 중계 서버: `http://localhost:5002`
-- WebSocket: `ws://localhost:5002/ws`
+## 검증 게이트
 
-개발 중 확인 URL:
+PR 전에 저장소 루트에서 전부 통과해야 합니다. CI(`.github/workflows/ci.yml`, job `ci`)가 같은 게이트를 돕니다.
 
-- 로컬 테스트 패널: `http://127.0.0.1:5173/`
-- OBS/송출용 9:16 화면: `http://127.0.0.1:5173/?mode=broadcast`
-
-## 검증
-
-```powershell
-npm.cmd run build
-npm.cmd run lint
-python -m py_compile server.py
+```bash
+npm run format:check
+npm run lint        # eslint + legacy import 0 검사
+npm run typecheck   # tsc --build (contract · server · simulator)
+npm run test        # vitest run
+npm run build
 ```
 
 ## 방향
 
-최종 목표는 단순 반복 영상이 아니라, 시청자 입력과 후원에 따라 상태가 계속 변화하는 9:16 실시간 생성형 방송입니다. 수익화 기능은 YouTube 정책, 지역별 기능 제공 여부, 채널 수익화 자격에 따라 단계적으로 붙입니다.
-
-운영 인프라는 장기적으로 클라우드 송출 환경을 전제로 설계합니다.
+최종 목표는 단순 반복 영상이 아니라, 시청자 입력과 후원에 따라 상태가 계속 변화하는 9:16 실시간 생성형 방송입니다. 수익화 기능은 YouTube 정책, 지역별 기능 제공 여부, 채널 수익화 자격에 따라 단계적으로 붙입니다. 상태 권위·입력 계약·방송 lifecycle·운영 데이터의 정의는 `docs/PROJECT_SPEC.md`가 정본입니다.
