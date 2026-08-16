@@ -9,10 +9,10 @@
 
 | T-ID | 제목 | 의존 | [contract] | 상태 | 브랜치 slug | PR | Orca task |
 |---|---|---|---|---|---|---|---|
-| T0 | 모노레포 스캐폴드·CI | — | — | changes_requested | t0-scaffold | #1 | `task_658a82e9f356` |
-| T1 | 정규 이벤트·snapshot·effect 계약과 fixture | T0 | ✔ | pending | t1-contract | | `task_1acc78f93775` |
-| T2 | obs-websocket 5 감시·제어 + OBS 프로파일 | T0 | — | pending | t2-obs-monitor | | `task_6e0c43d6b74c` |
-| T3 | OAuth·비밀정보 vault·quota | T0 | — | pending | t3-auth-vault | | `task_62829ec3ab8b` |
+| T0 | 모노레포 스캐폴드·CI | — | — | merged | t0-scaffold | #1 | `task_658a82e9f356` |
+| T1 | 정규 이벤트·snapshot·effect 계약과 fixture | T0 | ✔ | dispatched | t1-contract | | `task_1acc78f93775` |
+| T2 | obs-websocket 5 감시·제어 + OBS 프로파일 | T0 | — | dispatched | t2-obs-monitor | | `task_6e0c43d6b74c` |
+| T3 | OAuth·비밀정보 vault·quota | T0 | — | ready | t3-auth-vault | | `task_62829ec3ab8b` |
 | T4 | SQLite 영속층(inbox·checkpoint·snapshot·outbox·deadline) | T1 | — | pending | t4-persistence | | `task_6bb9ff9f79c8` |
 | T5 | 렌더러 read model(snapshot 복구·effect 멱등·ACK·건강) | T1 | — | pending | t5-renderer-readmodel | | `task_6ba022bb6151` |
 | T6 | 명령 파서·모더레이션·입력 arbiter | T1 | — | pending | t6-command-parser | | `task_a0f96dd7e038` |
@@ -74,3 +74,5 @@
 | 2026-08-16 13:20 | T0 worker_done(succeeded, PR #1). worker 질문 2건 답변: 1A(프로토타입 표식 주석) + 2A(vite 7.3.6). 이후 리뷰에서 1A는 폐기됨(아래) |
 | 2026-08-16 13:37 | R-T0-1 리뷰 디스패치(codex gpt-5.6-sol/xhigh/fast, `review` worktree). 발견: (1) worker/리뷰어 모두 inject 후 composer에 프롬프트가 남아 Enter 필요 → 런북 2.2/2.4 기록 (2) review worktree setup 잔여 변경 → 리뷰어가 reset 허용(4.2) (3) 같은 gh 계정이라 approve/request-changes 불가 → `--comment`로 기록(4.2·2.6) |
 | 2026-08-16 14:05 | R-T0-1 verdict **request_changes**(blocker 4: 결제→파워·이름/raw 표시·사망·Pokemon 문자열이 활성 apps/renderer에 잔존). 코디네이터 판정: 1A 폐기, TASK_SPECS §T0/§T5 재기술(R3F 장면만 apps/renderer, 게임 로직은 legacy/renderer-prototype). F-T0-1 fix task를 같은 worker 터미널에 디스패치 |
+| 2026-08-16 14:40 | F-T0-1 완료(c03abc6/8c79fce). R-T0-2 verdict **approve**(합격 4/4, 게이트 pass, 금지 패턴 0). 코디네이터 최종 게이트 통과 → PR #1 squash merge(main d9cbac0), t0 worker release·worktree 제거 |
+| 2026-08-16 14:50 | T1(contract, ctx_80a5d1bd2228)·T2(obs, ctx_560aa20466a2) 디스패치(동시 2). T3는 ready 대기. worker 기동 스크립트: 주입 텍스트가 안정된 뒤 Enter 1회(런북 2.2) |
