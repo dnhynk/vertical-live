@@ -1,3 +1,5 @@
+> **주의(2026-08-16)**: 이 README와 `docs/ROADMAP.md`, 계정/수익화 런북은 **구식**이며 `docs/PROJECT_SPEC.md` v1이 정본입니다. 스펙과 충돌하는 서술(Pokémon 사용, 후원→부활, Gifts 지역 등)은 무시하세요. 정합화는 T16(`docs/tasks/TASK_SPECS.md`)에서 수행합니다. 에이전트 규칙은 `CLAUDE.md`, 절차는 `docs/runbooks/agent-orchestration.md`.
+
 # Vertical Live
 
 24시간 무인 유튜브 세로 라이브를 위한 인터랙티브 펫 방송 프로토타입입니다.
