@@ -46,7 +46,8 @@
 
 | 질문 | 답(코디네이터) | 반영 |
 |---|---|---|
-| (기재 예정) | | |
+| (1) 옮겨온 `store.js`/`App.jsx`의 임의 사용자명 생성·표시명 출력이 `CLAUDE.md` §3과 충돌한다. 그대로 둘까(1A) / T0에서 제거할까(1B) / 렌더러도 legacy로 보낼까(1C)? | **1A**. §T0가 "동작 유지·렌더러 개편 범위 밖", 스펙 §16이 store.js를 T5에서 대체 예정으로 판단. 단 두 파일 맨 위에 동작 변화 없는 표식 주석 1줄을 넣고 티켓·PR에 명시할 것 | 두 파일 맨 위에 표식 주석 추가, 티켓 "알려진 carry-over"·Follow-ups·PR "Scope exclusions"에 기재 |
+| (2) `vite@7.2.4`의 dev server 취약점(수정본 7.3.6, semver-minor)을 이 PR에서 올릴까(2A) / 후속 task로 뺄까(2B)? | **2A**. 7.3.6 exact로 올리고 게이트 전부 재실행. 남은 transitive high는 티켓 Follow-ups에 기록만 | `apps/renderer`의 `vite`를 `7.3.6` exact로 고정, 게이트 5종 + 렌더러 기동 재검증, Follow-ups에 잔여 항목 기록 |
 
 ## Assumptions / provisional values
 
@@ -124,13 +125,21 @@ exit=0
 - `packages/contract`의 스키마: 이 task는 `[contract]`가 아니므로 `CONTRACT_VERSION` 상수 외에는 만들지 않았다
 - 워크스페이스 간 import(`@vl/server` → `@vl/contract` 등): T0 범위가 "최소 export + 테스트"이므로 배선만 두고 실제 사용은 T1 이후
 
-## 알려진 carry-over (코디네이터 판단 요청 — Questions 표 참조)
+## 알려진 carry-over — 프로토타입 코드, T5에서 제거 (코디네이터 결정 1A)
 
 `apps/renderer/src/store.js`·`App.jsx`는 프로토타입 상태 그대로 옮겼고, 그 안에는 로컬 데모용 **임의 사용자명 생성**(`TEST_NAMES = ['Sora', ...]`, `randomName()`)과 이벤트 로그의 **표시명 출력**이 남아 있다. §T0가 "동작 유지, 렌더러 개편은 범위 밖, TS 전환은 T5"라고 못박아 그대로 옮겼으나, `CLAUDE.md` §3의 "가짜 참여를 만들지 않는다"·"표시명을 저장·표시하지 않는다"와 충돌한다. 스펙 §16이 `src/store.js`를 "서버 snapshot의 projection이 되어야 함"이라 판단했으므로 T5에서 제거되는 코드다.
 
+코디네이터 결정에 따라 **두 파일 맨 위에 동작 변화 없는 표식 주석 1줄**을 넣었다(리뷰어가 신규 코드의 §3 위반으로 오판하지 않도록):
+
+```js
+// PROTOTYPE (pre-spec v1) — local demo only, not a production path. Removed/replaced in T5 (docs/tasks/TASK_SPECS.md §T5). Random names here violate CLAUDE.md §3 only if used in production.
+```
+
+**신규로 작성한 코드(`packages/contract`, `apps/server`, `tools/simulator`, `scripts/`)에는 임의 사용자명·표시명·가짜 이벤트가 없다.**
+
 ## Follow-ups
 
-- **T5**: `store.js`의 로컬 임의 사용자명·표시명 출력 제거(서버 snapshot projection으로 대체), 렌더러 TS 전환 시 루트 `tsconfig.json` references에 `apps/renderer` 추가
+- **T5**: `store.js`·`App.jsx`의 로컬 임의 사용자명 생성·표시명 출력 제거(서버 snapshot projection으로 대체)와 위 표식 주석 삭제, 렌더러 TS 전환 시 루트 `tsconfig.json` references에 `apps/renderer` 추가
 - **T5**: 워크스페이스별 vitest 환경 분리(jsdom 등) — 렌더러 테스트가 생기는 시점
-- **dev 의존성 보안**: `npm audit --omit=dev` = 0건이지만 dev 툴체인에 high 9건이 있다. 유일한 직접 의존은 `vite@7.2.4`(dev server path traversal / `server.fs.deny` 우회, 수정본 7.3.6, semver-minor). 나머지는 eslint·babel·rollup의 transitive. T0에서는 "이동한 앱의 동작 유지"를 위해 버전을 그대로 뒀다 — 코디네이터 판단에 따라 이 PR이나 후속 task에서 올린다
+- **dev 의존성 보안**: 코디네이터 결정 2A에 따라 이 PR에서 `vite`를 `7.2.4` → `7.3.6`(exact, semver-minor)로 올렸다. 그 결과 `npm audit` high 9건 → 4건. 남은 것은 **전부 dev-only transitive이고 직접 의존이 아니다**(`brace-expansion`, `flatted`, `js-yaml`, `minimatch`, `nanoid`, `picomatch`, `postcss`, `rollup`, `@babel/core`, `ajv` — eslint·babel·rollup 경유). `npm audit --omit=dev` = **0건**. 후속 task 후보로 기록만 한다
 - `apps/renderer`에는 아직 테스트가 없다(T5가 read model과 함께 추가)

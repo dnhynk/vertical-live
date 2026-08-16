@@ -1,4 +1,5 @@
-﻿import React, { Suspense, useEffect, useMemo } from 'react'
+﻿// PROTOTYPE (pre-spec v1) — local demo only, not a production path. Removed/replaced in T5 (docs/tasks/TASK_SPECS.md §T5). Random names here violate CLAUDE.md §3 only if used in production.
+import React, { Suspense, useEffect, useMemo } from 'react'
 import { Canvas } from '@react-three/fiber'
 import { Html } from '@react-three/drei'
 import usePetStore from './store'

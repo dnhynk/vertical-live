@@ -1,4 +1,5 @@
-﻿import { create } from 'zustand'
+﻿// PROTOTYPE (pre-spec v1) — local demo only, not a production path. Removed/replaced in T5 (docs/tasks/TASK_SPECS.md §T5). Random names here violate CLAUDE.md §3 only if used in production.
+import { create } from 'zustand'
 
 const clamp = (value, min = 0, max = 100) => Math.min(Math.max(value, min), max)
 const clampStat = (value) => clamp(Math.round(value))
