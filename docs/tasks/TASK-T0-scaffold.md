@@ -66,40 +66,46 @@
 | # | 기준 | 상태(met/unmet/unverifiable) | 근거(테스트 파일·명령·출력) |
 |---|---|---|---|
 | 1 | 새 clone에서 `npm ci && lint && typecheck && test && build` 통과 | met | `git clone --branch dnhynk/t0-scaffold` 한 새 디렉터리에서 5개 게이트 전부 통과 — 아래 "Gates (executed) — fresh clone" 블록 |
-| 2 | `npm run dev -w @vl/renderer`로 기존과 같이 뜬다 | met | 아래 "Gates (executed) — renderer dev server" 블록. Vite 7.2.4 ready, `GET /` 200(기존 `index.html`), `GET /src/main.jsx` 200(JSX 변환됨), `GET /pet.glb` 200 52796 bytes(이동한 `apps/renderer/public/`에서 서빙) |
-| 3 | CI가 PR에서 녹색 | (PR 생성 후 기재) | `.github/workflows/ci.yml` job `ci` — 로컬에서 같은 5개 게이트가 통과함을 확인 |
+| 2 | `npm run dev -w @vl/renderer`로 기존과 같이 뜬다 | met | 아래 "Gates (executed) — renderer dev server" 블록. Vite ready, `GET /` 200(기존 `index.html`), `GET /src/main.jsx` 200(JSX 변환됨), `GET /pet.glb` 200 52796 bytes(이동한 `apps/renderer/public/`에서 서빙) |
+| 3 | CI가 PR에서 녹색 | met | PR #1, workflow `CI` job `ci` — run 31950064753(head `708e855`) conclusion **success** 33s. `gh run list --branch dnhynk/t0-scaffold --json headSha,conclusion`로 확인 |
 | 4 | `legacy/`가 어떤 워크스페이스에서도 import되지 않음 | met | `scripts/check-no-legacy-imports.mjs`가 `npm run lint`에 포함. 위반을 넣었을 때 exit 1(아래 negative test), 제거하면 exit 0 |
 
 ### Gates (executed) — fresh clone
 
 ```text
-$ git clone --branch dnhynk/t0-scaffold --single-branch https://github.com/dnhynk/vertical-live.git <scratch>/fresh
-$ cd <scratch>/fresh && git log --oneline -1
-ce511b2 chore(repo): scaffold npm workspaces, TS/vitest/eslint toolchain and CI
+$ git clone --branch dnhynk/t0-scaffold --single-branch https://github.com/dnhynk/vertical-live.git <scratch>/fresh2
+$ cd <scratch>/fresh2 && git log --oneline -1
+708e855 chore(renderer): pin vite 7.3.6 and mark the prototype carry-over
 
-$ npm ci                    -> ok (production 취약점 0건; dev 툴체인 취약점은 아래 Follow-ups)
+$ npm ci                    -> added 270 packages, and audited 275 packages in 28s
 $ npm run format:check      -> Checking formatting... All matched files use Prettier code style!
 $ npm run lint              -> eslint 위반 0건; check-no-legacy-imports: ok (0 legacy imports)
 $ npm run typecheck         -> tsc --build tsconfig.json (출력 없음 = 오류 0)
 $ npm run test              -> RUN v4.1.10 / Test Files 3 passed (3) / Tests 10 passed (10)
-$ npm run build             -> @vl/contract tsc --build / @vl/renderer vite build (610 modules, built in 13.48s)
+$ npm run build             -> @vl/contract tsc --build
+                               / @vl/renderer vite v7.3.6, 610 modules transformed, built in 9.90s
                                / @vl/server tsc --build / @vl/simulator tsc --build
 ```
 
-같은 5개 게이트를 작업 worktree에서도 먼저 통과시켰다(동일 결과).
+같은 5개 게이트를 작업 worktree에서도 통과시켰다(vite 7.3.6 반영 후 재실행, 동일 결과).
 
 ### Gates (executed) — renderer dev server
 
+vite를 7.3.6으로 올린 뒤 재실행:
+
 ```text
-$ npm run dev -w @vl/renderer -- --port 5199 --strictPort
-  VITE v7.2.4  ready in 606 ms
-  ➜  Local:   http://localhost:5199/
+$ npm run dev -w @vl/renderer -- --port 5201 --strictPort
+  VITE v7.3.6  ready
+  ➜  Local:   http://localhost:5201/
 
 $ node -e "fetch(...)"
-GET /              -> 200  (<!doctype html> ... <title>vertical-live</title>, react-refresh 주입됨)
-GET /src/main.jsx  -> 200  (import __vite__cjsImport0_react_jsxDevRuntime ... = JSX 변환 정상)
-GET /pet.glb       -> 200  bytes=52796
+GET /              -> 200  <title>vertical-live</title>  (기존 index.html, react-refresh 주입됨)
+GET /src/main.jsx  -> 200  import __vite__cjsImport0_react_jsxDevRuntime ...  (JSX 변환 정상)
+GET /src/store.js  -> 200  // PROTOTYPE (pre-spec v1) — local demo only, ...  (표식 주석 반영)
+GET /pet.glb       -> 200  bytes=52796                   (이동한 apps/renderer/public/에서 서빙)
 ```
+
+(7.2.4 시점에도 같은 4개 요청이 200이었다.)
 
 ### Gates (executed) — legacy import 게이트 negative test
 
@@ -114,9 +120,12 @@ check-no-legacy-imports: ok (0 legacy imports)
 exit=0
 ```
 
-### 이동 시 발생한 유일한 내용 변경
+### 이동한 렌더러 파일에 가한 변경 (전부 비-동작 변경)
 
-`apps/renderer/src/{App.jsx,store.js,index.css,components/Pet.jsx,components/Background.jsx}`는 `prettier --write`로 포맷만 바뀌었다(BOM 제거·들여쓰기·세미콜론). 로직 변경 없음. 그 결과 git이 일부 파일을 rename이 아닌 delete+add로 표시한다.
+1. `apps/renderer/src/{App.jsx,store.js,index.css,components/Pet.jsx,components/Background.jsx}` — `prettier --write` 포맷만(들여쓰기·세미콜론). 로직 변경 없음. 그 결과 git이 일부 파일을 rename이 아닌 delete+add로 표시한다.
+2. `apps/renderer/src/{store.js,App.jsx}` — 맨 위에 표식 주석 1줄(코디네이터 결정 1A, 위 "알려진 carry-over" 참조).
+
+그 밖에 `index.html`, `vite.config.js`, `public/`, `main.jsx`, `App.css`는 내용 변경 없이 경로만 바뀌었다.
 
 ## Not done / out of scope
 
