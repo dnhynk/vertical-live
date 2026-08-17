@@ -21,7 +21,7 @@
 | T8 | 상태 엔진(단일 writer·outbox·WS·ACK·유료 멱등) | T1b, T4, T6, T7 | — | merged | t8-state-engine | #12 | `task_0aadf1c96dcf` |
 | T9 | YouTube source adapter(gRPC streamList + REST fallback) | T3, T4, T8 | — | merged | t9-youtube-adapter | #14 | `task_ec3d66a159bd` |
 | T10 | broadcast lifecycle·reconcile·한도 | T3, T4 | — | merged | t10-broadcast-lifecycle | #11 | `task_41769f69d4b7` |
-| T11 | 로컬 시뮬레이터·replay·지연 계측 | T5, T8 | — | changes_requested | t11-simulator-replay | #15 | `task_9470df5be9b8` |
+| T11 | 로컬 시뮬레이터·replay·지연 계측 | T5, T8 | — | merged | t11-simulator-replay | #15 | `task_9470df5be9b8` |
 | T12 | supervisor 상태기계·건강 집계·kill switch·알림·dead-man | T2, T8, T9, T10 | — | dispatched | t12-supervisor | | `task_560530cfb813` |
 | T13 | 데이터 보존·삭제·철회 자동화 | T3, T4 | — | merged | t13-data-policy | #10 | `task_15cd2ae24e82` |
 | T14 | 렌더러 화면 완성(5초 무음·감사 연출·i18n) | T5, T7 | — | merged | t14-renderer-screen | #13 | `task_82f32652b3cf` |
@@ -155,3 +155,4 @@
 | 2026-08-18 03:05 | R-T10-6 verdict **approve**(round 1~5 회귀 감사 포함) → 최종 게이트(마이그레이션 001~005 정렬, stream key 로그 없음) → **PR #11 squash merge**(main df55585). T10 worker release·worktree 제거. E-4 해결. TASK_SPECS §T12에 선행 task 배선 요구(시작 순서·신호 집계·T13 sink·kill·토큰 주입·Discord vault) 추가. T12는 PR #14 머지 후 디스패치 |
 | 2026-08-18 03:40 | R-T9-2 verdict **approve**(PR #14 DIRTY → F-T9-2 rebase `task_4bd81121aa94`). F-T11-1 완료(ledger 경로 실증·프로덕션 ReadModel 재전송 테스트·잔여 wait; 1479 tests) → R-T11-2 `task_5ff00d927243` → `ctx_dd838ea2d983`(review2) |
 | 2026-08-18 04:10 | F-T9-2 rebase 완료 → 검사(HealthComponent 'youtube-chat' 추가, main.ts chat source 배선, /health sourceHealth) → **PR #14 squash merge**(main 4023689). T9 worker release·worktree 제거. **T12 디스패치**. 진행: R-T11-2(review2). 남은: T15(T11·T12), T16(T12), T17(T12) |
+| 2026-08-18 04:40 | R-T11-2 verdict **approve** → 최종 게이트(@vl/server/input subpath, test:replay·sim 스크립트) → **PR #15 squash merge**(main 628e7cf). T11 worker release·worktree 제거. 머지 완료 13개 task(T0–T11·T13·T14·T1b), 진행 T12, 대기 T15·T16·T17(T12 이후) |
