@@ -13,9 +13,12 @@
   working while the server is stopped — a full disk is exactly the state in which
   the server may be down (spec §11 disk-full row of the fault matrix).
 
-  `--apply` is what makes it delete; without it the CLI is a dry run. The rules
-  it applies (retention days, max total, min free) are provisional until Gate 2
-  (BOARD A-15) and live in config/default.json.
+  The apply flag in the action below is what makes the CLI delete; without it it
+  is a dry run. The rules it applies (retention days, max total, min free) are
+  provisional until Gate 2 (BOARD A-15) and live in config/default.json.
+
+  (XML comments may not contain two consecutive hyphens, so flags are named in
+  prose here rather than quoted.)
 -->
 <Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo>

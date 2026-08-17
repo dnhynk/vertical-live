@@ -152,7 +152,9 @@ function Invoke-VLSchtasks {
     $previous = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        $output = & schtasks.exe @Arguments 2>&1
+        # `.ToString()` keeps stderr lines as plain text instead of ErrorRecords,
+        # which Windows PowerShell would otherwise render with a stack trace.
+        $output = & schtasks.exe @Arguments 2>&1 | ForEach-Object { $_.ToString() }
         return @{ ExitCode = $LASTEXITCODE; Output = ($output | Out-String).TrimEnd() }
     } finally {
         $ErrorActionPreference = $previous

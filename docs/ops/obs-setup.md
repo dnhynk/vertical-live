@@ -6,10 +6,10 @@ OBS는 **합성·인코딩 장치**이며 게임 상태를 소유하지 않는�
 
 ## 0. 이 문서가 다루지 않는 것
 
-- OBS 프로세스 자동 시작·재시작, Windows 로그온 세션, sleep/GPU reset 대응 → **T17**
+- OBS 프로세스 자동 시작·재시작, Windows 로그온 세션, sleep/GPU reset 대응 → **`docs/ops/windows-host.md`(T17)**
 - supervisor 상태기계와 건강 신호 집계·알림 → **T12**
 - Windows Credential Manager 기반 비밀정보 저장 → **T3에서 완료**. 운영 경로의 기본 저장소는 이제 Credential Manager이고, env(`VL_OBS_PASSWORD`)는 개발·테스트에서 `EnvSecretProvider`를 명시적으로 주입할 때만 쓰인다(`docs/ops/youtube-auth-setup.md` 4장).
-- 아카이브(녹화) 정책 → **T17**. `recordEncoder.json`은 형식을 맞추기 위해 들어 있고 V1에서는 쓰이지 않는다(`[AdvOut] RecEncoder=none`).
+- 아카이브(녹화) 정책 → **`docs/ops/windows-host.md` 4장(T17)**. `recordEncoder.json`은 형식을 맞추기 위해 들어 있고 V1에서는 쓰이지 않는다(`[AdvOut] RecEncoder=none`).
 
 ## 1. 버전 고정
 
@@ -76,7 +76,7 @@ npm run secrets -w @vl/server -- list   # 이름과 설정 여부만 출력, 값
 
 Browser Source는 `shutdown=false`, `restart_when_active=false`로 두어 24시간 세션에서 스스로 페이지를 내리거나 재시작하지 않는다. 새로고침은 서버가 `PressInputPropertiesButton{propertyName:"refreshnocache"}`로 명시적으로 건다. `webpage_control_level=0`(None)이라 페이지가 OBS 내부에 접근하지 못한다.
 
-**렌더러 토큰(T8)**: `/ws/renderer`는 loopback 확인만으로는 부족해 인증을 요구한다(스펙 §10.2). Browser Source URL에 `&token=<server.rendererToken>`을 붙여야 연결이 유지되고, 없거나 틀리면 서버가 4401로 닫는다. 운영자가 URL에 손으로 값을 넣지 않는다 — 정본은 vault(`npm run secrets -w @vl/server -- set server.rendererToken`)이고, 서버가 기동 시 obs-websocket `SetInputSettings`로 URL에 주입한다(A-16의 stream key와 같은 custody 규칙, 주입 구현은 T12/T17). OBS가 씬 컬렉션 JSON에 그 URL을 캐시하는 것은 사실이므로 정지 시 제거·디렉터리 ACL도 stream key와 같이 T17에서 다룬다.
+**렌더러 토큰(T8)**: `/ws/renderer`는 loopback 확인만으로는 부족해 인증을 요구한다(스펙 §10.2). Browser Source URL에 `&token=<server.rendererToken>`을 붙여야 연결이 유지되고, 없거나 틀리면 서버가 4401로 닫는다. 운영자가 URL에 손으로 값을 넣지 않는다 — 정본은 vault(`npm run secrets -w @vl/server -- set server.rendererToken`)이고, 서버가 시작 순서의 `streamService` 단계에서 obs-websocket `SetInputSettings`로 URL에 주입한다(A-16의 stream key와 같은 custody 규칙; 구현 `ObsControl.setRendererSourceFromVault()`, T17). 씬 컬렉션 JSON에는 토큰 없는 URL만 들어 있고(`config/default.json`의 `obs.browserSourceUrl`과 일치하는지 `profile.test.ts`가 검사), OBS가 주입된 URL을 캐시하므로 정지 시 `clearRendererSourceToken()`으로 되돌린다(`npm run obs:clear -w @vl/server`, `docs/ops/windows-host.md` 6장).
 
 > 렌더러 URL은 T5가 dev 서버(`:5173`)에서 빌드 서빙 주소로 바꿀 수 있다. 바뀌면 이 파일과 `ops/obs/scenes/vertical-live.json`을 같이 고친다.
 
@@ -112,10 +112,10 @@ streamServiceSettings { server: <obs.streamIngestUrl>, key: <vault: youtube.stre
 
 따라서 주입 이후 키는 **vault와 호스트의 `%APPDATA%\obs-studio\basic\profiles\vertical-live\service.json` 두 곳**에 존재한다. 이 task가 보장하는 것은 키가 **저장소·게임 DB·로그·화면**에 없다는 것이다(스펙 §10.2, CLAUDE.md §3). 운영자가 UI에 입력하던 이전 절차와 비교하면 사람이 키를 다루는 단계가 사라지고 정본이 vault 하나가 된다는 점이 개선이다.
 
-남은 노출을 닫는 것은 **T17**이다(티켓 Follow-ups·BOARD 후보):
+남은 노출은 **T17에서 닫혔다**:
 
-1. 정지(`StopStream`) 후 `SetStreamServiceSettings`로 키를 비워 프로파일에서 제거
-2. 프로파일 디렉터리 ACL을 서비스 계정으로 제한
+1. 정지 후 `SetStreamServiceSettings`로 키를 비워 프로파일에서 제거 — `ObsControl.clearStreamServiceKey()`. `safe_stopped`에서 서버가 자동 실행하고(`main.ts` `onSafeStop`), 일반 정지에서는 운영자가 `npm run obs:clear -w @vl/server`로 실행한다. 송출 중에는 거부한다.
+2. 프로파일 디렉터리 ACL을 서비스 계정으로 제한 — 명령과 되돌리는 법은 `docs/ops/windows-host.md` 6장("선택 강화: 디렉터리 ACL"). 호스트 권한 변경이라 **사용자가 실행**한다.
 
 [S27]에 따라 RTMPS URL과 스트림 키는 Live Control Room에서 받는다(Stream URL 필드의 자물쇠 아이콘). 받은 키는 OBS가 아니라 vault에 넣는다.
 
@@ -171,7 +171,7 @@ npm run obs:probe
 | H.264 profile | 미지정(`""`, 인코더 기본값) | [S26]은 H.264 profile을 명시하지 않는다. 근거 없는 값을 넣지 않는다 |
 | x264 preset | `veryfast` (OBS 기본값) | 호스트 CPU 여유는 Gate 2의 host·OBS baseline에서 실측해 확정한다 |
 | 소프트웨어 인코더(`obs_x264`) | 하드웨어 인코더 대신 | 하드웨어 인코더는 호스트 GPU에 의존한다. 이식 가능한 값으로 고정하고, 교체하더라도 CBR·`keyint_sec=2`·비트레이트·B-frame/reference frame은 유지한다. 실제 선택은 Gate 2 |
-| `recordEncoder.json` | OBS 기본값 | V1에서 녹화하지 않는다(`RecEncoder=none`). 프로파일 export 형식(4개 파일)을 맞추기 위한 것이며 아카이브 정책은 T17 |
+| `recordEncoder.json` | OBS 기본값 | V1에서 녹화하지 않는다(`RecEncoder=none`). 프로파일 export 형식(4개 파일)을 맞추기 위한 것이며 아카이브 순환 정책은 `docs/ops/windows-host.md` 4장 |
 
 ## 6. 실제 OBS 스모크 상태
 
