@@ -1,7 +1,7 @@
 # TASK-T1b-effect-cause
 
 - Task: T1b [contract] Effect 원인 확장(계약 v1 보강) (`docs/tasks/TASK_SPECS.md` §T1 — Effect 항목의 후속)
-- Branch: `dnhynk/t1b-effect-cause` · PR: #<n>
+- Branch: `dnhynk/t1b-effect-cause` · PR: #7
 - Orca: task `task_0a64fcaaae4a` · dispatch `ctx_6219c7a4e46f`
 - Spec sections read: §2.1, §6.2, §7.3(5)(6)(7), §7.4, §8.4, §8.5, §10.2
 - BOARD decisions/assumptions relied on: A-17(이 task로 계약에 반영), A-1, A-2, A-15
