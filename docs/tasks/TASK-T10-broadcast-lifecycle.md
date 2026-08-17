@@ -95,7 +95,7 @@ T3는 `googleapis@174.0.1`을 "T9/T10이 쓸 Data API 클라이언트"로 선언
 | # | 기준 | 상태 | 근거 |
 |---|---|---|---|
 | 1 | 가짜 API 서버로 정상 경로 | met | `youtube/broadcast/lifecycle.test.ts` "normal path" 4건 + round 1 신설 "request shapes" 2건(모든 요청 part ⊆ 문서 집합, 가짜 서버가 미지원 part 거부): 호출 순서 `liveStreams.list → insert → liveBroadcasts.insert → bind → list → transition(testing) → transition(live)`, 필수 필드·part·Bearer 검증, stream 재사용, monitorStream off일 때 testing 생략 |
-| 1 | timeout → reconcile | met | 같은 파일 "uncertain results are reconciled, never retried blindly" 6건(round 1에서 배리어 기반으로 전환 + 잘린 목록 inconclusive 2건 추가): insert timeout 후 insert 요청 **1회**·broadcast **1개**·`call_reconciled=applied`; liveStreams timeout 후 vault에 키 저장; 503 bind는 reconcile이 not_applied를 확인한 뒤에만 재시도(요청 2회); 끝까지 불확실하면 `BroadcastReconcileFailedError` |
+| 1 | timeout → reconcile | met | 같은 파일 "uncertain results are reconciled, never retried blindly" 10건(round 2에서 마커 기반 negative 4건 추가: 같은 시각 무관 방송 미채택, insert 미적용 시 미채택, 마커 중복 inconclusive, 마커-시각 불일치 inconclusive) + `attempt-marker.test.ts` 9건(round 1에서 배리어 기반으로 전환 + 잘린 목록 inconclusive 2건 추가): insert timeout 후 insert 요청 **1회**·broadcast **1개**·`call_reconciled=applied`; liveStreams timeout 후 vault에 키 저장; 503 bind는 reconcile이 not_applied를 확인한 뒤에만 재시도(요청 2회); 끝까지 불확실하면 `BroadcastReconcileFailedError` |
 | 1 | 3종 한도 오류 | met | 같은 파일 "channel limits" 5건: `userBroadcastsExceedLimit`(복구), `concurrentBroadcastsExceedLimit`(live 방송 채택), 복구 불가 시 `safe_stopped` 요청 + alert + attempt abandoned, 문서화되지 않은 일일 한도(limit-shaped) 동일 경로·insert 1회, `liveStreams` 한도는 stream 재사용으로 복구. reason 매핑 단위 테스트는 `limits.test.ts`(rate limit·quota를 한도로 오분류하지 않음 포함) |
 | 1 | invalidAutoStart fallback | met | 같은 파일 "auto-start" 3건: 400 `invalidAutoStart` → alert + `enableAutoStart:false`로 재-insert → transition 2회, attempt `autoStart=false`; auto-start가 실제로 동작하면 transition 0회; 수락됐지만 발화하지 않으면 `auto_start_did_not_fire`로 transition fallback |
 | 2 | stream key가 로그·DB·응답에 없음 | met | 같은 파일 "the stream key never leaves the vault" 5건(round 1: 폴링이 `cdn`을 요청하지 않음, 미일치 조회 후 staging 0): 반환값·attempt 행 전체·alert·로그 dump·**DB 디렉터리의 모든 바이트(WAL 포함)** 에 키 없음, vault에는 있음; 채널에 stream이 여러 개일 때 선택된 것만 저장; redactor로 마스킹됨. 스키마 차원 강제는 `db/broadcast-resources.test.ts` "has no column that could hold a stream key", 전송 차원은 `api.test.ts` "stream key handling" 3건 |
@@ -112,6 +112,19 @@ B4: exit=1 Tests  1 failed | 38 skipped (39)  (stopBroadcast가 모든 오류를
 B1: exit=1 Tests  1 failed | 38 skipped (39)  (가짜 서버 validateParts를 항상 null로)
 ```
 
+### Reproduction check (round 2)
+
+리뷰어의 재현을 negative 테스트로 고정하고, **마커 대조를 되돌린 빌드에서 실패**하는지 확인했다.
+
+```text
+$ (un-fix: #findInsertedBroadcast가 scheduledStartTime만 비교)
+$ npx vitest run .../lifecycle.test.ts -t "never adopts an unrelated broadcast"
+  × never adopts an unrelated broadcast that merely shares the scheduled time
+  AssertionError: expected 'synthetic-broadcast-1' not to be 'synthetic-broadcast-1'
+  Tests  1 failed | 42 skipped (43)          ← 리뷰어의 adoptedId == unrelatedId 재현
+$ (원복 후) 동일 명령 → Tests  1 passed | 42 skipped (43)
+```
+
 ### Gates (executed)
 
 ```text
@@ -123,7 +136,9 @@ $ npm run test           -> Test Files 64 passed (64) / Tests 1128 passed | 1 sk
 $ npm run build          -> contract, renderer(vite ✓ built), server(copied 2 migration(s)), simulator ok
 ```
 
-round 1 수정 후 재실행(base `44fefaa`로 rebase): 위 5개 게이트 모두 통과, 테스트 **1129 passed | 1 skipped (1130)**, `copied 2 migration(s)`(003 재번호 후 dist 정리 확인). 리뷰어가 관측한 `api.test.ts:162` flake는 M2의 배리어로 원인 자체를 제거했다(벽시계 의존 삭제).
+round 1 수정 후 재실행(base `44fefaa`로 rebase): 위 5개 게이트 모두 통과, 테스트 **1129 passed | 1 skipped (1130)**, `copied 2 migration(s)`(003 재번호 후 dist 정리 확인).
+
+round 2 수정 후 재실행(`git fetch && git rebase origin/main`): format `All matched files use Prettier code style!` · lint 0 problems · typecheck 무출력 · test **1141 passed | 1 skipped (1142)** · build `copied 2 migration(s)`. 리뷰어가 관측한 `api.test.ts:162` flake는 M2의 배리어로 원인 자체를 제거했다(벽시계 의존 삭제).
 
 위 게이트는 `git fetch && git rebase origin/main`(base `751126f`) 뒤에 돌렸다. rebase 직후 `npm run test`가 renderer 3파일에서 `Cannot find package 'jsdom'`로 실패했는데, 원인은 T5(PR #9)가 추가한 devDependency가 이 worktree의 `node_modules`에 없던 것이었다 — `npm install`(lockfile 변경 없음) 후 재실행하여 위 결과를 얻었다.
 
@@ -150,6 +165,29 @@ round 1 수정 후 재실행(base `44fefaa`로 rebase): 위 5개 게이트 모�
 | **M2** `api.test.ts:163` 50ms 벽시계 경쟁(리뷰어 환경에서 실제 flake) | 고침 `ab7ffb6`. 가짜 서버에 `holdApplied(method)` 배리어를 추가했다: 요청을 **적용한 뒤** `applied`를 resolve하고 응답을 보류한다. 테스트는 `await hold.applied`로 적용을 확인한 다음 `FakeClock.advance()`로 abort를 발생시킨다 — 벽시계 의존이 사라졌다. lifecycle의 timeout 테스트 2건도 같은 배리어로 전환했다 |
 | **m1** 티켓에 `fetch` 선택 근거 없음 | 고침 `ab7ffb6`. 위 "전송 계층 선택" 절 신설(재시도·timeout 소유권, 3-way outcome, 필드 단위 키 제거, 모듈 로드 비용) |
 | **m2** 마이그레이션 번호 충돌(PR #10이 002) | 고침 `ab7ffb6`. `003_broadcast-resources.sql`로 재번호, `migrate.test.ts` 기대치를 `['001_initial.sql','003_broadcast-resources.sql']`·버전 `[1,3]`로 갱신(runner는 번호 공백을 허용). 이 과정에서 `copy-migrations.mjs`가 `dist`를 정리하지 않아 이름이 바뀐 마이그레이션이 빌드 산출물에 남는 것을 발견 → 복사 전 target을 비우고 src/dist 개수 불일치를 오류로 처리 |
+
+## Review round 2
+
+리뷰: https://github.com/dnhynk/vertical-live/pull/11#pullrequestreview-4950922281 (verdict `request_changes`, blocker 1 · minor 2). round 1 findings 9건은 리뷰어가 모두 fixed로 확인했다. 커밋 `eeddfaa`.
+
+| finding | 처리 |
+|---|---|
+| **B1** `lifecycle.ts:1055` insert reconcile이 `scheduledStartTime`만 같은 첫 방송을 채택 → 같은 시각의 무관 방송을 바인딩하고 실제 insert 자원은 고아가 됨(§9.1 무효, 합격 1) | 고침 `eeddfaa`. **제품 소유 attempt 마커**를 도입했다: `attempt-marker.ts`가 `vl-attempt:<attemptId>`를 만들고, 이 문자열이 `snippet.description`의 마지막 줄로 insert 본문에 실려 나가며, 호출 **전에** `broadcast_resources.attempt_marker`(migration 003, NOT NULL)에 영속된다. reconcile은 시각이 아니라 마커로 후보를 고른다: 마커 일치 1건 + `scheduledStartTime` 일치 → 채택, 마커 일치 0건 + 목록 완전 → 미적용(재시도 허용), 마커 일치 ≥2건 → `marker_ambiguous` inconclusive, 마커는 맞고 시각이 다르면 → `marker_time_mismatch` inconclusive, 목록 불완전 → `broadcast_list_truncated` inconclusive(round 1 B2). inconclusive는 `pending_call`을 남기고 재시도를 금지한다. 근거·필드 선택 이유는 아래 표와 `attempt-marker.ts` 주석 |
+| **m1** 티켓 161행 Follow-up이 "transition(complete) 실패 시 항상 attempt를 닫는다"로 남아 round 1 B4 결과와 모순 | 고침 `eeddfaa`. 해당 항목을 취소선 + 정정으로 바꿨다(불확실하면 닫지 않고 `pending_transition='complete'`로 다시 reconcile한다) |
+| **m2** `db/broadcast-resources.test.ts:9` 주석이 "migration 002" | 고침 `eeddfaa`. 003으로 정정하고, 이 파일이 이제 마커 영속까지 검증한다는 사실을 주석에 반영 |
+
+### 마커 필드 선택 근거 (공식 문서, 2026-08-17 확인)
+
+| 질문 | 답 | 출처 |
+|---|---|---|
+| insert 본문에 우리 문자열을 넣을 수 있는 필드가 있는가 | `snippet.description`이 insert에서 쓰기 가능 | https://developers.google.com/youtube/v3/live/docs/liveBroadcasts/insert (Writable: `snippet.description`) |
+| 그 값을 list로 되읽을 수 있는가 | `snippet.description`은 liveBroadcast 리소스의 `snippet` 파트에 포함되어 응답으로 돌아온다 | https://developers.google.com/youtube/v3/live/docs/liveBroadcasts ("As with the `title`, you can set this field by modifying the broadcast resource") |
+| 길이 여유 | description 5,000자(`invalidDescription`), title 1–100자(`invalidTitle`) | https://developers.google.com/youtube/v3/live/docs/liveBroadcasts/insert 오류표 |
+| `snippet.title`을 쓰지 않은 이유 | 제목은 watch 페이지·세로 피드에 노출되는 제품 문구다. 기계 식별자를 넣지 않는다. 길이 여유도 없다 | 위 오류표 + 스펙 §5.2 |
+| custom metadata / idempotency key | **없다.** `liveBroadcasts.insert`에 idempotency key가 없고 API에 사용자 정의 메타데이터 필드도 없다 | 위 insert 참조 페이지(요청 본문 속성 목록) |
+| 개인정보 | 마커는 합성 attempt id뿐이다(§12.4 대상 데이터 아님). 기본 `privacyStatus: private` | 스펙 §12.4 |
+
+마커를 **파생값이 아니라 열로 영속**한 이유: 재기동 후의 reconcile은 "지금 빌드의 마커 형식"이 아니라 "그 attempt가 실제로 보낸 문자열"과 대조해야 한다. 형식이 바뀐 빌드로 재기동하면 파생값은 어긋나고, 그 결과는 정확히 이 task가 막으려는 중복 insert다.
 
 ## Follow-ups
 
