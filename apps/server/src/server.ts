@@ -106,14 +106,13 @@ function statusLine(engine: EngineHealth, supervisor: SupervisorHealthSummary | 
  * because nothing here knows what the exception is carrying.
  */
 function failClosed(res: ServerResponse, headers: Readonly<Record<string, string>> = {}): void {
-  if (res.writableEnded) return
-  // Headers already out means part of an answer was sent; the only thing left to
-  // do is stop the caller from waiting for the rest of it.
-  if (res.headersSent) {
-    res.end()
+  if (!res.headersSent) {
+    sendJson(res, 500, { error: 'internal_error' }, headers)
     return
   }
-  sendJson(res, 500, { error: 'internal_error' }, headers)
+  // Part of an answer already went out, so the status is no longer ours to
+  // choose; the only thing left is to stop the caller waiting for the rest of it.
+  if (!res.writableEnded) res.end()
 }
 
 function sendJson(

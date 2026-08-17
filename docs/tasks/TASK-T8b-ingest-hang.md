@@ -79,12 +79,97 @@ void readJsonBody(req).then(
 
 ## Result
 
-<채워짐 — 아래>
+### 재현 관측 (수정 전, 가설 확인)
+
+`apps/server/src/engine/ingest.test.ts`의 새 describe `POST /ingest/simulator when the inbox write fails`를 **수정 전 코드**로 실행:
+
+```text
+$ npx vitest run apps/server/src/engine/ingest.test.ts
+
+ FAIL  apps/server/src/engine/ingest.test.ts > POST /ingest/simulator when the inbox write fails
+       > answers 503 with a reason code while another connection holds the write lock
+AssertionError: expected { answered: false, status: null, …(1) } to deeply equal { answered: true, status: 503, …(1) }
+- Expected
++ Received
+  {
+-   "answered": true,
+-   "status": 503,
+-   "unhandledRejections": 0,
++   "answered": false,
++   "status": null,
++   "unhandledRejections": 1,
+  }
+
+ FAIL  … > still answers 202 once the lock is released
+AssertionError: expected [ …(1) ] to deeply equal []
++ [
++   SqliteError {
++     "message": "database is locked",
++     "code": "SQLITE_BUSY",
++   },
++ ]
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 15 passed (17)
+   Duration  11.50s
+```
+
+가설 그대로다: **응답이 하나도 오지 않고**(`answered:false`, 2초 abort), 그 사이 `SqliteError{code:'SQLITE_BUSY'}` 1건이 `unhandledRejection`으로 유출됐다. 다른 원인(예: 500 응답)이 아니었으므로 가설은 확인됐고, 그 뒤에만 고쳤다.
+
+### 수정 후
+
+```text
+$ npx vitest run apps/server/src/engine/ingest.test.ts
+ Test Files  1 passed (1)
+      Tests  22 passed (22)
+   Duration  2.90s (tests 1.62s)   ← hang이 사라져 테스트 실행 시간 10.41s → 1.62s
+```
+
+### 두 수정이 각각 필요함(각 절반을 되돌려 확인)
+
+| 되돌린 파일 | 결과 |
+|---|---|
+| `server.ts`만 수정 전으로 | `× answers 500 instead of leaving the operator waiting`(admin/kill), `× ends the request even when the throw is not one the endpoint classifies` — 둘 다 2초 abort. `2 failed \| 40 passed` |
+| `ingest.ts`만 수정 전으로 | `× …answers 503…`이 `status:500`으로 실패(net이 잡아 500 `internal_error`를 주지만 이유 코드가 없다) + 단위 매핑 테스트 4건 실패. `5 failed \| 17 passed` |
+
+즉 `server.ts`의 net은 "요청이 끝나는 것"을, `ingest.ts`의 매핑은 "왜 실패했는지"를 각각 담당하며 어느 쪽도 다른 쪽으로 대체되지 않는다.
+
+### Acceptance criteria
+
+| # | 기준 | 상태 | 근거(테스트 파일·명령·출력) |
+|---|---|---|---|
+| 1 | 재현 테스트가 수정 전 실패, 수정 후 통과 | met | 위 "재현 관측"·"수정 후". 실제 `SQLITE_BUSY`를 두 번째 커넥션의 `BEGIN IMMEDIATE`로 유발(`ingest.test.ts`의 `holdTheWriteLock()`, `db/locking.test.ts`와 같은 방식) |
+| 2 | 모든 예외 경로에서 HTTP 응답(503/500 + 이유 코드) | met | `ingest.test.ts` › `SimulatorIngestEndpoint write failures` 4건: busy/locked→503 `db_busy`/`db_locked`, FULL/CORRUPT/IOERR→500 `db_disk_full`/`db_corrupt`/`db_io`, 비-SQLite→500 `internal`. 분류에 없는 throw는 `server.ts`의 net이 500 `internal_error`(`ends the request even when the throw is not one the endpoint classifies`) |
+| 3 | unhandled rejection 0 | met | HTTP 테스트 3건이 `process.on('unhandledRejection')`으로 직접 센다(`unhandledRejections: 0`). `/admin/kill` 테스트도 동일 |
+| 4 | 비밀·원문 미노출 | met | `says nothing about the exception itself` (응답 본문에 `SQLITE`·`vertical-live.db`·temp 경로·토큰 없음) + `puts no part of the exception in the response` (경로·토큰이 든 예외 메시지로 검증) |
+| 5 | 기존 T8/T11 테스트 회귀 없음 | met | `npm run test` → `123 files / 1732 passed, 1 skipped` (main 기준 1723 + 신규 9). 기존 테스트 수정 0건 |
+| 6 | 게이트 5개 | met(로컬) | 아래 Gates. CI는 BOARD **E-5**(GitHub Actions 결제 차단)로 실행 불가 |
+
+### Gates (executed)
+
+```text
+$ npm run format:check   -> All matched files use Prettier code style!
+$ npm run lint           -> eslint 통과, check-no-legacy-imports: ok (0 legacy imports),
+                            check-install-scripts: ok (4 reviewed, better-sqlite3 binding loads)
+$ npm run typecheck      -> tsc --build tsconfig.json (오류 없음)
+$ npm run test           -> Test Files 123 passed (123) / Tests 1732 passed | 1 skipped (1733), 54.85s
+$ npm run build          -> @vl/contract·@vl/renderer(vite ✓ built in 10.02s)·@vl/server
+                            (copied 5 migration(s), docs/ops/data-map.md up to date)·@vl/simulator
+$ git fetch origin && git rebase origin/main -> Successfully rebased (base 4b280ed)
+```
+
+CI: **실행하지 않았음 — BOARD E-5**(GitHub Actions 결제 차단으로 모든 run이 2초 만에 실패). 위 로컬 게이트가 E-5 정책상의 대체 근거다.
 
 ## Not done / out of scope
 
-- <채워짐>
+- **`engine.ts` 미변경.** 처음에는 `StateEngine.ingest()`에서 실패를 기록(metric·`/health.lastFailure`)하는 안을 검토했으나, `#lastFailure`/`#consecutiveFailures`는 T12 supervisor가 읽는 writer 건강 신호다. 시뮬레이터 전용 엔드포인트의 write 실패로 그 신호를 움직이면 supervisor 판정을 바꾸게 되어 T8b 범위를 벗어난다. 실패는 **응답**으로만 보고한다.
+- **write 실패의 로그·metric 없음.** 엔드포인트에는 logger가 주입돼 있지 않고, 넣으려면 `main.ts` 2곳의 배선을 바꿔야 한다(범위 밖). Follow-up 참조.
+- **`/ingest/simulator`의 재시도 정책 없음.** 503은 호출자에게 재시도 가능함을 알릴 뿐, 서버가 대신 재시도하지 않는다(`Retry-After`도 붙이지 않았다 — 대기 시간의 근거가 스펙에 없다).
+- **T9 YouTube adapter 경로(`youtube/chat/sink.ts`)의 `inbox.ingest()`는 건드리지 않았다.** HTTP 응답이 없는 경로라 이 hang과 무관하다.
+- **T15의 워크어라운드(`skipsInjection`/inject deadline)는 손대지 않았다.** `tools/soak`는 PR #18 소유이며 이 브랜치(origin/main 기준)에는 아직 존재하지 않는다.
 
 ## Follow-ups
 
-- <채워짐>
+- **T15(PR #18) 워크어라운드 제거 가능.** `POST /ingest/simulator`가 이제 모든 예외 경로에서 반드시 응답하므로, T15가 hang을 견디려고 둔 `skipsInjection` / inject deadline 워크어라운드는 이 PR 머지 후 제거할 수 있다. soak 러너는 대신 503/500 응답을 fault matrix "DB lock" 행의 관측 지점으로 쓸 수 있다(재시도 여부는 `error: 'ingest_unavailable'`로 구분).
+- inbox write 실패의 운영자 가시성(로그 1줄 또는 `/metrics` 카운터). 24시간 무인 운영에서 503이 반복되는 상황은 호출자만 알고 호스트 쪽에는 흔적이 없다. `SimulatorIngestOptions`에 콜백을 하나 두고 `main.ts`에서 기존 redacted logger에 연결하면 되지만, 배선 변경이라 T8b 범위 밖으로 뒀다.
+- `failClosed()`의 `res.headersSent` 분기는 방어적이다. 현재 라우팅에는 `sendJson()`이 헤더를 쓴 뒤 던지는 경로가 없어 테스트로 도달시키지 않았다(헤더 전 `JSON.stringify` 실패는 `!headersSent` 분기로 간다). 분기를 지우면 그런 경로가 생겼을 때 다시 hang하므로 남겼다.
