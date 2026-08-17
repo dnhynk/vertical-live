@@ -11,10 +11,10 @@
 |---|---|---|---|---|---|---|---|
 | T0 | 모노레포 스캐폴드·CI | — | — | merged | t0-scaffold | #1 | `task_658a82e9f356` |
 | T1 | 정규 이벤트·snapshot·effect 계약과 fixture | T0 | ✔ | merged | t1-contract | #2 | `task_1acc78f93775` |
-| T1b | [contract] Effect 원인 확장(causedByEventKey nullable + cause 판별자; T7 발견) | T1 | ✔ | ready | t1b-effect-cause | | `task_0a64fcaaae4a` |
+| T1b | [contract] Effect 원인 확장(causedByEventKey nullable + cause 판별자; T7 발견) | T1 | ✔ | dispatched | t1b-effect-cause | | `task_0a64fcaaae4a` |
 | T2 | obs-websocket 5 감시·제어 + OBS 프로파일 | T0 | — | merged | t2-obs-monitor | #3 | `task_6e0c43d6b74c` |
 | T3 | OAuth·비밀정보 vault·quota | T0 | — | in_review | t3-auth-vault | #4 | `task_62829ec3ab8b` |
-| T4 | SQLite 영속층(inbox·checkpoint·snapshot·outbox·deadline) | T1 | — | dispatched | t4-persistence | | `task_6bb9ff9f79c8` |
+| T4 | SQLite 영속층(inbox·checkpoint·snapshot·outbox·deadline) | T1 | — | in_review | t4-persistence | #5 | `task_6bb9ff9f79c8` |
 | T5 | 렌더러 read model(snapshot 복구·effect 멱등·ACK·건강) | T1 | — | ready | t5-renderer-readmodel | | `task_6ba022bb6151` |
 | T6 | 명령 파서·모더레이션·입력 arbiter | T1 | — | ready | t6-command-parser | | `task_a0f96dd7e038` |
 | T7 | 콘텐츠 디렉터·크리처 상태 모델(순수 도메인) | T1 | — | dispatched | t7-content-director | | `task_e1e7531798ad` |
@@ -101,3 +101,5 @@
 | 2026-08-17 06:30 | T7 질문: 타이머 유래 effect vs EffectSchema.causedByEventKey 필수 충돌 → 답 A(T7은 EffectDraft+cause 판별자, 조립은 T8) + [contract] 후속 **T1b** `task_0a64fcaaae4a` 등록(A-17). T8은 T1b 머지 후 디스패치. 대기열: T1b → T6 → T5 |
 | 2026-08-17 06:50 | R-T2-3 verdict **approve**. 최종 게이트 통과(contract 미변경, service.json에 key 없음, deps exact) → **PR #3 squash merge**(main 7842a2b). T2 worker release, worktree 제거. 사용자 결정 대기 항목(BOARD §4에 추가): OBS 32.0.2/obs-websocket 5.6.3 버전 고정 승인, 실제 OBS 스모크(WebSocket 서버 활성화 후) |
 | 2026-08-17 06:55 | PR #4(T3) mergeStateStatus DIRTY(#3과 중복 파일) → F-T3-0 rebase task `task_3d2ac48f0034` → T3 터미널 `ctx_153cfdeffe35`. 이후 R-T3-1 |
+| 2026-08-17 07:20 | F-T3-0 rebase 완료(PR #4 CLEAN, 551 tests). R-T3-1 `task_cba4ef036404` → `ctx_1e16e3c930eb` |
+| 2026-08-17 07:35 | T4 worker_done(succeeded, PR #5: SQLite WAL+synchronous=FULL, 마이그레이션 러너, 두 트랜잭션 경계, crash-window·SIGKILL 테스트, 562 tests). 후속: T1b 머지 후 effect_outbox.caused_by_event_key nullable 마이그레이션 002 필요(T8 또는 T1b 후속). T1b 디스패치 `ctx_6219c7a4e46f`. 리뷰 대기열: R-T3-1(진행) → R-T4-1 |
