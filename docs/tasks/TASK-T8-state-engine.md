@@ -30,8 +30,9 @@ ACK 추적`으로 처리한다. 시작 시에는 snapshot 로드 → deadline �
    시각 순 병합, 동시각이면 이벤트 우선(T7 `runWorld`와 같은 규칙).
 4. **arbiter 연동** — `direct`는 즉시 step, `aggregated`는 held(처리 기록을 남기지 않아 커서가
    그 아래에 머문다) → 창 마감 시 `aggregatedOnly`만 **실제 마지막 이벤트**에 실어 1회 적용.
-5. **`command.argument` 어휘 검사** — 열린 `mission.choices`의 `choiceId`가 아니면 이유 코드와
-   함께 버린다(원문 미저장).
+5. **`command.argument` 어휘 검사** — 두 겹이다(round 1에서 정정). 저장 경계(`StateEngine.ingest`)에서
+   콘텐츠 전체 choice 어휘 밖 토큰을 떨어뜨려 inbox에 쓰지 않고, 처리 시점에 **현재 열린**
+   `mission.choices` 어휘가 아니면 처리 기록에 이유(`applied:argument_rejected`)를 남기고 버린다.
 6. **degraded 규칙(§9.2)** — 입력 건강 신호 또는 renderer ACK 건강이 불건전하면
    `interactionEnabled=false` snapshot을 발행하고 이벤트는 inbox에 보존(타이머는 계속 진행).
    복구 시 유효시간 내면 처리, 지나면 `expired`. 유료는 만료 없음.
@@ -76,7 +77,7 @@ ACK 추적`으로 처리한다. 시작 시에는 snapshot 로드 → deadline �
 | 1 | replay 결정성: 같은 inbox로 두 번 부팅하면 같은 snapshot·revision | met | `apps/server/src/engine/replay.test.ts` — "two boots over the same inbox reach the same snapshot and revision"(snapshot 전체 deep-equal + effectId·cause 목록 일치), "produces effect ids derived from the revision, not from a random source", "restarting on the same database resumes instead of restarting the world". 결정성은 (inbox 내용, seed, 주입 Clock) 3자에 대해 성립하며 셋 다 주입값이다 |
 | 2 | 유료 무결성: 동일 Super Chat 1건, Gift delta만, 같은 paid effectId 재발행 시 새 row 없음 | met | `apps/server/src/engine/paid.test.ts` 6건 — 중복 Super Chat → paid effect 1·ledger 1 / 원장에 이미 있는 event는 world에 도달하지 않음(`paid_duplicate`) / combo 0→1→3→5→3 → thanks 3건(delta 1,2,2), `getGiftStoredMax=5` / 최댓값보다 낮은 combo → `gift_no_delta`, 연출 없음 / 재기동 재발행 후 `listUnackedEffects` 수 불변 / ACK 후 `ackedAt` 기록 |
 | 3 | commit 후 발행 전 종료 → 재기동 시 미ACK effect 재발행·정합 | met | `apps/server/src/engine/recovery.test.ts` — "republishes an effect committed but never published"(발행 직전 예외로 크래시 창 재현 → 재기동 후 같은 effectId 1회 재발행, `publishedAt` 기록, snapshot revision ≥ effect revision, outbox row 수 불변). 추가로 hello 시 전량 재발행, 창 경과 시 `expired`, 구 DB(engine state 없음) 기동, 다른 버전 상태 거부 |
-| 4 | degraded 창 replay: CTA 비활성, 만료 명령 `expired`, 유료 대체 감사 1회 | met | `apps/server/src/engine/degraded.test.ts` 6건 — 렌더러 0/입력 불건전 시 `interactionEnabled=false`·`broadcastLifecycle=degraded` 발행 / degraded 중 이벤트 보존(inbox 잔존, `lastAppliedAction` null) 후 복구 시 적용 / 유효시간 경과 시 `event_expired` 1·적용 0 / 유료는 만료 없이 `fallback: true` 연출 정확히 1회 / 원 연출이 ACK되면 대체 연출 없음 |
+| 4 | degraded 창 replay: CTA 비활성, 만료 명령 `expired`, 유료 대체 감사 1회 | met (round 1에서 unmet → round 2에서 고침) | `apps/server/src/engine/degraded.test.ts` 8건 — 렌더러 0/입력 불건전 시 `interactionEnabled=false`·`broadcastLifecycle=degraded` 발행 / degraded 중 이벤트 보존(inbox 잔존, `lastAppliedAction` null) 후 복구 시 적용 / 유효시간 경과 시 `event_expired` 1·적용 0 / 유료는 만료 없이 `fallback: true` 연출 1회 / 원 연출이 ACK되면 대체 연출 없음. **round 1 지적대로 ACK 직후 재시작 창에서는 두 번째 연출이 났었다** — 판정 근거를 durable `acked_at`으로 옮기고 재시작 회귀 테스트 2건을 추가했다(Review round 1 표 blocker 2) |
 | 5 | 로컬 API 수신→ACK p95 기록 | met(기록) | `apps/server/src/engine/e2e.test.ts`가 실제 HTTP·WS·시스템 시계로 20건을 왕복시키고 `/metrics`를 읽어 출력한다. 단독 실행 3회: `receivedToAcked` p95 = **41 / 67 / 13 ms**(p50 19/38/9, max 58/288/60), 구간별 p95 `receivedToCommitted` 39/59/9, `committedToPublished` 1/1/1, `publishedToAcked` 10/22/4. 전체 스위트 병렬 실행 중에는 `receivedToAcked` p95 55–100 ms로 올라간다(같은 호스트에서 72개 테스트 파일이 동시에 도는 상태). 합격선은 §7.5에 따라 Gate 2 calibration 후 잠그며 여기서는 판정하지 않는다 |
 
 ### Gates (executed)
@@ -142,3 +143,36 @@ copied 2 migration(s) to dist/db/migrations
   소유권을 가져갈 때 엔진의 파생 규칙을 한 곳으로 합칠 것.
 - `engine.degraded.eventValidityMs`는 콘텐츠 정의값이 확정되면 `world/content/`로 옮기는 편이
   자연스럽다(현재는 운영이 조정하는 값이라 `config`에 둠).
+- `/ws/renderer` 인증 실패는 4401 close로 알리지만, 렌더러의 `WebSocketLike`는 close code를
+  받지 않아 화면 쪽 진단은 서버 로그(`renderer.unauthorized`)와 `config_token_missing` 경고뿐이다.
+  close code를 렌더러 로그까지 나르는 것은 T14 범위.
+- `StateEngine.ingest()`가 저장 경계다. T9의 source adapter는 store를 직접 부르지 말고 이 경로를
+  써야 argument sanitize와 inbox notify를 함께 받는다.
+
+## Review round 1
+
+리뷰: <https://github.com/dnhynk/vertical-live/pull/12#pullrequestreview-4950813879> (request_changes,
+blocker 4 + major 2). 고침은 모두 `423a5fa`(엔진·인증·수집)와 `68396c2`(보존 스케줄)에 있다.
+
+| finding | 처리 |
+|---|---|
+| [blocker] `engine.ts:615/637/742` — 창 마감 시 held 행의 처리 기록이 이후 resolved 행 뒤에 붙어 `ingestSeq` 오름차순 위반 → `ProcessedCursorError` → writer wedge | **고침 `423a5fa`.** `#resolve()`가 `#resolved`를 `ingestSeq` 정렬로 유지(삽입 정렬)하고, `#cursorPlan()`이 오름차순을 다시 검사해 어긋나면 `EngineInvariantError`로 이름을 붙여 던진다. 회귀 테스트 `aggregate.test.ts` "closes a window whose held rows sit below an already-resolved later row"는 리뷰어 시나리오 그대로(direct 20 + held 21/22 + Super Chat 23)이며, 정렬을 되돌리면 `processing records are not ascending: 23 then 21`로 실패하는 것을 확인했다. wedge 표면화: 실패한 pass는 `pump()`가 잡아 `health().lastFailure`·`consecutiveFailures`·degraded 사유 `writer_failing`·카운터 `writer_pass_failed`로 드러나고, 성공하면 0으로 돌아간다(테스트 "reports a failed pass on /health instead of retrying it silently"). 타이머와 `/ingest/simulator`는 이제 `pump()`를 쓴다 |
+| [blocker] `engine.ts:310/678` — 유료 ACK가 `acked_at`은 즉시 쓰지만 fallback 의무 해제는 다음 commit까지 지연 → 재시작/데드라인 경쟁 시 두 번째 감사 연출 | **고침 `423a5fa`.** 판정 근거를 durable `effect_outbox.acked_at`으로 옮겼다. 엔진 상태에 `paidThanksEffects`(`eventKey → effectId`, 미해결 의무만, commit마다 committed state에서 재유도)를 함께 영속하고, `paid_thanks_fallback` 타이머가 due일 때 `#settleAcknowledgedFallback()`이 그 effect의 `ackedAt`을 읽어 이미 ACK면 reducer에 넣지 않고 의무만 해제한다. effectId를 모르면(구 상태) 증명할 수 없으므로 §9.2대로 대체 연출을 **한다**. 회귀 테스트 `degraded.test.ts` "does not stage a substitute after a restart between the ACK and the commit"(ACK → pass 없이 재시작 → 창 경과)와 "closes the substitute obligation when the ACK precedes the window"; 판정을 끄면 전자가 실패하는 것을 확인했다 |
+| [blocker] `publisher.ts:66` — `/ws/renderer`가 loopback만 확인하고 인증 없음(§10.2) | **고침 `423a5fa`.** vault에 `server.rendererToken`을 추가하고(`SECRET_NAMES`, `VL_RENDERER_TOKEN`), 업그레이드에서 `?token=`을 `timingSafeEqual`로 검사해 실패하면 등록 전에 `4401`로 닫는다(rendererCount에 잡히지 않고 프레임도 읽지 않는다). 토큰 미설정은 전부 거부. 렌더러는 페이지 쿼리의 `token`을 WS URL로 옮긴다(`apps/renderer/src/config.ts`, 승인된 범위). 테스트: e2e "refuses a renderer that presents no token or the wrong one" / "accepts the renderer that presents the vault token", 렌더러 `config.test.ts` 2건(값은 로그에 남지 않음). 운영 절차는 `docs/ops/obs-setup.md`(vault 정본 + `SetInputSettings` 주입, A-16과 같은 custody, 씬 JSON 캐시는 T17)와 `docs/ops/youtube-auth-setup.md` 4장 |
+| [blocker] `engine.ts:544/590` — 어휘 밖 argument가 `applied`로 기록되고 원문 토큰이 inbox envelope에 남음; 티켓의 '미저장' 주장이 거짓 | **고침 `423a5fa`.** 저장 경계를 만들었다: 모든 수집은 `StateEngine.ingest()`를 지나고, 거기서 `sanitizeEnvelopeArgument()`가 콘텐츠 전체 choice 어휘(`STORABLE_COMMAND_ARGUMENTS`) 밖 토큰을 null로 지운 뒤에야 `commitIngestBatch`가 쓴다. 처리 시점의 동적 검사는 남되 기록이 `applied:argument_rejected`(집계 창은 `aggregated:argument_rejected`)로 바뀌었다. DB 관측 테스트 `argument.test.ts`가 두 번째 연결로 `ingest_inbox`를 읽어 (1) `envelope_json`에 토큰이 없고 (2) 저장 가능한 토큰일 때 `processing_result`가 이유를 담는 것을 확인한다. 티켓 Plan 5·아래 합격 기준 표의 문구도 정정했다 |
+| [major] `ingest.ts:154` — simulator 배치가 임의 `sourceKey`/`liveChatId`로 프로덕션 checkpoint를 덮어씀 | **고침 `423a5fa`.** checkpoint는 이제 **유도값**이다: `simulator:{배치의 liveChatId}`. 배치가 여러 chat을 섞으면 400(`batch_must_share_one_live_chat_id`), 다른 `sourceKey`/`liveChatId`를 지정하면 400으로 거부한다(조용히 고쳐 쓰지 않는다). 테스트 "cannot touch a production source checkpoint"가 리뷰어 재현(`youtube:chat_live` = `token_real`)을 그대로 두고 값이 보존되는 것을 확인한다 |
+| [major] lockfile의 `ws`가 아직 devDependencies | **고침 `423a5fa`.** `npm install`로 재생성했고 diff는 `apps/server`의 `ws` 이동 3줄뿐이다 |
+| (rebase) T13 머지로 `world_snapshot.engine_state_json`이 미신고 컬럼이 됨 | **고침 `68396c2`.** `config/retention.json`의 `world_snapshot.snapshot`에 컬럼과 목적(엔진 도메인 상태, 식별자 없음)을 추가하고 `npm run data-map:generate -w @vl/server`로 `docs/ops/data-map.md`를 재생성했다 |
+
+### Gates (round 2, `git rebase origin/main` = `5457ac4` 뒤)
+
+```text
+$ npm run format:check   -> All matched files use Prettier code style!
+$ npm run lint           -> eslint clean; legacy-import ok; install-script ok
+$ npm run typecheck      -> tsc --build, no errors
+$ npx vitest run         -> 81 files, 1237 passed | 1 skipped
+$ npm run build          -> four workspaces built; data-map --check passed
+```
+
+로컬 지연(단독 e2e 실행, round 2): `receivedToAcked` p95 17 ms(p50 10, max 52), 구간별 p95
+`receivedToCommitted` 14 / `committedToPublished` 0 / `publishedToAcked` 6.
