@@ -11,13 +11,14 @@
 |---|---|---|---|---|---|---|---|
 | T0 | 모노레포 스캐폴드·CI | — | — | merged | t0-scaffold | #1 | `task_658a82e9f356` |
 | T1 | 정규 이벤트·snapshot·effect 계약과 fixture | T0 | ✔ | merged | t1-contract | #2 | `task_1acc78f93775` |
+| T1b | [contract] Effect 원인 확장(causedByEventKey nullable + cause 판별자; T7 발견) | T1 | ✔ | ready | t1b-effect-cause | | `task_0a64fcaaae4a` |
 | T2 | obs-websocket 5 감시·제어 + OBS 프로파일 | T0 | — | changes_requested | t2-obs-monitor | #3 | `task_6e0c43d6b74c` |
 | T3 | OAuth·비밀정보 vault·quota | T0 | — | in_review | t3-auth-vault | #4 | `task_62829ec3ab8b` |
 | T4 | SQLite 영속층(inbox·checkpoint·snapshot·outbox·deadline) | T1 | — | dispatched | t4-persistence | | `task_6bb9ff9f79c8` |
 | T5 | 렌더러 read model(snapshot 복구·effect 멱등·ACK·건강) | T1 | — | ready | t5-renderer-readmodel | | `task_6ba022bb6151` |
 | T6 | 명령 파서·모더레이션·입력 arbiter | T1 | — | ready | t6-command-parser | | `task_a0f96dd7e038` |
 | T7 | 콘텐츠 디렉터·크리처 상태 모델(순수 도메인) | T1 | — | dispatched | t7-content-director | | `task_e1e7531798ad` |
-| T8 | 상태 엔진(단일 writer·outbox·WS·ACK·유료 멱등) | T4, T6, T7 | — | pending | t8-state-engine | | `task_0aadf1c96dcf` |
+| T8 | 상태 엔진(단일 writer·outbox·WS·ACK·유료 멱등) | T1b, T4, T6, T7 | — | pending | t8-state-engine | | `task_0aadf1c96dcf` |
 | T9 | YouTube source adapter(gRPC streamList + REST fallback) | T3, T4, T8 | — | pending | t9-youtube-adapter | | `task_ec3d66a159bd` |
 | T10 | broadcast lifecycle·reconcile·한도 | T3, T4 | — | pending | t10-broadcast-lifecycle | | `task_41769f69d4b7` |
 | T11 | 로컬 시뮬레이터·replay·지연 계측 | T5, T8 | — | pending | t11-simulator-replay | | `task_9470df5be9b8` |
@@ -59,6 +60,7 @@
 | A-13 | 리뷰어 codex는 `--dangerously-bypass-approvals-and-sandbox`로 기동(무인·review 전용·`gh` 네트워크 필요; claude worker의 skip-permissions와 같은 신뢰 수준) | 런북 0장 | 리뷰 |
 | A-14 | 공용 규격: 서버 `127.0.0.1:8787`, WS `/ws/renderer`, `/health`, `/metrics`, `/ingest/simulator`, `/admin/kill`; DB `data/vertical-live.db`; 패키지명 `@vl/*` | TASK_SPECS 공통 규약 | 전체 |
 | A-15 | 합격선 숫자(soak 중단·복구 허용치, freeze 허용치, p95 합격선, 신선도 최소치)는 코드에 하드코딩하지 않고 `provisional` config로 두며 Gate 0/2 승인값으로 교체 | 스펙 §7.5, §11 | T7, T11, T15 |
+| A-17 | 타이머(deadline) 유래 effect는 `cause:{kind:'deadline',deadlineKind}`로 표기하고 `causedByEventKey=null`; event 유래는 `cause:{kind:'event',eventKey}`이며 causedByEventKey와 일치; 유료 effect는 event 유래만. T7은 EffectDraft(cause 판별자)만 반환하고 T8이 Effect를 조립 | 스펙 §2.1·§6.2(무입력 진행) vs §7.3(6)·§10.2(원인 event key) — T7 질문(2026-08-17)으로 발견 | T1b, T7, T8 |
 | A-16 | stream key는 vault(SecretProvider)가 정본. 서버가 StartStream 전 obs-websocket `SetStreamServiceSettings`로 런타임 주입하고 운영자는 OBS UI에 키를 입력하지 않는다. OBS가 서비스 설정을 프로파일 디렉터리(service.json)에 저장하는 사실은 문서에 명시(저장소·DB·로그·화면 밖), 정지 시 제거·디렉터리 ACL은 T17 | 스펙 §10.2, R-T2-1 리뷰 finding | T2, T12, T17 |
 
 ## 4. 에스컬레이션 대기
@@ -92,3 +94,4 @@
 | 2026-08-17 05:25 | F-T2-1 완료(5건 수정, 109 tests, setStreamServiceFromVault 추가; T12가 startStream 전에 호출해야 함 — T12 명세 반영 예정). R-T2-2 `task_e2c585a03d88` → `ctx_a815b8dd9c16` |
 | 2026-08-17 06:10 | F-T1-2 완료(384 tests). R-T1-3 verdict **approve**. 코디네이터 최종 게이트 통과(범위 밖 변경 .prettierignore/eslint.config.js는 생성물·lint 범위 근거 있음) → **PR #2 squash merge**(main b760ed5). T1 worker release, t1 worktree 제거 |
 | 2026-08-17 06:15 | F-T2-2 완료(A-16 문구 테스트로 강제, 110 tests). R-T2-3 `task_4584777af58c` → `ctx_0ee73d302cd5`. T4 디스패치 `ctx_b455135e621e`, T7 디스패치 `ctx_f38356ff64be`(T5·T6은 ready 대기, 동시 worker 2). 리뷰 대기열: R-T2-3(진행) → R-T3-1(PR #4, #3 머지 후 rebase 필요) |
+| 2026-08-17 06:30 | T7 질문: 타이머 유래 effect vs EffectSchema.causedByEventKey 필수 충돌 → 답 A(T7은 EffectDraft+cause 판별자, 조립은 T8) + [contract] 후속 **T1b** `task_0a64fcaaae4a` 등록(A-17). T8은 T1b 머지 후 디스패치. 대기열: T1b → T6 → T5 |
