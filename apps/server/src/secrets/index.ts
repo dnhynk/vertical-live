@@ -9,10 +9,9 @@ export {
   WindowsCredentialManagerVault,
 } from './windows-credential-manager.js'
 export type { CredentialEntry, CredentialEntryFactory } from './windows-credential-manager.js'
-export { ALLOW_IN_MEMORY_VAULT_ENV, resolveSecretVault } from './resolve.js'
+export { defaultSecretProvider, resolveSecretVault } from './resolve.js'
 export type { ResolveSecretVaultOptions } from './resolve.js'
 export {
-  MIN_REDACTABLE_LENGTH,
   REDACTED,
   SecretRedactor,
   createRedactingLogger,

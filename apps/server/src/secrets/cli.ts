@@ -1,14 +1,17 @@
+import { SecretRedactor } from './redaction.js'
 import { SECRET_NAMES, type SecretName } from './types.js'
 import type { SecretVault } from './vault.js'
 
 /**
  * `secrets` CLI: puts the four spec §10.2 secrets into the vault
- * (`npm run secrets:set -w @vl/server -- <name>`), lists which ones are set and
+ * (`npm run secrets -w @vl/server -- set <name>`), lists which ones are set and
  * removes one.
  *
  * The value is read from stdin, never from argv: a command line ends up in the
  * shell history and in the process list, which is exactly the exposure the
- * vault exists to prevent. Nothing here ever prints a value.
+ * vault exists to prevent. Nothing here ever prints a value — including on the
+ * failure path, where the store's own error is masked with the value before it
+ * reaches the terminal.
  */
 
 export interface SecretsCliIo {
@@ -62,9 +65,14 @@ export async function runSecretsCli(
   }
 
   if (command === 'delete') {
-    const deleted = await vault.delete(secretName)
-    io.write(deleted ? `deleted ${secretName}` : `nothing stored under ${secretName}`)
-    return 0
+    try {
+      const deleted = await vault.delete(secretName)
+      io.write(deleted ? `deleted ${secretName}` : `nothing stored under ${secretName}`)
+      return 0
+    } catch (error) {
+      io.write(`delete failed: ${new SecretRedactor().redactError(error)}`)
+      return 1
+    }
   }
 
   const value = stripTrailingNewline(await deps.io.readStdin())
@@ -72,7 +80,16 @@ export async function runSecretsCli(
     io.write(`refusing to store an empty value for ${secretName}`)
     return 1
   }
-  await vault.set(secretName, value)
+  // Registered before the write: if the store echoes the value back in an
+  // error, the echo is masked on its way to the terminal.
+  const redactor = new SecretRedactor()
+  redactor.register(value)
+  try {
+    await vault.set(secretName, value)
+  } catch (error) {
+    io.write(`store failed: ${redactor.redactError(error)}`)
+    return 1
+  }
   io.write(`stored ${secretName} (${value.length} characters) in ${vault.source}`)
   return 0
 }

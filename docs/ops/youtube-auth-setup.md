@@ -59,7 +59,9 @@ npm run secrets -w @vl/server -- delete youtube.streamKey   # 제거
 
 Credential Manager 항목은 service `vertical-live`(`config/default.json`의 `youtube.auth.credentialService`), account = 위 이름으로 저장된다.
 
-비-Windows 호스트에는 OS vault 구현이 없다. 테스트/CI는 `VL_ALLOW_IN_MEMORY_VAULT=1`로 프로세스 메모리 vault를 쓰며, 이 값은 프로세스가 끝나면 사라진다. **운영 호스트에서 이 플래그를 쓰지 않는다.**
+비-Windows 호스트에는 OS vault 구현이 없다. `auth:login`·`secrets` CLI는 그런 호스트에서 **환경변수로 우회할 수 없고** `SecretVaultUnavailableError`로 멈춘다(리뷰 round 1 M2: 플래그 하나로 프로덕션이 메모리 vault에 붙는 경로를 없앴다). 테스트는 `InMemorySecretVault`를 코드로 주입해서 쓰며, 그 경로는 프로덕션 진입점에 존재하지 않는다.
+
+OBS websocket 비밀번호·스트림 키도 같은 vault를 쓴다. env(`VL_OBS_PASSWORD`, `VL_YOUTUBE_STREAM_KEY`)는 `EnvSecretProvider`를 **직접 주입**하는 개발·테스트에서만 읽히고, 주입하지 않은 운영 경로는 Credential Manager만 본다(`docs/ops/obs-setup.md` 2장).
 
 ## 5. 철회·재동의
 

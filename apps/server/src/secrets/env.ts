@@ -1,10 +1,15 @@
 import { SECRET_NAMES, type SecretName, type SecretProvider } from './types.js'
 
 /**
- * Environment-variable provider. It is the V1 stopgap until T3 ships the OS
- * credential vault provider: the process environment keeps secrets out of the
- * repository and out of the game DB, but it is not at-rest encrypted, so
- * `docs/ops/obs-setup.md` tells operators to set it per session.
+ * Environment-variable provider — **development and test only** since T3.
+ *
+ * The process environment keeps secrets out of the repository and out of the
+ * game DB, but it is not at-rest encrypted, so it does not satisfy spec §10.2.
+ * The operational store is the OS credential vault
+ * (`defaultSecretProvider()` / `resolveSecretVault()`); nothing constructs this
+ * provider by default any more. Use it only where a caller injects it on
+ * purpose: unit tests, and `obs:probe --fake`, which mints a synthetic password
+ * for its own in-process fake server.
  */
 export const SECRET_ENV_VARS: Readonly<Record<SecretName, string>> = {
   'obs.websocketPassword': 'VL_OBS_PASSWORD',

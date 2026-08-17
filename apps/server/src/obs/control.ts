@@ -1,6 +1,5 @@
 import { systemClock, type Clock } from '../clock.js'
-import { EnvSecretProvider } from '../secrets/env.js'
-import { requireSecret, type SecretProvider } from '../secrets/index.js'
+import { defaultSecretProvider, requireSecret, type SecretProvider } from '../secrets/index.js'
 import type { ObsConfig } from './config.js'
 import {
   BROWSER_SOURCE_INPUT_KIND,
@@ -83,7 +82,9 @@ export class ObsControl {
     this.#source = options.source
     this.#config = options.config
     this.#clock = options.clock ?? systemClock
-    this.#secrets = options.secrets ?? new EnvSecretProvider()
+    // Default is the OS credential vault (spec §10.2); the env provider is a
+    // development/test provider that has to be injected on purpose.
+    this.#secrets = options.secrets ?? defaultSecretProvider()
   }
 
   /**
@@ -104,7 +105,7 @@ export class ObsControl {
     const key = await requireSecret(
       this.#secrets,
       'youtube.streamKey',
-      `set ${EnvSecretProvider.envVarFor('youtube.streamKey')} (spec §10.2, BOARD A-16: the vault is the stream key's system of record — it is never in the repository, the game DB, logs, or on screen. Once injected, OBS caches it in the active profile's service.json; clearing that on stop is T17)`,
+      `store it with "npm run secrets -w @vl/server -- set youtube.streamKey" (development: set VL_YOUTUBE_STREAM_KEY and inject EnvSecretProvider). Spec §10.2, BOARD A-16: the vault is the stream key's system of record — it is never in the repository, the game DB, logs, or on screen. Once injected, OBS caches it in the active profile's service.json; clearing that on stop is T17`,
     )
     const server = this.#config.streamIngestUrl
 

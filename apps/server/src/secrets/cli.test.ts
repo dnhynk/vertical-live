@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { parseSecretName, runSecretsCli } from './cli.js'
 import { InMemorySecretVault } from './memory.js'
+import { REDACTED } from './redaction.js'
+import type { SecretVault } from './vault.js'
 
 const SYNTHETIC_STREAM_KEY = 'synthetic-stream-key-0123456789'
 
@@ -58,6 +60,37 @@ describe('secrets CLI', () => {
     expect(await h.run([])).toBe(1)
     expect(h.lines.join('\n')).toContain('usage:')
     expect(h.vault.storedNames()).toEqual([])
+  })
+
+  it('masks the value when the store echoes it in an error, however short', async () => {
+    // Review round 1, B2: a short value used to reach the terminal verbatim
+    // because the redactor refused to register it.
+    const shortSecret = 'pw1'
+    const lines: string[] = []
+    const echoingVault: SecretVault = {
+      source: 'echoing-test-vault',
+      get: async () => undefined,
+      set: async (_name, value) => {
+        throw new Error(`store rejected the blob "${value}"`)
+      },
+      delete: async () => {
+        throw new Error('delete is unavailable')
+      },
+    }
+    const run = (argv: string[], stdin: string): Promise<number> =>
+      runSecretsCli(argv, {
+        vault: echoingVault,
+        io: { write: (line) => lines.push(line), readStdin: async () => stdin },
+      })
+
+    expect(await run(['set', 'obs.websocketPassword'], `${shortSecret}\n`)).toBe(1)
+    expect(await run(['delete', 'obs.websocketPassword'], '')).toBe(1)
+
+    const output = lines.join('\n')
+    expect(output).toContain('store failed')
+    expect(output).toContain(REDACTED)
+    expect(output).not.toContain(shortSecret)
+    expect(output).toContain('delete failed: Error: delete is unavailable')
   })
 
   it('parses only the known secret names', () => {

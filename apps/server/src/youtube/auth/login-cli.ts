@@ -78,7 +78,7 @@ export async function runLoginCli(argv: readonly string[], deps: LoginCliDeps): 
     redactor.register(credentials.clientSecret)
 
     const vault =
-      deps.vault ?? (await resolveSecretVault({ env, service: config.credentialService, logger }))
+      deps.vault ?? (await resolveSecretVault({ service: config.credentialService, logger }))
     const client = new OAuthClient({
       clientId: credentials.clientId,
       ...(credentials.clientSecret === undefined ? {} : { clientSecret: credentials.clientSecret }),

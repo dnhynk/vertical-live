@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { InMemorySecretVault } from './memory.js'
 import { SecretRedactor, createRedactingLogger, redactValues, REDACTED } from './redaction.js'
-import { ALLOW_IN_MEMORY_VAULT_ENV, resolveSecretVault } from './resolve.js'
+import { defaultSecretProvider, resolveSecretVault } from './resolve.js'
 import { SecretVaultError, SecretVaultUnavailableError } from './vault.js'
 import {
   WindowsCredentialManagerVault,
@@ -104,19 +104,38 @@ describe('WindowsCredentialManagerVault (injected binding)', () => {
 })
 
 describe('resolveSecretVault', () => {
-  it('refuses an unencrypted fallback off Windows unless it is opted into', async () => {
-    await expect(resolveSecretVault({ platform: 'linux', env: {} })).rejects.toThrow(
+  it('has no environment-flag path to an unencrypted store', async () => {
+    // Review round 1, M2: an env switch made the in-memory vault reachable from
+    // a production `auth:login`. There is no flag now — off Windows it fails.
+    await expect(resolveSecretVault({ platform: 'linux' })).rejects.toThrow(
       SecretVaultUnavailableError,
     )
 
-    const optedIn = await resolveSecretVault({
-      platform: 'linux',
-      env: { [ALLOW_IN_MEMORY_VAULT_ENV]: '1' },
-    })
-    expect(optedIn.source).toContain('in-memory')
+    const previous = { ...process.env }
+    try {
+      process.env['VL_ALLOW_IN_MEMORY_VAULT'] = '1'
+      process.env['VITEST'] = 'true'
+      await expect(resolveSecretVault({ platform: 'linux' })).rejects.toThrow(
+        SecretVaultUnavailableError,
+      )
+    } finally {
+      process.env = previous
+    }
+  })
 
-    const underVitest = await resolveSecretVault({ platform: 'linux', env: { VITEST: 'true' } })
-    expect(underVitest.source).toContain('in-memory')
+  it('defaultSecretProvider reads through the vault and never touches the environment', async () => {
+    const provider = defaultSecretProvider({ platform: 'linux' })
+    expect(provider.source).toBe('windows-credential-manager')
+    // No env var can satisfy it: off Windows the read fails instead of falling
+    // back to `VL_OBS_PASSWORD`.
+    process.env['VL_OBS_PASSWORD'] = 'synthetic-env-password-0001'
+    try {
+      await expect(provider.get('obs.websocketPassword')).rejects.toThrow(
+        SecretVaultUnavailableError,
+      )
+    } finally {
+      delete process.env['VL_OBS_PASSWORD']
+    }
   })
 })
 
@@ -131,11 +150,18 @@ describe('SecretRedactor', () => {
     expect(redactor.redact(JSON.stringify({ refresh_token: value }))).not.toContain(value)
   })
 
-  it('skips values too short to mask safely', () => {
+  it('masks short values too — length is not a licence to leak', () => {
+    // Review round 1, B2: the vault accepts any non-empty value, so a short OBS
+    // password or admin token must be masked like any other secret.
     const redactor = new SecretRedactor()
-    expect(redactor.register('short')).toBe(false)
+    expect(redactor.register('short')).toBe(true)
+    expect(redactor.redact('provider echoed secret=short')).toBe(
+      `provider echoed secret=${REDACTED}`,
+    )
+
+    expect(redactor.register('')).toBe(false)
     expect(redactor.register(undefined)).toBe(false)
-    expect(redactor.redact('short')).toBe('short')
+    expect(redactor.register(null)).toBe(false)
   })
 
   it('masks logger messages, string fields and error stacks', () => {

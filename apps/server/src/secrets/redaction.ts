@@ -26,11 +26,11 @@ export const REDACTED = '[redacted]'
 /**
  * Values shorter than this are not masked: an 8-character secret cannot be
  * distinguished from ordinary text, and masking e.g. `"1"` everywhere would
- * shred unrelated output. Real secrets here (OAuth tokens, stream keys, admin
- * tokens) are far longer; `SecretRedactor.register` reports what it skipped so
- * a too-short value is visible in tests instead of silently unmasked.
+ * shred unrelated output. That trade-off was rejected in review round 1: the
+ * vault accepts any non-empty value, so a short OBS password or admin token
+ * would have stayed visible in an error string. Every non-empty value is masked
+ * now, whatever its length — a noisy log is recoverable, a leaked secret is not.
  */
-export const MIN_REDACTABLE_LENGTH = 8
 
 /** Collects secret values and masks them out of arbitrary text. */
 export class SecretRedactor {
@@ -41,11 +41,11 @@ export class SecretRedactor {
    * string, its `encodeURIComponent` form (token requests are form-encoded) and
    * its JSON-escaped form (structured logs).
    *
-   * @returns true when the value is now masked, false when it was empty or too
-   * short to mask safely.
+   * @returns true when the value is now masked, false only when it was empty,
+   * `undefined` or `null` — there is nothing to mask in those cases.
    */
   register(value: string | undefined | null): boolean {
-    if (value === undefined || value === null || value.length < MIN_REDACTABLE_LENGTH) {
+    if (value === undefined || value === null || value === '') {
       return false
     }
     for (const encoded of encodings(value)) {
