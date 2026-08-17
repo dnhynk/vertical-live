@@ -95,11 +95,13 @@ $ npm run format:check   -> All matched files use Prettier code style!
 $ npm run lint           -> eslint 0 problems; check-no-legacy-imports: ok (0 legacy imports);
                             check-install-scripts: ok (3 reviewed, better-sqlite3 binding loads)
 $ npm run typecheck      -> tsc --build tsconfig.json (no output)
-$ npm run test           -> Test Files 48 passed (48) / Tests 862 passed | 1 skipped (863)
+$ npm run test           -> Test Files 64 passed (64) / Tests 1117 passed | 1 skipped (1118)
 $ npm run build          -> contract, renderer(vite ✓ built), server(copied 2 migration(s)), simulator ok
 ```
 
-실행하지 않은 것: 실제 YouTube API 호출(§T10 범위 밖 — 실계정은 Gate 2). 위 게이트는 `git rebase origin/main` 뒤에 돌렸다.
+위 게이트는 `git fetch && git rebase origin/main`(base `751126f`) 뒤에 돌렸다. rebase 직후 `npm run test`가 renderer 3파일에서 `Cannot find package 'jsdom'`로 실패했는데, 원인은 T5(PR #9)가 추가한 devDependency가 이 worktree의 `node_modules`에 없던 것이었다 — `npm install`(lockfile 변경 없음) 후 재실행하여 위 결과를 얻었다.
+
+실행하지 않은 것: 실제 YouTube API 호출. 실계정 검증은 Gate 2 범위이며(§11 "실제 YouTube 계정이 필요한 … mock만으로 완료 판정하지 않는다"), 이 task는 가짜 API 서버까지가 판정 범위다.
 
 ## Not done / out of scope
 
