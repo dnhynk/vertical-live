@@ -50,7 +50,11 @@ protocol.md의 Hello 예시와 Identify 예시는 **같은 세션의 쌍이 아�
 
 | 질문 | 답(코디네이터) | 반영 |
 |---|---|---|
-| 합격 기준 2의 실제 OBS 스모크를 위해 호스트 OBS의 obs-websocket 서버(`server_enabled:false`)를 켜도 되는가 | (대기) | |
+| 합격 기준 2의 실제 OBS 스모크를 위해 호스트 OBS의 obs-websocket 서버(`server_enabled:false`)를 켜도 되는가 | **B — 사용자 OBS 설정·프로세스를 건드리지 않는다**(2026-08-17, 런북 2.5(6): 호스트·계정 조작은 사용자 결정 영역) | (b1) 가짜 v5 서버 상대로 `npm run obs:probe`를 실제 실행하고 출력을 `## Result`에 첨부. (b2) 티켓·PR에 "실제 OBS 스모크 실행하지 않았음: OBS 32.0.2 미실행·obs-websocket 5.6.3 `server_enabled=false`, 호스트 설정 변경은 범위 밖" 명시. (b3) `docs/ops/obs-setup.md`에 사용자가 WebSocket 서버를 켜고(loopback·비밀번호) probe를 돌리는 절차를 기술. 발견한 실제 버전(OBS 32.0.2, obs-websocket 5.6.3)은 obs-setup.md의 "고정 버전 후보(사용자 승인 대기)"로 기록 |
+
+## Session recovery
+
+2026-08-16 14:47 UTC 호스트 BSOD(bugcheck 0x50)로 이전 worker 세션이 소실됐다. worktree에 남은 미커밋 작업(Plan 1~6, 10)을 `wip(obs): recover in-progress obs-websocket client after host crash`로 커밋한 뒤 `origin/main`(4bae2ce)에 rebase하고 Plan 7부터 이어갔다. 재개 dispatch `ctx_67c1bd15a86b`.
 
 ## Assumptions / provisional values
 
