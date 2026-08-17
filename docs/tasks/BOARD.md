@@ -17,7 +17,7 @@
 | T4 | SQLite 영속층(inbox·checkpoint·snapshot·outbox·deadline) | T1 | — | changes_requested | t4-persistence | #5 | `task_6bb9ff9f79c8` |
 | T5 | 렌더러 read model(snapshot 복구·effect 멱등·ACK·건강) | T1 | — | dispatched | t5-renderer-readmodel | | `task_6ba022bb6151` |
 | T6 | 명령 파서·모더레이션·입력 arbiter | T1 | — | in_review | t6-command-parser | #8 | `task_a0f96dd7e038` |
-| T7 | 콘텐츠 디렉터·크리처 상태 모델(순수 도메인) | T1 | — | in_review | t7-content-director | #6 | `task_e1e7531798ad` |
+| T7 | 콘텐츠 디렉터·크리처 상태 모델(순수 도메인) | T1 | — | changes_requested | t7-content-director | #6 | `task_e1e7531798ad` |
 | T8 | 상태 엔진(단일 writer·outbox·WS·ACK·유료 멱등) | T1b, T4, T6, T7 | — | pending | t8-state-engine | | `task_0aadf1c96dcf` |
 | T9 | YouTube source adapter(gRPC streamList + REST fallback) | T3, T4, T8 | — | pending | t9-youtube-adapter | | `task_ec3d66a159bd` |
 | T10 | broadcast lifecycle·reconcile·한도 | T3, T4 | — | pending | t10-broadcast-lifecycle | | `task_41769f69d4b7` |
@@ -111,3 +111,4 @@
 | 2026-08-17 09:00 | T5 질문(CTA 명령 출처가 계약에 없음) → 답 A(선택창/집계창 우선, fallback §7.1 allowlist 표시; interactionEnabled=false면 숨김). display.cta 필드는 필요 시 T14에서 [contract] 후속 |
 | 2026-08-17 09:45 | R-T1b-1 verdict **approve**(7/7, 495 tests). 최종 게이트 통과 → **PR #7 squash merge**(main 6efc9b5). T1b worker release·worktree 제거. R-T7-1 `task_f31e681919dc` → `ctx_754ab822962b`. 리뷰 대기열: R-T7-1(진행) → R-T3-2 → (F-T4-1 후) R-T4-2 |
 | 2026-08-17 10:00 | T6 worker_done(succeeded, PR #8: normalize→allowlist 파서, §12.3 거부 규칙 ja/en, §6.4 arbiter, 원문 미노출 테스트; .gitignore `data/`가 apps/server/src/input/data를 숨긴 문제 발견 → 파일 이동, 규칙 `/data/`로 좁히기는 T8 명세에 포함 예정). 리뷰 대기열: R-T7-1(진행) → R-T3-2 → R-T6-1 → R-T4-2 |
+| 2026-08-17 10:25 | R-T7-1 verdict **request_changes**(blocker 2: skip 정책이 반복 deadline 후속을 만들지 않아 무입력 진행 단절; 무료 명령으로 동기 완료된 mission effect가 deadline cause로 오표기(A-17 위반); major 1: deadlineId에 beat 라벨; minor 1: literal NUL 구분자). F-T7-1 `task_da44c70877ec` → T7 터미널 `ctx_6e08a6061e08`(rebase 포함). R-T3-2 `task_df2e3eeada0d` → `ctx_7e725f235839`. 리뷰 대기열: R-T3-2(진행) → R-T6-1 → R-T4-2 → R-T7-2 |
