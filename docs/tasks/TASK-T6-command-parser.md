@@ -19,7 +19,7 @@
    - `folded`: `normalized` + 혼동 문자(Cyrillic/Greek→Latin) 접기 + 카타카나→히라가나. **URL·개인정보 검사**가 추가로 쓴다.
    - `skeleton`: `folded` + leet(0→o, 1→i, 3→e …) 접기 + 문자 이외 전부 제거. **금칙어 부분문자열 검사**만 쓴다.
    - 혼동 문자·leet 접기를 **명령 매칭에는 쓰지 않는다**: 접기는 허용 방향이라 명령 매칭에 쓰면 우회 표면이 늘고, 거부 검사에만 쓰면 항상 더 많이 거부하는 방향이라 안전하다(우회 0건 논거).
-4. `moderation.ts` + `data/moderation-terms.ts`, `data/homoglyphs.ts` — URL(스킴·`www.`·TLD·`(dot)` 난독화), 개인정보(이메일·전화/장문 숫자열·IP·`〒`·`@handle`), 금칙어 5범주(hate/sexual/self-harm/violence/ads-scam) ja·en. 출처·라이선스는 아래 "Sources consulted" 표와 데이터 파일 헤더에 남긴다(외부 목록을 복제하지 않으므로 `ASSETS.md` 항목은 만들지 않는다).
+4. `moderation.ts` + `moderation-terms.ts`, `homoglyphs.ts` — URL(스킴·`www.`·TLD·`(dot)` 난독화), 개인정보(이메일·전화/장문 숫자열·IP·`〒`·`@handle`), 금칙어 5범주(hate/sexual/self-harm/violence/ads-scam) ja·en. 출처·라이선스는 아래 "Sources consulted" 표와 데이터 파일 헤더에 남긴다(외부 목록을 복제하지 않으므로 `ASSETS.md` 항목은 만들지 않는다).
 5. `parse.ts` — 결정적 순서로 거부 코드 산출. `VOTE_A/B/C`는 `identity.gateOpen && voteWindowOpen`일 때만 수락, 아니면 `vote_disabled`(§6.4·§7.1, A-1·A-9). 명령 뒤에는 `CommandRefSchema`가 허용하는 짧은 토큰 인자 1개만 허용하고 그 외 텍스트는 `extraneous_text`.
 6. `arbiter.ts` — 주입된 `Clock`(monotonic)으로 고정 길이 창을 굴린다. 창이 닫힐 때 그 창의 수락 수로 다음 창의 모드를 정한다(hysteresis). `direct`에서 창당 `maxDirectPerWindow`를 넘는 분은 개별 반영하지 않고 집계에만 넣는다(전역 flood control, 기여 수 보존). 사용자별 cooldown 없음(`actor=null`).
 7. `metrics.ts` — `commandLike` / `accepted` / 거부 코드별 수 / `directApplied` / `aggregated` / `successRatio`.
@@ -50,7 +50,7 @@
 | `input.window.enterAggregateAtCommands` | 30 | provisional | 위와 같음 |
 | `input.window.exitAggregateAtCommands` | 10 | provisional | 위와 같음(hysteresis) |
 | `input.window.maxDirectPerWindow` | 20 | provisional | 전역 flood control 상한. 위와 같음 |
-| 금칙어 seed 목록 | `data/moderation-terms.ts` | provisional | 운영 정본은 Studio blocked words[S16] + 운영자 목록. 코드 목록은 2차 방어 seed |
+| 금칙어 seed 목록 | `apps/server/src/input/moderation-terms.ts` | provisional | 운영 정본은 Studio blocked words[S16] + 운영자 목록. 코드 목록은 2차 방어 seed |
 
 ## Result
 
@@ -59,8 +59,8 @@
 | 파일 | 역할 |
 |---|---|
 | `apps/server/src/input/normalize.ts` | NFKC → 보이지 않는 문자·잔여 결합 문자 제거 → 소문자 → 공백 정리의 `normalized`, 혼동 문자·카나 접기의 `folded`, leet·문자 이외 제거의 `skeleton` 3형태 |
-| `apps/server/src/input/data/homoglyphs.ts` | Latin 혼동 문자·leet·카나 접기 데이터 (UTS #39 축약, 출처 주석) |
-| `apps/server/src/input/data/moderation-terms.ts` | ja/en 금칙어 seed 5범주 + 출처·라이선스·상태 주석 |
+| `apps/server/src/input/homoglyphs.ts` | Latin 혼동 문자·leet·카나 접기 데이터 (UTS #39 축약, 출처 주석) |
+| `apps/server/src/input/moderation-terms.ts` | ja/en 금칙어 seed 5범주 + 출처·라이선스·상태 주석 |
 | `apps/server/src/input/moderation.ts` | URL·개인정보·금칙어 규칙, 고정 평가 순서, 원문 미반환 |
 | `apps/server/src/input/aliases.ts` | T1 `COMMAND_ALIASES`를 같은 정규화로 통과시킨 allowlist, 충돌 시 로드 실패 |
 | `apps/server/src/input/parse.ts` | `parseMessage(raw, context, limits) → ParsedCommand \| Rejection` 순수 함수 |
@@ -127,4 +127,5 @@ $ npm run build
 - 금칙어 목록의 운영 정본화: Studio blocked words[S16] 설정 절차와 운영자 관리 목록 로딩(외부 파일/DB)은 T13 데이터 정책 또는 T16 런북에서 정한다.
 - `input.window.*`·`maxRawLength`를 Gate 2 측정값으로 교체(A-3, A-15). 교체 시 `config/default.json`의 `provisional` 목록에서 뺀다.
 - identity gate가 열리면(§17 미정) 사용자별 한 표·cooldown 규칙이 추가된다. 현재 arbiter는 `actor`를 받지 않으므로 그때 시그니처가 바뀐다.
+- **`.gitignore`의 `data/` 규칙**(33행, "Local data / secrets")은 경로 어디에 있든 `data/` 디렉터리를 전부 무시한다. 처음에 데이터 모듈을 `apps/server/src/input/data/`에 두었더니 커밋되지 않은 채 로컬 게이트만 통과하고 CI에서 `TS2307`로 드러났다(run 32002801241). 이 PR은 파일을 `apps/server/src/input/` 바로 아래로 옮겨 회피했다. 규칙을 `/data/`(저장소 루트 한정)로 좁힐지는 다른 worker의 무시 대상에도 영향을 주므로 코디네이터 판단이 필요하다.
 - 모더레이션이 과차단한 사례를 실제 파일럿에서 표본 검토(§12.3 "사람 호출" 운영표와 함께). 현재는 과차단이 거부 코드만 바꾸므로 무해하지만, 명령 성공 지표를 왜곡할 수 있다.

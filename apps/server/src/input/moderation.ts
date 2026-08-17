@@ -1,4 +1,4 @@
-import { MODERATION_TERMS, type ModerationCategory } from './data/moderation-terms.js'
+import { MODERATION_TERMS, type ModerationCategory } from './moderation-terms.js'
 import { normalizeText, type NormalizedText } from './normalize.js'
 import type { RejectionReason } from './types.js'
 

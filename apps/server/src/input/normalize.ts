@@ -4,7 +4,7 @@ import {
   KATAKANA_END,
   KATAKANA_START,
   LEET_FOLD,
-} from './data/homoglyphs.js'
+} from './homoglyphs.js'
 
 /**
  * Text normalization for the command parser (spec §7.1: "Unicode 정규화 후
