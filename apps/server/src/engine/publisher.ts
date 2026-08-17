@@ -5,6 +5,7 @@ import {
   CONTRACT_VERSION,
   RendererToServerMessageSchema,
   type Effect,
+  type RendererToServerMessage,
   type WorldSnapshot,
 } from '@vl/contract'
 import { WebSocketServer, type WebSocket } from 'ws'
@@ -196,15 +197,35 @@ export class RendererHub implements EnginePublisher {
       this.#logger.warn('renderer.invalid_frame')
       return
     }
-    switch (message.data.type) {
+    try {
+      this.#dispatch(message.data)
+    } catch (error) {
+      // The last stop before the event loop. `ws` calls this listener while it
+      // processes socket data, so an exception from a handler would leave the
+      // process with an uncaught exception and Node would end the run — one
+      // renderer frame taking the broadcast down (T8c, found by T15's disk-full
+      // drill). The engine records and classifies the faults it owns; this is
+      // here so that no future handler can turn a frame into an exit.
+      //
+      // Only the frame *type* is logged: the frame comes from a browser context
+      // and logging unvalidated input is how raw text escapes (spec §12.3).
+      this.#logger.error('renderer.frame_handler_failed', {
+        type: message.data.type,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
+
+  #dispatch(message: RendererToServerMessage): void {
+    switch (message.type) {
       case 'hello':
-        this.#events.onHello(message.data.lastAppliedStateRevision)
+        this.#events.onHello(message.lastAppliedStateRevision)
         return
       case 'ack_state':
-        this.#events.onAckState(message.data.stateRevision, message.data.appliedAt)
+        this.#events.onAckState(message.stateRevision, message.appliedAt)
         return
       case 'ack_effect':
-        this.#events.onAckEffect(message.data.effectId, message.data.appliedAt)
+        this.#events.onAckEffect(message.effectId, message.appliedAt)
         return
       case 'renderer_health': {
         const {
@@ -213,7 +234,7 @@ export class RendererHub implements EnginePublisher {
           webglContextLost,
           lastAppliedStateRevision,
           lastAppliedEffectId,
-        } = message.data
+        } = message
         this.#lastHealth = {
           frameCounter,
           fps,

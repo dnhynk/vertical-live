@@ -15,7 +15,7 @@ import {
 } from '@vl/contract'
 
 import type { Clock, TimerHandle } from '../clock.js'
-import { EffectNotPublishedError, UnknownEffectError } from '../db/errors.js'
+import { classifySqliteError, EffectNotPublishedError, UnknownEffectError } from '../db/errors.js'
 import type { PersistenceStore } from '../db/store.js'
 import type {
   InboxProcessingRecord,
@@ -143,9 +143,10 @@ export interface EngineHealth {
   readonly inputMode: InputMode
   readonly broadcastLifecycle: BroadcastLifecycle
   /**
-   * Why the last writer pass failed, if it did. A wedged single writer is the
-   * worst failure this component has — the world stops — so the reason is on
-   * `/health` and not only in a log line (spec §9.4(2), R-T8-1 blocker 1).
+   * Why the last write failed, if one did — a writer pass, or a renderer ACK the
+   * store refused (T8c). A wedged single writer is the worst failure this
+   * component has — the world stops — so the reason is on `/health` and not only
+   * in a log line (spec §9.4(2), R-T8-1 blocker 1).
    */
   readonly lastFailure: { readonly at: string; readonly error: string } | null
   readonly consecutiveFailures: number
@@ -390,7 +391,33 @@ export class StateEngine {
     this.#metrics.count('ack_state')
   }
 
+  /**
+   * The renderer played an effect on a real frame (spec §7.3(7)).
+   *
+   * The durable write comes **first** and nothing in memory moves until it
+   * succeeds. The old order — forget the effect, then persist — lost the ACK
+   * twice over when the store refused the write: `acked_at` stayed NULL while
+   * the effect was already out of the retransmit set, so no later frame could
+   * repair it, and the exception left this method for a `ws` message listener
+   * that has no handler above it, which ends the process (T8c, found by T15's
+   * disk-full drill).
+   */
   onAckEffect(effectId: string, appliedAt: string): void {
+    try {
+      this.#store.markEffectAcked(effectId, appliedAt)
+    } catch (error) {
+      // An ACK for an effect this server never published is the renderer's view
+      // of another run; it is counted, not trusted, and never fabricated here.
+      if (error instanceof UnknownEffectError || error instanceof EffectNotPublishedError) {
+        this.#metrics.count('ack_effect_unknown')
+        return
+      }
+      // Anything else is the store failing (spec §11 "disk-full", "DB lock").
+      // The effect stays open, so §7.3(7) retransmits it and the renderer's next
+      // ACK writes the row that this one could not.
+      this.#recordAckFailure(effectId, error)
+      return
+    }
     const open = this.#openEffects.get(effectId)
     if (open?.effect.paid === true && open.effect.causedByEventKey !== null) {
       // The original thanks reached a frame, so the substitute of spec §9.2 is no
@@ -402,18 +429,32 @@ export class StateEngine {
     }
     this.#openEffects.delete(effectId)
     this.#metrics.recordEffectAck(effectId, appliedAt)
-    try {
-      this.#store.markEffectAcked(effectId, appliedAt)
-      this.#metrics.count('ack_effect')
-    } catch (error) {
-      // An ACK for an effect this server never published is the renderer's view
-      // of another run; it is counted, not trusted, and never fabricated here.
-      if (error instanceof UnknownEffectError || error instanceof EffectNotPublishedError) {
-        this.#metrics.count('ack_effect_unknown')
-        return
-      }
-      throw error
-    }
+    this.#metrics.count('ack_effect')
+  }
+
+  /**
+   * A renderer ACK the store refused.
+   *
+   * It is reported through the same two health fields a failed writer pass uses,
+   * because it is the same fact — the single writer's database would not take a
+   * write — and because that is what T12's aggregator already reads to declare
+   * the coordinator degraded (`supervisor/signals.ts`, spec §9.4(1), §9.2). The
+   * counter and the log line keep the *cause* distinguishable from a failed pass
+   * on `/metrics` and in the operator log.
+   */
+  #recordAckFailure(effectId: string, error: unknown): void {
+    const failure = classifySqliteError(error)
+    const message = error instanceof Error ? error.message : String(error)
+    this.#lastFailure = { at: this.#clock.nowUtcIso(), error: `ack ${effectId}: ${message}` }
+    this.#consecutiveFailures += 1
+    this.#metrics.count('ack_effect_store_failed')
+    this.#logger.error('engine.ack_store_failed', {
+      effectId,
+      kind: failure.kind,
+      code: failure.code,
+      retryable: failure.retryable,
+      error: message,
+    })
   }
 
   /** Health of the input path, reported by the source adapter (spec §9.4(3)). */
@@ -1054,7 +1095,9 @@ export class StateEngine {
    */
   #degradedReasons(now: string): string[] {
     const reasons: string[] = []
-    // A writer that cannot finish a pass is not producing state at all, which is
+    // A writer that cannot finish a pass is not producing state at all, and one
+    // that cannot record a renderer ACK is not keeping the read model's proof of
+    // delivery either: both are the store refusing the single writer, which is
     // the strongest degraded condition this component can report (spec §9.2).
     if (this.#consecutiveFailures > 0) reasons.push('writer_failing')
     if (this.#inputHealth !== 'ok') reasons.push(`input_${this.#inputHealth}`)
