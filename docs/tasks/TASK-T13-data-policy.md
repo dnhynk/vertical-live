@@ -152,3 +152,40 @@ round 1 이전 실행값은 1107 tests였고, fix에서 privacy 테스트가 67 
 | [major] `privacy/derived-metrics.test.ts:48` — basename 제외라 향후 어느 경로의 `derived-metrics.ts`든 검사에서 빠짐 | **고침 8559e05.** 저장소 상대 경로 2개(`apps/server/src/privacy/derived-metrics.ts`, `…/derived-metrics.test.ts`)만 제외한다. 테스트: "exempts exactly the two registry paths and nothing else"(두 경로 실재 확인 + 스캔 목록에서 빠졌음 확인) |
 | [minor] `db/retention.ts:303` — 마지막 배치가 가득 찼으면 잔여 작업이 있다고 가정 | **고침 8559e05.** 예산 소진 후 victims 질의를 `LIMIT 1`로 다시 프로브해 정확 소진과 잔여를 구분한다. 테스트: `retention.test.ts` "does not claim remaining work when the last full batch emptied the table"(1행·`batchLimit=1`·`maxBatches=1` → `truncated=false`, `clean=true`), 기존 3행 케이스는 여전히 `truncated=true` |
 | [issue] 티켓 `## Result` 정직성 — "삭제 증거를 잃을 수 없다"·"field map이 exhaustive"라는 서술이 위 두 건과 모순 | **고침 8559e05.** 두 서술이 이제 코드와 테스트로 사실이 되었고, 위 표와 아래 Result 근거를 실제 테스트 이름으로 교체했다 |
+
+## Review round 2
+
+리뷰: <https://github.com/dnhynk/vertical-live/pull/10#pullrequestreview-4950774630> (verdict `request_changes`,
+신규 major 2건). round 1의 4개 finding은 리뷰어가 resolved로 확인했고, B2에서 요구한 "sink가 throw하는 경우"를
+리뷰어가 직접 찔러 보면서 **round 1 수정이 만든 두 개의 후속 결함**이 드러났다. 둘 다 내 회귀다. 반박 0건.
+수정 커밋: `f82f009`(rebase 후 SHA).
+
+| finding | 처리(고침 SHA / 반박 근거) |
+|---|---|
+| [major] `privacy/scheduler.ts:135` — `#onError(error)`가 타이머 등록(138행)보다 먼저 실행되고 `finally`로 격리되지 않아, 알림 sink가 throw하면 **다음 tick이 등록되지 않는다**. 리뷰어 프로브: `{"thrown":"alert sink unavailable","failures":1,"unhealthy":true,"scheduled":0}` — 실패는 관측되지만 이후 §12.4 삭제가 영원히 실행되지 않는다 | **고침 f82f009.** 다음 tick 등록을 `finally`로 옮겼고, sink 호출은 `#notify`로 격리해 예외가 호스트 타이머 콜백으로 새어 나가지 않게 했다(24시간 프로세스에서 uncaught exception은 프로세스를 죽인다). sink 실패도 `failures[].stage='onResult'\|'onError'`로 따로 기록·로깅된다. 회귀 테스트: `scheduler.test.ts` "keeps the schedule when the error sink itself throws"(sweep 실패 + throw하는 `onError` → `running=true`, `failures.stage=['sweep','onError']`, 2초 뒤 `calls=3`), "keeps the schedule when the result sink throws" |
+| [major] `privacy/revocation.ts:338` — `#pending`에서 곧바로 `.then(...)`으로 체인하는데 throw하는 `#onError`가 그 promise를 rejected로 남긴다. rejected tail에서는 `.then(onFulfilled)`가 건너뛰어지므로 **이후 모든 `auth_revoked`가 handler에 도달하지 못한다**. 리뷰어 2-이벤트 프로브: `{"calls":1,"results":[],"failures":1,"failed":true}` | **고침 f82f009.** 실행부를 `#run(event)`로 분리하고 sink 호출을 `#notify`로 격리해 `#run`이 reject하지 않게 했다. 추가로 `this.#pending.then(run, run)`으로 **양쪽 settled 상태 모두**에 체인해 미래에 어떤 경로가 reject하더라도 큐가 멈추지 않는다. `pending`은 이제 reject하지 않는다(JSDoc 갱신). 회귀 테스트: `revocation.test.ts` "still handles the next revocation after a sink threw on the previous one"(첫 이벤트 handler 실패 + `onError` throw → 두 번째 이벤트가 handler 호출·`ingest_inbox=0`·`provider_revoked` 원장 행 기록·`results=['provider_side']`), "serializes revocations in emit order"(큐 순서 보존), 기존 "keeps recording failures when the error sink itself throws"는 `stage` 2건 확인으로 강화 |
+
+두 수정 모두 round 1 B2의 **관측 가능성을 유지**한다: sink가 throw해도 실패는 `failures`(+`unhealthy`/`failed`)와
+error 로그에 남고, 이제 그 sink 자체의 실패까지 `stage`로 구분해 기록된다.
+
+**회귀 테스트가 실제로 회귀를 잡는지 확인**: 새 테스트 4건을 수정 전 소스(`git checkout --`로 두 파일만 되돌림)에서
+실행해 4건 모두 실패(나머지 19건 통과)하는 것을 확인한 뒤 수정을 복원했다.
+
+```text
+# 수정 전 소스 + 새 테스트
+Tests  4 failed | 19 passed (23)
+# 수정 후
+Tests  23 passed (23)
+```
+
+### Gates (executed — review round 2 fix 후 재실행)
+
+```text
+npm run format:check  -> All matched files use Prettier code style!
+npm run lint          -> eslint 통과 · check-no-legacy-imports: ok (0 legacy imports) · check-install-scripts: ok (3 reviewed, better-sqlite3 binding loads)
+npm run typecheck     -> tsc --build tsconfig.json (출력 없음 = 통과)
+npm run test          -> Test Files 67 passed (67) / Tests 1134 passed | 1 skipped (1135)
+npm run build         -> contract·renderer·server·simulator 통과; server: "copied 2 migration(s) to dist/db/migrations", "docs/ops/data-map.md up to date"
+```
+
+`git fetch origin && git rebase origin/main`(BOARD 문서 커밋들) 후 실행. privacy 테스트 90 → 94건, 전체 1130 → 1134.
