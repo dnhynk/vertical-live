@@ -17,7 +17,9 @@
     "obs:probe": "tsc --build && node dist/obs/probe.js"
   },
   "dependencies": {
+    "@napi-rs/keyring": "1.3.0",
     "better-sqlite3": "13.0.3",
+    "googleapis": "174.0.1",
     "obs-websocket-js": "5.0.8"
   },
   "devDependencies": {
