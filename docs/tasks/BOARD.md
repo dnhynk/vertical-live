@@ -1,7 +1,7 @@
 # BOARD — 스펙 v1 구현 상태판
 
 > 갱신 주체: 코디네이터만(main 직접 커밋 예외). 절차: `docs/runbooks/agent-orchestration.md`. 명세: `docs/tasks/TASK_SPECS.md`.
-> Orca Run: `run_1c93e897ee3e` · 코디네이터 터미널: `term_1bb65169-3c40-4e8a-ac7a-29a7e53aa6dd`
+> Orca Run: `run_1c93e897ee3e` · 코디네이터 터미널: `term_27da0856-6d72-4358-99da-88a7dac8fabc`(2026-08-17 재바인딩; 이전 `term_1bb65169…`)
 
 ## 1. 작업 상태
 
@@ -76,3 +76,6 @@
 | 2026-08-16 14:05 | R-T0-1 verdict **request_changes**(blocker 4: 결제→파워·이름/raw 표시·사망·Pokemon 문자열이 활성 apps/renderer에 잔존). 코디네이터 판정: 1A 폐기, TASK_SPECS §T0/§T5 재기술(R3F 장면만 apps/renderer, 게임 로직은 legacy/renderer-prototype). F-T0-1 fix task를 같은 worker 터미널에 디스패치 |
 | 2026-08-16 14:40 | F-T0-1 완료(c03abc6/8c79fce). R-T0-2 verdict **approve**(합격 4/4, 게이트 pass, 금지 패턴 0). 코디네이터 최종 게이트 통과 → PR #1 squash merge(main d9cbac0), t0 worker release·worktree 제거 |
 | 2026-08-16 14:50 | T1(contract, ctx_80a5d1bd2228)·T2(obs, ctx_560aa20466a2) 디스패치(동시 2). T3는 ready 대기. worker 기동 스크립트: 주입 텍스트가 안정된 뒤 Enter 1회(런북 2.2) |
+| 2026-08-16 14:47 | **호스트 BSOD** bugcheck 0x00000050(PAGE_FAULT_IN_NONPAGED_AREA), 코디네이터·T1·T2 worker 세션 소실. T2의 OBS 스모크 질문에 대한 답(B)은 전달 전 소실. 이후 사용자가 15:35 UTC PC 종료, 2026-08-17 02:38 UTC 재기동 |
+| 2026-08-17 02:45 | 복구(런북 2.8): run-use로 재바인딩(새 터미널 `term_27da0856…`), T1/T2 dispatch는 Orca가 failed→task ready로 정리됨. `gh pr list`: #1만(merged). worktree 점검: t1-contract 커밋 1(b968e13, origin push됨)+미커밋 15항목, t2-obs-monitor 커밋 0+미커밋 8항목, NUL 손상 없음 |
+| 2026-08-17 03:00 | 같은 worktree에 재디스패치: T1 `ctx_7a375bf27a44`(term_52569c58…), T2 `ctx_67c1bd15a86b`(term_a6713d4e…). 복구 안내(새 ID만 사용·미커밋 보존·즉시 WIP 커밋+push·rebase·T2 질문 답 B)를 TASK와 함께 제출. 두 worker 모두 WIP 커밋·push 확인(T2 5b34f0e). 런북 3.6에 커밋 주기(10분 내 첫 커밋, 30분마다) 추가 |

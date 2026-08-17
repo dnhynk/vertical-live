@@ -162,13 +162,13 @@ orca orchestration dispatch --task <review_task_id> --to <handle> --inject --jso
 1. `orca status --json` → `orca orchestration run-use --id <run_id> --json` → `task-list --brief --json`, `dispatch-show --task <id>`로 어떤 dispatch가 죽었는지 확인
 2. `orca orchestration check --peek --json`으로 미처리 mail 확인. 죽기 직전 worker_done이 유실됐을 수 있으므로 **`gh pr list --state all`로 실제 PR 상태를 본다** — PR이 열려 있으면 worker_done 없이도 2.4로 간다. 머지됐으면 `task-update --id <task> --status completed --result '{...}'`로 수동 정리(복구 예외)
 3. 각 worktree(`git worktree list`)에서 `git status --short | wc -l`, `git log --oneline -3`, 티켓 존재 여부로 진행 상태를 파악한다. 미커밋 변경은 지우지 않는다
-4. 미완 task는 **같은 worktree**에 새 dispatch: `worker-start --task <id> --worktree id:<repo-id>::<path> --agent claude --json`. 시작 직후 `orca terminal send`로 (a) 이전 세션 소실 사실, (b) 티켓·git status·diff·log를 읽고 이어갈 것, (c) `git fetch && git rebase origin/main`, (d) 새 preamble의 taskId/dispatchId만 쓸 것, (e) 그동안 답한 질문의 결론(BOARD 가정 번호)을 전달한다
+4. 미완 task는 **같은 worktree**에 새 dispatch: `worker-start --task <id> --worktree id:<repo-id>::<path> --agent claude --json`(`--retry-of`는 recovery로 settled된 dispatch에는 거부된다; 기존 worktree는 setup을 다시 돌리지 않는다). 주입된 TASK가 composer에 안정적으로 머문 상태에서 `orca terminal send --text "<복구 안내>"`로 안내문을 **덧붙인 뒤** `--enter` 1회로 함께 제출한다(2026-08-17 복구에서 검증). 안내문으로 (a) 이전 세션 소실 사실, (b) 티켓·git status·diff·log를 읽고 이어갈 것, (c) `git fetch && git rebase origin/main`, (d) 새 preamble의 taskId/dispatchId만 쓸 것, (e) 그동안 답한 질문의 결론(BOARD 가정 번호)을 전달한다
 5. 머지가 끝난 worktree는 미커밋 변경 0을 확인한 뒤 `orca worktree rm --worktree path:<path>`로 정리한다
 6. BOARD 이력에 종료 시각·소실 범위·복구 조치를 남긴다
 
 **NTFS 0바이트 손상**(크래시 순간 쓰이던 파일): `git worktree list`에 `0000000 (error)`, ref·HEAD·index가 NUL로 채워짐. 복구: `.git/worktrees/<name>/logs/HEAD`·`.git/logs/refs/heads/<branch>`의 마지막 정상 SHA → `git cat-file -t` 확인 → 깨진 ref 삭제 후 `git update-ref` → HEAD 복구 → 깨진 index 삭제 후 `git reset` → 작업 트리 NUL 파일은 `git reset --hard HEAD`(커밋된 것만 복원됨 — 그래서 3.6의 조기 push 규칙이 있다).
 
-**재부팅 원인은 System 로그로 먼저 확인**: `Get-WinEvent -FilterHashtable @{LogName='System'; Id=41,1001,6008}`. BSOD면 사용자에게 보고하고 동시 worker 수·무거운 명령 병행을 줄인다.
+**재부팅 원인은 System 로그로 먼저 확인**: `Get-WinEvent -FilterHashtable @{LogName='System'; Id=41,1001,6008}`. BSOD면 사용자에게 보고하고 동시 worker 수·무거운 명령 병행을 줄인다. 이력: 2026-08-16 14:47 UTC bugcheck 0x00000050(PAGE_FAULT_IN_NONPAGED_AREA, minidump `C:\WINDOWS\Minidump\081626-14718-01.dmp`) — worker 2 + 리뷰어 0 상태에서 발생(ToneAndMove의 0x50 2회와 동일 코드). 재발 시 코디네이터가 고칠 수 없는 호스트 문제이므로 사용자에게 minidump 분석·메모리 진단을 권고하고, 조기 커밋 규칙(3.6)으로 손실만 최소화한다.
 
 **worker 브랜치를 코디네이터가 origin에 push해 둔다.** 복구 직후 커밋이 있는 브랜치는 `git push -u origin <branch>`로 보존한다(비파괴).
 
@@ -223,7 +223,7 @@ npm run build
 ### 3.6 커밋·PR
 
 - 커밋: 영어 Conventional Commits. 작은 논리 단위로 나눈다.
-- push: **첫 커밋 직후 `git push -u origin <branch>`, 이후 커밋마다 push**(WIP push 허용 — 호스트 크래시 시 push되지 않은 작업만 잃는다). rebase 뒤 자기 feature 브랜치가 non-fast-forward가 되면 **`git push --force-with-lease`만 허용**(자기 브랜치 한정). 맨 `--force`, main·타인 브랜치에 대한 force는 금지.
+- push: **첫 커밋 직후 `git push -u origin <branch>`, 이후 커밋마다 push**(WIP push 허용 — 호스트 크래시 시 push되지 않은 작업만 잃는다). **첫 커밋(티켓+뼈대)은 시작 10분 안에, 이후 논리 단위마다·최소 30분마다 커밋+push**한다(2026-08-16 14:47 UTC BSOD 0x50으로 T2의 20분치 미커밋 작업이 worktree에만 남았던 사례; 2026-08-17 복구에서 회수). rebase 뒤 자기 feature 브랜치가 non-fast-forward가 되면 **`git push --force-with-lease`만 허용**(자기 브랜치 한정). 맨 `--force`, main·타인 브랜치에 대한 force는 금지.
 - PR: `gh pr create --base main --title "<type(scope): summary>" --body-file <file>`. 본문은 `.github/pull_request_template.md`. "Tests"에는 **실행한 명령과 결과 요약**을 쓴다.
 - PR 하나. 범위 밖 변경은 Follow-up에 적는다.
 
