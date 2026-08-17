@@ -82,10 +82,13 @@ npm run test:replay     # 스펙 §11 세 행 + 내장 시나리오 전체 (가�
 
 | 스펙 §11 행 | 테스트 |
 |---|---|
-| 유료 무결성 | `tools/simulator/src/replay/paid-integrity.test.ts` |
+| 유료 무결성(서버: 1회 적용·combo 증가분) | `tools/simulator/src/replay/paid-integrity.test.ts` |
+| 유료 무결성(렌더러: 재전송 시 연출 미재시작) | `apps/renderer/src/replay/paid-effect-idempotence.test.ts` |
 | 모더레이션 | `tools/simulator/src/replay/moderation-bypass.test.ts` |
 | 상태 복구(백엔드 재시작) | `tools/simulator/src/replay/state-recovery.test.ts` |
 | Gate 1 local simulator | `tools/simulator/src/replay/scenarios.test.ts` |
+
+렌더러 쪽 절반이 `apps/renderer`에 있는 이유: 프로덕션 read model은 확장자 없는 상대 import를 쓰는 `moduleResolution: "Bundler"` 프로젝트라 `NodeNext`인 `tools/simulator`에서 import할 수 없다. 그래서 `test:replay`가 두 디렉터리를 함께 돈다.
 
 ## 6. 렌더러 `?mode=dev` 주입 패널
 
