@@ -70,13 +70,15 @@
 
 ### Gates (executed)
 
+모두 rebase(`origin/main` = a885e6f, T11 #15 머지 포함) 후 재실행한 결과다.
+
 ```text
-git fetch origin && git rebase origin/main   -> up to date (df55585 …4023689 기준)
+git fetch origin && git rebase origin/main -> Successfully rebased and updated refs/heads/dnhynk/t12-supervisor
 npm run format:check -> All matched files use Prettier code style!
-npm run lint         -> eslint 통과, check-no-legacy-imports: ok (0), check-install-scripts: ok (4 reviewed)
+npm run lint         -> eslint 통과, check-no-legacy-imports: ok (0 legacy imports), check-install-scripts: ok (4 reviewed, better-sqlite3 binding loads)
 npm run typecheck    -> tsc --build 통과(오류 0)
-npm run test         -> Test Files 113 passed, Tests 1617 passed | 1 skipped
-npm run build        -> 전 워크스페이스 통과(@vl/server: copy-migrations 5, data-map up to date)
+npm run test         -> Test Files 122 passed, Tests 1689 passed | 1 skipped (1690)
+npm run build        -> 전 워크스페이스 통과(@vl/server: copied 5 migration(s), docs/ops/data-map.md up to date)
 ```
 
 ## Not done / out of scope
