@@ -109,6 +109,33 @@
   "simulator": {
     "enabled": false
   },
+  "soak": {
+    "accelerated": {
+      "durationMs": 259200000,
+      "sliceMs": 10000,
+      "injectIntervalMs": 300000,
+      "commandsPerInjection": 2,
+      "faultIntervalMs": 10800000
+    },
+    "realtime": {
+      "durationMs": 259200000,
+      "sliceMs": 5000,
+      "injectIntervalMs": 60000,
+      "commandsPerInjection": 2,
+      "faultIntervalMs": 10800000
+    },
+    "reportDirectory": "data/diagnostics/soak",
+    "thresholds": {
+      "maxContinuousOutageMs": null,
+      "maxRecoveryMs": null,
+      "maxFreezeEvents": null,
+      "maxAlertDeliveryMs": null,
+      "endToEndP95Ms": null,
+      "minBroadcastAvailability": null,
+      "minInteractionAvailability": null
+    },
+    "provisional": ["accelerated", "realtime", "reportDirectory", "thresholds"]
+  },
   "supervisor": {
     "evaluateIntervalMs": 2000,
     "coordinatorHeartbeatTimeoutMs": 15000,

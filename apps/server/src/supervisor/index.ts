@@ -53,14 +53,29 @@ export {
   type RestartRequestOutcome,
 } from './restart.js'
 export {
+  buildPreflightProbes,
+  buildStartupSteps,
+  type BroadcastPort,
+  type ChatPort,
+  type EnginePort,
+  type ObsPort,
+  type PreflightDeps,
+  type RetentionPort,
+  type RuntimeDeps,
+} from './runtime.js'
+export {
   DiagnosticScreenshotRecorder,
   nodeScreenshotFs,
   type ScreenshotFs,
   type ScreenshotResult,
 } from './screenshot.js'
 export {
+  DEAD_MAN_SIGNAL,
+  ENGINE_STATE_COMMIT_SIGNAL,
   HealthAggregator,
   MODERATION_HEALTHY,
+  RENDERER_HEALTH_SIGNAL,
+  SUPERVISOR_COORDINATOR_SIGNAL,
   type AggregatorReadings,
   type ModerationHealth,
 } from './signals.js'

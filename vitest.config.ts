@@ -28,8 +28,26 @@ export default defineConfig({
         replacement: fileURLToPath(new URL('./apps/server/src/input/index.ts', import.meta.url)),
       },
       {
+        find: '@vl/server/obs',
+        replacement: fileURLToPath(new URL('./apps/server/src/obs/index.ts', import.meta.url)),
+      },
+      {
+        find: '@vl/server/supervisor',
+        replacement: fileURLToPath(
+          new URL('./apps/server/src/supervisor/index.ts', import.meta.url),
+        ),
+      },
+      {
+        find: '@vl/server/testing',
+        replacement: fileURLToPath(new URL('./apps/server/src/testing/index.ts', import.meta.url)),
+      },
+      {
         find: '@vl/server',
         replacement: fileURLToPath(new URL('./apps/server/src/index.ts', import.meta.url)),
+      },
+      {
+        find: '@vl/soak',
+        replacement: fileURLToPath(new URL('./tools/soak/src/index.ts', import.meta.url)),
       },
       {
         find: '@vl/simulator/scenario',

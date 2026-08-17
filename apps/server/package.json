@@ -13,6 +13,18 @@
     "./input": {
       "types": "./dist/input/index.d.ts",
       "default": "./dist/input/index.js"
+    },
+    "./obs": {
+      "types": "./dist/obs/index.d.ts",
+      "default": "./dist/obs/index.js"
+    },
+    "./supervisor": {
+      "types": "./dist/supervisor/index.d.ts",
+      "default": "./dist/supervisor/index.js"
+    },
+    "./testing": {
+      "types": "./dist/testing/index.d.ts",
+      "default": "./dist/testing/index.js"
     }
   },
   "scripts": {

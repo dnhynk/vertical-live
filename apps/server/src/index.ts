@@ -8,6 +8,16 @@ export {
   type ServerOptions,
 } from './server.js'
 export { systemClock, type Clock, type TimerHandle } from './clock.js'
+// The health vocabulary is already part of the public surface — `ServerOptions`
+// and every producer are typed with it — so it is exported by name rather than
+// left reachable only through a deep import.
+export type {
+  HealthComponent,
+  HealthDetailValue,
+  HealthSignal,
+  HealthSignalSink,
+  HealthStatus,
+} from './health/types.js'
 export * from './db/index.js'
 export * from './engine/index.js'
 // `./input/index.js` is deliberately *not* re-exported here: it and
