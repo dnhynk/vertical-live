@@ -72,6 +72,7 @@
 | E-2 | OBS 32.0.2 / obs-websocket 5.6.3을 고정 버전으로 승인 | 승인 시 docs/ops/obs-setup.md의 '후보' 표기 제거 | T2, T17 |
 | E-3 | 실제 OBS 스모크(`npm run obs:probe`) — 사용자가 OBS WebSocket 서버(loopback·비밀번호)를 켠 뒤 실행 | Gate 2 호스트 검증 항목 | T2 |
 | E-5 | **차단(2026-08-17 13:45 UTC~)**: GitHub Actions 결제 차단 — 모든 CI run이 2초 만에 실패, annotation: "The job was not started because recent account payments have failed or your spending limit needs to be increased. Please check the 'Billing & plans' section in your settings". **사용자 조치 필요**: GitHub Settings → Billing & plans에서 결제수단/지출 한도 복구. 그동안 코디네이터 정책: 리뷰어와 worker가 로컬에서 실행한 동일 게이트 5개(format/lint/typecheck/test/build) 결과를 CI 대신 최종 게이트 근거로 사용하고, 결제 복구 후 main CI를 재실행해 녹색을 확인한다(미확인 머지 목록: PR #14 이후) | 런북 2.5(6), 2.6(1) | 전체 |
+| E-6 | **보고(비차단)**: PR #16(T12 supervisor) 리뷰 round 4까지 request_changes(round마다 지적 해소, 잔존은 safe-stop 경로의 순서/취소 세부로 계속 좁아짐: 예약 restart→in-flight restart→시작 시퀀스 취소→alert await 순서). 코디네이터는 수렴 중으로 판단해 F-T12-4 진행 | 런북 2.5(4) | T12 |
 | E-4 | **해결(2026-08-17)**: PR #11 round 6에서 approve·머지. 원 항목: PR #11(T10 broadcast lifecycle) 리뷰가 round 4까지 request_changes(각 round의 지적은 해소, 리뷰어가 reconcile·update 경로의 인접 갭을 계속 발견 — 절단 목록 무판정, 마커 생명주기(A-18), update 본문 정확성). 코디네이터는 수렴 중으로 판단해 F-T10-4 진행. 사용자가 중단·재설계를 원하면 지시 | 런북 2.5(4) | T10 |
 
 ## 5. 이력
@@ -166,3 +167,4 @@
 | 2026-08-17 16:05 | F-T12-2 완료(readiness 신호 개념·started() 실기동 판정, 1715 tests). R-T12-3 `task_09f9c22548e8` → `ctx_8ec17a69bd89`(review) |
 | 2026-08-17 16:17 | R-T12-3 verdict request_changes(round 2 해소; 신규 blocker 2: safe_stopped 후 시작 시퀀스 계속 진행, 실행 중 restart 액션의 post-await 효과; minor 티켓 근거) → F-T12-3 `task_1e3ea51a4140` → T12 터미널. round 4에도 미승인이면 E-6 보고 |
 | 2026-08-17 16:31 | F-T12-3 완료(취소 술어·AbortSignal, 1722 tests). R-T12-4 `task_b4fb3f0376e1` → `ctx_09674c39f7c0`(review) |
+| 2026-08-17 16:41 | R-T12-4 verdict request_changes(잔존 blocker 1: safe_stopped 진입 시 alert await가 stopAll보다 앞서 in-flight restart가 완료됨) → F-T12-4 `task_e14fd128b4eb`. **E-6 보고 항목 등록** |
