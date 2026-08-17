@@ -241,3 +241,45 @@ $ npm run build          -> @vl/contract / @vl/server / @vl/renderer / @vl/simul
 564 → 576의 차이는 main에서 들어온 T1b(#7)·기타 테스트 11건과 이번 라운드에서 추가한 1건이다. skip 1건은 이전과 같은 "Windows Credential Manager off Windows"(이 호스트가 win32).
 
 실행하지 않았음: 실제 Google 계정 로그인(worker 계약 3.9 / 스펙 §11 Gate 2).
+
+### PR #5(T4) 머지 후 rebase (F-T3-3, 2026-08-17)
+
+`origin/main` `4e151bb`(T4 SQLite 영속층 #5 포함) 위로 rebase했다. 14 커밋 재적용, 충돌 3건:
+
+| 파일 | 충돌 | 해소 |
+|---|---|---|
+| `apps/server/package.json` | dependencies에 T4의 `better-sqlite3`와 T3의 `@napi-rs/keyring`·`googleapis`·`google-auth-library`가 같은 자리에 추가됨(2회) | union — 네 의존성 모두 exact로 유지. `scripts`(T4의 `build: tsc --build && node scripts/copy-migrations.mjs` + T3의 `auth:login`/`secrets`)와 devDependencies는 git이 자동 병합 |
+| `apps/server/src/index.ts` | T4가 `export * from './db/index.js'`를, T3가 `secrets`·`youtube` re-export를 같은 블록에 추가 | union — `db`·`secrets`·`youtube` 세 줄 모두 유지(clock export는 T4 쪽 한 줄 형식 채택) |
+| `package-lock.json` | 양쪽 의존성 집합 | 병합하지 않고 `npm install`로 재생성(별도 커밋 `45a8886`) |
+
+`config/default.json`은 충돌 없이 병합됐고 세 블록(`db`·`obs`·`youtube`)이 모두 남아 있다. `vitest.config.ts`(T4의 `@vl/contract` alias)와 새 `.npmrc`는 T3가 건드리지 않아 main 그대로다. T3 소유 소스 파일의 기능 변경은 0이다.
+
+**`.npmrc`의 `ignore-scripts=true` 하에서 `@napi-rs/keyring` 확인**(이번 rebase의 위험 항목):
+
+```text
+$ node -e "import('@napi-rs/keyring') …"
+loaded in 35 ms; get(missing) -> null
+round-trip -> "synthetic-probe-value-0001" delete -> true
+
+$ node scripts/check-install-scripts.mjs
+check-install-scripts: ok (3 reviewed, better-sqlite3 binding loads)
+
+$ npx vitest run apps/server/src/secrets/windows-credential-manager.live.test.ts
+ ✓ stores, reads back, overwrites and deletes a credential
+ ✓ reads back a value written by a separate vault instance
+ Tests  2 passed | 1 skipped (3)
+```
+
+문제 없다. `@napi-rs/keyring`은 install script를 선언하지 않고 플랫폼별 prebuilt를 optionalDependency(`@napi-rs/keyring-win32-x64-msvc`)로 받으므로 `ignore-scripts`의 영향을 받지 않는다(그래서 위 checker의 "3 reviewed" 목록에도 들어 있지 않다).
+
+게이트 5개:
+
+```text
+$ npm run format:check   -> All matched files use Prettier code style!
+$ npm run lint           -> eslint clean; check-no-legacy-imports: ok (0); check-install-scripts: ok (3 reviewed, better-sqlite3 binding loads)
+$ npm run typecheck      -> tsc --build, 오류 없음
+$ npm run test           -> Test Files 34 passed (34); Tests 665 passed | 1 skipped (666)
+$ npm run build          -> @vl/contract / @vl/server / @vl/renderer / @vl/simulator, 오류 없음
+```
+
+576 → 666의 차이는 main에서 들어온 T4(#5) 등 다른 task의 테스트다. skip 1건은 이전과 같은 "Windows Credential Manager off Windows"(이 호스트가 win32). vault CLI 스모크(`secrets list`)도 실제 Credential Manager에 대해 정상.
