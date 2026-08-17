@@ -63,18 +63,19 @@ powershell -ExecutionPolicy Bypass -File ops\windows\Unregister-VerticalLive.ps1
 
 | # | 대상 | 시작 명령 | 준비 신호 | 기본 대기 |
 |---|---|---|---|---|
-| 1 | 렌더러 정적 서빙 | `node apps\server\dist\bin\serve-renderer.js` | `http://127.0.0.1:5173/`가 응답 | 60s |
-| 2 | 서버 | `node apps\server\dist\main.js` | `http://127.0.0.1:8787/health`가 응답 | 120s |
-| 3 | OBS | `node apps\server\dist\bin\obs-launch.js` | `127.0.0.1:4455`(obs-websocket) 포트 열림 | 120s |
+| 1 | 렌더러 정적 서빙 | `node apps\server\dist\bin\serve-renderer.js` | `http://127.0.0.1:5173/`가 **HTTP 200** | 60s |
+| 2 | 서버 | `node apps\server\dist\main.js` | `/health`가 **200 + 건강 문서**(`status` 필드) | 120s |
+| 3 | OBS | `node apps\server\dist\bin\obs-launch.js` | `127.0.0.1:4455` 포트를 **`obs64.exe`가** 점유 | 120s |
 
 - **순서의 이유**: OBS Browser Source가 열릴 때 페이지가 있어야 하고(1), 페이지가 열리자마자 `/ws/renderer`에 붙으므로 서버가 떠 있어야 하며(2), 서버가 시작 순서에서 OBS에 렌더러 토큰과 스트림 키를 주입하므로 OBS는 마지막이다(3, BOARD A-16).
 - **준비 신호를 기다리지 sleep하지 않는다.** 각 단계는 위 신호가 올 때까지 폴링하고, 시간이 지나면 그 단계를 실패로 기록하고 exit code 1로 끝난다.
-- **이미 떠 있으면 건너뛴다.** 포트가 이미 응답하면 그 단계는 "already listening"으로 로그만 남긴다. 두 번 로그온해도 스택이 두 벌 뜨지 않는다(task도 `MultipleInstancesPolicy=IgnoreNew`).
-- `/health`는 `safe_stopped`에서 2xx가 아닌 상태를 낸다. 준비 판정은 **응답이 왔는지**이지 200인지가 아니다(스펙 §9.2).
+- **열린 포트는 준비가 아니다**(리뷰 round 1 M2). 포트만 열려 있고 프로토콜 응답이 없으면 준비로 치지 않는다. 그리고 **이미 응답하는 포트라도 그 프로세스가 이 저장소에서 시작된 것일 때만** 그대로 쓴다(소유 프로세스의 명령행에 이 저장소 경로가 있는지 확인). 다른 worktree나 무관한 프로세스가 같은 loopback 포트를 잡고 있으면 그 단계는 **소유 PID를 적고 실패**한다 — 남의 스택을 우리 것으로 착각해 OBS를 남의 렌더러에 붙이는 것이 이 확인이 막는 일이다.
+- **이미 떠 있고 우리 것이면 건너뛴다.** 로그는 `already running and ready (pid …)`. 두 번 로그온해도 스택이 두 벌 뜨지 않는다(task도 `MultipleInstancesPolicy=IgnoreNew`).
+- **설정은 서버의 로더에서 온다**(리뷰 round 1 M1). 스크립트는 `config/default.json`을 직접 읽지 않고 `node apps\server\dist\bin\ops-config.js`가 출력한 해석 결과를 쓴다. 따라서 `VL_PORT`, `VL_RENDERER_STATIC_PORT`/`VL_RENDERER_STATIC_HOST`, `VL_OBS_URL`, `VL_OBS_PROCESS_ENABLED`, `VL_OBS_EXECUTABLE`이 서버에서와 **같은 뜻**을 가진다. 해석된 값은 시작 전에 `resolved config: …` 한 줄로 남는다.
 - 로그: `data\ops\logs\autostart-<YYYYMMDD>.log`(순서·준비·실패), `renderer-static-*.log`, `server-*.log`(각 프로세스의 stdout/stderr).
-- dry run: `-WhatIf`. 무엇을 시작할지만 출력하고 아무것도 시작하지 않으며 로그 파일도 쓰지 않는다.
+- dry run: `-WhatIf`. 해석된 설정과 무엇을 시작할지만 출력하고 아무것도 시작하지 않으며 로그 파일도 쓰지 않는다.
 - 옵션: `-SkipObs`, `-RendererTimeoutSec`, `-ServerTimeoutSec`, `-ObsTimeoutSec`, `-NodeExe`, `-RepoRoot`.
-- 빌드 산출물(`apps\server\dist\main.js`, `apps\server\dist\bin\serve-renderer.js`, `apps\renderer\dist\index.html`)이 없으면 **아무것도 시작하지 않고** 실패한다. 로그온 시점은 컴파일할 때가 아니다.
+- 빌드 산출물(`dist\main.js`, `dist\bin\serve-renderer.js`, `dist\bin\ops-config.js`, `dist\bin\obs-launch.js`, `apps\renderer\dist\index.html`)이 없으면 **아무것도 시작하지 않고** 실패한다. 로그온 시점은 컴파일할 때가 아니다.
 
 ### OBS 실행기
 
@@ -125,10 +126,13 @@ npm run archive -w @vl/server -- --json
 
 지우지 않는 것:
 
-- 루트 밖의 경로(심볼릭 링크·`..`로 빠져나가는 항목은 후보에서 제거된다)
+- 루트 밖의 경로. 판정은 **정규 경로(realpath)로만** 한다(리뷰 round 1 B1): 심볼릭 링크·junction·`..`로 빠져나가는 항목은 후보에서 제거되고, **삭제 직전에 한 번 더** 같은 검사를 한다(스캔과 삭제 사이에 파일이 링크로 바뀔 수 있다).
+- **루트 자체가 junction/심볼릭 링크면 그 루트 전체를 거부한다.** 리포트에 `root <이름>: REFUSED (reparse_point)`로 남기고 exit code 1로 끝난다. 링크가 가리키는 곳은 config를 읽어서는 알 수 없으므로, 그 안을 지우는 것은 운영자가 승인한 삭제가 아니다. 정규 경로를 읽을 수 없는 루트(`unresolvable`)도 같다.
 - 루트가 소유하지 않은 확장자(예: 같은 폴더의 `notes.txt`)
 - 쓰기 유예 안에 있는 파일(진행 중인 녹화)
 - 루트가 아직 없으면 아무것도. "없음"은 실패가 아니다 — **V1은 녹화하지 않는다**(`ops/obs/profiles/vertical-live/basic.ini`의 `RecEncoder=none`).
+
+따라서 `archive.roots[].path`에는 **실제 디렉터리**를 적는다. 다른 볼륨에 두고 싶으면 junction을 만들지 말고 그 볼륨의 경로를 그대로 적는다.
 
 규칙을 다 적용해도 상한을 못 맞추면(예: 다른 프로그램이 디스크를 채웠다) 리포트에 `WARNING: <rule> is still unmet`으로 남긴다. 아카이브가 자기 것도 아닌 공간을 되찾을 수는 없고, 조용히 성공이라고 쓰는 편이 더 나쁘다. 볼륨 용량을 읽을 수 없으면 `free unknown`으로 적고 **여유공간 규칙을 적용하지 않는다**(모름은 0이 아니다).
 
@@ -258,6 +262,9 @@ icacls "$env:APPDATA\obs-studio\basic\profiles\vertical-live" /inheritance:e
 | 재부팅 후 아무것도 안 뜬다 | `schtasks /Query /TN \VerticalLive\vl-autostart /V /FO LIST` | 자동 로그온이 안 됨(5.2), task가 없음, `Last Result`≠0 |
 | autostart 로그에 `missing build artifact` | 로그 | `npm run build`를 안 했다 |
 | 1·2단계는 되고 OBS만 실패 | `data\ops\logs\autostart-*.log` | `obs.process.enabled=false`(경고만 남긴다), 실행 파일 경로, safe-mode 대화상자(5.7), OBS WebSocket 서버 꺼짐(`docs/ops/obs-setup.md` §2) |
+| `port … answers but belongs to pid … outside <repo>` | 그 PID의 명령행 | 다른 worktree나 무관한 프로세스가 같은 loopback 포트를 잡고 있다. 그 프로세스를 멈추거나, 이 호스트의 포트를 `VL_PORT`/`VL_RENDERER_STATIC_PORT`로 옮긴다 |
+| `port … is held by pid … and does not answer` | 그 PID | 포트는 잡혔는데 프로토콜 응답이 없다(죽어가는 프로세스, 무관한 리스너). 준비로 치지 않는 것이 정상 동작이다 |
+| `root …: REFUSED (reparse_point)` | `archive.roots[].path` | 그 경로가 junction/심볼릭 링크다. 실제 디렉터리 경로로 바꾼다(4장) |
 | `obs launch refused (already_running)` | 작업 관리자 | OBS는 살아 있는데 websocket이 죽었다. 사람이 OBS를 닫고 다시 띄운다 — 서버는 남의 OBS를 죽이지 않는다 |
 | 화면은 도는데 렌더러가 안 붙는다 | 서버 로그의 `4401` | 토큰 주입 실패. vault에 `server.rendererToken`이 있는지(`npm run secrets -w @vl/server -- list`) |
 | 디스크가 계속 찬다 | `npm run archive -w @vl/server`(dry run) | 루트·확장자가 실제 녹화 경로와 다르거나, 아카이브가 아닌 것이 디스크를 채우고 있다(`WARNING: ... still unmet`) |

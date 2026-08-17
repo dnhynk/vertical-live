@@ -13,6 +13,19 @@
 
 Set-StrictMode -Version Latest
 
+# `Get-VLPortOwner` needs NetTCPIP. Auto-loading it happens in the global scope,
+# where a `-WhatIf` run announces every alias the module defines ("What if:
+# Performing the operation New Alias ..."), which reads like this script is about
+# to change something. It is a read-only dependency, so it is imported once here
+# with the global preference suppressed and restored.
+$vlGlobalWhatIf = $global:WhatIfPreference
+$global:WhatIfPreference = $false
+try {
+    Import-Module NetTCPIP -ErrorAction SilentlyContinue | Out-Null
+} finally {
+    $global:WhatIfPreference = $vlGlobalWhatIf
+}
+
 function Get-VerticalLiveRepoRoot {
     param([Parameter(Mandatory = $true)][string] $ScriptRoot)
     return (Resolve-Path (Join-Path $ScriptRoot '..\..')).Path
@@ -40,16 +53,43 @@ function Write-VLLog {
     }
 }
 
-function Get-VerticalLiveConfig {
+function Get-VerticalLiveOpsConfig {
     <#
-      Reads config/default.json. The ops scripts take the ports and paths from
-      the same file the server reads, so a changed port cannot leave the
-      autostart waiting on the old one.
+      The resolved runtime view (ports, URLs, paths, switches) from the server's
+      own config loaders.
+
+      Review round 1, M1: this used to read config/default.json directly, which
+      ignored the documented env overrides (VL_OBS_PROCESS_ENABLED,
+      VL_RENDERER_STATIC_PORT/_HOST, VL_OBS_URL, VL_PORT) — the launcher could
+      refuse to start OBS the operator had enabled, or wait on a different port
+      from the one the process it started was listening on. Asking the Node
+      loaders keeps one definition of what an override means; this process
+      inherits the environment, so the child sees the same variables.
     #>
-    param([Parameter(Mandatory = $true)][string] $RepoRoot)
-    $path = Join-Path $RepoRoot 'config\default.json'
-    if (-not (Test-Path $path)) { throw "config not found: $path" }
-    return (Get-Content -Path $path -Raw -Encoding UTF8 | ConvertFrom-Json)
+    param(
+        [Parameter(Mandatory = $true)][string] $RepoRoot,
+        [Parameter(Mandatory = $true)][string] $NodeExe
+    )
+    $entry = Join-Path $RepoRoot 'apps\server\dist\bin\ops-config.js'
+    if (-not (Test-Path $entry)) {
+        throw "ops config entry point not found: $entry (run npm run build)"
+    }
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $output = & $NodeExe $entry 2>&1 | ForEach-Object { $_.ToString() }
+        $exitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previous
+    }
+    if ($exitCode -ne 0) {
+        throw "ops config failed (exit $exitCode): $(($output | Out-String).Trim())"
+    }
+    try {
+        return ($output | Out-String | ConvertFrom-Json)
+    } catch {
+        throw "ops config output was not JSON: $(($output | Out-String).Trim())"
+    }
 }
 
 function Get-VerticalLiveNodeExe {
@@ -64,53 +104,120 @@ function Get-VerticalLiveNodeExe {
     return $command.Source
 }
 
-function Get-VerticalLiveObsPort {
-    param([Parameter(Mandatory = $true)] $Config)
-    # obs.url is a ws:// URL on loopback (spec §10.2); the readiness probe only
-    # needs its port.
-    $uri = [System.Uri]$Config.obs.url
-    return $uri.Port
-}
-
-function Test-VLTcpOpen {
-    param(
-        [Parameter(Mandatory = $true)][string] $ComputerName,
-        [Parameter(Mandatory = $true)][int] $Port,
-        [int] $TimeoutMs = 1000
-    )
-    $client = New-Object System.Net.Sockets.TcpClient
-    try {
-        $async = $client.BeginConnect($ComputerName, $Port, $null, $null)
-        if (-not $async.AsyncWaitHandle.WaitOne($TimeoutMs)) { return $false }
-        $client.EndConnect($async)
-        return $true
-    } catch {
-        return $false
-    } finally {
-        $client.Close()
-    }
-}
-
-function Test-VLHttpAnswers {
+function Get-VLPortOwner {
     <#
-      Readiness means "the listener answered", not "it answered 200":
-      GET /health reports `safe_stopped` with a non-2xx status, and that is a
-      started server (spec §9.2), not a failed start.
+      Who is listening on a loopback port: @{ Found; ProcessId; Name; CommandLine }.
+
+      Review round 1, M2: an open port is not evidence that *our* component is
+      running. Another worktree on this host listens on the same loopback ports,
+      and so does any unrelated process that happened to take them. `CommandLine`
+      is $null when it cannot be read, and callers treat unknown as "not ours".
+    #>
+    param([Parameter(Mandatory = $true)][int] $Port)
+
+    # This function only reads. Auto-loading NetTCPIP under -WhatIf would
+    # otherwise announce every alias the module defines.
+    $WhatIfPreference = $false
+    $result = @{ Found = $false; ProcessId = $null; Name = $null; CommandLine = $null }
+    $owningPid = $null
+
+    $getConnection = Get-Command Get-NetTCPConnection -ErrorAction SilentlyContinue
+    if ($null -ne $getConnection) {
+        try {
+            $listener = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction Stop |
+                Select-Object -First 1
+            if ($null -ne $listener) { $owningPid = [int]$listener.OwningProcess }
+        } catch {
+            $owningPid = $null
+        }
+    }
+    if ($null -eq $owningPid) {
+        # Fallback for hosts without the NetTCPIP module.
+        $previous = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try {
+            $rows = & netstat.exe -ano 2>&1 | ForEach-Object { $_.ToString() }
+        } finally {
+            $ErrorActionPreference = $previous
+        }
+        foreach ($row in $rows) {
+            if ($row -match "^\s*TCP\s+\S+:$Port\s+\S+\s+LISTENING\s+(\d+)\s*$") {
+                $owningPid = [int]$Matches[1]
+                break
+            }
+        }
+    }
+    if ($null -eq $owningPid) { return $result }
+
+    $result.Found = $true
+    $result.ProcessId = $owningPid
+    try {
+        $process = Get-Process -Id $owningPid -ErrorAction Stop
+        $result.Name = $process.ProcessName
+    } catch {
+        $result.Name = $null
+    }
+    try {
+        $info = Get-CimInstance Win32_Process -Filter "ProcessId=$owningPid" -ErrorAction Stop
+        if ($null -ne $info) { $result.CommandLine = $info.CommandLine }
+    } catch {
+        $result.CommandLine = $null
+    }
+    return $result
+}
+
+function Test-VLHttpOk {
+    <#
+      Readiness for the static page: HTTP 200. Anything else — a 404 from an
+      unrelated server, a connection refused — is not ready.
     #>
     param(
         [Parameter(Mandatory = $true)][string] $Url,
         [int] $TimeoutSec = 5
     )
     try {
-        Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec $TimeoutSec -Method Get | Out-Null
-        return $true
-    } catch [System.Net.WebException] {
-        $response = $_.Exception.Response
-        if ($null -ne $response) { return $true }
-        return $false
+        $response = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec $TimeoutSec -Method Get
+        return ([int]$response.StatusCode -eq 200)
     } catch {
         return $false
     }
+}
+
+function Test-VLServerHealth {
+    <#
+      Readiness for the server: GET /health answers 200 with the health document
+      (spec §9.4 — `status` plus the per-family detail). A TCP connect proves
+      nothing; this is what tells our server apart from whatever else took the
+      port (review round 1, M2).
+    #>
+    param(
+        [Parameter(Mandatory = $true)][string] $Url,
+        [int] $TimeoutSec = 5
+    )
+    try {
+        $response = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec $TimeoutSec -Method Get
+        if ([int]$response.StatusCode -ne 200) { return $false }
+        $health = $response.Content | ConvertFrom-Json
+        return ($null -ne $health.PSObject.Properties['status'])
+    } catch {
+        return $false
+    }
+}
+
+function Test-VLTcpObs {
+    <#
+      OBS speaks obs-websocket, not HTTP, so its readiness signal is the port —
+      but only when the process holding it really is the configured OBS binary.
+      Any other listener on 4455 is a foreign process, not a ready encoder (M2).
+    #>
+    param(
+        [Parameter(Mandatory = $true)][int] $Port,
+        [Parameter(Mandatory = $true)][string] $ExecutableName
+    )
+    $owner = Get-VLPortOwner -Port $Port
+    if (-not $owner.Found) { return $false }
+    if ($null -eq $owner.Name) { return $false }
+    return ($owner.Name -eq [System.IO.Path]::GetFileNameWithoutExtension($ExecutableName))
 }
 
 function Wait-VLReady {
