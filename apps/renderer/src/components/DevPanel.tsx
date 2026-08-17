@@ -1,6 +1,7 @@
 import { JA_NATIVE_REVIEW } from '../i18n/index'
 import { useConnectionVersion, useLogEntries, useTick } from '../hooks'
 import type { RendererRuntime } from '../runtime'
+import { paletteFor } from '../visual/palette'
 
 /**
  * `?mode=dev` diagnostics: connection state, revisions, effect count and the
@@ -42,6 +43,13 @@ export default function DevPanel({ runtime }: DevPanelProps) {
         </dd>
         <dt>processedIngestSeq</dt>
         <dd>{snapshot === null ? '—' : snapshot.processedIngestSeq}</dd>
+        <dt>input (mode / enabled)</dt>
+        <dd data-testid="dev-input">
+          {snapshot === null ? '—' : snapshot.inputMode} /{' '}
+          {snapshot === null ? '—' : String(snapshot.interactionEnabled)}
+        </dd>
+        <dt>palette</dt>
+        <dd data-testid="dev-palette">{paletteFor(snapshot).paletteId}</dd>
         <dt>effects (started / active)</dt>
         <dd data-testid="dev-effects">
           {runtime.model.effectStartCount} / {runtime.model.activeEffects.length}

@@ -41,13 +41,20 @@ function stripComments(source: string): string {
   return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^[ \t]*\/\/.*$/gm, '')
 }
 
+/**
+ * The static checkers carry the forbidden patterns in their own code, so they
+ * are excluded from the scan. `paid-staging.test.ts` (TASK_SPECS §T14 acceptance
+ * 3) names the identity and payment fields it forbids the paid staging from
+ * mentioning, which is the same list this file scans for.
+ */
+const CHECKERS = new Set(['no-fabrication.test.ts', 'components/paid-staging.test.ts'])
+
 const FILES = collect(SOURCE_ROOT)
   .map((path) => ({
     path: relative(SOURCE_ROOT, path).split(sep).join('/'),
     source: stripComments(readFileSync(path, 'utf8')),
   }))
-  // This file carries the patterns themselves; it is the checker, not a source.
-  .filter((file) => file.path !== 'no-fabrication.test.ts')
+  .filter((file) => !CHECKERS.has(file.path))
 
 const APPLICATION_FILES = FILES.filter(
   (file) => !file.path.includes('.test.') && !file.path.startsWith('testing/'),
