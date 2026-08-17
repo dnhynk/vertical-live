@@ -149,6 +149,18 @@ export interface EngineHealth {
    * in a log line (spec §9.4(2), R-T8-1 blocker 1).
    */
   readonly lastFailure: { readonly at: string; readonly error: string } | null
+  /**
+   * Failed writes the single writer is still carrying: the current failed-pass
+   * streak **plus** every renderer ACK the store refused and has not recorded
+   * yet (T8c).
+   *
+   * One number, because T12 reads exactly one (`supervisor/signals.ts`
+   * coordinator signal: `> 0` → `degraded('writer_failing')`). The two halves
+   * are counted separately inside the engine and each clears on its own
+   * evidence — a completed pass, a recorded ACK — so a pass that happens to
+   * succeed cannot wipe a still-broken ACK path out from under the supervisor
+   * (R-T8c-1 blocker 1).
+   */
   readonly consecutiveFailures: number
 }
 
@@ -213,7 +225,26 @@ export class StateEngine {
   #inputHealth: InputHealth = 'ok'
   #interactionEnabled = false
   #lastFailure: { at: string; error: string } | null = null
+  /** Failed writer passes since the last one that completed. */
   #consecutiveFailures = 0
+  /**
+   * Open effects whose ACK the store refused and has not recorded since (T8c,
+   * R-T8c-1 blocker 1).
+   *
+   * ACK-store health cannot live on `#consecutiveFailures`: that is the *pass*
+   * streak, and a completed pass clears it — which on this loop happens every
+   * `tickIntervalMs` (250ms), while T12 evaluates every `evaluateIntervalMs`
+   * (2000ms). A full file refuses the `UPDATE` that grows an `effect_outbox`
+   * row while a pass with nothing to commit writes nothing and succeeds, so the
+   * fault was gone from the shared counter long before the supervisor read it.
+   *
+   * An id enters when the store refuses that effect's ACK and leaves only when
+   * the effect leaves the open set — the ACK was finally recorded, or §7.3(7)
+   * expired the effect and there is nothing left to retry. So the condition
+   * outlives unrelated passes without being able to latch for the rest of the
+   * run.
+   */
+  #unrecordedAcks = new Set<string>()
   #timer: TimerHandle | null = null
   readonly #autoTick: boolean
 
@@ -338,6 +369,9 @@ export class StateEngine {
    */
   runPending(): number {
     const commits = this.#runPending()
+    // Only the pass streak. A completed pass is evidence about *this* pass, not
+    // about a renderer ACK the store is still refusing (R-T8c-1 blocker 1) —
+    // `#unrecordedAcks` clears on its own evidence instead.
     this.#consecutiveFailures = 0
     return commits
   }
@@ -418,6 +452,8 @@ export class StateEngine {
       this.#recordAckFailure(effectId, error)
       return
     }
+    // The row is written, so this effect no longer owes the supervisor anything.
+    this.#unrecordedAcks.delete(effectId)
     const open = this.#openEffects.get(effectId)
     if (open?.effect.paid === true && open.effect.causedByEventKey !== null) {
       // The original thanks reached a frame, so the substitute of spec §9.2 is no
@@ -441,20 +477,44 @@ export class StateEngine {
    * the coordinator degraded (`supervisor/signals.ts`, spec §9.4(1), §9.2). The
    * counter and the log line keep the *cause* distinguishable from a failed pass
    * on `/metrics` and in the operator log.
+   *
+   * What it does **not** share is the lifetime: the count goes on
+   * `#unrecordedAcks`, which a completed pass does not clear, because a pass
+   * completing says nothing about the ACK write that is still failing
+   * (R-T8c-1 blocker 1). Only an effect still in the open set is tracked — an
+   * ACK for an effect that already left it (expired, or already acked) has no
+   * retransmit to repair it, so counting it would be a fault nothing can clear.
+   * It is still on `lastFailure`, `/metrics` and the log.
    */
   #recordAckFailure(effectId: string, error: unknown): void {
     const failure = classifySqliteError(error)
     const message = error instanceof Error ? error.message : String(error)
     this.#lastFailure = { at: this.#clock.nowUtcIso(), error: `ack ${effectId}: ${message}` }
-    this.#consecutiveFailures += 1
+    if (this.#openEffects.has(effectId)) this.#unrecordedAcks.add(effectId)
     this.#metrics.count('ack_effect_store_failed')
     this.#logger.error('engine.ack_store_failed', {
       effectId,
       kind: failure.kind,
       code: failure.code,
       retryable: failure.retryable,
+      unrecordedAcks: this.#unrecordedAcks.size,
       error: message,
     })
+  }
+
+  /**
+   * The one number T12 reads: failed writer passes plus renderer ACKs the store
+   * refused and still owes a row (`EngineHealth.consecutiveFailures`).
+   *
+   * They are added rather than kept apart because they are the same fact for the
+   * supervisor — the single writer's database would not take a write — and
+   * because `supervisor/signals.ts` turns that one field into
+   * `degraded('writer_failing')`. Adding a second field the aggregator does not
+   * read would surface the ACK failure without it ever reaching a §9.2
+   * transition.
+   */
+  #writeFailures(): number {
+    return this.#consecutiveFailures + this.#unrecordedAcks.size
   }
 
   /** Health of the input path, reported by the source adapter (spec §9.4(3)). */
@@ -485,7 +545,7 @@ export class StateEngine {
       inputMode: this.#arbiter.mode,
       broadcastLifecycle: this.#lifecycle(now),
       lastFailure: this.#lastFailure,
-      consecutiveFailures: this.#consecutiveFailures,
+      consecutiveFailures: this.#writeFailures(),
     }
   }
 
@@ -1072,6 +1132,9 @@ export class StateEngine {
     for (const [effectId, open] of [...this.#openEffects.entries()]) {
       if (nowMs > toMillis(open.effect.endsAt) + this.#config.engine.effects.expiryGraceMs) {
         this.#openEffects.delete(effectId)
+        // Nothing retransmits it any more, so a refused ACK for it has no repair
+        // left and must stop being reported as one (T8c).
+        this.#unrecordedAcks.delete(effectId)
         this.#store.markEffectExpired(effectId, now)
         this.#metrics.count('effect_expired')
         continue
@@ -1099,7 +1162,7 @@ export class StateEngine {
     // that cannot record a renderer ACK is not keeping the read model's proof of
     // delivery either: both are the store refusing the single writer, which is
     // the strongest degraded condition this component can report (spec §9.2).
-    if (this.#consecutiveFailures > 0) reasons.push('writer_failing')
+    if (this.#writeFailures() > 0) reasons.push('writer_failing')
     if (this.#inputHealth !== 'ok') reasons.push(`input_${this.#inputHealth}`)
     if (this.#publisher.rendererCount === 0) reasons.push('no_renderer')
     else if (

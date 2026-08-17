@@ -7,6 +7,9 @@ import WebSocket from 'ws'
 
 import { createTempStore, type TempStore } from '../db/testing/temp-store.js'
 import { createServer } from '../server.js'
+import { loadSupervisorConfig } from '../supervisor/config.js'
+import { HealthAggregator, MODERATION_HEALTHY } from '../supervisor/signals.js'
+import type { DeadManStatus, FamilyVerdict } from '../supervisor/types.js'
 import { FakeClock } from '../testing/fake-clock.js'
 import { StateEngine } from './engine.js'
 import { RendererHub } from './publisher.js'
@@ -204,6 +207,178 @@ describe('renderer ACK refused by the store', () => {
     expect(harness.engine.health().lastFailure).toBeNull()
     expect(harness.engine.metrics().counters['ack_effect_store_failed']).toBeUndefined()
   })
+})
+
+const SUPERVISOR_CONFIG = loadSupervisorConfig()
+
+const DEAD_MAN_OFF: DeadManStatus = {
+  enabled: false,
+  lastPushAt: null,
+  lastPushOk: null,
+  consecutiveFailures: 0,
+  lastError: null,
+}
+
+/**
+ * §9.4(1) as T12 would evaluate it right now.
+ *
+ * The assertions go through the real `HealthAggregator` rather than stopping at
+ * `engine.health()`, because the aggregator is the code a §9.2 transition is
+ * decided on — "the field moved" and "the supervisor's verdict moved" are not
+ * the same claim, and review round 1 found exactly that gap.
+ */
+function coordinatorVerdict(harness: EngineHarness): FamilyVerdict {
+  return new HealthAggregator(SUPERVISOR_CONFIG).evaluate({
+    engine: harness.engine.health(),
+    renderer: null,
+    deadMan: DEAD_MAN_OFF,
+    moderation: MODERATION_HEALTHY,
+    lastEvaluationMonotonicMs: harness.clock.monotonicMs() - SUPERVISOR_CONFIG.evaluateIntervalMs,
+    nowUtc: harness.clock.nowUtcIso(),
+    nowMonotonicMs: harness.clock.monotonicMs(),
+  }).families.coordinator
+}
+
+/**
+ * How long the failure stays readable, and by whom (review round 1, blocker 1).
+ *
+ * The two clocks that matter are not the same: the writer pass runs every
+ * `engine.tickIntervalMs` (250ms, `config/default.json`) and T12 evaluates every
+ * `supervisor.evaluateIntervalMs` (2000ms) — eight passes to every evaluation.
+ * A pass with nothing to commit writes nothing and completes, so a fault that a
+ * completed pass clears can be gone again before the aggregator ever reads it.
+ */
+describe('an ACK the store refused, as T12 reads it', () => {
+  let harness: EngineHarness
+
+  beforeEach(() => {
+    resetMessageIds()
+    harness = createEngineHarness({ config: testConfig() })
+  })
+
+  afterEach(() => {
+    freeDisk(productionConnection())
+    harness.dispose()
+  })
+
+  it('stays degraded across successful writer passes and clears when the ACK lands', async () => {
+    harness.engine.start()
+    await commitOpenEffects(harness.engine, harness.clock)
+    const open = harness.store.listUnackedEffects().map((entry) => entry.effect.effectId)
+
+    const connection = productionConnection()
+    fillDisk(connection)
+    for (const effectId of open) harness.engine.onAckEffect(effectId, at(200_000))
+    const refused = open.filter((effectId) => harness.store.getEffect(effectId)?.ackedAt == null)
+    expect(refused.length).toBeGreaterThan(0)
+    expect(coordinatorVerdict(harness)).toMatchObject({
+      status: 'degraded',
+      reason: 'writer_failing',
+    })
+
+    // The operator freed the space (spec §9.1), so the writer works again — but
+    // the renderer has not re-acknowledged: `acked_at` is still NULL and the
+    // effect is still open, so the read model still has no proof of delivery.
+    freeDisk(connection)
+
+    // Two whole supervisor evaluation intervals of passes that all complete.
+    // `runPending()` rethrows, so a pass that failed here would fail the test
+    // and this loop could not be mistaken for the failure staying alive.
+    const tickMs = harness.config.engine.tickIntervalMs
+    const passes = Math.ceil((SUPERVISOR_CONFIG.evaluateIntervalMs * 2) / tickMs)
+    for (let pass = 0; pass < passes; pass += 1) {
+      await harness.clock.advance(tickMs)
+      harness.engine.runPending()
+    }
+
+    const degraded = harness.engine.health()
+    expect(degraded.consecutiveFailures).toBe(refused.length)
+    expect(degraded.degradedReasons).toContain('writer_failing')
+    expect(degraded.openEffectCount).toBe(refused.length)
+    expect(coordinatorVerdict(harness)).toMatchObject({
+      status: 'degraded',
+      reason: 'writer_failing',
+    })
+
+    // The renderer's own ACK is the evidence that clears it — and it clears
+    // completely, so a recovered store leaves no false-degraded lock behind.
+    for (const effectId of refused) harness.engine.onAckEffect(effectId, at(300_000))
+    await harness.clock.advance(tickMs)
+    harness.engine.runPending()
+
+    const recovered = harness.engine.health()
+    expect(recovered.consecutiveFailures).toBe(0)
+    expect(recovered.degradedReasons).not.toContain('writer_failing')
+    expect(recovered.openEffectCount).toBe(0)
+    expect(coordinatorVerdict(harness).status).toBe('ok')
+  }, 60_000)
+})
+
+/**
+ * The other way a refused ACK ends: §7.3(7) expires the effect.
+ *
+ * The reason this needs its own test is that the fault has to be *durable*, and
+ * anything durable can latch. Once the window closes there is no retransmit for
+ * the renderer to answer, so no future ACK could ever clear the fault — a
+ * condition kept until "the ACK succeeds" would then be permanent, and a
+ * permanently degraded engine holds every event in the inbox (spec §9.2).
+ */
+describe('an ACK the store refused, for an effect that then expired', () => {
+  /** Long enough to outlive the fixture, short enough to close inside the test. */
+  const EXPIRY_GRACE_MS = 60_000
+
+  let harness: EngineHarness
+
+  beforeEach(() => {
+    resetMessageIds()
+    harness = createEngineHarness({
+      config: withEngineConfig((config) => ({
+        ...config,
+        engine: {
+          ...config.engine,
+          effects: { ...config.engine.effects, expiryGraceMs: EXPIRY_GRACE_MS },
+        },
+      })),
+    })
+  })
+
+  afterEach(() => {
+    freeDisk(productionConnection())
+    harness.dispose()
+  })
+
+  it('stops reporting a fault that no ACK can clear any more', async () => {
+    harness.engine.start()
+    await commitOpenEffects(harness.engine, harness.clock)
+    const open = harness.store.listUnackedEffects().map((entry) => entry.effect.effectId)
+
+    const connection = productionConnection()
+    fillDisk(connection)
+    for (const effectId of open) harness.engine.onAckEffect(effectId, at(200_000))
+    const refused = open.filter((effectId) => harness.store.getEffect(effectId)?.ackedAt == null)
+    expect(refused.length).toBeGreaterThan(0)
+    expect(coordinatorVerdict(harness).status).toBe('degraded')
+
+    // Space came back, but nobody re-acknowledged before the windows closed.
+    freeDisk(connection)
+    await harness.clock.advance(EXPIRY_GRACE_MS + 30_000)
+    harness.engine.runPending()
+
+    // `expired_at` is written, spec §9.2 substitute staging owns what happens
+    // next, and the engine is no longer claiming a write it is waiting on. The
+    // open set is not empty — the beats that ran during those 90 seconds staged
+    // effects of their own — so what is asserted is that no *refused* ACK is
+    // still outstanding.
+    expect(
+      refused.filter((effectId) => harness.store.getEffect(effectId)?.expiredAt == null),
+    ).toHaveLength(0)
+    expect(harness.engine.metrics().counters['effect_expired']).toBeGreaterThanOrEqual(
+      refused.length,
+    )
+    expect(harness.engine.health().consecutiveFailures).toBe(0)
+    expect(harness.engine.health().degradedReasons).not.toContain('writer_failing')
+    expect(coordinatorVerdict(harness).status).toBe('ok')
+  }, 60_000)
 })
 
 describe('renderer ACK refused by the store, over /ws/renderer', () => {
