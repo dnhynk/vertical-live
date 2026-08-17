@@ -56,4 +56,5 @@ export {
   type RetentionSource,
 } from './retention.js'
 export { DEFAULT_WORLD_ID, PersistenceStore, type OpenStoreOptions } from './store.js'
+export { BROADCAST_STAGE_ORDER } from './types.js'
 export type * from './types.js'

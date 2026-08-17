@@ -181,6 +181,87 @@ export interface PersistedEffect {
 export type EffectMarkResult =
   'recorded' | 'already_published' | 'already_acked' | 'already_expired'
 
+/** spec §9.3, BOARD A-4: `single` is production, rolling is a labelled experiment. */
+export type BroadcastStrategy = 'single' | 'rolling-experiment'
+
+/**
+ * Monotonic stage of *our* work on one broadcast attempt (spec §9.1). It is not
+ * YouTube's `lifeCycleStatus`: this is what the server durably did, that is what
+ * YouTube reports, and reconcile compares the two.
+ */
+export type BroadcastStage =
+  | 'planned'
+  | 'stream_ready'
+  | 'broadcast_created'
+  | 'bound'
+  | 'testing'
+  | 'live'
+  | 'complete'
+  | 'abandoned'
+
+/** Stage order used to reject a stage that would move backwards. */
+export const BROADCAST_STAGE_ORDER: readonly BroadcastStage[] = Object.freeze([
+  'planned',
+  'stream_ready',
+  'broadcast_created',
+  'bound',
+  'testing',
+  'live',
+  'complete',
+])
+
+/**
+ * The mutating calls whose outcome can be uncertain. Reads are never recorded as
+ * pending: re-reading is always safe, and reconcile itself is a read.
+ */
+export type BroadcastMutatingCall =
+  | 'liveStreams.insert'
+  | 'liveBroadcasts.insert'
+  | 'liveBroadcasts.bind'
+  | 'liveBroadcasts.transition'
+
+export interface BroadcastAttemptInput {
+  /** Locally generated: the YouTube write methods carry no idempotency key. */
+  readonly attemptId: string
+  readonly strategy: BroadcastStrategy
+  /** Reuse/reconcile key of the ingestion stream. */
+  readonly streamTitle: string
+  /** Reconcile key of the broadcast; chosen before `insert` is called. */
+  readonly scheduledStartTime: string
+}
+
+/** One persisted broadcast attempt (`broadcast_resources`). */
+export interface BroadcastAttemptRecord extends BroadcastAttemptInput {
+  readonly stage: BroadcastStage
+  /** Non-null means the result of that call is unknown (spec §9.1). */
+  readonly pendingCall: BroadcastMutatingCall | null
+  readonly pendingSince: string | null
+  readonly streamId: string | null
+  readonly broadcastId: string | null
+  readonly liveChatId: string | null
+  /** null = not attempted, true = accepted, false = `invalidAutoStart` (§4). */
+  readonly autoStart: boolean | null
+  readonly lastErrorReason: string | null
+  readonly createdAt: string
+  readonly updatedAt: string
+  readonly closedAt: string | null
+}
+
+/**
+ * What one resolved call adds to the attempt. Every field is optional so a caller
+ * records exactly what it learned; `stage` may only move forwards.
+ */
+export interface BroadcastAttemptUpdate {
+  readonly stage?: BroadcastStage
+  readonly streamId?: string
+  readonly broadcastId?: string
+  readonly liveChatId?: string
+  readonly scheduledStartTime?: string
+  readonly autoStart?: boolean
+  /** `null` clears a previously recorded reason. */
+  readonly lastErrorReason?: string | null
+}
+
 /** What a restart needs before it resumes source reception (spec §7.3(3), §11). */
 export interface RecoveryState {
   /** `null` before the first state commit. */
