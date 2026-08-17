@@ -7,6 +7,8 @@
 
 상태: `pending`(의존 대기) · `ready` · `dispatched` · `in_review` · `changes_requested` · `merged` · `blocked` · `failed`
 
+> **현재(2026-08-18 UTC): 스펙 v1 구현 task 전부 머지.** T0–T17 + T1b·T8b·T8c·T8d = PR 22개, open PR 0, main `59568bb`. 코디네이터가 main에서 로컬 게이트 5개(format/lint/typecheck/test 138 files·1884 passed·1 skipped/build) + `soak:ci` PASS 확인(E-5로 CI 미실행). 사용자 조치 대기: E-1·E-2·E-3·E-5·E-7(§4). 그 다음 단계는 Gate 0(`docs/ops/gate0-checklist.md`) — 사용자 결정 없이는 진행하지 않는다.
+
 | T-ID | 제목 | 의존 | [contract] | 상태 | 브랜치 slug | PR | Orca task |
 |---|---|---|---|---|---|---|---|
 | T0 | 모노레포 스캐폴드·CI | — | — | merged | t0-scaffold | #1 | `task_658a82e9f356` |
@@ -30,7 +32,7 @@
 | T17 | Windows 운영 스크립트(자동시작·OBS·아카이브) | T2, T12 | — | merged | t17-windows-ops | #17 | `task_e2466b978ebe` |
 | T8b | 엔진 버그픽스: /ingest/simulator inbox write 예외 시 hang(T15 발견) | T8 | — | merged | t8b-ingest-hang | #20 | `task_f1aeb51337bf` |
 | T8c | 엔진 버그픽스: 렌더러 ACK 경로 store 실패(disk-full) uncaught(T15 발견) | T8 | — | merged | t8c-ack-store-failure | #21 | `task_658a5641bf1c` |
-| T8d | 엔진 버그픽스: `#publish` markEffectPublished store 실패 시 미발행 row 고아화(T8c 발견) | T8c | — | in_review | t8d-publish-store-failure | #22 | `task_43eb61f3968d` |
+| T8d | 엔진 버그픽스: `#publish` markEffectPublished store 실패 시 미발행 row 고아화(T8c 발견) | T8c | — | merged | t8d-publish-store-failure | #22 | `task_43eb61f3968d` |
 
 디스패치 순서 원칙: `ready` 중 T-ID 낮은 것부터, 동시 2, `[contract]`는 하나만. 리뷰 Task는 `R-<T-ID>-<round>`로 별도 등록하고 아래 이력에만 남긴다.
 
@@ -195,3 +197,4 @@
 | 2026-08-17 21:01 | F-T8c-2 완료(d161b2f/4bd3b73: expiry store-first·#unrecordedEffects latch, 실제 Supervisor e2e 2개로 A-19 정책 검증; 1880 tests). worker 관측(결정 요청): `markEffectPublished`가 commit 트랜잭션 밖에서 실행되어 published_at 기록 거부 시 재기동까지 미발행 — **T8d 후보로 기록**(T8c 범위 밖, 리뷰 후 결정). R-T8c-3 `task_75dbb49b5749` → `ctx_bcb87da38636`(review) |
 | 2026-08-17 21:12 | R-T8c-3 verdict **approve**(round 2 blocker·major 해소, A-19대로 e2e 검증, UnknownEffect drop 근거 확인) → 최종 게이트(engine.ts/publisher.ts/test/티켓 4파일, supervisor·contract·deps 변경 0) → **PR #21 squash merge**(main 8dd7540). T8c worker release·worktree 제거. **T8d 등록·디스패치** `ctx_f8e5bd22e56b`(publish 경로 mark-first 권고, 불명확하면 ask; 선택: T15 pauseEffectAcks 제거). 코디네이터가 main 8dd7540에서 게이트 5개+soak:ci 로컬 재실행 중(E-5 대체 근거) |
 | 2026-08-17 21:54 | 코디네이터 main 8dd7540 로컬 게이트: format/lint/typecheck/test(137 files, 1880 passed, 1 skipped)/build 모두 exit 0, soak:ci verdict PASS(E-5 대체 근거). T8d worker_done(succeeded, PR #22: #publish mark-first·#unrecordedEffects latch·pass마다 mark 재시도·adoptRecoveredEffect 동일 경로; 발견: max_page_count로는 in-place update(published_at)가 거부되지 않아 live 경로는 실제 SQLITE_BUSY로 재현; 새 테스트 4개 수정 전 실패; 1884 tests; (b) pauseEffectAcks 제거 chore(soak) 포함, soak:ci PASS). R-T8d-1 `task_24cf94e11081` → `ctx_4fe5f4ea2d91`(review) |
+| 2026-08-17 22:11 | R-T8d-1 verdict **approve**(수정 전 4/4 실패 재현, SQLITE_BUSY fixture 20회 반복 안정, max_page_count 주장 독립 검증, soak:ci·matrix 20 PASS) → 최종 게이트(engine.ts·테스트·soak 주입 도구·티켓, supervisor·contract·deps 변경 0) → **PR #22 squash merge**(main 59568bb). T8d worker release·worktree 제거. **스펙 v1 구현 task 22개 전부 머지, open PR 0.** 코디네이터 main 59568bb 로컬 게이트: format/lint/typecheck/test(1884 passed, 1 skipped)/build exit 0, soak:ci PASS. 무인 운영 루프 종료 — 남은 것은 사용자 결정(E-1·E-2·E-3·E-5·E-7)과 Gate 0 |
