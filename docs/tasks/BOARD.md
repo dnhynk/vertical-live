@@ -20,7 +20,7 @@
 | T7 | 콘텐츠 디렉터·크리처 상태 모델(순수 도메인) | T1 | — | merged | t7-content-director | #6 | `task_e1e7531798ad` |
 | T8 | 상태 엔진(단일 writer·outbox·WS·ACK·유료 멱등) | T1b, T4, T6, T7 | — | merged | t8-state-engine | #12 | `task_0aadf1c96dcf` |
 | T9 | YouTube source adapter(gRPC streamList + REST fallback) | T3, T4, T8 | — | changes_requested | t9-youtube-adapter | #14 | `task_ec3d66a159bd` |
-| T10 | broadcast lifecycle·reconcile·한도 | T3, T4 | — | changes_requested | t10-broadcast-lifecycle | #11 | `task_41769f69d4b7` |
+| T10 | broadcast lifecycle·reconcile·한도 | T3, T4 | — | merged | t10-broadcast-lifecycle | #11 | `task_41769f69d4b7` |
 | T11 | 로컬 시뮬레이터·replay·지연 계측 | T5, T8 | — | changes_requested | t11-simulator-replay | #15 | `task_9470df5be9b8` |
 | T12 | supervisor 상태기계·건강 집계·kill switch·알림·dead-man | T2, T8, T9, T10 | — | pending | t12-supervisor | | `task_560530cfb813` |
 | T13 | 데이터 보존·삭제·철회 자동화 | T3, T4 | — | merged | t13-data-policy | #10 | `task_15cd2ae24e82` |
@@ -71,7 +71,7 @@
 | E-1 | 호스트 BSOD 0x00000050 2회(2026-08-16 14:47 UTC, 2026-08-17 03:24 UTC; minidump `081626-14718-01.dmp`, `081726-14937-01.dmp`) | 사용자가 minidump 분석(WinDbg `!analyze -v`)·메모리 진단·드라이버 갱신을 수행할지, 동시 에이전트 상한을 D-4(2+1)에서 낮출지 | 런북 2.8 |
 | E-2 | OBS 32.0.2 / obs-websocket 5.6.3을 고정 버전으로 승인 | 승인 시 docs/ops/obs-setup.md의 '후보' 표기 제거 | T2, T17 |
 | E-3 | 실제 OBS 스모크(`npm run obs:probe`) — 사용자가 OBS WebSocket 서버(loopback·비밀번호)를 켠 뒤 실행 | Gate 2 호스트 검증 항목 | T2 |
-| E-4 | **보고(비차단)**: PR #11(T10 broadcast lifecycle) 리뷰가 round 4까지 request_changes(각 round의 지적은 해소, 리뷰어가 reconcile·update 경로의 인접 갭을 계속 발견 — 절단 목록 무판정, 마커 생명주기(A-18), update 본문 정확성). 코디네이터는 수렴 중으로 판단해 F-T10-4 진행. 사용자가 중단·재설계를 원하면 지시 | 런북 2.5(4) | T10 |
+| E-4 | **해결(2026-08-18)**: PR #11 round 6에서 approve·머지. 원 항목: PR #11(T10 broadcast lifecycle) 리뷰가 round 4까지 request_changes(각 round의 지적은 해소, 리뷰어가 reconcile·update 경로의 인접 갭을 계속 발견 — 절단 목록 무판정, 마커 생명주기(A-18), update 본문 정확성). 코디네이터는 수렴 중으로 판단해 F-T10-4 진행. 사용자가 중단·재설계를 원하면 지시 | 런북 2.5(4) | T10 |
 
 ## 5. 이력
 
@@ -152,3 +152,4 @@
 | 2026-08-18 01:45 | F-T10-5 완료(liveStreams attempt 마커, #findInsertedStream). R-T9-1 verdict request_changes(major 3: pollingIntervalMillis 상한 절단, parts 정확 집합 미강제, reconnect/loss 계측 왜곡; minor proto provenance) → F-T9-1 `task_cf08276f2fe1` → T9 터미널. R-T10-6 `task_e508bdc836c5` → `ctx_1474dfecf147`(review2). 진행: R-T11-1(review) |
 | 2026-08-18 02:10 | R-T11-1 verdict request_changes(major 3: paid-ledger 테스트 false-positive, 재전송 검증이 stub Set, dev 패널 잔여 wait 생략) → F-T11-1 `task_edc8abe328d9` → T11 터미널. 진행: R-T10-6(review2), F-T9-1 |
 | 2026-08-18 02:40 | F-T9-1 완료(4건). R-T9-2 `task_8835c53b11f7` → `ctx_7e0a7146bc1c`(review). 진행: R-T10-6(review2), F-T11-1 |
+| 2026-08-18 03:05 | R-T10-6 verdict **approve**(round 1~5 회귀 감사 포함) → 최종 게이트(마이그레이션 001~005 정렬, stream key 로그 없음) → **PR #11 squash merge**(main df55585). T10 worker release·worktree 제거. E-4 해결. TASK_SPECS §T12에 선행 task 배선 요구(시작 순서·신호 집계·T13 sink·kill·토큰 주입·Discord vault) 추가. T12는 PR #14 머지 후 디스패치 |

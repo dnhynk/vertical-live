@@ -235,6 +235,13 @@
   - 알림: `AlertSink` 인터페이스 + Discord webhook 구현(URL은 vault), 심각도·중복 억제, 전달 실패 로그. 모더레이션 호출표(§12.3, Gate 0)는 config 자리만.
   - dead-man: Uptime Kuma push URL로 주기 heartbeat(§9.4(8)), off-host availability 사건은 외부에서 기록됨을 문서화. 주기 screenshot은 진단 저장만(freeze 판정 아님, §9.4).
   - `/health`에 상태기계·신호 요약.
+  - **추가(2026-08-18, 선행 task가 T12에 남긴 배선 — 각 티켓/PR 참조)**:
+    - 시작 순서(§7.3(3)·§9.1): DB 열기·마이그레이션 → 엔진 복구(T8 `engine.ready`) → T13 `RetentionScheduler.start()`·`RevocationAuthEventSink`를 T3 TokenManager sink에 연결 → T10 `ensureBound()` → T2 `ObsControl.setStreamServiceFromVault()` → `startStream()` → T9 chat source 시작(liveChatId는 T10 `broadcast_resources`의 열린 attempt에서 resolver로 읽음; config fallback은 개발 전용) → 마커 제거 후 `publish()`(A-18) — 이 순서를 코드와 테스트로 고정.
+    - T2 `HealthSignal`, T9 §9.4(3) 신호, T10 §9.4(6) 신호, T8 writer 실패(`lastFailure`/`consecutiveFailures`), 렌더러 `renderer_health`(§9.4(4))를 하나의 집계기로 모아 §9.2 전이를 결정하고 `interactionEnabled`를 엔진에 지시.
+    - T13 스케줄러/철회 sink의 `onResult/onError`를 필수로 연결하고 `clean===false`·`rowsUnprocessed>0`은 alert.
+    - `metrics_daily` 테이블이 생기면 T13 retention.json의 상태를 `planned`→`present`로 갱신(T15와 조율).
+    - `/admin/kill`은 T8 엔진의 `POST /admin/kill` 자리와 통합(loopback+token, vault). 렌더러 토큰(`server.rendererToken`)과 OBS Browser Source URL 주입은 T17과 분담(T12는 obs-websocket `SetInputSettings`로 URL+토큰 주입 함수 제공).
+    - AlertSink Discord 구현의 webhook URL은 vault(`alerts.discordWebhookUrl`), 심각도·중복 억제·전달 실패 로그.
 - **합격 기준**
   1. 신호 조합별 전이 테이블 테스트(입력 불건전→degraded+CTA off, 복구→live, 정책 오류→safe_stopped 후 자동 재시작 없음).
   2. kill switch 3경로 테스트, alert 전송 mock 테스트, dead-man push mock 테스트.
