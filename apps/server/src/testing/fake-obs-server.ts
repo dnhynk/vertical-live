@@ -117,6 +117,11 @@ export interface FakeObsServerOptions {
   readonly password?: string
   /** RPC version the server offers and requires. Defaults to 1. */
   readonly rpcVersion?: number
+  /**
+   * Delay `Hello` by this many real milliseconds. Used to drive the client past
+   * its connect timeout while the handshake is still in flight.
+   */
+  readonly helloDelayMs?: number
   readonly state?: Partial<FakeObsState>
 }
 
@@ -195,6 +200,7 @@ export class FakeObsServer {
   readonly #wss: WebSocketServer
   readonly #password: string
   readonly #rpcVersion: number
+  readonly #helloDelayMs: number
   readonly #sessions = new Set<Session>()
   readonly #port: number
   #pendingStartSamples = 0
@@ -204,6 +210,7 @@ export class FakeObsServer {
     this.#port = port
     this.#password = options.password ?? FAKE_OBS_DEFAULT_PASSWORD
     this.#rpcVersion = options.rpcVersion ?? RPC_VERSION
+    this.#helloDelayMs = options.helloDelayMs ?? 0
     this.state = { ...defaultState(), ...options.state }
     this.#wss.on('connection', (socket) => {
       this.#onConnection(socket)
@@ -222,6 +229,11 @@ export class FakeObsServer {
 
   get url(): string {
     return `ws://127.0.0.1:${this.#port}`
+  }
+
+  /** Sessions whose socket the server still holds open, identified or not. */
+  get openSessionCount(): number {
+    return this.#sessions.size
   }
 
   get identifiedSessionCount(): number {
@@ -280,14 +292,28 @@ export class FakeObsServer {
       this.#onMessage(session, raw.toString())
     })
 
-    send(socket, {
-      op: WEBSOCKET_OP_CODE.hello,
-      d: {
-        obsWebSocketVersion: this.state.obsWebSocketVersion,
-        rpcVersion: this.#rpcVersion,
-        authentication: { challenge: session.challenge, salt: session.salt },
-      },
-    })
+    const sendHello = (): void => {
+      if (socket.readyState !== socket.OPEN) {
+        return
+      }
+      send(socket, {
+        op: WEBSOCKET_OP_CODE.hello,
+        d: {
+          obsWebSocketVersion: this.state.obsWebSocketVersion,
+          rpcVersion: this.#rpcVersion,
+          authentication: { challenge: session.challenge, salt: session.salt },
+        },
+      })
+    }
+
+    if (this.#helloDelayMs > 0) {
+      const timer = setTimeout(sendHello, this.#helloDelayMs)
+      socket.once('close', () => {
+        clearTimeout(timer)
+      })
+      return
+    }
+    sendHello()
   }
 
   #onMessage(session: Session, raw: string): void {

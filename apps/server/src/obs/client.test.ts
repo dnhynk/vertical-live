@@ -5,7 +5,12 @@ import { EnvSecretProvider, MissingSecretError } from '../secrets/index.js'
 import { FakeClock } from '../testing/fake-clock.js'
 import { FakeObsServer } from '../testing/fake-obs-server.js'
 import { TEST_OBS_PASSWORD, testObsConfig, waitFor } from '../testing/obs-test-support.js'
-import { ObsClient, ObsNotConnectedError, OBS_CONNECTION_SIGNAL } from './client.js'
+import {
+  ObsClient,
+  ObsConnectTimeoutError,
+  ObsNotConnectedError,
+  OBS_CONNECTION_SIGNAL,
+} from './client.js'
 import { OBS_EVENT_SUBSCRIPTIONS, RPC_VERSION } from './protocol.js'
 
 const secrets = new EnvSecretProvider({ VL_OBS_PASSWORD: TEST_OBS_PASSWORD })
@@ -165,6 +170,35 @@ describe('ObsClient handshake and authentication', () => {
           clock: new FakeClock(),
         }),
     ).toThrow(/loopback/)
+  })
+
+  it('closes the socket when the connect timeout wins, leaving no ghost connection', async () => {
+    // Review round 1 finding 3. The Hello arrives after the connect timeout has
+    // already fired; without closing the socket the handshake completes behind
+    // the timeout and leaves an identified connection outside the state
+    // machine (spec §10.2: one component, one supervisor).
+    const server = await startServer({ password: TEST_OBS_PASSWORD, helloDelayMs: 150 })
+    const clock = new FakeClock()
+    const client = track(
+      new ObsClient({
+        config: testObsConfig(server.url, { connectTimeoutMs: 1000 }),
+        secrets,
+        clock,
+      }),
+    )
+
+    const connecting = client.connect()
+    await waitFor(() => clock.pendingTimerCount === 1, 'connect timeout is armed')
+    await clock.advance(1000)
+
+    await expect(connecting).rejects.toBeInstanceOf(ObsConnectTimeoutError)
+    expect(client.state).toBe('disconnected')
+
+    // Give the delayed Hello time to land, then confirm nothing came back up.
+    await waitFor(() => server.openSessionCount === 0, 'server sees the socket closed')
+    expect(client.identified).toBe(false)
+    expect(server.identifiedSessionCount).toBe(0)
+    await expect(client.call('GetVersion')).rejects.toBeInstanceOf(ObsNotConnectedError)
   })
 
   it('refuses requests while disconnected', async () => {

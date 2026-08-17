@@ -170,7 +170,22 @@ export class ObsClient {
         rpcVersion: RPC_VERSION,
         eventSubscriptions: OBS_EVENT_SUBSCRIPTIONS,
       })
-      const hello = await this.#withTimeout(connecting, this.#config.connectTimeoutMs)
+
+      let hello: Awaited<typeof connecting>
+      try {
+        hello = await this.#withTimeout(connecting, this.#config.connectTimeoutMs)
+      } catch (error) {
+        // The handshake may still be in flight when the timeout wins. Close the
+        // socket and swallow the attempt's late outcome, so a delayed Hello
+        // cannot leave an identified connection that no supervisor owns
+        // (spec §10.2: one component, one supervisor).
+        void connecting.then(
+          () => this.#obs.disconnect().catch(() => undefined),
+          () => undefined,
+        )
+        await this.#obs.disconnect().catch(() => undefined)
+        throw error
+      }
 
       this.#obsWebSocketVersion = hello.obsWebSocketVersion
       this.#negotiatedRpcVersion = hello.negotiatedRpcVersion
