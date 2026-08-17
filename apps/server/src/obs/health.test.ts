@@ -383,6 +383,57 @@ describe('ObsHealthMonitor against a fake v5 server', () => {
     })
   })
 
+  it('reports a reconnecting output from StreamStateChanged as degraded', async () => {
+    // Review round 1 finding 5. `StreamStateChanged` has no `outputReconnecting`
+    // field, so a retrying output arrives as `outputActive: true` with
+    // `OBS_WEBSOCKET_OUTPUT_RECONNECTING`. Reporting that as plain `ok` hides
+    // exactly the state spec §9.4(5) requires to be observable.
+    await connect()
+    const monitor = new ObsHealthMonitor({
+      source: client,
+      config: testObsConfig(server.url),
+      onSignal: (signal) => signals.push(signal),
+      clock: new FakeClock(),
+    })
+    monitor.start()
+
+    server.emitEvent(
+      'StreamStateChanged',
+      { outputActive: true, outputState: OBS_OUTPUT_STATE.reconnecting },
+      EVENT_SUBSCRIPTION.outputs,
+    )
+    await waitFor(() => signals.length > 0, 'reconnecting event reaches the monitor')
+
+    expect(signals[0]).toMatchObject({
+      name: OBS_STREAM_SIGNAL,
+      status: 'degraded',
+      reason: 'output_reconnecting',
+      detail: {
+        outputActive: true,
+        outputReconnecting: true,
+        outputState: OBS_OUTPUT_STATE.reconnecting,
+        source: 'StreamStateChanged',
+      },
+    })
+
+    // Recovery is observable too, and agrees with the polling path's wording.
+    signals = []
+    server.emitEvent(
+      'StreamStateChanged',
+      { outputActive: true, outputState: OBS_OUTPUT_STATE.reconnected },
+      EVENT_SUBSCRIPTION.outputs,
+    )
+    await waitFor(() => signals.length > 0, 'reconnected event reaches the monitor')
+    monitor.stop()
+
+    expect(signals[0]).toMatchObject({
+      name: OBS_STREAM_SIGNAL,
+      status: 'ok',
+      detail: { outputActive: true, outputReconnecting: false },
+    })
+    expect(signals[0]?.reason).toBeUndefined()
+  })
+
   it('does not receive events from categories it did not subscribe to', async () => {
     await connect()
     const unsubscribed: string[] = []

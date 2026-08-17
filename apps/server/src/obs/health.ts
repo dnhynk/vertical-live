@@ -4,6 +4,7 @@ import { systemClock, type Clock, type TimerHandle } from '../clock.js'
 import type { HealthSignal, HealthSignalSink } from '../health/types.js'
 import type { ObsConfig, ObsThresholdConfig } from './config.js'
 import { ObsNotConnectedError } from './client.js'
+import { OBS_OUTPUT_STATE } from './protocol.js'
 import type { ObsRequester } from './requester.js'
 
 /**
@@ -305,16 +306,27 @@ export class ObsHealthMonitor {
   }
 
   readonly #handleStreamStateChanged = (data: OBSEventTypes['StreamStateChanged']): void => {
+    // `StreamStateChanged` carries no `outputReconnecting` flag, so the
+    // reconnecting state has to be read off `outputState`. Without this an
+    // output retrying its connection is reported as plain `ok`, and spec
+    // §9.4(5) requires reconnecting to be observable. The precedence mirrors
+    // the polling path in `deriveObsHealthSignals`, so both sources of the
+    // `obs.stream` signal agree.
+    const outputReconnecting = data.outputState === OBS_OUTPUT_STATE.reconnecting
+
     this.#onSignal(
       signal(
         OBS_STREAM_SIGNAL,
         { utc: this.#clock.nowUtcIso(), monotonicMs: this.#clock.monotonicMs() },
         {
           ...(data.outputActive
-            ? { status: 'ok' as const }
+            ? outputReconnecting
+              ? { status: 'degraded' as const, reason: 'output_reconnecting' }
+              : { status: 'ok' as const }
             : { status: 'degraded' as const, reason: 'output_inactive' }),
           detail: {
             outputActive: data.outputActive,
+            outputReconnecting,
             outputState: data.outputState,
             source: 'StreamStateChanged',
           },
