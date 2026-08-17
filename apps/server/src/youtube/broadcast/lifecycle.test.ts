@@ -122,6 +122,10 @@ describe('normal path', () => {
     )
 
     const streamInsert = h.server.requestsFor('liveStreams.insert')[0]
+    // The stream carries the same attempt identity as the broadcast (review round 5, B1).
+    expect((streamInsert?.body as { snippet: { description: string } }).snippet.description).toBe(
+      h.temp.store.listBroadcastAttempts()[0]?.attemptMarker,
+    )
     expect(streamInsert?.body).toMatchObject({
       snippet: { title: 'vertical-live ingest' },
       // No API field sets 9:16; the portrait canvas is OBS's (see config.ts).
@@ -313,6 +317,95 @@ describe('uncertain results are reconciled, never retried blindly', () => {
     const attempt = h.temp.store.findOpenBroadcastAttempt()
     expect(attempt?.broadcastId).toBeNull()
     expect(attempt?.lastErrorReason).toBe('reconciled_not_applied')
+  })
+
+  it('adopts the stream its own insert created, not a same-title one beside it', async () => {
+    // Review round 5 (B1) reproduction. The reuse scan finds nothing; a same-title decoy
+    // appears while the insert is in flight; the insert is applied and left unanswered.
+    // Title matching adopted the decoy and vaulted its key — the value OBS acts on —
+    // while the stream the insert created was orphaned.
+    const clock = new FakeClock()
+    const h = await setUp({ clock })
+    const lifecycle = h.lifecycle()
+    let decoy: { id: string; streamKey: string } | undefined
+    h.server.onRequest = (request) => {
+      if (request.method === 'liveStreams.insert' && decoy === undefined) {
+        decoy = h.server.seedStream({ title: h.config.stream.title })
+      }
+    }
+
+    const target = await withAppliedButUnknown(h, clock, 'liveStreams.insert', () =>
+      lifecycle.ensureBound(),
+    )
+
+    // Two same-title streams exist; only one carries this attempt's marker.
+    const sameTitle = [...h.server.streams.values()].filter(
+      (stream) => stream.title === h.config.stream.title,
+    )
+    expect(sameTitle).toHaveLength(2)
+    const attempt = h.temp.store.getBroadcastAttempt(target.attemptId)
+    expect(target.streamId).not.toBe(decoy?.id)
+    expect(h.server.streams.get(target.streamId)?.description).toContain(attempt?.attemptMarker)
+    // The vault carries the adopted stream's key, not the decoy's.
+    expect(await h.vault.get('youtube.streamKey')).toBe(
+      h.server.streams.get(target.streamId)?.streamKey,
+    )
+    expect(await h.vault.get('youtube.streamKey')).not.toBe(decoy?.streamKey)
+    expect(h.server.requestsFor('liveStreams.insert')).toHaveLength(1)
+    expect(attempt?.pendingCall).toBeNull()
+  })
+
+  it('stays inconclusive when two streams carry the same attempt marker', async () => {
+    const h = await setUp({ maxAttempts: 1 })
+    const lifecycle = h.lifecycle()
+    h.server.queueFailure('liveStreams.insert', { status: 503, reason: 'serviceUnavailable' })
+    // Two inserts landed for one attempt: adopting either orphans the other, and either
+    // key could be the wrong one to vault.
+    h.server.onRequest = (request) => {
+      if (request.method === 'liveStreams.insert') {
+        const body = request.body as { snippet: { title: string; description: string } }
+        for (const index of [1, 2]) {
+          h.server.seedStream({
+            title: body.snippet.title,
+            description: body.snippet.description,
+            streamKey: `synthetic-duplicate-key-${String(index)}`,
+          })
+        }
+      }
+    }
+
+    const error = await lifecycle.ensureBound().catch((caught: unknown) => caught)
+
+    expect(error).toBeInstanceOf(BroadcastReconcileInconclusiveError)
+    expect((error as BroadcastReconcileInconclusiveError).detail).toBe('stream_marker_ambiguous')
+    expect(await h.vault.get('youtube.streamKey')).toBeUndefined()
+    expect(h.custodian.stagedStreamIds).toEqual([])
+    const attempt = h.temp.store.findOpenBroadcastAttempt()
+    expect(attempt?.pendingCall).toBe('liveStreams.insert')
+    expect(attempt?.streamId).toBeNull()
+  })
+
+  it('stays inconclusive when the marker turns up on a stream with another title', async () => {
+    const h = await setUp({ maxAttempts: 1 })
+    const lifecycle = h.lifecycle()
+    h.server.queueFailure('liveStreams.insert', { status: 503, reason: 'serviceUnavailable' })
+    h.server.onRequest = (request) => {
+      if (request.method === 'liveStreams.insert') {
+        const body = request.body as { snippet: { description: string } }
+        h.server.seedStream({
+          title: 'synthetic-some-other-title',
+          description: body.snippet.description,
+        })
+      }
+    }
+
+    const error = await lifecycle.ensureBound().catch((caught: unknown) => caught)
+
+    expect((error as BroadcastReconcileInconclusiveError).detail).toBe(
+      'stream_marker_title_mismatch',
+    )
+    expect(await h.vault.get('youtube.streamKey')).toBeUndefined()
+    expect(h.temp.store.findOpenBroadcastAttempt()?.pendingCall).toBe('liveStreams.insert')
   })
 
   it('writes nothing to the vault when a truncated stream scan cannot decide', async () => {

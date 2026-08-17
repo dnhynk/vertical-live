@@ -50,6 +50,7 @@ export interface FakeRequest {
 export interface FakeStream {
   id: string
   title: string
+  description: string | undefined
   isReusable: boolean
   resolution: string
   frameRate: string
@@ -225,6 +226,7 @@ export class FakeYouTubeApiServer {
     const stream: FakeStream = {
       id: `synthetic-stream-${String(serial)}`,
       title: 'vertical-live ingest',
+      description: undefined,
       isReusable: true,
       resolution: 'variable',
       frameRate: 'variable',
@@ -473,6 +475,9 @@ export class FakeYouTubeApiServer {
     }
     return this.seedStream({
       title,
+      ...(typeof snippet['description'] === 'string'
+        ? { description: snippet['description'] }
+        : {}),
       resolution: String(cdn['resolution'] ?? ''),
       frameRate: String(cdn['frameRate'] ?? ''),
       ingestionType: String(cdn['ingestionType'] ?? ''),
@@ -629,7 +634,10 @@ function streamResource(stream: FakeStream, parts: readonly string[]): Record<st
   return keepParts(parts, {
     kind: 'youtube#liveStream',
     id: stream.id,
-    snippet: { title: stream.title },
+    snippet: {
+      title: stream.title,
+      ...(stream.description === undefined ? {} : { description: stream.description }),
+    },
     cdn: {
       frameRate: stream.frameRate,
       ingestionType: stream.ingestionType,

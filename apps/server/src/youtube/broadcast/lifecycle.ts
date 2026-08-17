@@ -472,6 +472,9 @@ export class BroadcastLifecycle {
         const created = await this.#runCall(current, 'liveStreams.insert', () =>
           this.#api.insertLiveStream({
             title: current.streamTitle,
+            // The identity a reconcile matches on. The title cannot serve: it is the
+            // reuse key, so several streams can carry it (review round 5, B1).
+            description: describeWithMarker('', current.attemptMarker),
             resolution: this.#config.stream.resolution,
             frameRate: this.#config.stream.frameRate,
             ingestionType: this.#config.stream.ingestionType,
@@ -792,18 +795,19 @@ export class BroadcastLifecycle {
   ): Promise<BroadcastAttemptRecord> {
     switch (call) {
       case 'liveStreams.insert': {
-        const search = await this.#selectStreamByTitle(attempt.streamTitle, {
-          requireKey: true,
-          // No verdict *and* no side effect from a truncated scan (review round 4, B1).
-          requireCompleteScan: true,
-        })
+        const search = await this.#findInsertedStream(attempt)
         this.#alertReconcile(call, search.streamId !== null, {
           attemptId: attempt.attemptId,
           listComplete: search.complete,
+          markerMatches: search.markerMatches,
         })
-        // Same rule as the broadcast case below (review round 3, B1): a partial scan
-        // supports no verdict, not even a positive one.
+        // Exactly the broadcast rules, in the same order (review rounds 3–5): a partial
+        // scan supports no verdict, two markers mean two inserts landed, and a marker
+        // whose stream carries another title is not something to reason about. None of
+        // these branches has written to the vault — `#findInsertedStream` commits a key
+        // only on the single-match path.
         this.#assertConclusive(attempt, call, search.complete, 'stream_list_truncated')
+        this.#assertConclusive(attempt, call, search.markerMatches <= 1, 'stream_marker_ambiguous')
         if (search.streamId !== null) {
           // The insert did land: the stream exists, so its key has to reach the
           // vault even though this process never saw the insert's own response.
@@ -812,6 +816,12 @@ export class BroadcastLifecycle {
             streamId: search.streamId,
           })
         }
+        this.#assertConclusive(
+          attempt,
+          call,
+          search.markerMatches === 0,
+          'stream_marker_title_mismatch',
+        )
         return this.#store.recordBroadcastCallResult(attempt.attemptId, {
           lastErrorReason: 'reconciled_not_applied',
         })
@@ -1215,15 +1225,17 @@ export class BroadcastLifecycle {
   // ------------------------------------------------------------------ helpers
 
   /**
-   * Finds this product's ingestion stream and finishes stream-key custody in the
-   * same step. `liveStreams.list` returns a key for **every** stream on the channel,
+   * Picks an ingestion stream to *reuse* and finishes stream-key custody in the same
+   * step. This is a choice among interchangeable resources, not a verdict about an
+   * uncertain call — the reconcile path uses `#findInsertedStream` instead, which
+   * demands the attempt marker. `liveStreams.list` returns a key for **every** stream on the channel,
    * so leaving the staged values behind would keep keys in memory outside the vault
    * (review round 1, M1): the selected one is committed, the rest are discarded, on
    * every path out of here.
    */
   async #selectStreamByTitle(
     title: string,
-    options: { readonly requireKey: boolean; readonly requireCompleteScan?: boolean },
+    options: { readonly requireKey: boolean },
   ): Promise<{ readonly streamId: string | null; readonly complete: boolean }> {
     let page
     try {
@@ -1235,14 +1247,6 @@ export class BroadcastLifecycle {
       this.#streamKeys.discard()
       throw error
     }
-    // The completeness gate has to come *before* the vault write, not after the caller
-    // reads `complete` (review round 4, B1). Committing the first visible same-title
-    // key and only then refusing the verdict is still a decision taken from a partial
-    // scan — and the one OBS treats as authoritative.
-    if (options.requireCompleteScan === true && !page.complete) {
-      this.#streamKeys.discard()
-      return { streamId: null, complete: false }
-    }
     const streamId = page.items.find((stream) => stream.title === title)?.id ?? null
     if (streamId === null) {
       this.#streamKeys.discard()
@@ -1250,6 +1254,49 @@ export class BroadcastLifecycle {
       await this.#streamKeys.commit(streamId, { required: options.requireKey })
     }
     return { streamId, complete: page.complete }
+  }
+
+  /**
+   * Looks for the stream *this attempt's* insert created (review round 5, B1).
+   *
+   * The attempt marker in `snippet.description` is the identity; the configured title
+   * only corroborates it. Matching on the title alone adopted whichever same-title
+   * stream happened to be listed first — and wrote its key to the vault, which is the
+   * value OBS treats as authoritative — while the stream the insert had actually
+   * created was orphaned. A key is committed on exactly one path: a single marker match
+   * whose title agrees, from a complete scan.
+   */
+  async #findInsertedStream(attempt: BroadcastAttemptRecord): Promise<{
+    readonly streamId: string | null
+    readonly complete: boolean
+    readonly markerMatches: number
+  }> {
+    let page
+    try {
+      page = await this.#api.listLiveStreams(
+        { mine: true },
+        { maxPages: this.#config.reconcileMaxPages },
+      )
+    } catch (error) {
+      this.#streamKeys.discard()
+      throw error
+    }
+    // Nothing below writes to the vault until a single unambiguous match is in hand, so
+    // an inconclusive scan leaves no trace anywhere (review round 4, B1).
+    if (!page.complete) {
+      this.#streamKeys.discard()
+      return { streamId: null, complete: false, markerMatches: 0 }
+    }
+    const marked = page.items.filter((stream) =>
+      carriesAttemptMarker(stream.description, attempt.attemptMarker),
+    )
+    const only = marked.length === 1 ? marked[0] : undefined
+    if (only === undefined || only.title !== attempt.streamTitle) {
+      this.#streamKeys.discard()
+      return { streamId: null, complete: true, markerMatches: marked.length }
+    }
+    await this.#streamKeys.commit(only.id, { required: true })
+    return { streamId: only.id, complete: true, markerMatches: 1 }
   }
 
   /**

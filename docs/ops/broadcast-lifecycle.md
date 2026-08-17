@@ -25,6 +25,12 @@ liveStreams.list (재사용 확인) → liveStreams.insert → liveBroadcasts.in
 3. **`publish()`는 `marker_cleared_at`이 없으면 거부한다.** 공개 전환(`private → public|unlisted`)은 이 메서드밖에 없고, `ensureLive()`는 이것을 자동으로 호출하지 않는다. 즉 마커가 남아 있는 방송은 코드 차원에서 공개될 수 없다.
 4. 채택한 남의 방송(한도 복구 경로)은 우리 마커를 갖고 있지 않으므로 description을 건드리지 않는다.
 
+### ingestion stream의 마커는 남는다 (round 5)
+
+`liveStreams.insert`에도 같은 마커가 `snippet.description`으로 들어간다. stream의 **title은 재사용 키**여서 같은 title을 가진 stream이 여러 개일 수 있고, 그러면 "내 insert가 만든 것"을 title로 가릴 수 없다. reconcile은 마커 단일 일치일 때만 채택하고, 복수·title 불일치·목록 절단은 inconclusive로 두며 **vault에 아무것도 쓰지 않는다**.
+
+broadcast와 달리 이 마커는 **제거하지 않는다.** `liveStream`은 "information about the video stream that you are transmitting to YouTube"(공식 리소스 문서), 즉 송출 입력 자원이고 watch 페이지를 갖는 것은 `liveBroadcast`/video다. 다만 공식 문서는 stream snippet이 시청자에게 보이는지 **말하지 않는다**. 그래서 이것은 증명이 아니라 판단이고, 두 가지 안전장치를 둔다: 마커는 `title`이 아니라 `description`에 넣는다(Studio는 stream을 title로 나열한다), 그리고 Gate 2에서 stream description이 노출되는 화면이 발견되면 broadcast와 같은 `update`+검증 단계를 추가한다(A-18과 동일한 방식).
+
 `liveBroadcasts.update`는 **요청한 part의 모든 mutable 멤버를 덮어쓴다**(공식 문서: "if your request does not specify a value for a property that already has a value, the property's existing value will be deleted"). 단 **`snippet.title`과 `status.privacyStatus`는 2023-08-01부터 예외**로, 생략하면 값이 유지된다(revision history: "Omitting these fields from the request will leave them unchanged"). 그래서 서버가 보내는 것은 이렇게 정해져 있다:
 
 | 목적 | 보내는 것 | 보내지 않는 것과 이유 |

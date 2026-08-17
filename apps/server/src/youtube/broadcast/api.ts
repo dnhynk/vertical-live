@@ -185,6 +185,12 @@ export interface LiveStreamSummary {
   readonly id: string
   readonly title: string | null
   /**
+   * `snippet.description`, which carries this product's attempt marker. A title is not
+   * an identity — several streams can share one — so the marker is what a reconcile
+   * matches on (review round 5, B1).
+   */
+  readonly description: string | null
+  /**
    * Only ever known from `insert`: `liveStreams.list` does not accept the
    * `contentDetails` part, so a listed stream reports `null` here.
    */
@@ -224,6 +230,13 @@ export interface LiveBroadcastSummary {
 
 export interface InsertLiveStreamInput {
   readonly title: string
+  /**
+   * Writable on insert and returned by `list` in the `snippet` part
+   * (https://developers.google.com/youtube/v3/live/docs/liveStreams/insert and
+   * .../liveStreams, both checked 2026-08-17), which is what makes it usable as the
+   * attempt identity a reconcile can read back.
+   */
+  readonly description: string
   readonly resolution: StreamResolution
   readonly frameRate: StreamFrameRate
   readonly ingestionType: StreamIngestionType
@@ -369,7 +382,7 @@ export class YouTubeLiveApi {
         ]),
       },
       body: {
-        snippet: { title: input.title },
+        snippet: { title: input.title, description: input.description },
         cdn: {
           frameRate: input.frameRate,
           ingestionType: input.ingestionType,
@@ -761,6 +774,8 @@ export class YouTubeLiveApi {
     return {
       id,
       title: snippet === undefined ? null : (readOptionalString(snippet, 'title') ?? null),
+      description:
+        snippet === undefined ? null : (readOptionalString(snippet, 'description') ?? null),
       isReusable:
         contentDetails === undefined
           ? null

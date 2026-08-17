@@ -83,6 +83,7 @@ describe('requests', () => {
 
     await h.api.insertLiveStream({
       title: 'vertical-live ingest',
+      description: 'vl-attempt:synthetic',
       resolution: 'variable',
       frameRate: 'variable',
       ingestionType: 'rtmp',
@@ -267,6 +268,7 @@ describe('stream key handling', () => {
 
     const created = await h.api.insertLiveStream({
       title: 'vertical-live ingest',
+      description: 'vl-attempt:synthetic',
       resolution: 'variable',
       frameRate: 'variable',
       ingestionType: 'rtmp',
@@ -305,6 +307,7 @@ describe('stream key handling', () => {
     await expect(
       api.insertLiveStream({
         title: 'vertical-live ingest',
+        description: 'vl-attempt:synthetic',
         resolution: 'variable',
         frameRate: 'variable',
         ingestionType: 'rtmp',

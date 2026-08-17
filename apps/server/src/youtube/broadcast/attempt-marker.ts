@@ -26,6 +26,26 @@
  * putting it on a (by default private) broadcast carries no personal data (§12.4).
  */
 
+/**
+ * The same marker identifies this attempt's `liveStreams.insert` (review round 5, B1):
+ * a stream's title is its *reuse* key, so several streams can carry it and it cannot
+ * serve as the identity of one call. `snippet.description` is writable on insert and
+ * comes back in the `snippet` part of `liveStreams.list`
+ * (https://developers.google.com/youtube/v3/live/docs/liveStreams/insert and
+ * .../liveStreams, checked 2026-08-17), with 10,000 characters of room.
+ *
+ * Unlike the broadcast's, the stream marker is **not removed again**. A `liveStream` is
+ * "information about the video stream that you are transmitting to YouTube" — the
+ * ingestion endpoint, not the published artifact; the `liveBroadcast`/video is what has
+ * a watch page, and the description guidance the broadcast marker had to respect is
+ * about *video* metadata. The reference states nothing either way about whether a
+ * stream's snippet is shown to viewers, so this is a reasoned decision and not a proven
+ * one: the marker goes in `description` rather than `title` (Studio lists streams by
+ * title), and if Gate 2 finds any surface that exposes a stream description, the fix is
+ * the same `update`-then-verify step the broadcast already uses (BOARD A-18). Recorded
+ * in the ticket and in `docs/ops/broadcast-lifecycle.md`.
+ */
+
 /** Stable prefix. Changing it is a migration concern: see `attemptMarkerOf`. */
 export const ATTEMPT_MARKER_PREFIX = 'vl-attempt:'
 
