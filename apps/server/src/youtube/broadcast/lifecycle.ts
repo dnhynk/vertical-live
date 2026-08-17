@@ -284,12 +284,10 @@ export class BroadcastLifecycle {
         const updated = await this.#runCall(current, 'liveBroadcasts.update', () =>
           this.#api.updateBroadcast({
             broadcastId,
-            // `status` overrides every mutable member it contains, so the
-            // made-for-kids declaration travels with the privacy change.
-            status: {
-              privacyStatus,
-              selfDeclaredMadeForKids: this.#config.selfDeclaredMadeForKids,
-            },
+            // `privacyStatus` is the only writable member of `status` this method
+            // documents, so it travels alone. `selfDeclaredMadeForKids` is set at insert
+            // and is not updatable here (review round 4, M2).
+            status: { privacyStatus },
           }),
         )
         if (updated.privacyStatus !== privacyStatus) {
@@ -330,8 +328,8 @@ export class BroadcastLifecycle {
       return this.#store.updateBroadcastAttempt(attempt.attemptId, { markerCleared: true })
     }
 
-    const title = observed.title ?? this.#config.title
     const scheduledStartTime = observed.scheduledStartTime ?? attempt.scheduledStartTime
+    const scheduledEndTime = observed.scheduledEndTime
     const description = withoutAttemptMarker(observed.description, attempt.attemptMarker)
 
     return this.#withRetries(
@@ -339,16 +337,28 @@ export class BroadcastLifecycle {
       'liveBroadcasts.update',
       async (current) => {
         const updated = await this.#runCall(current, 'liveBroadcasts.update', () =>
-          // `snippet` overrides every mutable member it contains, so title and
-          // scheduled start have to travel with the description or they are deleted.
+          // What travels, and what deliberately does not (review round 4, M1):
+          // `scheduledStartTime` is required with `snippet`; `scheduledEndTime` has no
+          // exemption from deletion-on-omission, so an operator's end time is read back
+          // and sent again; `title` is exempt since 2023-08-01, so it is left out
+          // rather than overwriting a Studio edit made since this read.
           this.#api.updateBroadcast({
             broadcastId,
-            snippet: { title, description, scheduledStartTime },
+            snippet: {
+              description,
+              scheduledStartTime,
+              ...(scheduledEndTime === null ? {} : { scheduledEndTime }),
+            },
           }),
         )
         if (carriesAttemptMarker(updated.description, current.attemptMarker)) {
           throw new Error(
             `broadcast ${broadcastId} still carries its attempt marker after the update`,
+          )
+        }
+        if (updated.scheduledEndTime !== scheduledEndTime) {
+          throw new Error(
+            `broadcast ${broadcastId} lost its scheduledEndTime (${String(scheduledEndTime)} → ${String(updated.scheduledEndTime)}) while its attempt marker was removed`,
           )
         }
         this.#alert('attempt_marker_cleared', 'updated', { broadcastId })
@@ -782,7 +792,11 @@ export class BroadcastLifecycle {
   ): Promise<BroadcastAttemptRecord> {
     switch (call) {
       case 'liveStreams.insert': {
-        const search = await this.#selectStreamByTitle(attempt.streamTitle, { requireKey: true })
+        const search = await this.#selectStreamByTitle(attempt.streamTitle, {
+          requireKey: true,
+          // No verdict *and* no side effect from a truncated scan (review round 4, B1).
+          requireCompleteScan: true,
+        })
         this.#alertReconcile(call, search.streamId !== null, {
           attemptId: attempt.attemptId,
           listComplete: search.complete,
@@ -1209,7 +1223,7 @@ export class BroadcastLifecycle {
    */
   async #selectStreamByTitle(
     title: string,
-    options: { readonly requireKey: boolean },
+    options: { readonly requireKey: boolean; readonly requireCompleteScan?: boolean },
   ): Promise<{ readonly streamId: string | null; readonly complete: boolean }> {
     let page
     try {
@@ -1220,6 +1234,14 @@ export class BroadcastLifecycle {
     } catch (error) {
       this.#streamKeys.discard()
       throw error
+    }
+    // The completeness gate has to come *before* the vault write, not after the caller
+    // reads `complete` (review round 4, B1). Committing the first visible same-title
+    // key and only then refusing the verdict is still a decision taken from a partial
+    // scan — and the one OBS treats as authoritative.
+    if (options.requireCompleteScan === true && !page.complete) {
+      this.#streamKeys.discard()
+      return { streamId: null, complete: false }
     }
     const streamId = page.items.find((stream) => stream.title === title)?.id ?? null
     if (streamId === null) {

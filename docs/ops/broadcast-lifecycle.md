@@ -25,7 +25,15 @@ liveStreams.list (재사용 확인) → liveStreams.insert → liveBroadcasts.in
 3. **`publish()`는 `marker_cleared_at`이 없으면 거부한다.** 공개 전환(`private → public|unlisted`)은 이 메서드밖에 없고, `ensureLive()`는 이것을 자동으로 호출하지 않는다. 즉 마커가 남아 있는 방송은 코드 차원에서 공개될 수 없다.
 4. 채택한 남의 방송(한도 복구 경로)은 우리 마커를 갖고 있지 않으므로 description을 건드리지 않는다.
 
-`liveBroadcasts.update`는 **요청한 part의 모든 mutable 멤버를 덮어쓴다**(공식 문서: "if your request does not specify a value for a property that already has a value, the property's existing value will be deleted"). 그래서 description만 바꿀 때도 `snippet.title`·`snippet.scheduledStartTime`을 함께 보내고, privacy를 바꿀 때는 `status.selfDeclaredMadeForKids`를 함께 보낸다. `contentDetails`는 이 경로로 절대 보내지 않는다(추가 필수 필드와 시작 후 수정 금지 오류가 있다).
+`liveBroadcasts.update`는 **요청한 part의 모든 mutable 멤버를 덮어쓴다**(공식 문서: "if your request does not specify a value for a property that already has a value, the property's existing value will be deleted"). 단 **`snippet.title`과 `status.privacyStatus`는 2023-08-01부터 예외**로, 생략하면 값이 유지된다(revision history: "Omitting these fields from the request will leave them unchanged"). 그래서 서버가 보내는 것은 이렇게 정해져 있다:
+
+| 목적 | 보내는 것 | 보내지 않는 것과 이유 |
+|---|---|---|
+| 마커 제거 | `snippet.description`(마커만 뺀 값) + `snippet.scheduledStartTime`(snippet을 보낼 때 필수) + `snippet.scheduledEndTime`(값이 있으면 — 예외 목록에 없어 생략하면 삭제된다) | `snippet.title` — 예외라서 생략해도 유지된다. 방금 읽은 값을 되돌려 보내면 그 사이 운영자가 Studio에서 고친 제목을 덮어쓴다 |
+| 공개 전환 | `status.privacyStatus` | `status.selfDeclaredMadeForKids` — update의 writable 목록에 없다(리소스 문서상 insert·list 전용). insert에서 정해지고 이 경로로는 바꾸지 않는다 |
+| — | — | `contentDetails` 전체 — 추가 필수 필드(`monitorStream.*`)와 시작 후 수정 금지 오류가 있다 |
+
+가짜 API 서버도 이 계약을 그대로 모델링한다(생략된 `title`은 유지, 생략된 `description`·`scheduledEndTime`은 삭제, `status.selfDeclaredMadeForKids`는 거부).
 
 ## 3. 운영자가 하는 일 / 하지 않는 일
 

@@ -66,6 +66,7 @@ export interface FakeBroadcast {
   title: string
   description: string | undefined
   scheduledStartTime: string
+  scheduledEndTime: string | undefined
   privacyStatus: string
   selfDeclaredMadeForKids: boolean
   latencyPreference: string
@@ -246,6 +247,7 @@ export class FakeYouTubeApiServer {
       title: 'Autonomous Vertical Live',
       description: undefined,
       scheduledStartTime: '2026-01-01T00:02:00.000Z',
+      scheduledEndTime: undefined,
       privacyStatus: 'private',
       selfDeclaredMadeForKids: false,
       latencyPreference: 'ultraLow',
@@ -421,22 +423,41 @@ export class FakeYouTubeApiServer {
       if (typeof scheduledStartTime !== 'string' || scheduledStartTime === '') {
         throw fail(400, 'scheduledStartTimeRequired', 'youtube.liveBroadcast')
       }
-      // Omitted members are deleted, exactly as the reference states.
-      broadcast.title = typeof snippet['title'] === 'string' ? snippet['title'] : ''
+      // `title` is one of the two fields that survive omission since 2023-08-01
+      // ("omitting these fields from the request will leave them unchanged",
+      // revision_history#august-1-2023); everything else in the part is replaced, so an
+      // omitted member is deleted.
+      if (typeof snippet['title'] === 'string') {
+        broadcast.title = snippet['title']
+      }
       broadcast.description =
         typeof snippet['description'] === 'string' && snippet['description'] !== ''
           ? snippet['description']
+          : undefined
+      broadcast.scheduledEndTime =
+        typeof snippet['scheduledEndTime'] === 'string' && snippet['scheduledEndTime'] !== ''
+          ? snippet['scheduledEndTime']
           : undefined
       broadcast.scheduledStartTime = scheduledStartTime
     }
     if (parts.includes('status')) {
       const status = asRecord(root['status'])
-      const privacyStatus = status['privacyStatus']
-      if (typeof privacyStatus !== 'string' || privacyStatus === '') {
-        throw fail(400, 'invalidPrivacyStatus', 'youtube.liveBroadcast')
+      // The update reference's writable list for `status` is `privacyStatus` alone, and
+      // the resource defines `selfDeclaredMadeForKids` for insert and list only. The
+      // real API would ignore it silently and publishes no reason string for it; this
+      // fake is deliberately stricter so a request shape the product should not send
+      // fails a test instead (review round 4, M2).
+      if (status['selfDeclaredMadeForKids'] !== undefined) {
+        throw fail(400, 'syntheticUnsupportedUpdateField', 'youtube.liveBroadcast')
       }
-      broadcast.privacyStatus = privacyStatus
-      broadcast.selfDeclaredMadeForKids = status['selfDeclaredMadeForKids'] === true
+      const privacyStatus = status['privacyStatus']
+      // Also exempt from deletion-on-omission since 2023-08-01.
+      if (privacyStatus !== undefined) {
+        if (typeof privacyStatus !== 'string' || privacyStatus === '') {
+          throw fail(400, 'invalidPrivacyStatus', 'youtube.liveBroadcast')
+        }
+        broadcast.privacyStatus = privacyStatus
+      }
     }
     return broadcast
   }
@@ -496,6 +517,9 @@ export class FakeYouTubeApiServer {
         ? { description: snippet['description'] }
         : {}),
       scheduledStartTime,
+      ...(typeof snippet['scheduledEndTime'] === 'string'
+        ? { scheduledEndTime: snippet['scheduledEndTime'] }
+        : {}),
       privacyStatus,
       selfDeclaredMadeForKids: status['selfDeclaredMadeForKids'] === true,
       latencyPreference: String(contentDetails['latencyPreference'] ?? 'normal'),
@@ -641,6 +665,9 @@ function broadcastResource(
       title: broadcast.title,
       ...(broadcast.description === undefined ? {} : { description: broadcast.description }),
       scheduledStartTime: broadcast.scheduledStartTime,
+      ...(broadcast.scheduledEndTime === undefined
+        ? {}
+        : { scheduledEndTime: broadcast.scheduledEndTime }),
       ...(broadcast.actualStartTime === null ? {} : { actualStartTime: broadcast.actualStartTime }),
       liveChatId: broadcast.liveChatId,
     },

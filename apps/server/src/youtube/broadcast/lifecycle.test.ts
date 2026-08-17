@@ -315,6 +315,46 @@ describe('uncertain results are reconciled, never retried blindly', () => {
     expect(attempt?.lastErrorReason).toBe('reconciled_not_applied')
   })
 
+  it('writes nothing to the vault when a truncated stream scan cannot decide', async () => {
+    // Review round 4 (B1) reproduction. A same-title decoy is visible on the first page
+    // and the stream this attempt's insert actually created sits past the page bound.
+    // The DB already refused to decide; the vault must refuse too, because the key it
+    // holds is the one OBS treats as authoritative.
+    const h = await setUp()
+    const decoy = h.server.seedStream({ title: h.config.stream.title })
+    for (let index = 0; index < 200; index += 1) {
+      h.server.seedStream({ title: `synthetic-unrelated-stream-${String(index)}` })
+    }
+    const landed = h.server.seedStream({ title: h.config.stream.title })
+    // The durable state of a process that died with the insert in flight.
+    const attempt = h.temp.store.beginBroadcastAttempt({
+      attemptId: 'attempt-resumed',
+      strategy: 'single',
+      streamTitle: h.config.stream.title,
+      scheduledStartTime: '2026-01-01T00:02:00.000Z',
+      attemptMarker: 'vl-attempt:attempt-resumed',
+    })
+    h.temp.store.markBroadcastCallPending(attempt.attemptId, 'liveStreams.insert')
+
+    const error = await h
+      .lifecycle()
+      .resume()
+      .catch((caught: unknown) => caught)
+
+    expect(error).toBeInstanceOf(BroadcastReconcileInconclusiveError)
+    expect((error as BroadcastReconcileInconclusiveError).detail).toBe('stream_list_truncated')
+    // Neither key was adopted — not the visible decoy's, not the real one's.
+    expect(await h.vault.get('youtube.streamKey')).toBeUndefined()
+    expect(await h.vault.get('youtube.streamKey')).not.toBe(decoy.streamKey)
+    expect(await h.vault.get('youtube.streamKey')).not.toBe(landed.streamKey)
+    expect(h.custodian.stagedStreamIds).toEqual([])
+    const resumed = h.temp.store.getBroadcastAttempt(attempt.attemptId)
+    expect(resumed?.pendingCall).toBe('liveStreams.insert')
+    expect(resumed?.streamId).toBeNull()
+    expect(resumed?.lastErrorReason).toBe('reconcile_inconclusive:stream_list_truncated')
+    expect(h.logger.dump()).toContain('list truncated at the page bound')
+  })
+
   it('refuses to adopt a visible marker match while the list is truncated', async () => {
     // Review round 3 (B1) reproduction. A marker is visible on the first page, 200
     // unrelated broadcasts follow, and the copy this attempt's insert actually created
@@ -927,11 +967,104 @@ describe('the attempt marker does not outlive its purpose (BOARD A-18)', () => {
 
     const broadcast = h.server.broadcasts.get(binding.broadcastId)
     expect(broadcast?.privacyStatus).toBe('public')
-    // `status` overrides every member it carries, so the made-for-kids declaration
-    // travelled with the privacy change instead of being deleted.
+    // The made-for-kids declaration was set at insert and is not updatable through this
+    // method, so it is untouched rather than resent (review round 4, M2).
     expect(broadcast?.selfDeclaredMadeForKids).toBe(false)
     expect(broadcast?.description ?? '').not.toContain(binding.attemptId)
     expect(h.alerts.ofKind('broadcast_published').map((alert) => alert.reason)).toEqual(['public'])
+  })
+
+  it('preserves an operator-set end time and does not resend the title', async () => {
+    // Review round 4 (M1). `scheduledEndTime` is writable and has no exemption from
+    // deletion-on-omission, so it has to be read back and sent again; `snippet.title`
+    // has been optional since 2023-08-01 and omission leaves it unchanged, so resending
+    // a value read a moment ago would overwrite a concurrent Studio edit.
+    const h = await setUp({ config: { description: 'synthetic blurb' } })
+    const lifecycle = h.lifecycle()
+    h.server.onRequest = (request) => {
+      if (request.method === 'liveBroadcasts.insert') {
+        queueMicrotask(() => {
+          const broadcast = [...h.server.broadcasts.values()].at(-1)
+          if (broadcast !== undefined) {
+            // Both set outside this product: an end time, and a title edited in Studio
+            // between the insert and the marker removal.
+            broadcast.scheduledEndTime = '2026-01-01T12:00:00.000Z'
+            broadcast.title = 'operator renamed this in Studio'
+          }
+        })
+      }
+    }
+
+    const binding = await lifecycle.ensureBound()
+
+    const update = h.server.requestsFor('liveBroadcasts.update')[0]
+    const snippet = (update?.body as { snippet: Record<string, unknown> }).snippet
+    expect(snippet['description']).toBe('synthetic blurb')
+    expect(snippet['scheduledEndTime']).toBe('2026-01-01T12:00:00.000Z')
+    expect(snippet['scheduledStartTime']).not.toBeUndefined()
+    // Not sent at all — that is the point.
+    expect(snippet['title']).toBeUndefined()
+    expect(Object.keys(snippet).sort()).toEqual([
+      'description',
+      'scheduledEndTime',
+      'scheduledStartTime',
+    ])
+    const broadcast = h.server.broadcasts.get(binding.broadcastId)
+    expect(broadcast?.scheduledEndTime).toBe('2026-01-01T12:00:00.000Z')
+    expect(broadcast?.title).toBe('operator renamed this in Studio')
+    expect(broadcast?.description).toBe('synthetic blurb')
+  })
+
+  it('omits scheduledEndTime when the broadcast has none', async () => {
+    const h = await setUp()
+
+    await h.lifecycle().ensureBound()
+
+    const snippet = (
+      h.server.requestsFor('liveBroadcasts.update')[0]?.body as {
+        snippet: Record<string, unknown>
+      }
+    ).snippet
+    expect(Object.keys(snippet).sort()).toEqual(['description', 'scheduledStartTime'])
+  })
+
+  it('sends privacyStatus alone when publishing', async () => {
+    // Review round 4 (M2): the update reference's writable list for `status` is
+    // `privacyStatus` only, and the resource defines `selfDeclaredMadeForKids` for
+    // insert and list. The fake rejects the unsupported member, so sending it would
+    // fail this test rather than only production.
+    const h = await setUp({ config: { privacyStatus: 'unlisted' } })
+    await h.lifecycle().ensureBound()
+
+    await h.lifecycle().publish()
+
+    const publishUpdate = h.server.requestsFor('liveBroadcasts.update').at(-1)
+    const status = (publishUpdate?.body as { status: Record<string, unknown> }).status
+    expect(Object.keys(status)).toEqual(['privacyStatus'])
+    expect(status['privacyStatus']).toBe('unlisted')
+    expect((publishUpdate?.body as { snippet?: unknown }).snippet).toBeUndefined()
+  })
+
+  it('is checked by a fake server that rejects an unsupported update member', async () => {
+    const h = await setUp()
+    const broadcast = h.server.seedBroadcast()
+    const url = new URL(`${h.server.baseUrl}/liveBroadcasts`)
+    url.searchParams.set('part', 'id,status')
+
+    const response = await fetch(url, {
+      method: 'PUT',
+      headers: { authorization: 'Bearer synthetic', 'content-type': 'application/json' },
+      body: JSON.stringify({
+        id: broadcast.id,
+        status: { privacyStatus: 'public', selfDeclaredMadeForKids: false },
+      }),
+    })
+    const body = (await response.json()) as { error: { errors: { reason: string }[] } }
+
+    expect(response.status).toBe(400)
+    expect(body.error.errors[0]?.reason).toBe('syntheticUnsupportedUpdateField')
+    // And the broadcast was not touched by the refused request.
+    expect(h.server.broadcasts.get(broadcast.id)?.privacyStatus).toBe('private')
   })
 
   it('refuses to publish when the configured privacy is private', async () => {

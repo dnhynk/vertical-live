@@ -206,6 +206,12 @@ export interface LiveBroadcastSummary {
    */
   readonly description: string | null
   readonly scheduledStartTime: string | null
+  /**
+   * `snippet.scheduledEndTime`. Read so an update can preserve it: it is writable and
+   * *not* one of the two fields that survive omission, so leaving it out of an update
+   * deletes it (review round 4, M1).
+   */
+  readonly scheduledEndTime: string | null
   readonly actualStartTime: string | null
   readonly liveChatId: string | null
   /** `complete` | `created` | `live` | `liveStarting` | `ready` | `revoked` | `testStarting` | `testing`. */
@@ -256,16 +262,34 @@ export type BroadcastTransition = 'testing' | 'live' | 'complete'
  */
 export interface UpdateBroadcastInput {
   readonly broadcastId: string
-  /** Sent as one unit; omitting a member of it would delete that member. */
+  /**
+   * Sent as one unit. Omitting a member deletes it — with two documented exceptions:
+   * since 2023-08-01 `snippet.title` and `status.privacyStatus` "no longer require
+   * values to be specified" and "omitting these fields from the request will leave
+   * them unchanged"
+   * (https://developers.google.com/youtube/v3/live/revision_history#august-1-2023,
+   * checked 2026-08-17).
+   *
+   * So `title` is deliberately **not** in this shape: re-sending a value read a moment
+   * ago is not required and would overwrite an edit an operator made in Studio in
+   * between (review round 4, M1). `scheduledEndTime` *is* here, because it has no such
+   * exemption and would be deleted by an update that left it out.
+   */
   readonly snippet?: {
-    readonly title: string
     readonly description: string
+    /** Still required whenever `snippet` is sent. */
     readonly scheduledStartTime: string
+    /** Send it back exactly when the broadcast has one. */
+    readonly scheduledEndTime?: string
   }
-  /** Same rule: `selfDeclaredMadeForKids` travels with `privacyStatus`. */
+  /**
+   * `privacyStatus` is the only writable member of `status` this method documents
+   * (review round 4, M2): the update reference's writable list contains no
+   * `selfDeclaredMadeForKids`, and the resource defines that member for insert and
+   * list only.
+   */
   readonly status?: {
     readonly privacyStatus: BroadcastPrivacyStatus
-    readonly selfDeclaredMadeForKids: boolean
   }
 }
 
@@ -489,9 +513,12 @@ export class YouTubeLiveApi {
   }
 
   /**
-   * Overwrites the parts named in `input`. Used for exactly two things (BOARD A-18):
-   * taking the attempt marker back out of `snippet.description` once the broadcast id
-   * is durably ours, and applying the configured privacy afterwards.
+   * Writes the parts named in `input`. Used for exactly two things (BOARD A-18): taking
+   * the attempt marker back out of `snippet.description` once the broadcast id is
+   * durably ours, and applying the configured privacy afterwards.
+   *
+   * Only fields the method documents as writable travel — see `UpdateBroadcastInput`
+   * for which members are sent, which are deliberately omitted, and why.
    */
   async updateBroadcast(input: UpdateBroadcastInput): Promise<LiveBroadcastSummary> {
     const parts: string[] = ['id']
@@ -816,6 +843,8 @@ function toLiveBroadcast(item: Record<string, unknown>): LiveBroadcastSummary {
       snippet === undefined ? null : (readOptionalString(snippet, 'description') ?? null),
     scheduledStartTime:
       snippet === undefined ? null : (readOptionalString(snippet, 'scheduledStartTime') ?? null),
+    scheduledEndTime:
+      snippet === undefined ? null : (readOptionalString(snippet, 'scheduledEndTime') ?? null),
     actualStartTime:
       snippet === undefined ? null : (readOptionalString(snippet, 'actualStartTime') ?? null),
     liveChatId: snippet === undefined ? null : (readOptionalString(snippet, 'liveChatId') ?? null),
