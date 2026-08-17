@@ -151,3 +151,4 @@
 | 2026-08-18 01:15 | T11 worker_done(succeeded, PR #15: 시나리오 7종·VirtualClock 러너·test:replay(§11 3행)·sim:report·dev 패널 주입, e2e p95 75ms 측정 기록). R-T11-1 `task_fa3ddc437095` → `ctx_3fc5bcf8739f`(review). 진행: R-T9-1(review2), F-T10-5. 다음: T12(PR #11·#14 머지 후) |
 | 2026-08-18 01:45 | F-T10-5 완료(liveStreams attempt 마커, #findInsertedStream). R-T9-1 verdict request_changes(major 3: pollingIntervalMillis 상한 절단, parts 정확 집합 미강제, reconnect/loss 계측 왜곡; minor proto provenance) → F-T9-1 `task_cf08276f2fe1` → T9 터미널. R-T10-6 `task_e508bdc836c5` → `ctx_1474dfecf147`(review2). 진행: R-T11-1(review) |
 | 2026-08-18 02:10 | R-T11-1 verdict request_changes(major 3: paid-ledger 테스트 false-positive, 재전송 검증이 stub Set, dev 패널 잔여 wait 생략) → F-T11-1 `task_edc8abe328d9` → T11 터미널. 진행: R-T10-6(review2), F-T9-1 |
+| 2026-08-18 02:40 | F-T9-1 완료(4건). R-T9-2 `task_8835c53b11f7` → `ctx_7e0a7146bc1c`(review). 진행: R-T10-6(review2), F-T11-1 |
