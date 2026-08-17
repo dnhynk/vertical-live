@@ -3,6 +3,7 @@
   "references": [
     { "path": "./packages/contract" },
     { "path": "./apps/server" },
+    { "path": "./apps/renderer" },
     { "path": "./tools/simulator" }
   ]
 }

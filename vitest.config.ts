@@ -21,7 +21,8 @@ export default defineConfig({
     ],
   },
   test: {
-    // One run over every workspace. Renderer tests (jsdom) arrive with T5.
-    include: ['{packages,apps,tools}/*/src/**/*.test.ts'],
+    // One run over every workspace. Renderer tests declare `@vitest-environment
+    // jsdom` per file; everything else runs in the default node environment.
+    include: ['{packages,apps,tools}/*/src/**/*.test.{ts,tsx}'],
   },
 })

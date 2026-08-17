@@ -1,0 +1,21 @@
+{
+  "$meta": {
+    "locale": "ja",
+    "nativeReview": "pending",
+    "note": "Placeholder Japanese wording for the T5 read-model screen. Spec §5.3 requires native-speaker review before Gate 3 (BOARD A-11); no entry may claim review before then. World vocabulary keys (need.*, mission.*, chapter.*) are owned by the content director (T7) and land with the screen in T14."
+  },
+  "strings": {
+    "ui.waiting": "接続中",
+    "ui.slot.needOrMission": "いまのおねがい",
+    "ui.slot.lastAction": "いま反映された行動",
+    "ui.slot.progress": "成長",
+    "ui.slot.nextChoice": "つぎの選択",
+    "ui.cta.title": "チャットで参加",
+    "ui.interactionPaused": "相互作用一時停止",
+    "ui.none": "なし",
+    "ui.undecided": "未定",
+    "ui.contributions": "{count}回",
+    "ui.jst": "{time} JST",
+    "ui.progressValue": "{current} / {target}"
+  }
+}
