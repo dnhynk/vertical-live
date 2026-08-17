@@ -41,5 +41,19 @@ export {
   type MigrateOptions,
   type MigrateResult,
 } from './migrate.js'
+export {
+  assertSqlIdentifier,
+  type BatchAuditFactory,
+  type DeleteAllOptions,
+  type DeleteExpiredOptions,
+  type DeleteSweepResult,
+  type RetentionLedgerEntry,
+  type RetentionLedgerFilter,
+  type RetentionLedgerRow,
+  type RetentionOutcome,
+  type RetentionPolicyKind,
+  type RetentionReason,
+  type RetentionSource,
+} from './retention.js'
 export { DEFAULT_WORLD_ID, PersistenceStore, type OpenStoreOptions } from './store.js'
 export type * from './types.js'
