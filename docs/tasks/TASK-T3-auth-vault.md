@@ -105,6 +105,8 @@ $ npm run build
 > @vl/contract@0.0.0 build / @vl/server@0.0.0 build / @vl/simulator@0.0.0 build   (오류 없음)
 ```
 
+CI(GitHub Actions, ubuntu-latest, run 31994493250, PR #4): `ci` **pass** (47s). 같은 게이트가 리눅스에서 돌며 테스트는 `84 passed | 2 skipped` — Windows 전용 Credential Manager round-trip 2건이 skip되고, 그 대신 "off Windows에서 `create()`가 unavailable을 던진다" 테스트가 실행된다(이 호스트에서는 정확히 반대: `85 passed | 1 skipped`). 즉 native 바인딩은 CI에서 설치는 되지만 로드되지 않는다.
+
 실제 Windows Credential Manager 스모크(이 호스트, 합성값):
 
 ```text
