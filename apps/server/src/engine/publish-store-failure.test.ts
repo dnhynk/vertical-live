@@ -131,17 +131,14 @@ function productionConnection(): SqliteConnection {
  * real, and a disk filling — or a backup taking the lock — under a live
  * broadcast lands in exactly this window.
  */
-function lockAfterNextEffectCommit(
-  store: PersistenceStore,
-  competitor: Database.Database,
-): void {
+function lockAfterNextEffectCommit(store: PersistenceStore, competitor: Database.Database): void {
   const commit = store.commitStateTransition.bind(store)
   store.commitStateTransition = (input) => {
     const result = commit(input)
     // Only the commit that carries effects: `#reconcileInteraction` commits
     // first in a pass and publishes nothing, so locking on that one would starve
     // the transition under test instead of refusing its publish mark.
-    if (input.effects.length > 0) {
+    if ((input.effects ?? []).length > 0) {
       store.commitStateTransition = commit
       competitor.exec('BEGIN IMMEDIATE')
     }
@@ -234,7 +231,6 @@ describe('an effect the store will not mark published (§11 "DB lock")', () => {
       refused.some((effectId) => harness.store.getEffect(effectId)?.effect.paid === true),
     ).toBe(true)
     expect(harness.engine.health().lastFailure?.error ?? '').toMatch(/database is locked|BUSY/i)
-    expect(harness.engine.metrics().counters['effect_publish_store_failed']).toBe(refused.length)
 
     // Nothing was sent. It must not be: `markEffectAcked` rejects an ACK for a
     // row that does not say it was published, so an effect on the wire ahead of
@@ -243,19 +239,30 @@ describe('an effect the store will not mark published (§11 "DB lock")', () => {
 
     // A pass that has nothing to commit completes even while the lock is held,
     // and the fault has to outlive it — a completed pass says nothing about a
-    // publish mark that is still being refused (R-T8c-1 blocker 1).
+    // publish mark that is still being refused (R-T8c-1 blocker 1). Before the
+    // fix this is where the loss became invisible: the row stayed unpublished
+    // while `openEffectCount`, `consecutiveFailures` and `degraded` all went
+    // back to their healthy values.
     await harness.clock.advance(harness.config.engine.tickIntervalMs)
     harness.engine.pump()
 
     expect(unpublishedIn(harness.store)).toEqual(expect.arrayContaining(refused))
     const degraded = harness.engine.health()
-    expect(degraded.openEffectCount).toBeGreaterThanOrEqual(refused.length)
+    // Every outstanding outbox row is accounted for in memory. Before the fix
+    // the refused ones were in the store and nowhere else, so this count was
+    // short by exactly them.
+    expect(degraded.openEffectCount).toBe(harness.store.listUnackedEffects().length)
     expect(degraded.consecutiveFailures).toBeGreaterThanOrEqual(refused.length)
     expect(degraded.degradedReasons).toContain('writer_failing')
     expect(coordinatorVerdict(harness)).toMatchObject({
       status: 'degraded',
       reason: 'writer_failing',
     })
+    // The cause stays distinguishable from a failed pass on `/metrics` and in
+    // the operator log (`engine.publish_store_failed`).
+    expect(harness.engine.metrics().counters['effect_publish_store_failed']).toBeGreaterThanOrEqual(
+      refused.length,
+    )
 
     // The lock is gone (spec §9.1). Until the row is written the renderer's ACK
     // is still refused — which is why the mark has to come first.
@@ -384,7 +391,7 @@ describe('unpublished rows read back on a full disk (§11 "disk-full")', () => {
 
     const degraded = harness.engine.health()
     expect(degraded.consecutiveFailures).toBeGreaterThanOrEqual(refused.length)
-    expect(degraded.openEffectCount).toBeGreaterThanOrEqual(refused.length)
+    expect(degraded.openEffectCount).toBe(harness.store.listUnackedEffects().length)
     expect(degraded.degradedReasons).toContain('writer_failing')
     expect(degraded.lastFailure?.error ?? '').toMatch(/database or disk is full|SQLITE_FULL/i)
     expect(coordinatorVerdict(harness).status).toBe('degraded')
