@@ -24,6 +24,8 @@
     "secrets": "npm run build && node dist/bin/secrets.js",
     "kill": "npm run build && node dist/bin/kill.js",
     "archive": "npm run build && node dist/bin/archive.js",
+    "obs:launch": "npm run build && node dist/bin/obs-launch.js",
+    "obs:clear": "npm run build && node dist/bin/obs-clear.js",
     "serve:renderer": "npm run build && node dist/bin/serve-renderer.js"
   },
   "dependencies": {

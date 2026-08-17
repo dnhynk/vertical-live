@@ -114,8 +114,9 @@ export function buildStartupSteps(deps: RuntimeDeps): StartupSteps {
         return
       }
       if (context.cancelled()) return
-      // BOARD A-16: the vault is the stream key's system of record and the key
-      // is injected at runtime, before the output starts.
+      // BOARD A-16: the vault is the system of record for what OBS is given at
+      // runtime — the renderer token and the stream key — and both go in before
+      // the output starts. `main.ts` supplies the adapter that does it (T17).
       await deps.obs.setStreamServiceFromVault()
     },
     startStream: async (context) => {

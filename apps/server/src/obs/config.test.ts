@@ -24,12 +24,22 @@ const validSection = {
   commandVerifyTimeoutMs: 5000,
   commandVerifyIntervalMs: 250,
   browserSourceName: 'test-browser-source',
+  browserSourceUrl: 'http://127.0.0.1:5173/?mode=broadcast',
   streamIngestUrl: 'rtmps://test-ingest.invalid:443/live2',
   reconnect: { initialDelayMs: 1000, maxDelayMs: 30_000, factor: 2 },
   thresholds: {
     congestionDegradedAt: 0.2,
     skippedFrameRatioDegradedAt: 0.01,
     stalledSamplesDegradedAt: 2,
+  },
+  // T17 added the OBS launcher block; like every other section it is required
+  // rather than defaulted, so a host config cannot silently lose it.
+  process: {
+    enabled: false,
+    executablePath: 'C:\\obs\\obs64.exe',
+    profile: 'vertical-live',
+    sceneCollection: 'vertical-live',
+    extraArgs: [],
   },
   provisional: ['pollIntervalMs'],
 }

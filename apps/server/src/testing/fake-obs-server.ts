@@ -49,6 +49,8 @@ export interface FakeInput {
   inputName: string
   inputKind: string
   unversionedInputKind: string
+  /** `GetInputSettings`/`SetInputSettings` payload (T17 renderer URL injection). */
+  inputSettings?: Record<string, unknown>
 }
 
 export interface FakeVideoSettings {
@@ -172,6 +174,7 @@ function defaultState(): FakeObsState {
         inputName: 'test-browser-source',
         inputKind: 'browser_source',
         unversionedInputKind: 'browser_source',
+        inputSettings: { url: 'http://127.0.0.1:5173/?mode=broadcast', shutdown: false },
       },
       {
         inputName: 'test-color-source',
@@ -539,6 +542,39 @@ export class FakeObsServer {
         return ok({
           inputs: inputs.map((input) => ({ ...input, inputUuid: `uuid-${input.inputName}` })),
         })
+      }
+
+      case 'GetInputSettings': {
+        const inputName = requestData['inputName']
+        if (typeof inputName !== 'string') {
+          return fail(REQUEST_STATUS.missingRequestField, 'inputName')
+        }
+        const input = state.inputs.find((entry) => entry.inputName === inputName)
+        if (input === undefined) {
+          return fail(REQUEST_STATUS.resourceNotFound, 'no such input')
+        }
+        return ok({ inputKind: input.inputKind, inputSettings: { ...(input.inputSettings ?? {}) } })
+      }
+
+      case 'SetInputSettings': {
+        const inputName = requestData['inputName']
+        const settings = requestData['inputSettings']
+        if (typeof inputName !== 'string') {
+          return fail(REQUEST_STATUS.missingRequestField, 'inputName')
+        }
+        if (typeof settings !== 'object' || settings === null || Array.isArray(settings)) {
+          return fail(REQUEST_STATUS.invalidRequestFieldType, 'inputSettings')
+        }
+        const input = state.inputs.find((entry) => entry.inputName === inputName)
+        if (input === undefined) {
+          return fail(REQUEST_STATUS.resourceNotFound, 'no such input')
+        }
+        // `overlay: true` (the v5 default) merges; `false` replaces.
+        input.inputSettings =
+          requestData['overlay'] === false
+            ? { ...(settings as Record<string, unknown>) }
+            : { ...(input.inputSettings ?? {}), ...(settings as Record<string, unknown>) }
+        return ok(undefined)
       }
 
       case 'PressInputPropertiesButton': {

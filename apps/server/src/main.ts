@@ -17,6 +17,7 @@ import { ObsClient } from './obs/client.js'
 import { loadObsConfig } from './obs/config.js'
 import { ObsControl } from './obs/control.js'
 import { ObsHealthMonitor } from './obs/health.js'
+import { ObsProcessLauncher } from './obs/process.js'
 import { SecretRedactor, type LogFields, type Logger } from './secrets/redaction.js'
 import { defaultSecretProvider, resolveSecretVault } from './secrets/resolve.js'
 import { requireSecret } from './secrets/types.js'
@@ -239,6 +240,8 @@ const engine = new StateEngine({
 let obsClient: ObsClient | null = null
 let obsControl: ObsControl | null = null
 let obsPort: ObsPort | null = null
+/** T17's Windows launcher for the `obs-process` component; null until wired. */
+let obsLauncher: ObsProcessLauncher | null = null
 if (supervisorConfig.integrations.obs) {
   const obsConfig = loadObsConfig()
   const client = new ObsClient({
@@ -272,10 +275,20 @@ if (supervisorConfig.integrations.obs) {
       // `ObsClient` owns the OBS-connection restart loop (spec §10.2), and this
       // is the first call that needs the socket.
       await client.connect()
+      // Both runtime injections happen in this step because they are the same
+      // custody act (BOARD A-16): the vault holds the renderer token and the
+      // stream key, and OBS is given them at start rather than an operator
+      // typing them in. The renderer URL goes first — the page has to be
+      // loading before the `renderer` pre-check can pass (T17).
+      await control.setRendererSourceFromVault()
       return control.setStreamServiceFromVault()
     },
     startStream: () => control.startStream(),
   }
+  obsLauncher = new ObsProcessLauncher({
+    config: obsConfig.process,
+    logger: stdoutLogger,
+  })
 }
 
 // --------------------------------------------------------- YouTube (T3/T10)
@@ -545,17 +558,31 @@ const supervisor: Supervisor = new Supervisor({
       if (signal.aborted) return
       await obsControl.refreshBrowserSource()
     },
-    obsProcess: () =>
-      // Launching OBS itself is T17's Windows script. Until it is wired the
-      // escalation fails honestly, which is what takes the run to
-      // `safe_stopped` rather than leaving it in a recovery that cannot recover.
-      Promise.reject(new Error('obs process launch is not configured (T17)')),
+    obsProcess: (signal) => {
+      // T17's launcher. It refuses when it is not configured, when the
+      // executable is missing and when OBS is already running, so an escalation
+      // that cannot actually recover still fails honestly and the run reaches
+      // `safe_stopped` instead of a recovery that cannot recover.
+      if (obsLauncher === null) {
+        return Promise.reject(new Error('obs process launch is not configured (obs integration off)'))
+      }
+      if (signal.aborted) return Promise.resolve()
+      obsLauncher.launch()
+      return Promise.resolve()
+    },
     obsConnectionAttempts: () => obsClient?.reconnectAttempts ?? 0,
   },
   onSafeStop: async () => {
     // Stop pushing to YouTube. The world keeps its state; leaving
     // `safe_stopped` is a human starting the process again (spec §9.2).
     await obsControl?.stopStream().catch(() => undefined)
+    // Then take the two injected secrets back out of OBS (BOARD A-16, T17):
+    // OBS persists the stream key into the profile's `service.json` and the
+    // renderer token into the scene-collection JSON, and a stopped run has no
+    // reason to leave either on disk. Best effort — a failure here must not
+    // stand between the run and its stop.
+    await obsControl?.clearStreamServiceKey().catch(() => undefined)
+    await obsControl?.clearRendererSourceToken().catch(() => undefined)
   },
 })
 

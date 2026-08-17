@@ -19,8 +19,9 @@ import { silentLogger, type Logger } from '../secrets/redaction.js'
  *    the first API call can collect anything that would need deleting (§12.4).
  * 4. `broadcast` — `ensureBound()` persists resource ids *before* the calls that
  *    create them, and reconciles anything left in flight (§9.1).
- * 5. `streamService` — the stream key goes from the vault into OBS at runtime
- *    (BOARD A-16); the operator never types it into the OBS UI.
+ * 5. `streamService` — the vault's runtime injections into OBS (BOARD A-16):
+ *    the renderer Browser Source URL with its token, then the stream key. The
+ *    operator types neither into the OBS UI (T17).
  * 6. `startStream` — the encoder starts pushing only after it has a key and a
  *    bound ingest.
  * 7. `goLive` — the one step TASK_SPECS §T12 does not name, added because the

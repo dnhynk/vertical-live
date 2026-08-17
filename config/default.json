@@ -72,6 +72,11 @@
       "window.maxDirectPerWindow"
     ]
   },
+  "renderer": {
+    "staticDir": "apps/renderer/dist",
+    "host": "127.0.0.1",
+    "port": 5173
+  },
   "obs": {
     "url": "ws://127.0.0.1:4455",
     "connectTimeoutMs": 5000,
@@ -79,6 +84,7 @@
     "commandVerifyTimeoutMs": 5000,
     "commandVerifyIntervalMs": 250,
     "browserSourceName": "vertical-live-renderer",
+    "browserSourceUrl": "http://127.0.0.1:5173/?mode=broadcast",
     "streamIngestUrl": "rtmps://a.rtmps.youtube.com:443/live2",
     "reconnect": {
       "initialDelayMs": 1000,
@@ -89,6 +95,13 @@
       "congestionDegradedAt": 0.2,
       "skippedFrameRatioDegradedAt": 0.01,
       "stalledSamplesDegradedAt": 2
+    },
+    "process": {
+      "enabled": false,
+      "executablePath": "C:\\Program Files\\obs-studio\\bin\\64bit\\obs64.exe",
+      "profile": "vertical-live",
+      "sceneCollection": "vertical-live",
+      "extraArgs": ["--disable-updater", "--disable-missing-files-check"]
     },
     "provisional": [
       "pollIntervalMs",

@@ -149,6 +149,7 @@ describe('runArchiveSweep', () => {
     const result = runArchiveSweep({ config, fs, clock, apply: true })
 
     expect(fs.removed).toEqual(['/archive/recordings/sweep.MKV'])
+    expect(result.plan.scannedFiles).toBe(1)
   })
 
   it('drops a listed path that is not inside its root', () => {
