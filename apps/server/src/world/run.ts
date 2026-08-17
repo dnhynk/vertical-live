@@ -2,7 +2,13 @@ import type { CanonicalEvent, IsoUtcInstant } from '@vl/contract'
 
 import { DEFAULT_WORLD_TUNING, type WorldTuning } from './content/tuning.js'
 import { dueDeadlines } from './deadlines.js'
-import { initialWorldState, step, stepRngFor, type InitialWorldOptions } from './reducer.js'
+import {
+  initialWorldState,
+  pendingDeadlines,
+  step,
+  stepRngFor,
+  type InitialWorldOptions,
+} from './reducer.js'
 import { toMillis } from './time.js'
 import type {
   EffectDraft,
@@ -30,7 +36,7 @@ export interface ScheduledEvent {
 }
 
 export interface RunOptions {
-  readonly from: IsoUtcInstant
+  /** Absolute end of the window. The start is wherever the state already is. */
   readonly to: IsoUtcInstant
   readonly state: WorldState
   readonly events?: readonly ScheduledEvent[]
@@ -65,7 +71,7 @@ export function runWorld(options: RunOptions): RunReport {
 
   const nextDeadline = (): ScheduledDeadline | null => {
     let earliest: ScheduledDeadline | null = null
-    for (const deadline of state.world.deadlines) {
+    for (const deadline of pendingDeadlines(state)) {
       if (earliest === null || toMillis(deadline.dueAt) < toMillis(earliest.dueAt)) {
         earliest = deadline
       }
@@ -117,7 +123,6 @@ export function runFreshWorld(
 ): RunReport {
   const state = initialWorldState(options)
   return runWorld({
-    from: options.startedAt,
     to: options.to,
     state,
     events: options.events,
@@ -126,6 +131,9 @@ export function runFreshWorld(
 }
 
 /** Deadlines that are already due at `now`, for the recovery path of §7.3(3). */
-export function overdueDeadlines(state: WorldState, now: IsoUtcInstant): readonly ScheduledDeadline[] {
-  return dueDeadlines(state.world.deadlines, now)
+export function overdueDeadlines(
+  state: WorldState,
+  now: IsoUtcInstant,
+): readonly ScheduledDeadline[] {
+  return dueDeadlines(pendingDeadlines(state), now)
 }

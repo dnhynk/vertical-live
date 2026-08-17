@@ -27,7 +27,12 @@ import {
   mapNeeds,
 } from './creature.js'
 import { removeDeadline, replaceDeadline, scheduleDeadline } from './deadlines.js'
-import { applyPaidEvent, applyThanksFallback, paidEventKindOf } from './paid.js'
+import {
+  applyPaidEvent,
+  applyThanksFallback,
+  paidEventKindOf,
+  paidFallbackDeadlines,
+} from './paid.js'
 import { createRng, type Rng } from './rng.js'
 import {
   addMillis,
@@ -703,16 +708,15 @@ function applyEvent(
 ): void {
   const paidEventKind = paidEventKindOf(event)
   if (paidEventKind !== null) {
-    // Audit only. A command riding along on a paid message is deliberately not
-    // executed: acting on it would make the payment buy an action (spec §8.5).
+    // Audit only, and `draft.world` is deliberately never assigned on this path:
+    // that is the §8.5 guarantee in its strongest form. A command riding along on
+    // a paid message is not executed either — acting on it would make the payment
+    // buy an action.
     const result = applyPaidEvent(draft.audit, event, paidEventKind, now, tuning)
     draft.audit = result.audit
     draft.effects.push(...result.effects)
     draft.transitions.push(...result.transitions)
     draft.rejections.push(...result.rejections)
-    for (const deadline of result.deadlines) {
-      draft.world = { ...draft.world, deadlines: replaceDeadline(draft.world.deadlines, deadline) }
-    }
     return
   }
 
@@ -956,10 +960,12 @@ function applyDeadline(
 ): void {
   // A fired timer leaves the pending set first; each handler then schedules its
   // own successor. Without this a rescheduled kind with a different key (the
-  // chapter beats) would leave the spent timer behind and fire it again.
-  draft.world = {
-    ...draft.world,
-    deadlines: removeDeadline(draft.world.deadlines, deadline.kind, deadline.key),
+  // chapter beats) would leave the spent timer behind and fire it again. The
+  // reference check keeps the paid fallback timer — which lives in the audit
+  // state, not here — from touching the world (spec §8.5).
+  const remaining = removeDeadline(draft.world.deadlines, deadline.kind, deadline.key)
+  if (remaining !== draft.world.deadlines) {
+    draft.world = { ...draft.world, deadlines: remaining }
   }
 
   switch (deadline.kind) {
@@ -1159,16 +1165,28 @@ export function step(
     applyDeadline(draft, input.deadline, now, rng, tuning)
   }
 
-  const world: GameState = {
-    ...draft.world,
-    stepIndex: draft.world.stepIndex + 1,
-    worldTimeUtc: now,
-  }
+  // An input that moved nothing in the world — a paid acknowledgement, a refused
+  // vote — leaves `world` referentially identical, so it cannot advance the step
+  // counter or the world clock either, and therefore cannot shift a single later
+  // random draw (spec §8.5). The engine still gets the audit state and effects.
+  const world: GameState =
+    draft.world === state.world
+      ? draft.world
+      : { ...draft.world, stepIndex: draft.world.stepIndex + 1, worldTimeUtc: now }
+  const nextState: WorldState = { world, audit: draft.audit }
   return {
-    state: { world, audit: draft.audit },
+    state: nextState,
     transitions: draft.transitions,
     effects: draft.effects,
-    deadlines: world.deadlines,
+    deadlines: pendingDeadlines(nextState),
     rejections: draft.rejections,
   }
+}
+
+/**
+ * Everything the engine must keep a timer for: the world's own schedule plus the
+ * substitute-thanks obligations held in the audit state (spec §9.2, §10.2).
+ */
+export function pendingDeadlines(state: WorldState): readonly ScheduledDeadline[] {
+  return [...state.world.deadlines, ...paidFallbackDeadlines(state.audit)]
 }

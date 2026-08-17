@@ -3,7 +3,13 @@ import type { Identifier } from '@vl/contract'
 import { FRESHNESS_MINIMUMS, type WorldTuning } from './content/tuning.js'
 import { matchesCondition, type ContentContext, type Variant } from './content/variants.js'
 import type { Rng } from './rng.js'
-import type { VariationState, WorldTransition } from './types.js'
+import {
+  TIME_SCALES,
+  TRANSITION_SCALES,
+  type TimeScale,
+  type VariationState,
+  type WorldTransition,
+} from './types.js'
 
 /**
  * Repeat avoidance (spec §12.5) and the two "신선도" metrics of spec §14.1.
@@ -77,12 +83,21 @@ export function countUniqueTransitions(transitions: readonly WorldTransition[]):
  * Share of a recent scene sample that repeats an earlier scene in the same
  * sample (spec §14.1 "반복 장면 표본 비율"). 0 means every sampled scene was
  * distinct; transitions that staged no scene are not sampled.
+ *
+ * `scales` restricts the sample to some of the §6.2 time scales. It matters
+ * because a 24-hour ambient loop stages thousands of seconds-scale idle beats
+ * from a small catalogue, so an unrestricted sample measures mostly breathing.
+ * Spec §12.5 is about *scenes* repeating, so the report below carries the
+ * narrative sample (minutes and slower) next to the unrestricted one instead of
+ * quietly picking one of them.
  */
 export function repeatedSceneRatio(
   transitions: readonly WorldTransition[],
   sampleSize: number = FRESHNESS_MINIMUMS.sceneSampleSize,
+  scales: readonly TimeScale[] = TIME_SCALES,
 ): number {
   const scenes = transitions
+    .filter((transition) => scales.includes(TRANSITION_SCALES[transition.type]))
     .map((transition) => transition.sceneKey)
     .filter((sceneKey): sceneKey is string => sceneKey !== null)
     .slice(-Math.max(1, Math.floor(sampleSize)))
@@ -90,22 +105,38 @@ export function repeatedSceneRatio(
   return (scenes.length - new Set(scenes).size) / scenes.length
 }
 
+/** Everything slower than the seconds scale, i.e. what reads as a scene. */
+export const NARRATIVE_SCALES: readonly TimeScale[] = ['minutes', 'hours', 'day']
+
 export interface FreshnessReport {
   readonly totalTransitions: number
   readonly uniqueTransitions: number
   readonly sceneSampleSize: number
+  /** Over every staged scene, seconds-scale idle staging included. */
   readonly repeatedSceneRatio: number
+  /** Over minutes-and-slower staging only (spec §12.5 "장면"). */
+  readonly repeatedNarrativeSceneRatio: number
+  /** How many transitions each §6.2 time scale produced. */
+  readonly transitionsByScale: Readonly<Record<TimeScale, number>>
 }
 
 export function computeFreshness(
   transitions: readonly WorldTransition[],
   sampleSize: number = FRESHNESS_MINIMUMS.sceneSampleSize,
 ): FreshnessReport {
+  const transitionsByScale = {} as Record<TimeScale, number>
+  for (const scale of TIME_SCALES) transitionsByScale[scale] = 0
+  for (const transition of transitions) {
+    const scale = TRANSITION_SCALES[transition.type]
+    transitionsByScale[scale] += 1
+  }
   return {
     totalTransitions: transitions.length,
     uniqueTransitions: countUniqueTransitions(transitions),
     sceneSampleSize: sampleSize,
     repeatedSceneRatio: repeatedSceneRatio(transitions, sampleSize),
+    repeatedNarrativeSceneRatio: repeatedSceneRatio(transitions, sampleSize, NARRATIVE_SCALES),
+    transitionsByScale,
   }
 }
 
@@ -119,6 +150,6 @@ export function meetsFreshnessMinimums(
 ): boolean {
   return (
     report.uniqueTransitions >= minimums.uniqueTransitionsPerVirtualDay &&
-    report.repeatedSceneRatio <= minimums.maxRepeatedSceneRatio
+    report.repeatedNarrativeSceneRatio <= minimums.maxRepeatedNarrativeSceneRatio
   )
 }

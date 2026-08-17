@@ -140,6 +140,12 @@ export interface DeadlineDefinition {
 }
 
 /**
+ * Every deadline kind mapped to its policy. Omitting a kind is a compile error,
+ * which is the mechanism behind TASK_SPECS §T7 acceptance 4.
+ */
+export type DeadlinePolicyMap = Record<DeadlineKind, DeadlinePolicy>
+
+/**
  * A scheduled timer. `policy` is copied from the definition table by
  * `scheduleDeadline()`, which is the only constructor, so a deadline without a
  * policy cannot be built (spec §10.2, TASK_SPECS §T7 acceptance 4).
@@ -255,6 +261,37 @@ export const TRANSITION_TYPES = [
   'paid_acknowledged',
 ] as const
 export type TransitionType = (typeof TRANSITION_TYPES)[number]
+
+/**
+ * Which §6.2 time scale each transition belongs to. The map is exhaustive by
+ * type, so a new transition type has to declare its scale — that is what lets
+ * the tests assert that a zero-input day produced content on all four scales
+ * (spec §6.2, the Gate 3 requirement).
+ */
+export const TRANSITION_SCALES = {
+  idle_beat: 'seconds',
+  need_relieved: 'minutes',
+  need_pressure: 'minutes',
+  emotion_changed: 'minutes',
+  crisis_entered: 'minutes',
+  crisis_recovered: 'minutes',
+  bond_progress: 'minutes',
+  growth_progress: 'minutes',
+  growth_stage_advanced: 'day',
+  mission_started: 'minutes',
+  mission_progress: 'minutes',
+  mission_resolved: 'minutes',
+  choice_opened: 'day',
+  choice_resolved: 'day',
+  chapter_started: 'day',
+  chapter_beat: 'day',
+  chapter_resolved: 'day',
+  weather_changed: 'hours',
+  phase_changed: 'hours',
+  visitor_arrived: 'hours',
+  visitor_left: 'hours',
+  paid_acknowledged: 'seconds',
+} as const satisfies Record<TransitionType, TimeScale>
 
 /**
  * One recorded state transition. This is the unit spec §14.1 "신선도" counts, so

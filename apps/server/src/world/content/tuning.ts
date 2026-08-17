@@ -195,6 +195,6 @@ export const DEFAULT_WORLD_TUNING: WorldTuning = {
 export const FRESHNESS_MINIMUMS = {
   provisional: true,
   uniqueTransitionsPerVirtualDay: 40,
-  maxRepeatedSceneRatio: 0.55,
+  maxRepeatedNarrativeSceneRatio: 0.7,
   sceneSampleSize: 200,
 } as const

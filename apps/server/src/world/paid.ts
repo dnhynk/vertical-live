@@ -55,8 +55,19 @@ export interface PaidResult {
   readonly audit: AuditState
   readonly effects: readonly PaidThanksDraft[]
   readonly transitions: readonly WorldTransition[]
-  readonly deadlines: readonly ScheduledDeadline[]
   readonly rejections: readonly InputRejection[]
+}
+
+/**
+ * The substitute-thanks timers, derived from the audit state rather than stored
+ * in the world's schedule. Keeping them out of `GameState` is what makes "a paid
+ * event never touches world state" a referential fact and not a convention
+ * (spec §8.5); the engine sees them in `StepResult.deadlines` all the same.
+ */
+export function paidFallbackDeadlines(audit: AuditState): readonly ScheduledDeadline[] {
+  return audit.pendingThanks.map((pending) =>
+    scheduleDeadline('paid_thanks_fallback', pending.fallbackAt, pending.eventKey),
+  )
 }
 
 /**
@@ -78,7 +89,6 @@ export function applyPaidEvent(
       audit,
       effects: [],
       transitions: [],
-      deadlines: [],
       rejections: [{ reason: 'duplicate_paid_event', eventKey: event.eventKey, at: now }],
     }
   }
@@ -122,7 +132,6 @@ export function applyPaidEvent(
       audit: { pendingThanks: audit.pendingThanks, acknowledgedEventKeys: acknowledged },
       effects: [effect],
       transitions: [transition],
-      deadlines: [],
       rejections: [],
     }
   }
@@ -142,7 +151,6 @@ export function applyPaidEvent(
     },
     effects: [effect],
     transitions: [transition],
-    deadlines: [scheduleDeadline('paid_thanks_fallback', pending.fallbackAt, pending.eventKey)],
     rejections: [],
   }
 }
@@ -171,7 +179,7 @@ export function applyThanksFallback(
 ): PaidResult {
   const pending = audit.pendingThanks.find((it) => it.eventKey === eventKey)
   if (pending === undefined) {
-    return { audit, effects: [], transitions: [], deadlines: [], rejections: [] }
+    return { audit, effects: [], transitions: [], rejections: [] }
   }
   const effect: PaidThanksDraft = {
     kind: 'PAID_THANKS',
@@ -201,7 +209,6 @@ export function applyThanksFallback(
         sceneKey: null,
       },
     ],
-    deadlines: [],
     rejections: [],
   }
 }
