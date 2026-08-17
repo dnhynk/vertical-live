@@ -564,7 +564,9 @@ const supervisor: Supervisor = new Supervisor({
       // that cannot actually recover still fails honestly and the run reaches
       // `safe_stopped` instead of a recovery that cannot recover.
       if (obsLauncher === null) {
-        return Promise.reject(new Error('obs process launch is not configured (obs integration off)'))
+        return Promise.reject(
+          new Error('obs process launch is not configured (obs integration off)'),
+        )
       }
       if (signal.aborted) return Promise.resolve()
       obsLauncher.launch()

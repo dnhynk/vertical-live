@@ -62,7 +62,8 @@ export interface ArchiveSweepResult {
   /** False for a dry run: the plan was computed and nothing was deleted. */
   readonly applied: boolean
   readonly roots: readonly ArchiveRootReport[]
-  readonly freeBytes: number
+  /** `null` when no volume reading was available. */
+  readonly freeBytes: number | null
   readonly plan: ArchiveSweepPlan
   readonly deleted: readonly string[]
   readonly failed: readonly ArchiveDeleteFailure[]
@@ -95,13 +96,22 @@ export function runArchiveSweep(options: RunArchiveSweepOptions): ArchiveSweepRe
   for (const root of options.config.roots) {
     const rootPath = resolveRoot(root, cwd)
     if (!fs.exists(rootPath)) {
-      roots.push({ name: root.name, path: rootPath, exists: false, files: 0, bytes: 0, freeBytes: null })
+      roots.push({
+        name: root.name,
+        path: rootPath,
+        exists: false,
+        files: 0,
+        bytes: 0,
+        freeBytes: null,
+      })
       continue
     }
 
     const found = fs
       .list(rootPath)
-      .filter((entry) => isInside(rootPath, entry.path) && hasExtension(entry.path, root.extensions))
+      .filter(
+        (entry) => isInside(rootPath, entry.path) && hasExtension(entry.path, root.extensions),
+      )
       .map((entry) => ({
         root: root.name,
         path: entry.path,
@@ -135,7 +145,23 @@ export function runArchiveSweep(options: RunArchiveSweepOptions): ArchiveSweepRe
   // one volume. Roots are expected to share the host's data volume; if the
   // readings disagree the tightest one is used, which errs towards deleting
   // more rather than towards a full disk.
-  const freeBytes = freeReadings.length === 0 ? 0 : Math.min(...freeReadings)
+  //
+  // With no root on disk yet — the ordinary state before OBS records anything —
+  // the working directory's volume is read instead, so the report still says
+  // how much room the host has. If even that fails the value stays `null`:
+  // unknown, which the plan treats as "do not apply the free-space rule",
+  // rather than 0, which would read as a full disk.
+  let freeBytes: number | null = freeReadings.length === 0 ? null : Math.min(...freeReadings)
+  if (freeBytes === null) {
+    try {
+      freeBytes = fs.freeBytes(cwd)
+    } catch (error) {
+      logger.warn('archive free space unreadable', {
+        path: cwd,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
   const plan = planArchiveSweep({ config: options.config, files, freeBytes, nowMs })
 
   const deleted: string[] = []

@@ -95,13 +95,15 @@ function report(result: ArchiveSweepResult, config: ArchiveConfig): string[] {
   }
 
   lines.push(
-    `scanned ${String(result.plan.scannedFiles)} file(s), ${mib(result.plan.scannedBytes)}; ${String(result.plan.protectedFiles)} inside the write grace window; free ${mib(result.freeBytes)}`,
+    `scanned ${String(result.plan.scannedFiles)} file(s), ${mib(result.plan.scannedBytes)}; ${String(result.plan.protectedFiles)} inside the write grace window; free ${result.freeBytes === null ? 'unknown' : mib(result.freeBytes)}`,
   )
 
   if (result.plan.deletions.length === 0) {
     lines.push('no files selected for deletion')
   } else {
-    lines.push(`${result.applied ? 'deleted' : 'would delete'} ${String(result.plan.deletions.length)} file(s), ${mib(result.plan.reclaimBytes)}:`)
+    lines.push(
+      `${result.applied ? 'deleted' : 'would delete'} ${String(result.plan.deletions.length)} file(s), ${mib(result.plan.reclaimBytes)}:`,
+    )
     for (const deletion of result.plan.deletions) {
       lines.push(`  [${deletion.reason}] ${mib(deletion.file.sizeBytes)}  ${deletion.file.path}`)
     }

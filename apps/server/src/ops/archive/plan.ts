@@ -38,8 +38,13 @@ export interface ArchiveDeletion {
 export interface ArchiveSweepPlanInput {
   readonly config: ArchiveConfig
   readonly files: readonly ArchiveFile[]
-  /** Free bytes on the volume that holds the roots, before any deletion. */
-  readonly freeBytes: number
+  /**
+   * Free bytes on the volume that holds the roots, before any deletion, or
+   * `null` when it could not be read. Unknown is not zero: treating an
+   * unreadable volume as a full one would delete recordings to fix a number
+   * nobody measured.
+   */
+  readonly freeBytes: number | null
   /** Wall clock, epoch milliseconds. */
   readonly nowMs: number
 }
@@ -52,7 +57,8 @@ export interface ArchiveSweepPlan {
   readonly deletions: readonly ArchiveDeletion[]
   readonly reclaimBytes: number
   readonly totalBytesAfter: number
-  readonly freeBytesAfter: number
+  /** `null` when the free-space reading was unavailable. */
+  readonly freeBytesAfter: number | null
   /**
    * Rules that still do not hold after every eligible file is gone. The sweeper
    * cannot delete its way out of a disk filled by something else, and saying so
@@ -104,14 +110,18 @@ export function planArchiveSweep(input: ArchiveSweepPlanInput): ArchiveSweepPlan
     index += 1
   }
 
-  while (freeBytes + reclaimBytes < config.minFreeBytes && index < remaining.length) {
-    condemn(remaining[index] as ArchiveFile, 'min_free_bytes')
-    index += 1
+  if (freeBytes !== null) {
+    while (freeBytes + reclaimBytes < config.minFreeBytes && index < remaining.length) {
+      condemn(remaining[index] as ArchiveFile, 'min_free_bytes')
+      index += 1
+    }
   }
 
   const unmetRules: ArchiveDeleteReason[] = []
   if (totalBytes > config.maxTotalBytes) unmetRules.push('max_total_bytes')
-  if (freeBytes + reclaimBytes < config.minFreeBytes) unmetRules.push('min_free_bytes')
+  if (freeBytes !== null && freeBytes + reclaimBytes < config.minFreeBytes) {
+    unmetRules.push('min_free_bytes')
+  }
 
   return {
     scannedFiles: files.length,
@@ -120,7 +130,7 @@ export function planArchiveSweep(input: ArchiveSweepPlanInput): ArchiveSweepPlan
     deletions,
     reclaimBytes,
     totalBytesAfter: totalBytes,
-    freeBytesAfter: freeBytes + reclaimBytes,
+    freeBytesAfter: freeBytes === null ? null : freeBytes + reclaimBytes,
     unmetRules,
   }
 }

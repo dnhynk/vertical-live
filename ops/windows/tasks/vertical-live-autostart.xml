@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-16"?>
+<!--
+  Logon autostart for the vertical-live host (TASK_SPECS §T17, spec §11).
+
+  ops/windows/Register-VerticalLive.ps1 substitutes two placeholders below (in
+  double braces, so this comment names them without the braces):
+    USER_ID    the account that runs the broadcast (DOMAIN\user)
+    REPO_ROOT  absolute path of this repository on the host
+
+  Why the settings are what they are:
+
+  - LogonTrigger + InteractiveToken: OBS needs an interactive desktop session to
+    composite and encode (spec §11 "hosting OS와 OBS interactive-session 실행
+    방식을 선택"). A task that runs whether or not the user is logged on gets
+    session 0, where OBS has no GPU-backed desktop. That is why this is a logon
+    task and not a boot task, and why the host needs automatic logon
+    (docs/ops/windows-host.md).
+  - Delay PT30S: the network stack and the GPU driver are still settling right
+    after logon; the sequence itself waits for readiness, this only avoids
+    burning the first attempts.
+  - MultipleInstancesPolicy IgnoreNew: a second logon must not start a second
+    stack. The start script is idempotent as well.
+  - ExecutionTimeLimit PT0S: no limit. The script exits once the sequence is
+    done; the processes it starts outlive it.
+  - RunLevel LeastPrivilege: nothing here needs administrator rights.
+  - Battery settings false: the host is a desk machine on mains power, and a
+    24-hour service must not be stopped by a power event (spec §9.1).
+-->
+<Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <URI>\VerticalLive\vl-autostart</URI>
+    <Description>vertical-live: start renderer static serving, the server and OBS at logon.</Description>
+  </RegistrationInfo>
+  <Triggers>
+    <LogonTrigger>
+      <Enabled>true</Enabled>
+      <UserId>{{USER_ID}}</UserId>
+      <Delay>PT30S</Delay>
+    </LogonTrigger>
+  </Triggers>
+  <Principals>
+    <Principal id="Author">
+      <UserId>{{USER_ID}}</UserId>
+      <LogonType>InteractiveToken</LogonType>
+      <RunLevel>LeastPrivilege</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <AllowHardTerminate>true</AllowHardTerminate>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
+    <IdleSettings>
+      <StopOnIdleEnd>false</StopOnIdleEnd>
+      <RestartOnIdle>false</RestartOnIdle>
+    </IdleSettings>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <Enabled>true</Enabled>
+    <Hidden>false</Hidden>
+    <RunOnlyIfIdle>false</RunOnlyIfIdle>
+    <WakeToRun>false</WakeToRun>
+    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+    <Priority>7</Priority>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>powershell.exe</Command>
+      <Arguments>-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "{{REPO_ROOT}}\ops\windows\Start-VerticalLive.ps1"</Arguments>
+      <WorkingDirectory>{{REPO_ROOT}}</WorkingDirectory>
+    </Exec>
+  </Actions>
+</Task>

@@ -113,8 +113,8 @@ describe('loadArchiveConfig', () => {
   })
 
   it('refuses a config file it cannot read', () => {
-    expect(() => loadArchiveConfig({ configPath: join(tmpdir(), 'vl-missing-config.json') })).toThrow(
-      /cannot read/,
-    )
+    expect(() =>
+      loadArchiveConfig({ configPath: join(tmpdir(), 'vl-missing-config.json') }),
+    ).toThrow(/cannot read/)
   })
 })

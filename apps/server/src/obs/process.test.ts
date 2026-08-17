@@ -53,13 +53,7 @@ describe('ObsProcessLauncher', () => {
     expect(spawns.calls).toEqual([
       {
         command: config.executablePath,
-        args: [
-          '--profile',
-          'vertical-live',
-          '--collection',
-          'vertical-live',
-          '--disable-updater',
-        ],
+        args: ['--profile', 'vertical-live', '--collection', 'vertical-live', '--disable-updater'],
         cwd: dirname(config.executablePath),
       },
     ])

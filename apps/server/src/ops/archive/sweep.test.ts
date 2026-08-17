@@ -126,6 +126,31 @@ describe('runArchiveSweep', () => {
     ])
   })
 
+  it('falls back to the working directory for free space when no root exists', () => {
+    const fs = fakeFs({}, { [resolve('/repo')]: 42 * MB })
+
+    const result = runArchiveSweep({ config, fs, clock, cwd: '/repo' })
+
+    expect(result.freeBytes).toBe(42 * MB)
+    expect(result.roots.every((root) => !root.exists)).toBe(true)
+  })
+
+  it('reports free space as unknown when no reading is available at all', () => {
+    const unreadable: ArchiveFsPort = {
+      exists: () => false,
+      list: () => [],
+      remove: () => {},
+      freeBytes: () => {
+        throw new Error('ENOENT')
+      },
+    }
+
+    const result = runArchiveSweep({ config, fs: unreadable, clock })
+
+    expect(result.freeBytes).toBeNull()
+    expect(result.plan.unmetRules).toEqual([])
+  })
+
   it('treats a root that does not exist yet as empty, not as a failure', () => {
     // V1 does not record (`RecEncoder=none`), so the recordings directory is
     // absent on a fresh host until an operator turns recording on.

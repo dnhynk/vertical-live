@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-16"?>
+<!--
+  Rolling archive sweep (spec §9.1 "용량 제한이 있는 로컬 rolling archive", §11).
+
+  ops/windows/Register-VerticalLive.ps1 substitutes four placeholders below (in
+  double braces, so this comment names them without the braces):
+    USER_ID    the account that owns the archive files
+    REPO_ROOT  absolute path of this repository on the host
+    NODE_EXE   absolute path of node.exe on the host
+    INTERVAL   repetition interval, ISO 8601 duration (default PT1H)
+
+  The sweep is a separate task, not a job inside the server process, so it keeps
+  working while the server is stopped — a full disk is exactly the state in which
+  the server may be down (spec §11 disk-full row of the fault matrix).
+
+  `--apply` is what makes it delete; without it the CLI is a dry run. The rules
+  it applies (retention days, max total, min free) are provisional until Gate 2
+  (BOARD A-15) and live in config/default.json.
+-->
+<Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <URI>\VerticalLive\vl-archive-sweep</URI>
+    <Description>vertical-live: delete archive files past the retention, size and free-space rules.</Description>
+  </RegistrationInfo>
+  <Triggers>
+    <LogonTrigger>
+      <Enabled>true</Enabled>
+      <UserId>{{USER_ID}}</UserId>
+      <Delay>PT5M</Delay>
+      <Repetition>
+        <Interval>{{INTERVAL}}</Interval>
+        <StopAtDurationEnd>false</StopAtDurationEnd>
+      </Repetition>
+    </LogonTrigger>
+  </Triggers>
+  <Principals>
+    <Principal id="Author">
+      <UserId>{{USER_ID}}</UserId>
+      <LogonType>InteractiveToken</LogonType>
+      <RunLevel>LeastPrivilege</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <AllowHardTerminate>true</AllowHardTerminate>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
+    <IdleSettings>
+      <StopOnIdleEnd>false</StopOnIdleEnd>
+      <RestartOnIdle>false</RestartOnIdle>
+    </IdleSettings>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <Enabled>true</Enabled>
+    <Hidden>false</Hidden>
+    <RunOnlyIfIdle>false</RunOnlyIfIdle>
+    <WakeToRun>false</WakeToRun>
+    <ExecutionTimeLimit>PT10M</ExecutionTimeLimit>
+    <Priority>7</Priority>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>{{NODE_EXE}}</Command>
+      <Arguments>"{{REPO_ROOT}}\apps\server\dist\bin\archive.js" --apply</Arguments>
+      <WorkingDirectory>{{REPO_ROOT}}</WorkingDirectory>
+    </Exec>
+  </Actions>
+</Task>

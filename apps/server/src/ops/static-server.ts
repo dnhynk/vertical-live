@@ -77,7 +77,9 @@ export function loadRendererStaticConfig(
   if (!LOOPBACK_HOSTS.has(host)) {
     // Spec §10.2 binds the renderer API to loopback; the static page is served
     // to the Browser Source on the same host and has no reason to leave it.
-    throw new RendererStaticConfigError(`renderer.host must be loopback (got ${JSON.stringify(host)})`)
+    throw new RendererStaticConfigError(
+      `renderer.host must be loopback (got ${JSON.stringify(host)})`,
+    )
   }
 
   const port = Number(env['VL_RENDERER_STATIC_PORT'] ?? values['port'])

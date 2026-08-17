@@ -33,7 +33,11 @@ function file(name: string, ageDays: number, sizeMb: number): ArchiveFile {
   }
 }
 
-function plan(config: Partial<ArchiveConfig>, files: readonly ArchiveFile[], freeBytes: number) {
+function plan(
+  config: Partial<ArchiveConfig>,
+  files: readonly ArchiveFile[],
+  freeBytes: number | null,
+) {
   return planArchiveSweep({ config: { ...base, ...config }, files, freeBytes, nowMs: NOW_MS })
 }
 
@@ -134,6 +138,16 @@ describe('planArchiveSweep', () => {
       '/archive/b.mkv',
     ])
     expect(second.deletions).toEqual(first.deletions)
+  })
+
+  it('does not apply the free-space rule when the volume could not be read', () => {
+    // Unknown is not zero: a reading that failed must not condemn files to fix
+    // a number nobody measured.
+    const result = plan({}, [file('a.mkv', 5, 1)], null)
+
+    expect(result.deletions).toEqual([])
+    expect(result.freeBytesAfter).toBeNull()
+    expect(result.unmetRules).toEqual([])
   })
 
   it('plans nothing when the archive is empty', () => {

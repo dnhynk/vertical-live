@@ -1,10 +1,7 @@
 import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 
-import {
-  loadRendererStaticConfig,
-  startRendererStaticServer,
-} from '../ops/static-server.js'
+import { loadRendererStaticConfig, startRendererStaticServer } from '../ops/static-server.js'
 
 /**
  * Entry point for `npm run serve:renderer -w @vl/server`.
@@ -36,7 +33,9 @@ const started = await startRendererStaticServer({
 process.stdout.write(`@vl/server renderer static serving ${directory} at ${started.url}\n`)
 
 function write(level: string, message: string, fields?: Record<string, unknown>): void {
-  process.stdout.write(`${JSON.stringify({ at: new Date().toISOString(), level, message, ...fields })}\n`)
+  process.stdout.write(
+    `${JSON.stringify({ at: new Date().toISOString(), level, message, ...fields })}\n`,
+  )
 }
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
