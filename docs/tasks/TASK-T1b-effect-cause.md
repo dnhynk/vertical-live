@@ -29,6 +29,13 @@
 |---|---|---|---|
 | — | — | — | 외부 플랫폼 사실이 필요 없는 내부 계약 변경이라 공식 문서 조회 없음. 근거는 `docs/PROJECT_SPEC.md` §2.1·§6.2·§7.3(6)·§8.4·§10.2 |
 
+### 스펙 정합 (§7.3(6)·§10.2 vs §2.1·§6.2)
+
+- §7.3(6): "렌더러에 `stateRevision` snapshot과 `effectId`, `causedByEventKey`, 절대 시작·종료 시각이 있는 effect를 WebSocket으로 발행한다." → `causedByEventKey` 필드는 **없애지 않는다**. 이름 그대로 남기고, deadline 유래일 때만 `null`이 되며 event 유래일 때는 `cause.eventKey`와 같아야 한다(refine).
+- §10.2: "유료 감사처럼 재생 불가능한 외부 부작용은 durable effect outbox에 `effectId`, **원인 event key**, 절대 시작·종료 시각, `ackedAt`을 저장한다." → 원인 event key를 요구하는 대상은 **유료 감사 같은 재생 불가능한 부작용**이다. 그래서 `paid: true`인 effect는 event 원인만 허용하고(§8.4 유료 감사), 무료 연출은 deadline 원인을 가질 수 있다. 이렇게 두 절이 모두 문자 그대로 만족된다.
+- §2.1·§6.2: 시청자 0명에서도 수초 규모 연출이 진행되어야 하므로 event가 없는 effect가 표현 가능해야 한다. `cause.kind='deadline'`이 그 경로다.
+- 이 정합 판단은 코디네이터가 **BOARD `docs/tasks/BOARD.md` §3 가정 A-17**로 이미 등록했다(2026-08-17). 이 PR은 A-17을 계약 코드로 옮긴 것이고, BOARD 파일 자체는 코디네이터만 갱신하므로 이 PR에서 건드리지 않았다.
+
 ## Questions asked (orca ask) and answers
 
 | 질문 | 답(코디네이터) | 반영 |
@@ -50,17 +57,26 @@
 
 | # | 기준 | 상태(met/unmet/unverifiable) | 근거(테스트 파일·명령·출력) |
 |---|---|---|---|
-| 1 | 게이트 5개 통과 | (실행 후 기록) | |
-| 2 | JSON Schema 최신(`schema:generate` 산출물 커밋) | (실행 후 기록) | |
-| 3 | 음성 테스트: deadline effect + 비-null `causedByEventKey` 거부 | (실행 후 기록) | |
-| 4 | 음성 테스트: paid deadline effect 거부 | (실행 후 기록) | |
-| 5 | 음성 테스트: event effect key 불일치 거부 | (실행 후 기록) | |
-| 6 | 기존 384 테스트 회귀 없음 | (실행 후 기록) | |
+| 1 | 게이트 5개 통과 | met | 아래 Gates 블록(rebase 후 재실행) |
+| 2 | JSON Schema 최신 | met | `npm run schema:generate -w @vl/contract` 산출물 커밋(`schema/effect.schema.json`, `schema/ws-server-message.schema.json`). `npm run build -w @vl/contract` = `schema up to date (6 files)`, `src/schema/registry.test.ts`가 `npm run test`에서 최신성 확인 |
+| 3 | 음성: deadline effect + 비-null `causedByEventKey` 거부 | met | `read-model.test.ts` "refuses a deadline-caused effect that still names an event key" — 거부 사유가 `causedByEventKey` path임까지 확인 |
+| 4 | 음성: paid deadline effect 거부 | met | 같은 파일 "refuses a paid effect caused by a deadline (spec §8.4, §10.2)" — PAID_THANKS(paid 리터럴)와 AMBIENCE(`paid:true`) 양쪽, 사유 path `cause` 확인 |
+| 5 | 음성: event effect key 불일치 거부 | met | 같은 파일 "refuses an event-caused effect whose causedByEventKey disagrees with cause.eventKey" + "refuses an event-caused effect with a null causedByEventKey" |
+| 6 | 양성: deadline 유래 effect 통과(무입력 진행, §2.1·§6.2) | met | 같은 파일 `DEADLINE_AMBIENCE`(deadlineId 있음)·`DEADLINE_ACTION_REACTION`(deadlineId 없음)이 `it.each(EFFECTS)`와 WS `effect` 메시지 테스트를 통과 |
+| 7 | 기존 테스트 회귀 없음 | met | `npm run test` = 18 files / **495 passed, 0 failed**. 손댄 테스트 파일은 `read-model.test.ts` 하나뿐이고 31→42개(main 버전은 `git show origin/main:…`로 세었다). 즉 나머지 484개는 그대로다. 명세의 "384"는 T2(PR #3) 머지 전 T1 브랜치 숫자라 현재 main 기준과 다르다 |
 
 ### Gates (executed)
 
 ```text
-(아직 실행하지 않음 — 구현 후 채운다)
+git fetch origin && git rebase origin/main
+  -> Successfully rebased and updated refs/heads/dnhynk/t1b-effect-cause. (origin/main 5077a7a 위)
+
+npm run format:check   -> pass: "All matched files use Prettier code style!"
+npm run lint           -> pass: eslint 0 problems; "check-no-legacy-imports: ok (0 legacy imports)"
+npm run typecheck      -> pass: tsc --build tsconfig.json (출력 없음)
+npm run test           -> pass: "Test Files 18 passed (18) / Tests 495 passed (495)"
+npm run build          -> pass: @vl/contract(tsc + "schema up to date (6 files)"), @vl/renderer(vite build ✓ built in 13.09s),
+                          @vl/server(tsc --build), @vl/simulator(tsc --build)
 ```
 
 ## Not done / out of scope
