@@ -57,13 +57,63 @@ export interface ServerOptions {
   readonly sourceHealth?: () => readonly HealthSignal[]
 }
 
-function sendJson(res: ServerResponse, statusCode: number, body: unknown): void {
+function sendJson(
+  res: ServerResponse,
+  statusCode: number,
+  body: unknown,
+  headers: Readonly<Record<string, string>> = {},
+): void {
   const payload = JSON.stringify(body)
   res.writeHead(statusCode, {
     'content-type': 'application/json; charset=utf-8',
     'content-length': Buffer.byteLength(payload),
+    ...headers,
   })
   res.end(payload)
+}
+
+/**
+ * CORS for `POST /ingest/simulator`, and only for it.
+ *
+ * The renderer's `?mode=dev` panel injects events through this endpoint (§T11),
+ * and it is served from a different loopback port than the API — Vite in
+ * development, a static preview in OBS — so the browser sends a preflight for
+ * the `Authorization` header and refuses to read the answer without these
+ * headers.
+ *
+ * Two limits keep it from becoming a hole:
+ *
+ * - the caller's `Origin` is **echoed only if it is itself loopback**; there is
+ *   no `*`, and a page from anywhere else gets no CORS headers at all and so
+ *   cannot read a response;
+ * - the headers only exist while `simulator.enabled` is true. On a production
+ *   broadcast the endpoint answers 404 to every method, preflight included, and
+ *   is indistinguishable from a path that was never routed (§T11 acceptance 3).
+ *
+ * None of this replaces the checks: loopback address, bearer token and schema
+ * validation still run on the POST itself.
+ */
+function simulatorCorsHeaders(req: IncomingMessage): Record<string, string> {
+  const origin = headerValue(req, 'origin')
+  if (origin === null || !isLoopbackOrigin(origin)) return {}
+  return {
+    'access-control-allow-origin': origin,
+    'access-control-allow-methods': 'POST, OPTIONS',
+    'access-control-allow-headers': 'authorization, content-type',
+    'access-control-max-age': '600',
+    vary: 'Origin',
+  }
+}
+
+export function isLoopbackOrigin(origin: string): boolean {
+  let url: URL
+  try {
+    url = new URL(origin)
+  } catch {
+    return false
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return false
+  return url.hostname === '127.0.0.1' || url.hostname === 'localhost' || url.hostname === '[::1]'
 }
 
 /**
@@ -118,22 +168,31 @@ export function handleRequest(
       sendJson(res, 404, { error: 'not_found' })
       return
     }
-    if (method !== 'POST') {
-      sendJson(res, 405, { error: 'method_not_allowed' })
-      return
-    }
+    const cors = simulatorCorsHeaders(req)
     if (!isLoopbackAddress(req.socket.remoteAddress ?? null)) {
       sendJson(res, 403, { error: 'loopback_only' })
+      return
+    }
+    if (method === 'OPTIONS') {
+      // Preflight: it carries no `Authorization` header by definition, so it is
+      // answered on the loopback check alone. It grants nothing — the POST it
+      // precedes is still authenticated and validated.
+      res.writeHead(204, { ...cors, 'content-length': 0 })
+      res.end()
+      return
+    }
+    if (method !== 'POST') {
+      sendJson(res, 405, { error: 'method_not_allowed' }, cors)
       return
     }
     void readJsonBody(req).then(
       (body) => {
         if (body === BODY_TOO_LARGE) {
-          sendJson(res, 413, { error: 'body_too_large' })
+          sendJson(res, 413, { error: 'body_too_large' }, cors)
           return
         }
         if (body === BODY_UNPARSEABLE) {
-          sendJson(res, 400, { error: 'body_must_be_json' })
+          sendJson(res, 400, { error: 'body_must_be_json' }, cors)
           return
         }
         const result = ingest.handle({
@@ -141,10 +200,10 @@ export function handleRequest(
           remoteAddress: req.socket.remoteAddress ?? null,
           body,
         })
-        sendJson(res, result.status, result.body)
+        sendJson(res, result.status, result.body, cors)
       },
       () => {
-        sendJson(res, 400, { error: 'body_must_be_json' })
+        sendJson(res, 400, { error: 'body_must_be_json' }, cors)
       },
     )
     return

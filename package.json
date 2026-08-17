@@ -18,8 +18,11 @@
     "lint": "eslint . && node scripts/check-no-legacy-imports.mjs && node scripts/check-install-scripts.mjs",
     "typecheck": "tsc --build tsconfig.json",
     "test": "vitest run",
+    "test:replay": "vitest run tools/simulator/src/replay apps/renderer/src/replay",
     "build": "npm run build --workspaces --if-present",
-    "obs:probe": "npm run obs:probe -w @vl/server --"
+    "obs:probe": "npm run obs:probe -w @vl/server --",
+    "sim": "npm run build -w @vl/server && npm run build -w @vl/simulator && node tools/simulator/dist/bin.js",
+    "sim:report": "npm run sim -- report"
   },
   "devDependencies": {
     "@eslint/js": "9.39.1",

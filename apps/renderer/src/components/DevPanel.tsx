@@ -2,18 +2,20 @@ import { JA_NATIVE_REVIEW } from '../i18n/index'
 import { useConnectionVersion, useLogEntries, useTick } from '../hooks'
 import type { RendererRuntime } from '../runtime'
 import { paletteFor } from '../visual/palette'
+import DevInjector from './DevInjector'
 
 /**
  * `?mode=dev` diagnostics: connection state, revisions, effect count and the
- * health signals of spec §9.4(4). Event injection and replay are T11.
+ * health signals of spec §9.4(4), plus the T11 injection controls.
  *
  * The panel only shows values the renderer produced itself — codes, counters,
  * ids and i18n keys — because it is on screen and raw chat may not be
  * (spec §12.3).
  *
- * `config.wsUrl` carries no token by construction (`config.ts`), so the address
- * below is safe to draw. Never render `authenticatedWsUrl()` here: it is the
- * socket's URL and it contains a vault secret (spec §10.2, `DevPanel.test.tsx`).
+ * `config.wsUrl` and `config.apiUrl` carry no token by construction
+ * (`config.ts`), so the addresses below are safe to draw. Never render
+ * `authenticatedWsUrl()` or `config.simToken` here: those carry vault secrets
+ * (spec §10.2, `DevPanel.test.tsx`).
  */
 export interface DevPanelProps {
   runtime: RendererRuntime
@@ -32,6 +34,8 @@ export default function DevPanel({ runtime }: DevPanelProps) {
       <dl className="dev-grid">
         <dt>ws</dt>
         <dd data-testid="dev-ws-url">{runtime.config.wsUrl}</dd>
+        <dt>api</dt>
+        <dd data-testid="dev-api-url">{runtime.config.apiUrl}</dd>
         <dt>status</dt>
         <dd data-testid="dev-status">{runtime.connection.status}</dd>
         <dt>reconnects</dt>
@@ -72,6 +76,7 @@ export default function DevPanel({ runtime }: DevPanelProps) {
         <dt>provisional</dt>
         <dd>{runtime.config.provisional.join(', ')}</dd>
       </dl>
+      <DevInjector runtime={runtime} />
       <ol className="dev-log" data-testid="dev-log">
         {entries
           .slice(-20)

@@ -9,6 +9,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./scenario": {
+      "types": "./dist/scenario/index.d.ts",
+      "default": "./dist/scenario/index.js"
     }
   },
   "bin": {
@@ -16,5 +20,13 @@
   },
   "scripts": {
     "build": "tsc --build"
+  },
+  "dependencies": {
+    "@vl/contract": "0.0.0",
+    "@vl/server": "0.0.0",
+    "ws": "8.21.3"
+  },
+  "devDependencies": {
+    "@types/ws": "8.18.1"
   }
 }
