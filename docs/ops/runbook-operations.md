@@ -181,7 +181,7 @@ curl -s http://127.0.0.1:8787/health | jq '.supervisor.families[] | select(.stat
 재개 절차(공통):
 
 ```bash
-curl -s http://127.0.0.1:8787/health | jq '.supervisor'   # 프로세스가 살아 있다면 사유가 여기 있다
+curl -s http://127.0.0.1:8787/health | jq '.supervisor.safeStop'   # 프로세스가 살아 있다면 kind·사유가 여기 있다
 # 원인 해결
 npm run kill -w @vl/server -- --clear                      # 파일 플래그가 있었다면
 npm run start -w @vl/server

@@ -121,11 +121,15 @@ npm run secrets -w @vl/server -- set alerts.discordWebhookUrl   # supervisor.ale
 ### 4.4 시뮬레이터
 
 ```bash
-npm run secrets -w @vl/server -- set server.simulatorToken
-npm run sim -- <scenario>         # 시나리오 주입 (simulator.enabled=true 필요)
-npm run sim:report                # 지연·처리 리포트
-npm run test:replay               # replay 회귀 테스트
+npm run sim -- list                                  # 내장 시나리오 목록
+npm run sim -- run <id>                              # 재생 (기본: 가상 시계 + 인프로세스 백엔드)
+npm run sim -- run <id> --url http://127.0.0.1:8787 --token <server.simulatorToken>
+npm run sim:report                                   # 구간별 p50/p95 리포트
+npm run test:replay                                  # replay 회귀 테스트
 ```
+
+돌고 있는 서버에 주입하려면 `simulator.enabled=true`와 vault의 `server.simulatorToken`이 필요하다
+(`npm run secrets -w @vl/server -- set server.simulatorToken`). 꺼져 있으면 엔드포인트가 404다.
 
 자세한 내용은 `docs/ops/simulator.md`. 시뮬레이터는 공개 방송과 **같은 계약**만 쓰고, 이벤트는 항상
 `source: "simulator"`로 표시된다(§2.6).
