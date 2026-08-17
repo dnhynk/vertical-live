@@ -1,3 +1,9 @@
+// The consumption check at the bottom reads two component sources from disk.
+/// <reference types="node" />
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
 import { describe, expect, it } from 'vitest'
 
 import { sampleSnapshot } from '../testing/fixtures'
@@ -42,13 +48,11 @@ describe('selectPalette', () => {
     expect(morning.paletteId).not.toBe(night.paletteId)
   })
 
-  it('tints the ground with the place and the accent with the chapter', () => {
+  it('tints the ground and the rim light with the place', () => {
     const garden = selectPalette(BASE)
     const terrace = selectPalette({ ...BASE, environmentId: 'night_terrace' })
     expect(garden.skyBottom).not.toBe(terrace.skyBottom)
     expect(garden.rimColor).not.toBe(terrace.rimColor)
-
-    expect(selectPalette({ ...BASE, chapterId: 'festival_prep' }).accent).not.toBe(garden.accent)
   })
 
   it('dims and slows the room in rain, and speeds it up in wind', () => {
@@ -90,6 +94,79 @@ describe('selectPalette', () => {
 
   it('is a pure function of its conditions', () => {
     expect(selectPalette(BASE)).toEqual(selectPalette({ ...BASE }))
+  })
+})
+
+/**
+ * Review round 1, major 1: a chapter has to change the picture, not just the HUD
+ * accent. These vary **only** `chapterId` — everything else in `BASE` is held
+ * fixed — and check the fields the scene actually draws with.
+ */
+describe('chapter variation (spec §6.2 day scale, §12.5)', () => {
+  const CHAPTERS = ['gathering', 'festival_prep', 'growth_choice'] as const
+
+  /** Largest per-channel distance, so a rounding-level "difference" cannot pass. */
+  function distance(left: string, right: string): number {
+    const channels = (hex: string): number[] =>
+      [1, 3, 5].map((at) => parseInt(hex.slice(at, at + 2), 16))
+    const a = channels(left)
+    const b = channels(right)
+    return Math.max(...a.map((value, index) => Math.abs(value - (b[index] ?? 0))))
+  }
+
+  it('changes the background and the lights, not only the accent', () => {
+    for (const first of CHAPTERS) {
+      for (const second of CHAPTERS) {
+        if (first === second) continue
+        const a = selectPalette({ ...BASE, chapterId: first })
+        const b = selectPalette({ ...BASE, chapterId: second })
+        const label = `${first} vs ${second}`
+
+        // Background.tsx uniforms.
+        expect(distance(a.skyTop, b.skyTop), label).toBeGreaterThanOrEqual(6)
+        expect(distance(a.skyMid, b.skyMid), label).toBeGreaterThanOrEqual(6)
+        expect(distance(a.skyBottom, b.skyBottom), label).toBeGreaterThanOrEqual(6)
+        // Scene.tsx rim light.
+        expect(distance(a.rimColor, b.rimColor), label).toBeGreaterThanOrEqual(6)
+        expect(a.rimIntensity, label).not.toBe(b.rimIntensity)
+        // And the HUD accent it already changed.
+        expect(a.accent, label).not.toBe(b.accent)
+      }
+    }
+  })
+
+  it('holds everything else steady, so only the day moved', () => {
+    const gathering = selectPalette({ ...BASE, chapterId: 'gathering' })
+    const festival = selectPalette({ ...BASE, chapterId: 'festival_prep' })
+
+    expect(gathering.keyIntensity).toBe(festival.keyIntensity)
+    expect(gathering.ambientIntensity).toBe(festival.ambientIntensity)
+    expect(gathering.motion).toBe(festival.motion)
+  })
+
+  it('leaves the room alone for a chapter it does not know', () => {
+    const unknown = selectPalette({ ...BASE, chapterId: 'sample-chapter-from-the-future' })
+    const neutral = selectPalette({ ...BASE, chapterId: '' })
+
+    expect(unknown.skyTop).toBe(neutral.skyTop)
+    expect(unknown.rimColor).toBe(neutral.rimColor)
+    expect(unknown.rimIntensity).toBe(neutral.rimIntensity)
+    expect(unknown.accent).toBe(neutral.accent)
+  })
+
+  it('moves fields the scene really draws with', () => {
+    // The assertions above are only worth something if these are the fields
+    // `Background.tsx` and `Scene.tsx` read off the palette.
+    const components = join(dirname(fileURLToPath(import.meta.url)), '..', 'components')
+    const background = readFileSync(join(components, 'Background.tsx'), 'utf8')
+    const scene = readFileSync(join(components, 'Scene.tsx'), 'utf8')
+
+    for (const field of ['skyTop', 'skyMid', 'skyBottom']) {
+      expect(background.includes(`palette.${field}`), field).toBe(true)
+    }
+    for (const field of ['rimColor', 'rimIntensity']) {
+      expect(scene.includes(`palette.${field}`), field).toBe(true)
+    }
   })
 })
 

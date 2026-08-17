@@ -157,13 +157,59 @@ const WEATHER_EFFECTS: Readonly<Record<string, WeatherEffect>> = {
   starry: { light: 0.75, motion: 0.45, wash: '#26325c', washMix: 0.3 },
 }
 
-/** Chapter accent, used by the HUD rule and the rim light (spec §6.2 day scale). */
-const CHAPTER_ACCENT_DEFAULT = '#ffd84d'
+/**
+ * What the daily chapter does to the room (spec §6.2 day scale, §12.5).
+ *
+ * Review round 1, major 1: the chapter used to set the HUD accent and nothing
+ * else, so a new chapter left the background and the lights exactly as they
+ * were — the day-scale half of "상태·챕터·환경에 따른 배경·조명 변화" was not on
+ * screen. A chapter now also tints the sky and re-colours the rim light, so the
+ * same afternoon garden reads green on a gathering day, lantern-warm while the
+ * festival is being prepared, and cool on a growth-choice day.
+ */
+interface ChapterMood {
+  /** HUD accent. */
+  readonly accent: string
+  /** Mixed into the whole sky, after the weather wash (`Background.tsx`). */
+  readonly skyTint: string
+  readonly skyTintMix: number
+  /** How far the rim light moves from the room's own colour toward the chapter. */
+  readonly rimMix: number
+  /** Scales the rim light: a festival evening is lit more than a quiet one. */
+  readonly rimScale: number
+}
 
-const CHAPTER_ACCENTS: Readonly<Record<string, string>> = {
-  gathering: '#9be080',
-  festival_prep: '#ff9f68',
-  growth_choice: '#8fd0ff',
+/** An unknown chapter leaves the room alone and only sets the neutral accent. */
+const CHAPTER_DEFAULT: ChapterMood = {
+  accent: '#ffd84d',
+  skyTint: '#ffd84d',
+  skyTintMix: 0,
+  rimMix: 0,
+  rimScale: 1,
+}
+
+const CHAPTER_MOODS: Readonly<Record<string, ChapterMood>> = {
+  gathering: {
+    accent: '#9be080',
+    skyTint: '#7fbf63',
+    skyTintMix: 0.12,
+    rimMix: 0.45,
+    rimScale: 1,
+  },
+  festival_prep: {
+    accent: '#ff9f68',
+    skyTint: '#ff8a4c',
+    skyTintMix: 0.16,
+    rimMix: 0.6,
+    rimScale: 1.25,
+  },
+  growth_choice: {
+    accent: '#8fd0ff',
+    skyTint: '#6aa8ff',
+    skyTintMix: 0.14,
+    rimMix: 0.5,
+    rimScale: 0.9,
+  },
 }
 
 /** Mood trims the key light a little; it never changes what the screen says. */
@@ -221,11 +267,14 @@ export function selectPalette(conditions: SceneConditions): ScenePalette {
   const phase = PHASE_TONES[conditions.worldPhaseId] ?? PHASE_DEFAULT
   const environment = ENVIRONMENT_TINTS[conditions.environmentId] ?? ENVIRONMENT_DEFAULT
   const weather = WEATHER_EFFECTS[conditions.weatherId] ?? WEATHER_DEFAULT
-  const accent = CHAPTER_ACCENTS[conditions.chapterId] ?? CHAPTER_ACCENT_DEFAULT
+  const chapter = CHAPTER_MOODS[conditions.chapterId] ?? CHAPTER_DEFAULT
   const mood = MOOD_KEY_SCALES[conditions.emotionId] ?? MOOD_KEY_SCALE_DEFAULT
   const rest = conditions.resting ? 0.85 : 1
 
-  const wash = (color: string): string => mixColors(color, weather.wash, weather.washMix)
+  // Weather first, then the chapter: the weather is what the sky is doing now,
+  // the chapter is what the day is about, and the day tints what the sky does.
+  const wash = (color: string): string =>
+    mixColors(mixColors(color, weather.wash, weather.washMix), chapter.skyTint, chapter.skyTintMix)
   const light = weather.light * rest
 
   return {
@@ -243,9 +292,9 @@ export function selectPalette(conditions: SceneConditions): ScenePalette {
     ambientIntensity: phase.ambientIntensity * light,
     keyColor: phase.keyColor,
     keyIntensity: phase.keyIntensity * light * mood,
-    rimColor: environment.rimColor,
-    rimIntensity: (conditions.resting ? 0.7 : 1.1) * weather.light,
-    accent,
+    rimColor: mixColors(environment.rimColor, chapter.accent, chapter.rimMix),
+    rimIntensity: (conditions.resting ? 0.7 : 1.1) * weather.light * chapter.rimScale,
+    accent: chapter.accent,
     motion: weather.motion * (conditions.resting ? 0.6 : 1),
   }
 }
