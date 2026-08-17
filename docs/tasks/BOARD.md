@@ -18,10 +18,10 @@
 | T5 | 렌더러 read model(snapshot 복구·effect 멱등·ACK·건강) | T1 | — | merged | t5-renderer-readmodel | #9 | `task_6ba022bb6151` |
 | T6 | 명령 파서·모더레이션·입력 arbiter | T1 | — | merged | t6-command-parser | #8 | `task_a0f96dd7e038` |
 | T7 | 콘텐츠 디렉터·크리처 상태 모델(순수 도메인) | T1 | — | merged | t7-content-director | #6 | `task_e1e7531798ad` |
-| T8 | 상태 엔진(단일 writer·outbox·WS·ACK·유료 멱등) | T1b, T4, T6, T7 | — | changes_requested | t8-state-engine | #12 | `task_0aadf1c96dcf` |
-| T9 | YouTube source adapter(gRPC streamList + REST fallback) | T3, T4, T8 | — | pending | t9-youtube-adapter | | `task_ec3d66a159bd` |
+| T8 | 상태 엔진(단일 writer·outbox·WS·ACK·유료 멱등) | T1b, T4, T6, T7 | — | merged | t8-state-engine | #12 | `task_0aadf1c96dcf` |
+| T9 | YouTube source adapter(gRPC streamList + REST fallback) | T3, T4, T8 | — | dispatched | t9-youtube-adapter | | `task_ec3d66a159bd` |
 | T10 | broadcast lifecycle·reconcile·한도 | T3, T4 | — | changes_requested | t10-broadcast-lifecycle | #11 | `task_41769f69d4b7` |
-| T11 | 로컬 시뮬레이터·replay·지연 계측 | T5, T8 | — | pending | t11-simulator-replay | | `task_9470df5be9b8` |
+| T11 | 로컬 시뮬레이터·replay·지연 계측 | T5, T8 | — | dispatched | t11-simulator-replay | | `task_9470df5be9b8` |
 | T12 | supervisor 상태기계·건강 집계·kill switch·알림·dead-man | T2, T8, T9, T10 | — | pending | t12-supervisor | | `task_560530cfb813` |
 | T13 | 데이터 보존·삭제·철회 자동화 | T3, T4 | — | merged | t13-data-policy | #10 | `task_15cd2ae24e82` |
 | T14 | 렌더러 화면 완성(5초 무음·감사 연출·i18n) | T5, T7 | — | merged | t14-renderer-screen | #13 | `task_82f32652b3cf` |
@@ -141,3 +141,4 @@
 | 2026-08-17 21:20 | F-T10-2 완료(attempt 마커 vl-attempt:<id>@snippet.description + broadcast_resources.attempt_marker, T13 retention 통합; 1235 tests). R-T10-3 `task_a05cfe9402db` → `ctx_c7f8d9d6fc76`(review). 진행: R-T8-2(review2) |
 | 2026-08-17 21:45 | R-T8-2 verdict request_changes(blocker 2: DevPanel이 토큰 포함 wsUrl 화면 노출(§10.2), 어휘 밖 argument가 'applied'로만 기록) → F-T8-2 `task_f121a06adbef` → T8 터미널. round 3에도 실패하면 런북 2.5(4) 에스컬레이션. 진행: R-T10-3(review) |
 | 2026-08-17 22:05 | R-T10-3 verdict request_changes(blocker: 절단 목록+가시 마커 채택; major: 마커 공개 description 잔존; minor stale 서술). 코디네이터 판단: 각 round의 지적은 해소됐고 리뷰어가 인접 갭을 더 찾은 것이므로 **A-18 마커 생명주기 결정** 후 F-T10-3 `task_f60ae9ddfa44` → T10 터미널 1회 더 진행. round 4에도 미승인이면 2.5(4) 에스컬레이션 |
+| 2026-08-17 22:40 | F-T8-2 완료(wsUrl/wsToken 구조 분리, migration 005 argument_rejected). R-T8-3 verdict **approve** → 최종 게이트(.gitignore /data/, 렌더러 config 토큰 분리 확인) → **PR #12 squash merge**(main d6e6edd). T8 worker release·worktree 제거. T9 `ctx_054a70617198`·T11 `ctx_67eddda5be64` 디스패치. 진행: F-T10-3. 마이그레이션 현황: 001·002·004·005 main, 003(T10) 대기 |
