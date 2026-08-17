@@ -31,4 +31,4 @@ export {
 } from './inject.js'
 export { DEFAULT_SLICE_MS, runScenario, type RunOptions, type RunResult } from './run.js'
 export { openSession, type SessionOptions, type SimulatorSession } from './session.js'
-export { StubRenderer, type StubRendererOptions } from './stub-renderer.js'
+export { StubRenderer, type ObservedEffect, type StubRendererOptions } from './stub-renderer.js'

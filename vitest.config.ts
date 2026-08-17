@@ -37,6 +37,10 @@ export default defineConfig({
           new URL('./tools/simulator/src/scenario/index.ts', import.meta.url),
         ),
       },
+      {
+        find: '@vl/simulator',
+        replacement: fileURLToPath(new URL('./tools/simulator/src/index.ts', import.meta.url)),
+      },
     ],
   },
   test: {

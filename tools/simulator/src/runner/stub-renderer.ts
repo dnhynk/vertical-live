@@ -17,11 +17,21 @@ import WebSocket from 'ws'
  * so the latency report would silently only cover the server half.
  *
  * It is *not* a second implementation of the renderer. It draws nothing, keeps
- * no read model and holds no world state; `effectStarts` counts distinct effect
- * ids so a replayed paid effect can be shown not to restart (spec §11 유료
- * 무결성), and the full renderer's own idempotence is covered by T5
- * (`apps/renderer/src/read-model/store.test.ts`).
+ * no read model and holds no world state. `effectStarts` counts distinct effect
+ * ids, which says what the *wire* carried and nothing about what a renderer
+ * would do with it — the stub's own `Set` cannot be evidence for spec §11's
+ * "같은 paid effectId가 재전송돼도 연출을 재시작하지 않음" (review round 1, M2).
+ * `effectLog` exists for that: it keeps every frame with the instant it arrived,
+ * so `apps/renderer/src/replay/paid-effect-idempotence.test.ts` can replay the
+ * real retransmissions through the production `ReadModel`.
  */
+
+/** One received effect frame and the instant this renderer saw it. */
+export interface ObservedEffect {
+  readonly effect: Effect
+  /** `clock.nowUtcIso()` at arrival; the production read model needs it. */
+  readonly atUtc: string
+}
 
 export interface StubRendererOptions {
   readonly wsUrl: string
@@ -42,6 +52,8 @@ export class StubRenderer {
   readonly snapshots: WorldSnapshot[] = []
   /** Every effect frame received, including retransmits. */
   readonly effectFrames: Effect[] = []
+  /** The same frames, each with its arrival instant, in arrival order. */
+  readonly effectLog: ObservedEffect[] = []
   /** Frames that carried an `effectId` this renderer had already played. */
   repeatedEffectFrames = 0
   closeCode: number | null = null
@@ -129,7 +141,9 @@ export class StubRenderer {
       }
       case 'effect': {
         const effect = message.data.effect
+        const atUtc = this.#options.clock.nowUtcIso()
         this.effectFrames.push(effect)
+        this.effectLog.push({ effect, atUtc })
         if (this.#seenEffectIds.has(effect.effectId)) this.repeatedEffectFrames += 1
         else this.#seenEffectIds.add(effect.effectId)
         if (this.#options.ackEffects !== false) {
@@ -137,7 +151,7 @@ export class StubRenderer {
             schemaVersion: CONTRACT_VERSION,
             type: 'ack_effect',
             effectId: effect.effectId,
-            appliedAt: this.#options.clock.nowUtcIso(),
+            appliedAt: atUtc,
           })
         }
         return
