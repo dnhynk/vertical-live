@@ -62,11 +62,44 @@ export const EMPTY_PAYMENT: PaymentDetails = {
   giftName: null,
 }
 
-/** Accepts the JSON number or JSON string encodings of an integer API field. */
-export function toInteger(value: unknown): number | null {
-  if (typeof value === 'number') return Number.isSafeInteger(value) ? value : null
-  if (typeof value === 'string' && /^[0-9]{1,15}$/.test(value)) return Number.parseInt(value, 10)
-  return null
+/**
+ * Outcome of reading one numeric source field.
+ *
+ * The three cases are kept apart on purpose: an absent field is normal (the
+ * §7.4 payment contract makes every number nullable), while a field that is
+ * present but outside the contract is a malformed item. Collapsing the two
+ * would either invent a value or throw inside `IngestEnvelopeSchema.parse`,
+ * and spec §7.3(1) requires a minimal envelope for a malformed item instead.
+ */
+export type IntegerRead =
+  | { readonly status: 'absent' }
+  | { readonly status: 'ok'; readonly value: number }
+  | { readonly status: 'malformed' }
+
+const ABSENT: IntegerRead = { status: 'absent' }
+const MALFORMED: IntegerRead = { status: 'malformed' }
+
+/**
+ * Reads an integer API field in either its JSON number or JSON string encoding
+ * ([S3] reports `unsigned long` as a string, gRPC depends on the loader's
+ * `longs` option), and holds it to the same bound the schema does — so a value
+ * that reaches `buildValidEnvelope` can never fail validation there.
+ */
+export function readInteger(
+  container: Record<string, unknown>,
+  key: string,
+  minimum: number,
+): IntegerRead {
+  const value = container[key]
+  if (value === undefined || value === null || value === '') return ABSENT
+  if (typeof value === 'number') {
+    return Number.isSafeInteger(value) && value >= minimum ? { status: 'ok', value } : MALFORMED
+  }
+  if (typeof value === 'string' && /^[0-9]{1,15}$/.test(value)) {
+    const parsed = Number.parseInt(value, 10)
+    return parsed >= minimum ? { status: 'ok', value: parsed } : MALFORMED
+  }
+  return MALFORMED
 }
 
 /** ISO 4217 alphabetic code, upper-cased. */

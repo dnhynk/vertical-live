@@ -22,6 +22,7 @@ import { CONTRACT_VERSION } from './version.js'
 export const ValidationErrorCodeSchema = z.enum([
   'MALFORMED_ITEM',
   'MISSING_MESSAGE_ID',
+  'MALFORMED_MESSAGE_ID',
   'MISSING_SNIPPET',
   'MISSING_MESSAGE_TYPE',
   'UNSUPPORTED_MESSAGE_TYPE',
@@ -30,6 +31,9 @@ export const ValidationErrorCodeSchema = z.enum([
   'MALFORMED_PUBLISHED_AT',
   'MISSING_EVENT_DETAILS',
   'MALFORMED_AMOUNT',
+  'MALFORMED_TIER',
+  'MALFORMED_JEWELS',
+  'MALFORMED_COMBO_COUNT',
 ])
 export type ValidationErrorCode = z.infer<typeof ValidationErrorCodeSchema>
 

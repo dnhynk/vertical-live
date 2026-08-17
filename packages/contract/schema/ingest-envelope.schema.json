@@ -271,6 +271,7 @@
               "enum": [
                 "MALFORMED_ITEM",
                 "MISSING_MESSAGE_ID",
+                "MALFORMED_MESSAGE_ID",
                 "MISSING_SNIPPET",
                 "MISSING_MESSAGE_TYPE",
                 "UNSUPPORTED_MESSAGE_TYPE",
@@ -278,7 +279,10 @@
                 "MISSING_PUBLISHED_AT",
                 "MALFORMED_PUBLISHED_AT",
                 "MISSING_EVENT_DETAILS",
-                "MALFORMED_AMOUNT"
+                "MALFORMED_AMOUNT",
+                "MALFORMED_TIER",
+                "MALFORMED_JEWELS",
+                "MALFORMED_COMBO_COUNT"
               ]
             },
             "field": {

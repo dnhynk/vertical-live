@@ -287,6 +287,39 @@ const EXPECTED: Readonly<Record<string, Expectation>> = {
     field: 'id',
     sourceMessageType: { grpc: null, rest: null },
   },
+  // An id carrying the eventKey separator is dropped, not stored: it would forge
+  // a key segment (spec §7.4) and it does not fit `ExternalIdSchema` either.
+  'invalid-message-id-charset': {
+    status: 'invalid',
+    messageId: null,
+    code: 'MALFORMED_MESSAGE_ID',
+    field: 'id',
+    sourceMessageType: { grpc: null, rest: null },
+  },
+  'invalid-negative-tier': {
+    status: 'invalid',
+    messageId: 'msg_test_0015',
+    code: 'MALFORMED_TIER',
+    field: 'snippet.super_chat_details.tier',
+    restField: 'snippet.superChatDetails.tier',
+    sourceMessageType: { grpc: 'SUPER_CHAT_EVENT', rest: 'superChatEvent' },
+  },
+  'invalid-negative-jewels': {
+    status: 'invalid',
+    messageId: 'msg_test_gift_0002',
+    code: 'MALFORMED_JEWELS',
+    field: 'snippet.gift_details.jewels_amount',
+    restField: 'snippet.giftEventDetails.giftMetadata.jewelsAmount',
+    sourceMessageType: { grpc: 'GIFT_EVENT', rest: 'giftEvent' },
+  },
+  'invalid-negative-combo-count': {
+    status: 'invalid',
+    messageId: 'msg_test_gift_0003',
+    code: 'MALFORMED_COMBO_COUNT',
+    field: 'snippet.gift_details.combo_count',
+    restField: 'snippet.giftEventDetails.giftMetadata.comboCount',
+    sourceMessageType: { grpc: 'GIFT_EVENT', rest: 'giftEvent' },
+  },
 }
 
 function adapt(shape: 'grpc' | 'rest', name: string, ctx = context()): IngestEnvelope {
@@ -429,6 +462,191 @@ describe('field names are never mixed', () => {
       validationStatus: 'invalid',
       messageId: null,
       validationError: { code: 'MALFORMED_ITEM', field: null },
+    })
+  })
+})
+
+describe('malformed source numbers and ids stay envelopes (spec §7.3(1))', () => {
+  const PUBLISHED_AT = '2026-08-16T00:00:00.000Z'
+
+  function superChatItem(shape: 'grpc' | 'rest', patch: Record<string, unknown>): unknown {
+    return shape === 'grpc'
+      ? {
+          id: 'msg_test_probe_0001',
+          snippet: {
+            type: 'SUPER_CHAT_EVENT',
+            live_chat_id: LIVE_CHAT_ID,
+            published_at: PUBLISHED_AT,
+            super_chat_details: { amount_micros: '550000', currency: 'JPY', tier: 2, ...patch },
+          },
+        }
+      : {
+          id: 'msg_test_probe_0001',
+          snippet: {
+            type: 'superChatEvent',
+            liveChatId: LIVE_CHAT_ID,
+            publishedAt: PUBLISHED_AT,
+            superChatDetails: { amountMicros: '550000', currency: 'JPY', tier: 2, ...patch },
+          },
+        }
+  }
+
+  function giftItem(shape: 'grpc' | 'rest', patch: Record<string, unknown>): unknown {
+    return shape === 'grpc'
+      ? {
+          id: 'msg_test_probe_0002',
+          snippet: {
+            type: 'GIFT_EVENT',
+            live_chat_id: LIVE_CHAT_ID,
+            published_at: PUBLISHED_AT,
+            gift_details: {
+              gift_name: 'test_gift_lantern',
+              jewels_amount: 30,
+              combo_count: 1,
+              ...patch,
+            },
+          },
+        }
+      : {
+          id: 'msg_test_probe_0002',
+          snippet: {
+            type: 'giftEvent',
+            liveChatId: LIVE_CHAT_ID,
+            publishedAt: PUBLISHED_AT,
+            giftEventDetails: {
+              giftMetadata: {
+                giftName: 'test_gift_lantern',
+                jewelsAmount: 30,
+                comboCount: 1,
+                ...patch,
+              },
+            },
+          },
+        }
+  }
+
+  /** Values no source number may become. `0` is added per field where the contract requires ≥ 1. */
+  const HOSTILE_VALUES: readonly unknown[] = [
+    -1,
+    -1000,
+    1.5,
+    '-1',
+    '1.5',
+    'five-hundred',
+    '',
+    Number.NaN,
+    Number.POSITIVE_INFINITY,
+    2 ** 60,
+    true,
+    {},
+    [],
+  ]
+
+  interface NumericProbe {
+    readonly code: ValidationErrorCode
+    readonly keys: Readonly<Record<'grpc' | 'rest', string>>
+    readonly build: (shape: 'grpc' | 'rest', patch: Record<string, unknown>) => unknown
+    /** `''` and an absent value mean "not reported"; only a required field rejects them. */
+    readonly rejectsAbsent: boolean
+    readonly extraHostile?: readonly unknown[]
+  }
+
+  const NUMERIC_PROBES: readonly NumericProbe[] = [
+    {
+      code: 'MALFORMED_AMOUNT',
+      keys: { grpc: 'amount_micros', rest: 'amountMicros' },
+      build: superChatItem,
+      rejectsAbsent: true,
+    },
+    {
+      code: 'MALFORMED_TIER',
+      keys: { grpc: 'tier', rest: 'tier' },
+      build: superChatItem,
+      rejectsAbsent: false,
+      // `tier` is 1-based in [S3]; 0 is not a tier.
+      extraHostile: [0],
+    },
+    {
+      code: 'MALFORMED_JEWELS',
+      keys: { grpc: 'jewels_amount', rest: 'jewelsAmount' },
+      build: giftItem,
+      rejectsAbsent: false,
+    },
+    {
+      code: 'MALFORMED_COMBO_COUNT',
+      keys: { grpc: 'combo_count', rest: 'comboCount' },
+      build: giftItem,
+      rejectsAbsent: false,
+    },
+  ]
+
+  describe.each(SHAPES)('%s', (shape) => {
+    it.each(NUMERIC_PROBES.map((probe) => [probe.code, probe] as const))(
+      'maps every malformed value of the %s field to that code, never an exception',
+      (_code, probe) => {
+        const hostile = [...HOSTILE_VALUES, ...(probe.extraHostile ?? [])].filter(
+          (value) => value !== '' || probe.rejectsAbsent,
+        )
+        for (const value of hostile) {
+          const item = probe.build(shape, { [probe.keys[shape]]: value })
+          const envelope = ADAPTERS[shape](item, context())
+          expect(IngestEnvelopeSchema.safeParse(envelope).success).toBe(true)
+          expect(envelope, `${shape} ${probe.code} ${JSON.stringify(value)}`).toMatchObject({
+            validationStatus: 'invalid',
+            validationError: { code: probe.code },
+          })
+          expect(Object.keys(envelope).sort()).toEqual(REJECTED_KEYS)
+        }
+      },
+    )
+
+    it.each(NUMERIC_PROBES.map((probe) => [probe.code, probe] as const))(
+      'treats an absent field the way the contract does (%s)',
+      (_code, probe) => {
+        const item = probe.build(shape, { [probe.keys[shape]]: undefined })
+        const envelope = ADAPTERS[shape](item, context())
+        expect(envelope.validationStatus).toBe(probe.rejectsAbsent ? 'invalid' : 'valid')
+      },
+    )
+
+    it('still accepts the string encoding of a large integer', () => {
+      const envelope = ADAPTERS[shape](superChatItem(shape, { tier: '5' }), context())
+      expect(envelope).toMatchObject({
+        validationStatus: 'valid',
+        payment: { amountMicros: 550_000, tier: 5 },
+      })
+    })
+
+    it('normalizes an absent combo count to the first gift', () => {
+      const key = shape === 'grpc' ? 'combo_count' : 'comboCount'
+      const envelope = ADAPTERS[shape](giftItem(shape, { [key]: undefined }), context())
+      expect(envelope).toMatchObject({
+        validationStatus: 'valid',
+        payment: { comboCount: 0, jewels: 30 },
+      })
+    })
+
+    it.each(['msg_test:0001', 'msg test 0001', 'msg#0001', 'a'.repeat(129), '../etc/passwd'])(
+      'rejects the unusable message id %s without storing it',
+      (id) => {
+        const item = { ...(superChatItem(shape, {}) as Record<string, unknown>), id }
+        const envelope = ADAPTERS[shape](item, context())
+        expect(envelope).toMatchObject({
+          validationStatus: 'invalid',
+          messageId: null,
+          validationError: { code: 'MALFORMED_MESSAGE_ID', field: 'id' },
+        })
+        expect(JSON.stringify(envelope)).not.toContain(id)
+      },
+    )
+
+    it('accepts a message id at the length limit', () => {
+      const id = 'a'.repeat(128)
+      const item = { ...(superChatItem(shape, {}) as Record<string, unknown>), id }
+      expect(ADAPTERS[shape](item, context())).toMatchObject({
+        validationStatus: 'valid',
+        messageId: id,
+      })
     })
   })
 })

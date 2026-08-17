@@ -1,15 +1,15 @@
 import type { EventKind } from '../enums.js'
 import type { IngestEnvelope, PaymentDetails, ValidationErrorCode } from '../ingest.js'
-import { toIsoUtcInstant } from '../primitives.js'
+import { EXTERNAL_ID_PATTERN, toIsoUtcInstant } from '../primitives.js'
 import {
   EMPTY_PAYMENT,
   buildRejectedEnvelope,
   buildValidEnvelope,
   isRecord,
+  readInteger,
   readString,
   toCurrency,
   toGiftName,
-  toInteger,
   type IngestAdapterContext,
 } from './shared.js'
 
@@ -63,6 +63,10 @@ export function fromRestListItem(item: unknown, ctx: IngestAdapterContext): Inge
 
   const messageId = readString(item, 'id')
   if (messageId === null) return reject('MISSING_MESSAGE_ID', 'id', null)
+  // An id outside the external-id charset cannot be stored in either envelope
+  // variant, and a `:` in it would forge an `eventKey` separator (spec §7.4),
+  // so the envelope records the gap instead of the offending value.
+  if (!EXTERNAL_ID_PATTERN.test(messageId)) return reject('MALFORMED_MESSAGE_ID', 'id', null)
 
   const snippet = item['snippet']
   if (!isRecord(snippet)) return reject('MISSING_SNIPPET', 'snippet', messageId)
@@ -96,15 +100,12 @@ export function fromRestListItem(item: unknown, ctx: IngestAdapterContext): Inge
     return reject('MISSING_EVENT_DETAILS', `snippet.${binding.detailsField}`, messageId, typeToken)
   }
   let details = outer
+  let detailsPath = `snippet.${binding.detailsField}`
   if (binding.metadataField !== undefined) {
     const nested = outer[binding.metadataField]
+    detailsPath = `${detailsPath}.${binding.metadataField}`
     if (!isRecord(nested)) {
-      return reject(
-        'MISSING_EVENT_DETAILS',
-        `snippet.${binding.detailsField}.${binding.metadataField}`,
-        messageId,
-        typeToken,
-      )
+      return reject('MISSING_EVENT_DETAILS', detailsPath, messageId, typeToken)
     }
     details = nested
   }
@@ -122,28 +123,39 @@ export function fromRestListItem(item: unknown, ctx: IngestAdapterContext): Inge
     case 'SUPER_STICKER': {
       // `userComment` exists on super chats and is deliberately not read:
       // a paid comment must not be able to buy a command (spec §8.5).
-      const amountMicros = toInteger(details['amountMicros'])
-      if (amountMicros === null) {
-        return reject(
-          'MALFORMED_AMOUNT',
-          `snippet.${binding.detailsField}.amountMicros`,
-          messageId,
-          typeToken,
-        )
+      const amountMicros = readInteger(details, 'amountMicros', 0)
+      if (amountMicros.status !== 'ok') {
+        return reject('MALFORMED_AMOUNT', `${detailsPath}.amountMicros`, messageId, typeToken)
+      }
+      // `tier` is optional in the contract, so only a present-but-out-of-range
+      // value is an error; 0 and negatives are not tiers ([S3] tier is 1-based).
+      const tier = readInteger(details, 'tier', 1)
+      if (tier.status === 'malformed') {
+        return reject('MALFORMED_TIER', `${detailsPath}.tier`, messageId, typeToken)
       }
       payment = {
         ...EMPTY_PAYMENT,
-        amountMicros,
+        amountMicros: amountMicros.value,
         currency: toCurrency(details['currency']),
-        tier: toInteger(details['tier']),
+        tier: tier.status === 'ok' ? tier.value : null,
       }
       break
     }
     case 'GIFT': {
+      const jewels = readInteger(details, 'jewelsAmount', 0)
+      if (jewels.status === 'malformed') {
+        return reject('MALFORMED_JEWELS', `${detailsPath}.jewelsAmount`, messageId, typeToken)
+      }
+      // A non-combo gift reports no combo count and counts as the first one
+      // (spec §7.4), so an absent value normalizes to 0 rather than rejecting.
+      const comboCount = readInteger(details, 'comboCount', 0)
+      if (comboCount.status === 'malformed') {
+        return reject('MALFORMED_COMBO_COUNT', `${detailsPath}.comboCount`, messageId, typeToken)
+      }
       payment = {
         ...EMPTY_PAYMENT,
-        jewels: toInteger(details['jewelsAmount']),
-        comboCount: toInteger(details['comboCount']) ?? 0,
+        jewels: jewels.status === 'ok' ? jewels.value : null,
+        comboCount: comboCount.status === 'ok' ? comboCount.value : 0,
         giftName: toGiftName(details['giftName']),
       }
       break

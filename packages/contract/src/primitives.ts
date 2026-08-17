@@ -19,9 +19,11 @@ export type IsoUtcInstant = z.infer<typeof IsoUtcInstantSchema>
  * Identifier issued by an external platform (message, broadcast and chat ids).
  * The character class excludes `:` so it cannot forge an `eventKey` separator.
  */
+export const EXTERNAL_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/
+
 export const ExternalIdSchema = z
   .string()
-  .regex(/^[A-Za-z0-9_-]{1,128}$/, 'external id must be 1-128 chars of [A-Za-z0-9_-]')
+  .regex(EXTERNAL_ID_PATTERN, 'external id must be 1-128 chars of [A-Za-z0-9_-]')
 export type ExternalId = z.infer<typeof ExternalIdSchema>
 
 /**

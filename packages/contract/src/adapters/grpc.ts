@@ -1,15 +1,15 @@
 import type { EventKind } from '../enums.js'
 import type { IngestEnvelope, PaymentDetails, ValidationErrorCode } from '../ingest.js'
-import { toIsoUtcInstant } from '../primitives.js'
+import { EXTERNAL_ID_PATTERN, toIsoUtcInstant } from '../primitives.js'
 import {
   EMPTY_PAYMENT,
   buildRejectedEnvelope,
   buildValidEnvelope,
   isRecord,
+  readInteger,
   readString,
   toCurrency,
   toGiftName,
-  toInteger,
   type IngestAdapterContext,
 } from './shared.js'
 
@@ -97,6 +97,10 @@ export function fromGrpcStreamListItem(item: unknown, ctx: IngestAdapterContext)
 
   const messageId = readString(item, 'id')
   if (messageId === null) return reject('MISSING_MESSAGE_ID', 'id', null)
+  // An id outside the external-id charset cannot be stored in either envelope
+  // variant, and a `:` in it would forge an `eventKey` separator (spec §7.4),
+  // so the envelope records the gap instead of the offending value.
+  if (!EXTERNAL_ID_PATTERN.test(messageId)) return reject('MALFORMED_MESSAGE_ID', 'id', null)
 
   const snippet = item['snippet']
   if (!isRecord(snippet)) return reject('MISSING_SNIPPET', 'snippet', messageId)
@@ -141,8 +145,8 @@ export function fromGrpcStreamListItem(item: unknown, ctx: IngestAdapterContext)
     case 'SUPER_STICKER': {
       // `user_comment` exists on super chats and is deliberately not read:
       // a paid comment must not be able to buy a command (spec §8.5).
-      const amountMicros = toInteger(details['amount_micros'])
-      if (amountMicros === null) {
+      const amountMicros = readInteger(details, 'amount_micros', 0)
+      if (amountMicros.status !== 'ok') {
         return reject(
           'MALFORMED_AMOUNT',
           `snippet.${binding.detailsField}.amount_micros`,
@@ -150,19 +154,50 @@ export function fromGrpcStreamListItem(item: unknown, ctx: IngestAdapterContext)
           typeToken,
         )
       }
+      // `tier` is optional in the contract, so only a present-but-out-of-range
+      // value is an error; 0 and negatives are not tiers ([S3] tier is 1-based).
+      const tier = readInteger(details, 'tier', 1)
+      if (tier.status === 'malformed') {
+        return reject(
+          'MALFORMED_TIER',
+          `snippet.${binding.detailsField}.tier`,
+          messageId,
+          typeToken,
+        )
+      }
       payment = {
         ...EMPTY_PAYMENT,
-        amountMicros,
+        amountMicros: amountMicros.value,
         currency: toCurrency(details['currency']),
-        tier: toInteger(details['tier']),
+        tier: tier.status === 'ok' ? tier.value : null,
       }
       break
     }
     case 'GIFT': {
+      const jewels = readInteger(details, 'jewels_amount', 0)
+      if (jewels.status === 'malformed') {
+        return reject(
+          'MALFORMED_JEWELS',
+          `snippet.${binding.detailsField}.jewels_amount`,
+          messageId,
+          typeToken,
+        )
+      }
+      // A non-combo gift reports no combo count and counts as the first one
+      // (spec §7.4), so an absent value normalizes to 0 rather than rejecting.
+      const comboCount = readInteger(details, 'combo_count', 0)
+      if (comboCount.status === 'malformed') {
+        return reject(
+          'MALFORMED_COMBO_COUNT',
+          `snippet.${binding.detailsField}.combo_count`,
+          messageId,
+          typeToken,
+        )
+      }
       payment = {
         ...EMPTY_PAYMENT,
-        jewels: toInteger(details['jewels_amount']),
-        comboCount: toInteger(details['combo_count']) ?? 0,
+        jewels: jewels.status === 'ok' ? jewels.value : null,
+        comboCount: comboCount.status === 'ok' ? comboCount.value : 0,
         giftName: toGiftName(details['gift_name']),
       }
       break

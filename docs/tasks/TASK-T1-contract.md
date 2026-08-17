@@ -100,6 +100,17 @@ npm run build         -> @vl/contract: schema up to date (6 files); @vl/renderer
 
 실행하지 않은 게이트: 없음.
 
+## Review round 1
+
+리뷰: PR #2 `pullrequestreview-4948249749`(verdict `request_changes`, blocker 1 + major 3). Orca task `task_df3f5c1e4034` · dispatch `ctx_457f6a165433`.
+
+| # | Finding | 판정 | 커밋 | 내용 |
+|---|---|---|---|---|
+| 1 | [blocker] `adapters/shared.ts:101` — 형식 오류 숫자(음수 `tier`/`jewels`/`comboCount` 등)가 `IngestEnvelopeSchema.parse`에서 throw | 고침 | (SHA-1) | |
+| 2 | [major] `primitives.ts:61` — `Date.parse`는 ISO 8601 검증기가 아님 | 고침 | (SHA-2) | |
+| 3 | [major] `event.ts:29-31` — `CanonicalEventSchema`가 §7.4 `eventKey` 관계를 강제하지 않음 | 고침 | (SHA-3) | |
+| 4 | [major] `adapters/shared.ts:43` — `NormalizedItemFacts.commandText`가 TS 계약 타입·dist `.d.ts`에 노출 | 고침 | (SHA-4) | |
+
 ## Not done / out of scope
 
 - 명령 파서·모더레이션 구현(T6), 상태 엔진·delta 계산(T8), DB(T4), 렌더링(T5/T14), 실제 gRPC/REST 호출과 로더 설정(T9)
