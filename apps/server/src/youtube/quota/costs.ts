@@ -95,6 +95,14 @@ export const QUOTA_COSTS: Readonly<Record<PlannedMethod, QuotaCostEntry>> = Obje
     checkedOn: CHECKED_ON,
     basis: `${WRITE_BASIS} transition updates the broadcast's status.`,
   },
+  'liveBroadcasts.update': {
+    units: 50,
+    operation: 'write',
+    documented: false,
+    evidenceUrl: READ_WRITE_RULE_URL,
+    checkedOn: CHECKED_ON,
+    basis: `${WRITE_BASIS} T10 calls it twice per broadcast at most: once to take the attempt marker out of the description and once to apply the configured privacy (BOARD A-18).`,
+  },
   'liveStreams.list': {
     units: 1,
     operation: 'read',

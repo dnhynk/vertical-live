@@ -42,6 +42,16 @@ import {
   type RetentionLedgerFilter,
   type RetentionLedgerRow,
 } from './retention.js'
+import {
+  BROADCAST_STAGE_ORDER,
+  type BroadcastAttemptInput,
+  type BroadcastAttemptRecord,
+  type BroadcastAttemptUpdate,
+  type BroadcastMutatingCall,
+  type BroadcastStage,
+  type BroadcastStrategy,
+  type BroadcastTransitionTarget,
+} from './types.js'
 import type {
   DeadlineRecord,
   InboxInput,
@@ -136,6 +146,27 @@ interface EffectColumns {
   readonly published_at: string | null
   readonly acked_at: string | null
   readonly expired_at: string | null
+}
+
+interface BroadcastAttemptColumns {
+  readonly attempt_id: string
+  readonly strategy: string
+  readonly stage: string
+  readonly pending_call: string | null
+  readonly pending_transition: string | null
+  readonly pending_since: string | null
+  readonly stream_id: string | null
+  readonly stream_title: string
+  readonly broadcast_id: string | null
+  readonly live_chat_id: string | null
+  readonly scheduled_start_time: string
+  readonly attempt_marker: string
+  readonly marker_cleared_at: string | null
+  readonly auto_start: number | null
+  readonly last_error_reason: string | null
+  readonly created_at: string
+  readonly updated_at: string
+  readonly closed_at: string | null
 }
 
 interface DeadlineColumns {
@@ -967,6 +998,218 @@ export class PersistenceStore {
   listRetentionLedger(filter: RetentionLedgerFilter = {}): RetentionLedgerRow[] {
     return listRetentionLedger(this.#db, filter)
   }
+
+  // ------------------------------------------------------- broadcast resources
+
+  /**
+   * Records the intent to bring one broadcast up, before any API call
+   * (spec §9.1). The reconcile keys (`streamTitle`, `scheduledStartTime`) are
+   * fixed here precisely because a retry has to look for the *same* resource.
+   */
+  beginBroadcastAttempt(input: BroadcastAttemptInput): BroadcastAttemptRecord {
+    assertNonEmptyString(input.attemptId, 'attemptId')
+    assertNonEmptyString(input.streamTitle, 'streamTitle')
+    assertNonEmptyString(input.scheduledStartTime, 'scheduledStartTime')
+    assertNonEmptyString(input.attemptMarker, 'attemptMarker')
+    const now = this.#clock.nowUtcIso()
+    this.#db
+      .prepare(
+        `INSERT INTO broadcast_resources
+           (attempt_id, strategy, stage, stream_title, scheduled_start_time, attempt_marker,
+            created_at, updated_at)
+         VALUES (?, ?, 'planned', ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        input.attemptId,
+        input.strategy,
+        input.streamTitle,
+        input.scheduledStartTime,
+        input.attemptMarker,
+        now,
+        now,
+      )
+    return this.#requireBroadcastAttempt(input.attemptId)
+  }
+
+  /**
+   * Marks a mutating call as in flight. Written *before* the request leaves the
+   * process, so a crash or a timeout leaves the uncertainty on disk and the next
+   * run reconciles instead of retrying blindly (spec §9.1).
+   */
+  markBroadcastCallPending(
+    attemptId: string,
+    call: BroadcastMutatingCall,
+    transitionTarget?: BroadcastTransitionTarget,
+  ): BroadcastAttemptRecord {
+    const current = this.#requireBroadcastAttempt(attemptId)
+    if (current.closedAt !== null) {
+      throw new PersistenceInvariantError(
+        `broadcast attempt ${attemptId} is closed; a closed attempt makes no more calls`,
+      )
+    }
+    if (current.pendingCall !== null && current.pendingCall !== call) {
+      throw new PersistenceInvariantError(
+        `broadcast attempt ${attemptId} still has ${current.pendingCall} in flight; resolve it before calling ${call}`,
+      )
+    }
+    // The target is what makes a resumed transition reconcile readable, so it is
+    // required rather than optional for that call (review round 1, B4).
+    if (call === 'liveBroadcasts.transition' && transitionTarget === undefined) {
+      throw new PersistenceInvariantError(
+        `broadcast attempt ${attemptId}: a pending ${call} must record its target status`,
+      )
+    }
+    if (call !== 'liveBroadcasts.transition' && transitionTarget !== undefined) {
+      throw new PersistenceInvariantError(
+        `broadcast attempt ${attemptId}: ${call} has no transition target`,
+      )
+    }
+    const now = this.#clock.nowUtcIso()
+    this.#db
+      .prepare(
+        `UPDATE broadcast_resources
+            SET pending_call = ?, pending_transition = ?, pending_since = ?, updated_at = ?
+          WHERE attempt_id = ?`,
+      )
+      .run(call, transitionTarget ?? null, now, now, attemptId)
+    return this.#requireBroadcastAttempt(attemptId)
+  }
+
+  /**
+   * Records what a resolved call established and clears the pending marker. Used
+   * for a success, for a definitive rejection, and for a reconcile that found the
+   * call had (or had not) been applied — in every one of those cases the outcome
+   * is no longer unknown.
+   */
+  recordBroadcastCallResult(
+    attemptId: string,
+    update: BroadcastAttemptUpdate = {},
+  ): BroadcastAttemptRecord {
+    return this.#updateBroadcastAttempt(attemptId, update, { clearPending: true })
+  }
+
+  /** Same as `recordBroadcastCallResult` but leaves an in-flight call pending. */
+  updateBroadcastAttempt(
+    attemptId: string,
+    update: BroadcastAttemptUpdate,
+  ): BroadcastAttemptRecord {
+    return this.#updateBroadcastAttempt(attemptId, update, { clearPending: false })
+  }
+
+  /**
+   * Ends an attempt. `complete` for a broadcast that finished, `abandoned` for one
+   * this host gave up on (a limit it could not recover from, spec §9.1). The row
+   * stays: it is the audit trail of what was created at YouTube.
+   */
+  closeBroadcastAttempt(
+    attemptId: string,
+    stage: 'complete' | 'abandoned',
+    reason?: string,
+  ): BroadcastAttemptRecord {
+    const current = this.#requireBroadcastAttempt(attemptId)
+    if (current.closedAt !== null) {
+      return current
+    }
+    this.#db
+      .prepare(
+        `UPDATE broadcast_resources
+            SET stage = ?, pending_call = NULL, pending_transition = NULL, pending_since = NULL,
+                last_error_reason = COALESCE(?, last_error_reason),
+                closed_at = ?, updated_at = ?
+          WHERE attempt_id = ?`,
+      )
+      .run(stage, reason ?? null, this.#clock.nowUtcIso(), this.#clock.nowUtcIso(), attemptId)
+    return this.#requireBroadcastAttempt(attemptId)
+  }
+
+  getBroadcastAttempt(attemptId: string): BroadcastAttemptRecord | null {
+    const row = this.#db
+      .prepare<[string], BroadcastAttemptColumns>(`${BROADCAST_COLUMNS} WHERE attempt_id = ?`)
+      .get(attemptId)
+    return row === undefined ? null : toBroadcastAttempt(row)
+  }
+
+  /** The newest attempt that has not been closed — what a restart resumes. */
+  findOpenBroadcastAttempt(): BroadcastAttemptRecord | null {
+    const row = this.#db
+      .prepare<[], BroadcastAttemptColumns>(
+        `${BROADCAST_COLUMNS} WHERE closed_at IS NULL ORDER BY created_at DESC, attempt_id DESC LIMIT 1`,
+      )
+      .get()
+    return row === undefined ? null : toBroadcastAttempt(row)
+  }
+
+  /** Newest first. Used by `/health` and by the rolling-experiment report. */
+  listBroadcastAttempts(limit = 50): BroadcastAttemptRecord[] {
+    assertPositiveInt(limit, 'limit')
+    const rows = this.#db
+      .prepare<[number], BroadcastAttemptColumns>(
+        `${BROADCAST_COLUMNS} ORDER BY created_at DESC, attempt_id DESC LIMIT ?`,
+      )
+      .all(limit)
+    return rows.map(toBroadcastAttempt)
+  }
+
+  #updateBroadcastAttempt(
+    attemptId: string,
+    update: BroadcastAttemptUpdate,
+    options: { clearPending: boolean },
+  ): BroadcastAttemptRecord {
+    const current = this.#requireBroadcastAttempt(attemptId)
+    if (update.stage !== undefined) {
+      assertBroadcastStageAdvances(current.stage, update.stage, attemptId)
+    }
+    // Every external id is write-once: the same attempt pointing at a second
+    // broadcast or stream would make the audit trail a guess.
+    assertBroadcastIdStable(current.streamId, update.streamId, attemptId, 'streamId')
+    assertBroadcastIdStable(current.broadcastId, update.broadcastId, attemptId, 'broadcastId')
+    assertBroadcastIdStable(current.liveChatId, update.liveChatId, attemptId, 'liveChatId')
+
+    const now = this.#clock.nowUtcIso()
+    this.#db
+      .prepare(
+        `UPDATE broadcast_resources
+            SET stage = COALESCE(?, stage),
+                stream_id = COALESCE(?, stream_id),
+                broadcast_id = COALESCE(?, broadcast_id),
+                live_chat_id = COALESCE(?, live_chat_id),
+                scheduled_start_time = COALESCE(?, scheduled_start_time),
+                auto_start = COALESCE(?, auto_start),
+                -- Write-once: a marker that has been removed cannot come back.
+                marker_cleared_at = COALESCE(marker_cleared_at, ?),
+                last_error_reason = CASE WHEN ? THEN ? ELSE last_error_reason END,
+                pending_call = CASE WHEN ? THEN NULL ELSE pending_call END,
+                pending_transition = CASE WHEN ? THEN NULL ELSE pending_transition END,
+                pending_since = CASE WHEN ? THEN NULL ELSE pending_since END,
+                updated_at = ?
+          WHERE attempt_id = ?`,
+      )
+      .run(
+        update.stage ?? null,
+        update.streamId ?? null,
+        update.broadcastId ?? null,
+        update.liveChatId ?? null,
+        update.scheduledStartTime ?? null,
+        update.autoStart === undefined ? null : update.autoStart ? 1 : 0,
+        update.markerCleared === true ? now : null,
+        update.lastErrorReason === undefined ? 0 : 1,
+        update.lastErrorReason ?? null,
+        options.clearPending ? 1 : 0,
+        options.clearPending ? 1 : 0,
+        options.clearPending ? 1 : 0,
+        now,
+        attemptId,
+      )
+    return this.#requireBroadcastAttempt(attemptId)
+  }
+
+  #requireBroadcastAttempt(attemptId: string): BroadcastAttemptRecord {
+    const record = this.getBroadcastAttempt(attemptId)
+    if (record === null) {
+      throw new PersistenceInvariantError(`unknown broadcast attempt ${attemptId}`)
+    }
+    return record
+  }
 }
 
 const EFFECT_COLUMNS = `SELECT effect_id, cause_kind, caused_by_event_key, cause_deadline_kind,
@@ -975,6 +1218,69 @@ const EFFECT_COLUMNS = `SELECT effect_id, cause_kind, caused_by_event_key, cause
     FROM effect_outbox`
 
 const DEADLINE_COLUMNS = `SELECT id, kind, due_at, policy, payload_json, status FROM deadlines`
+
+const BROADCAST_COLUMNS = `SELECT attempt_id, strategy, stage, pending_call, pending_transition, pending_since,
+         stream_id, stream_title, broadcast_id, live_chat_id, scheduled_start_time, attempt_marker,
+         marker_cleared_at, auto_start, last_error_reason, created_at, updated_at, closed_at
+    FROM broadcast_resources`
+
+function toBroadcastAttempt(row: BroadcastAttemptColumns): BroadcastAttemptRecord {
+  return {
+    attemptId: row.attempt_id,
+    strategy: row.strategy as BroadcastStrategy,
+    stage: row.stage as BroadcastStage,
+    pendingCall: row.pending_call as BroadcastMutatingCall | null,
+    pendingTransition: row.pending_transition as BroadcastTransitionTarget | null,
+    pendingSince: row.pending_since,
+    streamId: row.stream_id,
+    streamTitle: row.stream_title,
+    broadcastId: row.broadcast_id,
+    liveChatId: row.live_chat_id,
+    scheduledStartTime: row.scheduled_start_time,
+    attemptMarker: row.attempt_marker,
+    markerClearedAt: row.marker_cleared_at,
+    autoStart: row.auto_start === null ? null : row.auto_start === 1,
+    lastErrorReason: row.last_error_reason,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    closedAt: row.closed_at,
+  }
+}
+
+/**
+ * The stage is the durable record of what has already been done at YouTube, so it
+ * only ever moves forwards. `abandoned` is reachable from anywhere: giving up is
+ * always allowed (spec §9.1 safe stop).
+ */
+function assertBroadcastStageAdvances(
+  current: BroadcastStage,
+  next: BroadcastStage,
+  attemptId: string,
+): void {
+  if (next === 'abandoned' || next === current) {
+    return
+  }
+  const currentIndex = BROADCAST_STAGE_ORDER.indexOf(current)
+  const nextIndex = BROADCAST_STAGE_ORDER.indexOf(next)
+  if (currentIndex === -1 || nextIndex <= currentIndex) {
+    throw new PersistenceInvariantError(
+      `broadcast attempt ${attemptId} cannot move from stage ${current} to ${next}`,
+    )
+  }
+}
+
+function assertBroadcastIdStable(
+  current: string | null,
+  next: string | undefined,
+  attemptId: string,
+  label: string,
+): void {
+  if (next !== undefined && current !== null && current !== next) {
+    throw new PersistenceInvariantError(
+      `broadcast attempt ${attemptId} already points at ${label} ${current}; refusing to repoint it at ${next}`,
+    )
+  }
+}
 
 /**
  * 0 for anything that is not a well-formed gift, so the unique index stays NOT

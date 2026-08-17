@@ -214,9 +214,10 @@ export function seedState(store: PersistenceStore, options: SeededStateOptions):
 /**
  * Inserts a `broadcast_resources` row over a second connection.
  *
- * T10 owns that table's writer, so there is no store method to call yet; the row
- * still has to exist for the retention sweep over it to be proven rather than
- * assumed. WAL allows the extra connection and it is closed immediately.
+ * T10 owns that table's writer (`beginBroadcastAttempt`), but that writer stamps
+ * `updated_at` from the store's clock, and this sweep needs a row that is already
+ * old. The raw insert stays for that reason; the columns are migration 003's. WAL
+ * allows the extra connection and it is closed immediately.
  */
 export function insertBroadcastResource(
   file: string,
@@ -228,10 +229,21 @@ export function insertBroadcastResource(
     database
       .prepare(
         `INSERT INTO broadcast_resources
-           (broadcast_id, live_chat_id, stream_id, lifecycle, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+           (attempt_id, strategy, stage, stream_id, stream_title, broadcast_id, live_chat_id,
+            scheduled_start_time, attempt_marker, created_at, updated_at)
+         VALUES (?, 'single', 'live', ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
-      .run(broadcastId, TEST_LIVE_CHAT_ID, 'stream_test_0001', 'live', updatedAt, updatedAt)
+      .run(
+        `attempt_test_${broadcastId}`,
+        'stream_test_0001',
+        'vertical-live ingest (retention test)',
+        broadcastId,
+        TEST_LIVE_CHAT_ID,
+        updatedAt,
+        `vl-attempt:attempt_test_${broadcastId}`,
+        updatedAt,
+        updatedAt,
+      )
   } finally {
     database.close()
   }
