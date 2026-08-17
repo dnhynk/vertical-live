@@ -243,11 +243,16 @@ export class YouTubeLiveApi {
   ): Promise<LiveStreamSummary[]> {
     const query: Record<string, string> =
       'ids' in filter ? { id: filter.ids.join(',') } : { mine: 'true' }
-    const items = await this.#listAll('liveStreams.list', '/liveStreams', {
-      ...query,
-      part: 'id,snippet,cdn,contentDetails,status',
-      maxResults: '50',
-    }, options.maxPages)
+    const items = await this.#listAll(
+      'liveStreams.list',
+      '/liveStreams',
+      {
+        ...query,
+        part: 'id,snippet,cdn,contentDetails,status',
+        maxResults: '50',
+      },
+      options.maxPages,
+    )
     const summaries: LiveStreamSummary[] = []
     for (const item of items) {
       summaries.push(await this.#toLiveStream(item))
@@ -331,12 +336,17 @@ export class YouTubeLiveApi {
   ): Promise<LiveBroadcastSummary[]> {
     const query: Record<string, string> =
       'ids' in filter ? { id: filter.ids.join(',') } : { broadcastStatus: filter.broadcastStatus }
-    const items = await this.#listAll('liveBroadcasts.list', '/liveBroadcasts', {
-      ...query,
-      broadcastType: 'all',
-      part: 'id,snippet,contentDetails,status',
-      maxResults: '50',
-    }, options.maxPages)
+    const items = await this.#listAll(
+      'liveBroadcasts.list',
+      '/liveBroadcasts',
+      {
+        ...query,
+        broadcastType: 'all',
+        part: 'id,snippet,contentDetails,status',
+        maxResults: '50',
+      },
+      options.maxPages,
+    )
     return items.map(toLiveBroadcast)
   }
 
@@ -435,7 +445,9 @@ export class YouTubeLiveApi {
     if (quota === undefined) {
       return
     }
-    const blocked = RESERVE_METHODS.has(method) ? quota.isExhausted(method) : !quota.canSpend(method)
+    const blocked = RESERVE_METHODS.has(method)
+      ? quota.isExhausted(method)
+      : !quota.canSpend(method)
     if (blocked) {
       throw new YouTubeApiCallError(
         method,
@@ -495,7 +507,12 @@ export class YouTubeLiveApi {
     const outcome: ApiCallOutcome = response.status >= 500 ? 'uncertain' : 'rejected'
     // Only the status and the machine reason travel; response bodies can quote the
     // request, which for `liveStreams` would mean the stream key.
-    return new YouTubeApiCallError(method, outcome, classification, `HTTP ${String(response.status)}`)
+    return new YouTubeApiCallError(
+      method,
+      outcome,
+      classification,
+      `HTTP ${String(response.status)}`,
+    )
   }
 
   /**
@@ -546,14 +563,21 @@ export class YouTubeLiveApi {
 
 function toLiveStreamStatus(status: Record<string, unknown> | undefined): LiveStreamStatus {
   if (status === undefined) {
-    return { streamStatus: null, healthStatus: null, lastUpdateTimeSeconds: null, configurationIssues: [] }
+    return {
+      streamStatus: null,
+      healthStatus: null,
+      lastUpdateTimeSeconds: null,
+      configurationIssues: [],
+    }
   }
   const health = optionalRecord(status, 'healthStatus')
   return {
     streamStatus: readOptionalString(status, 'streamStatus') ?? null,
     healthStatus: health === undefined ? null : (readOptionalString(health, 'status') ?? null),
     lastUpdateTimeSeconds:
-      health === undefined ? null : (readOptionalNumberish(health, 'lastUpdateTimeSeconds') ?? null),
+      health === undefined
+        ? null
+        : (readOptionalNumberish(health, 'lastUpdateTimeSeconds') ?? null),
     configurationIssues:
       health === undefined
         ? []
@@ -665,11 +689,7 @@ function readArray(value: unknown): unknown[] {
   return value
 }
 
-function requireString(
-  container: Record<string, unknown>,
-  key: string,
-  label: string,
-): string {
+function requireString(container: Record<string, unknown>, key: string, label: string): string {
   const value = readOptionalString(container, key)
   if (value === undefined) {
     throw new YouTubeApiShapeError(`${label} is missing`)
@@ -677,10 +697,7 @@ function requireString(
   return value
 }
 
-function readOptionalString(
-  container: Record<string, unknown>,
-  key: string,
-): string | undefined {
+function readOptionalString(container: Record<string, unknown>, key: string): string | undefined {
   const value = container[key]
   if (value === undefined || value === null || value === '') {
     return undefined
@@ -691,10 +708,7 @@ function readOptionalString(
   return value
 }
 
-function readOptionalBoolean(
-  container: Record<string, unknown>,
-  key: string,
-): boolean | undefined {
+function readOptionalBoolean(container: Record<string, unknown>, key: string): boolean | undefined {
   const value = container[key]
   if (value === undefined || value === null) {
     return undefined

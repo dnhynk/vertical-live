@@ -80,7 +80,10 @@ export class StreamKeyCustodian {
       return false
     }
     await this.#vault.set('youtube.streamKey', staged)
-    this.#logger.info('stream key stored in the vault', { streamId, rotated: current !== undefined })
+    this.#logger.info('stream key stored in the vault', {
+      streamId,
+      rotated: current !== undefined,
+    })
     return true
   }
 

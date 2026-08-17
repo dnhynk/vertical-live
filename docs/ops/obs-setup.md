@@ -91,7 +91,9 @@ streamServiceSettings { server: <obs.streamIngestUrl>, key: <vault: youtube.stre
 
 `server`는 `config/default.json`의 `obs.streamIngestUrl`(기본값 `rtmps://a.rtmps.youtube.com:443/live2`)이고, `key`만 vault에서 온다. 주입 후 서버는 `GetStreamServiceSettings`로 되읽어 검증하되 **키 값 자체는 비교하지도 반환하지도 않는다**(타입·server 일치와 키가 비어 있지 않은지만 확인). 명령의 반환값은 `{streamServiceType, server, keyConfigured}`뿐이라 그대로 로그에 남겨도 안전하다.
 
-스트림 키도 Credential Manager에 넣는다(T3):
+**기본 경로: 서버가 vault에 직접 넣는다(T10).** `youtube.streamKey`는 `liveStreams.insert`/`list` 응답의 `cdn.ingestionInfo.streamName`이다. broadcast lifecycle이 ingestion stream을 만들거나 재사용할 때 그 값을 파싱 즉시 vault에 쓰고 (`StreamKeyCustodian`, `apps/server/src/youtube/broadcast/stream-key.ts`) 반환값·로그·DB·화면 어디에도 내지 않는다. 그래서 정상 운영에서는 운영자가 Live Control Room에서 키를 복사할 일이 없다.
+
+수동 입력은 fallback이다(첫 broadcast 생성 전 OBS를 먼저 시험할 때, 또는 사람이 만든 stream을 쓸 때):
 
 ```powershell
 '<Live Control Room에서 받은 스트림 키>' | npm run secrets -w @vl/server -- set youtube.streamKey

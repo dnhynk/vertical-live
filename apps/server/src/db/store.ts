@@ -1013,14 +1013,7 @@ export class PersistenceStore {
            (attempt_id, strategy, stage, stream_title, scheduled_start_time, created_at, updated_at)
          VALUES (?, ?, 'planned', ?, ?, ?, ?)`,
       )
-      .run(
-        input.attemptId,
-        input.strategy,
-        input.streamTitle,
-        input.scheduledStartTime,
-        now,
-        now,
-      )
+      .run(input.attemptId, input.strategy, input.streamTitle, input.scheduledStartTime, now, now)
     return this.#requireBroadcastAttempt(input.attemptId)
   }
 
@@ -1029,10 +1022,7 @@ export class PersistenceStore {
    * process, so a crash or a timeout leaves the uncertainty on disk and the next
    * run reconciles instead of retrying blindly (spec §9.1).
    */
-  markBroadcastCallPending(
-    attemptId: string,
-    call: BroadcastMutatingCall,
-  ): BroadcastAttemptRecord {
+  markBroadcastCallPending(attemptId: string, call: BroadcastMutatingCall): BroadcastAttemptRecord {
     const current = this.#requireBroadcastAttempt(attemptId)
     if (current.closedAt !== null) {
       throw new PersistenceInvariantError(
@@ -1045,7 +1035,9 @@ export class PersistenceStore {
       )
     }
     this.#db
-      .prepare('UPDATE broadcast_resources SET pending_call = ?, pending_since = ?, updated_at = ? WHERE attempt_id = ?')
+      .prepare(
+        'UPDATE broadcast_resources SET pending_call = ?, pending_since = ?, updated_at = ? WHERE attempt_id = ?',
+      )
       .run(call, this.#clock.nowUtcIso(), this.#clock.nowUtcIso(), attemptId)
     return this.#requireBroadcastAttempt(attemptId)
   }

@@ -228,7 +228,10 @@ export class FakeYouTubeApiServer {
     this.requests.push(request)
     this.onRequest?.(request)
 
-    if (req.headers.authorization === undefined || !req.headers.authorization.startsWith('Bearer ')) {
+    if (
+      req.headers.authorization === undefined ||
+      !req.headers.authorization.startsWith('Bearer ')
+    ) {
       json(res, 401, errorBody(401, 'authError', 'global', 'missing bearer token'))
       return
     }
@@ -394,7 +397,8 @@ export class FakeYouTubeApiServer {
       throw fail(404, 'liveStreamNotFound', 'youtube.liveStream')
     }
     broadcast.boundStreamId = streamId
-    broadcast.lifeCycleStatus = broadcast.lifeCycleStatus === 'created' ? 'ready' : broadcast.lifeCycleStatus
+    broadcast.lifeCycleStatus =
+      broadcast.lifeCycleStatus === 'created' ? 'ready' : broadcast.lifeCycleStatus
     return broadcast
   }
 
@@ -481,9 +485,7 @@ function broadcastResource(broadcast: FakeBroadcast): Record<string, unknown> {
       title: broadcast.title,
       ...(broadcast.description === undefined ? {} : { description: broadcast.description }),
       scheduledStartTime: broadcast.scheduledStartTime,
-      ...(broadcast.actualStartTime === null
-        ? {}
-        : { actualStartTime: broadcast.actualStartTime }),
+      ...(broadcast.actualStartTime === null ? {} : { actualStartTime: broadcast.actualStartTime }),
       liveChatId: broadcast.liveChatId,
     },
     status: {

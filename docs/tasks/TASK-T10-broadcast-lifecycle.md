@@ -59,21 +59,47 @@ YouTube 방송 자원(liveStream · liveBroadcast)의 생명주기를 서버가 
 | `reconcileMaxAttempts` / backoff | T3 `youtube.quota.backoff` 재사용 | provisional(A-15) | 새 숫자를 만들지 않고 T3의 정책을 쓴다 |
 | 일일 생성 한도 판정 | named reason 3개 외의 limit-shaped 오류 | 추론(문서화됨) | 위 Sources 표: 공개 reason 없음. 4가지 kind의 **행동은 동일**(복구 우선 → safe_stopped + alert)이므로 오분류는 alert 라벨만 바꾸고 조치를 바꾸지 않는다 |
 
+## Implemented
+
+| 파일 | 역할 |
+|---|---|
+| `apps/server/src/db/migrations/002_broadcast-resources.sql` | 001의 skeleton 대체. attempt 단위 행 + `pending_call`(호출 전 기록) + 단조 stage + 열린 행 1개당 broadcast 1개 unique index |
+| `apps/server/src/db/store.ts`, `db/types.ts` | `beginBroadcastAttempt` · `markBroadcastCallPending` · `recordBroadcastCallResult` · `updateBroadcastAttempt` · `closeBroadcastAttempt` · `getBroadcastAttempt` · `findOpenBroadcastAttempt` · `listBroadcastAttempts`. 단계 역행·외부 ID 재지정·닫힌 attempt 호출 거부 |
+| `youtube/broadcast/api.ts` | `fetch` + `AbortSignal`(주입 Clock) REST 클라이언트 6개 메서드. 실패를 `not_attempted` / `rejected` / `uncertain`으로 정규화, quota 사전검사·기록, `streamName`을 파싱 즉시 sink로 넘기고 반환 shape·오류 메시지에서 제거 |
+| `youtube/broadcast/stream-key.ts` | `StreamKeyCustodian`: stream별 staging → 선택된 stream만 vault write, redactor 등록, unchanged면 미기록, 생성된 stream에 키 없으면 실패 |
+| `youtube/broadcast/limits.ts` | 3종 named reason + limit-shaped unknown(일일 한도) 판정, adoptable lifecycle 목록 |
+| `youtube/broadcast/lifecycle.ts` | `resume` · `ensureBound` · `goLive` · `ensureLive` · `rollOver` · `stopBroadcast`. 호출 전 영속 → 불확실이면 `list` reconcile → 그 뒤에만 재시도, `invalidAutoStart`/`invalidScheduledStartTime`/`redundantTransition`/`errorStreamInactive` 개별 처리, 한도는 복구 우선 → 불가 시 safe stop |
+| `youtube/broadcast/health.ts` | §9.4(6) 신호 3개(`youtube.stream_status`·`youtube.stream_health`·`youtube.broadcast_lifecycle`) + 폴링 모니터. 관측 실패는 `unknown`이며 판정하지 않음 |
+| `youtube/broadcast/alerts.ts` | `BroadcastAlertSink` · `SafeStopRequestSink` 인터페이스(구현은 T12) |
+| `testing/fake-youtube-api-server.ts` | 상태를 가진 loopback 가짜 API. 지연은 **적용 후 늦게 응답**하므로 timeout이 진짜 불확실 결과가 된다 |
+| `config/default.json` `youtube.broadcast` + `broadcast/config.ts` | 전략·공개범위·MFK·지연·auto-start·stream cdn 값과 provisional 목록 |
+| `docs/ops/obs-setup.md`, `docs/ops/youtube-auth-setup.md` | stream key는 이제 서버가 vault에 채우고 수동 입력은 fallback임을 명시(기존 안내가 틀린 상태로 남지 않게) |
+
 ## Result
 
 ### Acceptance criteria
 
-| # | 기준 | 상태(met/unmet/unverifiable) | 근거(테스트 파일·명령·출력) |
+| # | 기준 | 상태 | 근거 |
 |---|---|---|---|
-| 1 | 가짜 API 서버로 정상 경로, timeout→reconcile, 3종 한도 오류, invalidAutoStart fallback | _(구현 후 기재)_ | |
-| 2 | stream key가 로그·DB·응답에 없음 | _(구현 후 기재)_ | |
-| 3 | lifecycle 단계 영속 → 재기동 후 이어서 진행 | _(구현 후 기재)_ | |
+| 1 | 가짜 API 서버로 정상 경로 | met | `youtube/broadcast/lifecycle.test.ts` "normal path" 4건: 호출 순서 `liveStreams.list → insert → liveBroadcasts.insert → bind → list → transition(testing) → transition(live)`, 필수 필드·part·Bearer 검증, stream 재사용, monitorStream off일 때 testing 생략 |
+| 1 | timeout → reconcile | met | 같은 파일 "uncertain results are reconciled, never retried blindly" 4건: insert timeout 후 insert 요청 **1회**·broadcast **1개**·`call_reconciled=applied`; liveStreams timeout 후 vault에 키 저장; 503 bind는 reconcile이 not_applied를 확인한 뒤에만 재시도(요청 2회); 끝까지 불확실하면 `BroadcastReconcileFailedError` |
+| 1 | 3종 한도 오류 | met | 같은 파일 "channel limits" 5건: `userBroadcastsExceedLimit`(복구), `concurrentBroadcastsExceedLimit`(live 방송 채택), 복구 불가 시 `safe_stopped` 요청 + alert + attempt abandoned, 문서화되지 않은 일일 한도(limit-shaped) 동일 경로·insert 1회, `liveStreams` 한도는 stream 재사용으로 복구. reason 매핑 단위 테스트는 `limits.test.ts`(rate limit·quota를 한도로 오분류하지 않음 포함) |
+| 1 | invalidAutoStart fallback | met | 같은 파일 "auto-start" 3건: 400 `invalidAutoStart` → alert + `enableAutoStart:false`로 재-insert → transition 2회, attempt `autoStart=false`; auto-start가 실제로 동작하면 transition 0회; 수락됐지만 발화하지 않으면 `auto_start_did_not_fire`로 transition fallback |
+| 2 | stream key가 로그·DB·응답에 없음 | met | 같은 파일 "the stream key never leaves the vault" 3건: 반환값·attempt 행 전체·alert·로그 dump·**DB 디렉터리의 모든 바이트(WAL 포함)** 에 키 없음, vault에는 있음; 채널에 stream이 여러 개일 때 선택된 것만 저장; redactor로 마스킹됨. 스키마 차원 강제는 `db/broadcast-resources.test.ts` "has no column that could hold a stream key", 전송 차원은 `api.test.ts` "stream key handling" 3건 |
+| 3 | 단계 영속 → 재기동 후 이어가기 | met | 같은 파일 "restart" 3건: `ensureBound` 후 store 재오픈 → `goLive`가 같은 attempt/broadcast/stream으로 이어가고 insert·bind 각 1회; 호출 중 사망(pending transition) → 재기동 `resume()`이 reconcile로 `live` 확정, transition 요청 0회; insert가 이미 만든 broadcast를 `scheduledStartTime`으로 찾아 채택, broadcast 1개 |
 
 ### Gates (executed)
 
 ```text
-(구현 후 기재)
+$ npm run format:check   -> All matched files use Prettier code style!
+$ npm run lint           -> eslint 0 problems; check-no-legacy-imports: ok (0 legacy imports);
+                            check-install-scripts: ok (3 reviewed, better-sqlite3 binding loads)
+$ npm run typecheck      -> tsc --build tsconfig.json (no output)
+$ npm run test           -> Test Files 48 passed (48) / Tests 862 passed | 1 skipped (863)
+$ npm run build          -> contract, renderer(vite ✓ built), server(copied 2 migration(s)), simulator ok
 ```
+
+실행하지 않은 것: 실제 YouTube API 호출(§T10 범위 밖 — 실계정은 Gate 2). 위 게이트는 `git rebase origin/main` 뒤에 돌렸다.
 
 ## Not done / out of scope
 
@@ -84,4 +110,9 @@ YouTube 방송 자원(liveStream · liveBroadcast)의 생명주기를 서버가 
 
 ## Follow-ups
 
-- (구현 중 발견 사항 기재)
+- **T12 배선**: `BroadcastLifecycle`은 `BroadcastAlertSink`·`SafeStopRequestSink`·`HealthSignalSink`만 호출한다. T12가 (a) Discord alert 구현(D-3), (b) `safe_stopped` 전이, (c) `BroadcastHealthMonitor` 기동, (d) `ObsControl.setStreamServiceFromVault()` → `startStream()` 순서를 `ensureBound()` **뒤**에 두는 것을 맡는다. `errorStreamInactive`는 `BroadcastStreamInactiveError`로 나오므로 "인코더를 먼저 켜라"는 신호로 쓸 수 있다.
+- **T9**: `liveChatId`는 `store.findOpenBroadcastAttempt()?.liveChatId` 또는 `ensureLive()`의 `BroadcastTarget.liveChatId`에서 읽는다(§T9 "T10의 broadcast_resources에서 읽되"). rolling 교체 신호는 새 attempt 행의 `live_chat_id`다.
+- **T3 `quota/classify.ts`**: 공용 표에 `sharedIngestionBroadcastsExceedLimit`가 없어 403 → `forbidden`(safe_stopped)으로 분류된다. T10은 자기 `classifyBroadcastLimit`에서 먼저 잡으므로 이 task의 동작에는 영향이 없다. 공용 표에 한 줄 추가하는 것은 T3 소유 파일 변경이라 하지 않았다.
+- **Gate 2에서 확정할 것**: 일일 생성 한도의 실제 reason 문자열(있다면), auto-start와 monitorStream 조합의 실제 수용 여부, `scheduledStartLeadMs` 최소값, `liveStreams.status` 폴링 간격, provisional quota 비용.
+- `enableDvr`/`recordFromStart`는 config 기본값(false / API 기본)을 그대로 둔다. 12시간 초과 방송의 archive 부재(§4)는 전략 선택 문제이므로 Gate 2 실험에서 결정한다.
+- `stopBroadcast()`가 `transition(complete)` 실패 후에도 attempt를 닫는다. 그 경우 YouTube에는 방송이 남을 수 있고 `last_error_reason=complete_failed:*`로 기록된다. 다음 `ensureLive()`의 한도 복구 경로가 그 방송을 찾아 채택한다.

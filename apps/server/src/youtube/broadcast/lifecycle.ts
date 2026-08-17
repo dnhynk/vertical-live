@@ -10,11 +10,7 @@ import type {
 import type { HealthDetailValue } from '../../health/types.js'
 import { silentLogger, type Logger } from '../../secrets/redaction.js'
 import type { BackoffPolicy } from '../quota/backoff.js'
-import {
-  YouTubeApiCallError,
-  type LiveBroadcastSummary,
-  type YouTubeLiveApi,
-} from './api.js'
+import { YouTubeApiCallError, type LiveBroadcastSummary, type YouTubeLiveApi } from './api.js'
 import {
   nullBroadcastAlertSink,
   nullSafeStopRequestSink,
@@ -302,52 +298,62 @@ export class BroadcastLifecycle {
       })
     }
 
-    return this.#withRetries(attempt, 'liveStreams.insert', async (current) => {
-      const created = await this.#runCall(current, 'liveStreams.insert', () =>
-        this.#api.insertLiveStream({
-          title: current.streamTitle,
-          resolution: this.#config.stream.resolution,
-          frameRate: this.#config.stream.frameRate,
-          ingestionType: this.#config.stream.ingestionType,
-          isReusable: this.#config.stream.isReusable,
-        }),
-      )
-      // A stream this process just created is unusable without its key.
-      await this.#streamKeys.commit(created.id, { required: true })
-      return this.#store.recordBroadcastCallResult(current.attemptId, {
-        stage: 'stream_ready',
-        streamId: created.id,
-      })
-    }, (current) => current.streamId !== null)
+    return this.#withRetries(
+      attempt,
+      'liveStreams.insert',
+      async (current) => {
+        const created = await this.#runCall(current, 'liveStreams.insert', () =>
+          this.#api.insertLiveStream({
+            title: current.streamTitle,
+            resolution: this.#config.stream.resolution,
+            frameRate: this.#config.stream.frameRate,
+            ingestionType: this.#config.stream.ingestionType,
+            isReusable: this.#config.stream.isReusable,
+          }),
+        )
+        // A stream this process just created is unusable without its key.
+        await this.#streamKeys.commit(created.id, { required: true })
+        return this.#store.recordBroadcastCallResult(current.attemptId, {
+          stage: 'stream_ready',
+          streamId: created.id,
+        })
+      },
+      (current) => current.streamId !== null,
+    )
   }
 
   async #ensureBroadcast(attempt: BroadcastAttemptRecord): Promise<BroadcastAttemptRecord> {
     if (attempt.broadcastId !== null) {
       return attempt
     }
-    return this.#withRetries(attempt, 'liveBroadcasts.insert', async (current) => {
-      const autoStart = this.#config.enableAutoStart && current.autoStart !== false
-      const created = await this.#runCall(current, 'liveBroadcasts.insert', () =>
-        this.#api.insertBroadcast({
-          title: this.#config.title,
-          ...(this.#config.description === '' ? {} : { description: this.#config.description }),
-          scheduledStartTime: current.scheduledStartTime,
-          privacyStatus: this.#config.privacyStatus,
-          selfDeclaredMadeForKids: this.#config.selfDeclaredMadeForKids,
-          latencyPreference: this.#config.latencyPreference,
-          enableAutoStart: autoStart,
-          enableAutoStop: this.#config.enableAutoStop,
-          enableDvr: this.#config.enableDvr,
-          enableMonitorStream: this.#config.enableMonitorStream,
-        }),
-      )
-      return this.#store.recordBroadcastCallResult(current.attemptId, {
-        stage: 'broadcast_created',
-        broadcastId: created.id,
-        ...(created.liveChatId === null ? {} : { liveChatId: created.liveChatId }),
-        autoStart: created.enableAutoStart ?? autoStart,
-      })
-    }, (current) => current.broadcastId !== null)
+    return this.#withRetries(
+      attempt,
+      'liveBroadcasts.insert',
+      async (current) => {
+        const autoStart = this.#config.enableAutoStart && current.autoStart !== false
+        const created = await this.#runCall(current, 'liveBroadcasts.insert', () =>
+          this.#api.insertBroadcast({
+            title: this.#config.title,
+            ...(this.#config.description === '' ? {} : { description: this.#config.description }),
+            scheduledStartTime: current.scheduledStartTime,
+            privacyStatus: this.#config.privacyStatus,
+            selfDeclaredMadeForKids: this.#config.selfDeclaredMadeForKids,
+            latencyPreference: this.#config.latencyPreference,
+            enableAutoStart: autoStart,
+            enableAutoStop: this.#config.enableAutoStop,
+            enableDvr: this.#config.enableDvr,
+            enableMonitorStream: this.#config.enableMonitorStream,
+          }),
+        )
+        return this.#store.recordBroadcastCallResult(current.attemptId, {
+          stage: 'broadcast_created',
+          broadcastId: created.id,
+          ...(created.liveChatId === null ? {} : { liveChatId: created.liveChatId }),
+          autoStart: created.enableAutoStart ?? autoStart,
+        })
+      },
+      (current) => current.broadcastId !== null,
+    )
   }
 
   async #ensureBound(attempt: BroadcastAttemptRecord): Promise<BroadcastAttemptRecord> {
@@ -356,19 +362,24 @@ export class BroadcastLifecycle {
     }
     // The ids are read from `current` inside the step, never captured outside it: a
     // limit recovery can move the attempt onto a different broadcast mid-step.
-    return this.#withRetries(attempt, 'liveBroadcasts.bind', async (current) => {
-      const broadcastId = requireId(current.broadcastId, 'broadcastId')
-      const streamId = requireId(current.streamId, 'streamId')
-      const bound = await this.#runCall(current, 'liveBroadcasts.bind', () =>
-        this.#api.bindBroadcast({ broadcastId, streamId }),
-      )
-      if (bound.boundStreamId !== streamId) {
-        throw new Error(
-          `bind returned boundStreamId ${String(bound.boundStreamId)} for broadcast ${broadcastId}, expected ${streamId}`,
+    return this.#withRetries(
+      attempt,
+      'liveBroadcasts.bind',
+      async (current) => {
+        const broadcastId = requireId(current.broadcastId, 'broadcastId')
+        const streamId = requireId(current.streamId, 'streamId')
+        const bound = await this.#runCall(current, 'liveBroadcasts.bind', () =>
+          this.#api.bindBroadcast({ broadcastId, streamId }),
         )
-      }
-      return this.#store.recordBroadcastCallResult(current.attemptId, { stage: 'bound' })
-    }, (current) => stageAtLeast(current.stage, 'bound'))
+        if (bound.boundStreamId !== streamId) {
+          throw new Error(
+            `bind returned boundStreamId ${String(bound.boundStreamId)} for broadcast ${broadcastId}, expected ${streamId}`,
+          )
+        }
+        return this.#store.recordBroadcastCallResult(current.attemptId, { stage: 'bound' })
+      },
+      (current) => stageAtLeast(current.stage, 'bound'),
+    )
   }
 
   async #goLive(attempt: BroadcastAttemptRecord): Promise<BroadcastAttemptRecord> {
@@ -416,34 +427,40 @@ export class BroadcastLifecycle {
     broadcastStatus: 'testing' | 'live',
     stage: BroadcastStage,
   ): Promise<BroadcastAttemptRecord> {
-    return this.#withRetries(attempt, 'liveBroadcasts.transition', async (current) => {
-      const broadcastId = requireId(current.broadcastId, 'broadcastId')
-      let result: LiveBroadcastSummary
-      try {
-        result = await this.#runCall(current, 'liveBroadcasts.transition', () =>
-          this.#api.transitionBroadcast({ broadcastId, broadcastStatus }),
-        )
-      } catch (error) {
-        if (error instanceof YouTubeApiCallError && error.reason === 'redundantTransition') {
-          // "The broadcast is already in the requested status" — the desired end
-          // state holds, so this is a success, not a failure to retry.
-          const observed = await this.#readBroadcast(broadcastId)
-          return observed !== null && stage === 'live'
-            ? this.#markLive(current, observed)
-            : this.#store.recordBroadcastCallResult(current.attemptId, { stage })
+    return this.#withRetries(
+      attempt,
+      'liveBroadcasts.transition',
+      async (current) => {
+        const broadcastId = requireId(current.broadcastId, 'broadcastId')
+        let result: LiveBroadcastSummary
+        try {
+          result = await this.#runCall(current, 'liveBroadcasts.transition', () =>
+            this.#api.transitionBroadcast({ broadcastId, broadcastStatus }),
+          )
+        } catch (error) {
+          if (error instanceof YouTubeApiCallError && error.reason === 'redundantTransition') {
+            // "The broadcast is already in the requested status" — the desired end
+            // state holds, so this is a success, not a failure to retry.
+            const observed = await this.#readBroadcast(broadcastId)
+            return observed !== null && stage === 'live'
+              ? this.#markLive(current, observed)
+              : this.#store.recordBroadcastCallResult(current.attemptId, { stage })
+          }
+          if (error instanceof YouTubeApiCallError && error.reason === 'errorStreamInactive') {
+            this.#store.recordBroadcastCallResult(current.attemptId, {
+              lastErrorReason: 'errorStreamInactive',
+            })
+            throw new BroadcastStreamInactiveError(broadcastId)
+          }
+          throw error
         }
-        if (error instanceof YouTubeApiCallError && error.reason === 'errorStreamInactive') {
-          this.#store.recordBroadcastCallResult(current.attemptId, {
-            lastErrorReason: 'errorStreamInactive',
-          })
-          throw new BroadcastStreamInactiveError(broadcastId)
-        }
-        throw error
-      }
-      return stage === 'live'
-        ? this.#markLive(current, result)
-        : this.#store.recordBroadcastCallResult(current.attemptId, { stage })
-    }, (current) => (stage === 'live' ? current.stage === 'live' : stageAtLeast(current.stage, 'testing')))
+        return stage === 'live'
+          ? this.#markLive(current, result)
+          : this.#store.recordBroadcastCallResult(current.attemptId, { stage })
+      },
+      (current) =>
+        stage === 'live' ? current.stage === 'live' : stageAtLeast(current.stage, 'testing'),
+    )
   }
 
   #markLive(
@@ -749,9 +766,7 @@ export class BroadcastLifecycle {
     )
     // Prefer one that is already carrying video: adopting it costs no transition.
     return (
-      ours.find((candidate) => isLiveLifeCycleStatus(candidate.lifeCycleStatus)) ??
-      ours[0] ??
-      null
+      ours.find((candidate) => isLiveLifeCycleStatus(candidate.lifeCycleStatus)) ?? ours[0] ?? null
     )
   }
 

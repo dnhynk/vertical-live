@@ -94,11 +94,10 @@ export function loadBroadcastConfig(options: LoadAuthConfigOptions = {}): Broadc
   const section = readYouTubeSection('broadcast', options)
   const stream = asObject(section['stream'], 'youtube.broadcast.stream')
 
-  const strategy = readEnum(
-    section['strategy'],
-    'youtube.broadcast.strategy',
-    ['single', 'rolling-experiment'] as const,
-  )
+  const strategy = readEnum(section['strategy'], 'youtube.broadcast.strategy', [
+    'single',
+    'rolling-experiment',
+  ] as const)
   const enableDvr = readBoolean(section['enableDvr'], 'youtube.broadcast.enableDvr')
   const latencyPreference = readEnum(
     section['latencyPreference'],

@@ -64,10 +64,7 @@ export {
   BroadcastHealthMonitor,
   deriveBroadcastHealthSignals,
 } from './health.js'
-export type {
-  BroadcastHealthMonitorOptions,
-  BroadcastHealthSample,
-} from './health.js'
+export type { BroadcastHealthMonitorOptions, BroadcastHealthSample } from './health.js'
 
 export {
   ADOPTABLE_LIFE_CYCLE_STATUSES,
@@ -84,10 +81,6 @@ export {
   BroadcastSafeStopRequiredError,
   BroadcastStreamInactiveError,
 } from './lifecycle.js'
-export type {
-  BroadcastBinding,
-  BroadcastLifecycleOptions,
-  BroadcastTarget,
-} from './lifecycle.js'
+export type { BroadcastBinding, BroadcastLifecycleOptions, BroadcastTarget } from './lifecycle.js'
 
 export { StreamKeyCustodian } from './stream-key.js'

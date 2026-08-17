@@ -203,10 +203,7 @@ describe('restart', () => {
     if (broadcast !== undefined) {
       broadcast.lifeCycleStatus = 'live'
     }
-    h.temp.store.markBroadcastCallPending(
-      attempt?.attemptId ?? '',
-      'liveBroadcasts.transition',
-    )
+    h.temp.store.markBroadcastCallPending(attempt?.attemptId ?? '', 'liveBroadcasts.transition')
 
     const restarted = h.restart()
     const resumed = await restarted.resume()

@@ -48,6 +48,8 @@ npm run secrets -w @vl/server -- list
 
 stream key·OBS websocket 비밀번호·admin/simulator 토큰도 같은 vault에 넣는다. **값은 stdin으로 받는다**(명령행에 쓰면 셸 히스토리와 프로세스 목록에 남는다).
 
+`youtube.streamKey`만은 예외적으로 서버가 스스로 채운다: broadcast lifecycle(T10)이 ingestion stream을 만들거나 재사용할 때 `cdn.ingestionInfo.streamName`을 vault에 쓴다(`docs/ops/obs-setup.md` "스트림 키"). 아래 명령은 fallback이다.
+
 ```powershell
 "<stream key>" | npm run secrets -w @vl/server -- set youtube.streamKey
 "<obs password>" | npm run secrets -w @vl/server -- set obs.websocketPassword

@@ -125,7 +125,10 @@ export interface BroadcastHealthMonitorOptions {
   readonly config: BroadcastConfig
   readonly onSignal: HealthSignalSink
   /** Ids to watch; re-read every poll so a rollover is picked up. */
-  readonly resources: () => { readonly streamId: string | null; readonly broadcastId: string | null }
+  readonly resources: () => {
+    readonly streamId: string | null
+    readonly broadcastId: string | null
+  }
   readonly clock?: Clock
 }
 
