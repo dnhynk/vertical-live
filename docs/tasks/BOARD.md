@@ -17,7 +17,7 @@
 | T4 | SQLite 영속층(inbox·checkpoint·snapshot·outbox·deadline) | T1 | — | merged | t4-persistence | #5 | `task_6bb9ff9f79c8` |
 | T5 | 렌더러 read model(snapshot 복구·effect 멱등·ACK·건강) | T1 | — | changes_requested | t5-renderer-readmodel | #9 | `task_6ba022bb6151` |
 | T6 | 명령 파서·모더레이션·입력 arbiter | T1 | — | changes_requested | t6-command-parser | #8 | `task_a0f96dd7e038` |
-| T7 | 콘텐츠 디렉터·크리처 상태 모델(순수 도메인) | T1 | — | changes_requested | t7-content-director | #6 | `task_e1e7531798ad` |
+| T7 | 콘텐츠 디렉터·크리처 상태 모델(순수 도메인) | T1 | — | merged | t7-content-director | #6 | `task_e1e7531798ad` |
 | T8 | 상태 엔진(단일 writer·outbox·WS·ACK·유료 멱등) | T1b, T4, T6, T7 | — | pending | t8-state-engine | | `task_0aadf1c96dcf` |
 | T9 | YouTube source adapter(gRPC streamList + REST fallback) | T3, T4, T8 | — | pending | t9-youtube-adapter | | `task_ec3d66a159bd` |
 | T10 | broadcast lifecycle·reconcile·한도 | T3, T4 | — | dispatched | t10-broadcast-lifecycle | | `task_41769f69d4b7` |
@@ -121,3 +121,4 @@
 | 2026-08-17 13:20 | F-T6-1 완료(PR #8 round 2 대기). R-T7-2 리뷰어 질문(A-15: tuning.ts의 provisional typed config 수용 여부) → 'typed config 수용 + T8이 config/default.json에서 주입' 답변. F-T3-3 rebase 완료 → 코디네이터 해결 diff 검사(index.ts re-export·package.json deps union만) → **PR #4 squash merge**(main 1c11d83). T3 worker release·worktree 제거 |
 | 2026-08-17 13:30 | T3·T4 머지로 T10·T13 ready → T10 `ctx_a44401984418`, T13 `ctx_2cc8eb9d4f98` 디스패치. 진행 중 리뷰: R-T7-2(review2), R-T5-1(review). 대기열: R-T6-2. T8은 T6·T7 머지 후(명세에 tuning config 주입·.gitignore /data/ 좁히기·setStreamServiceFromVault 등 반영 예정) |
 | 2026-08-17 13:50 | R-T7-2 verdict **approve**(PR #6은 DIRTY → F-T7-2 rebase `task_5a003a4e94d5` → T7 터미널 `ctx_1e50dbaad8fe`, 코디네이터가 해결 diff 검사 후 머지). R-T6-2 `task_ed7976f9c58f` → `ctx_4ef82c10c7a6`(review2). R-T5-1 verdict **request_changes**(blocker 2: 재수신 effect 재ACK가 notify 없이 보류, 미래 startsAt effect의 commit 전 ACK) → F-T5-1 `task_094f1d5206d8` → T5 터미널 `ctx_40abe7b1e8e3` |
+| 2026-08-17 14:10 | F-T7-2 rebase 완료 → 코디네이터 해결 diff 검사(index.ts re-export, @vl/contract 의존·tsconfig reference 추가만) → **PR #6 squash merge**(main ccfe601). T7 worker release·worktree 제거. T8은 T6(PR #8) 머지 후 디스패치 |
