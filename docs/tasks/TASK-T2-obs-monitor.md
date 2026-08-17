@@ -1,8 +1,8 @@
 # TASK-T2-obs-monitor
 
 - Task: T2 obs-websocket 5 감시·제어 + OBS 프로파일 (`docs/tasks/TASK_SPECS.md` §T2)
-- Branch: `dnhynk/t2-obs-monitor` · PR: #<n>
-- Orca: task `task_6e0c43d6b74c` · dispatch `ctx_560aa20466a2`
+- Branch: `dnhynk/t2-obs-monitor` · PR: #3
+- Orca: task `task_6e0c43d6b74c` · dispatch `ctx_560aa20466a2` → `ctx_67c1bd15a86b` → `ctx_b7a70a2f34f8` (호스트 BSOD 2회로 재개, `## Session recovery`)
 - Spec sections read: §2, §9.4(5)(7), §10.2, §10.3, §10.4, §11(송출·화면·관측성), §12.1
 - BOARD decisions/assumptions relied on: D-1(TS/Node 24), D-2(이 Windows 11 PC = 1차 호스트), A-14(공용 규격), A-15(합격선 숫자는 `provisional` config)
 
