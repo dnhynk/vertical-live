@@ -16,7 +16,7 @@
 | T3 | OAuth·비밀정보 vault·quota | T0 | — | changes_requested | t3-auth-vault | #4 | `task_62829ec3ab8b` |
 | T4 | SQLite 영속층(inbox·checkpoint·snapshot·outbox·deadline) | T1 | — | changes_requested | t4-persistence | #5 | `task_6bb9ff9f79c8` |
 | T5 | 렌더러 read model(snapshot 복구·effect 멱등·ACK·건강) | T1 | — | dispatched | t5-renderer-readmodel | | `task_6ba022bb6151` |
-| T6 | 명령 파서·모더레이션·입력 arbiter | T1 | — | dispatched | t6-command-parser | | `task_a0f96dd7e038` |
+| T6 | 명령 파서·모더레이션·입력 arbiter | T1 | — | in_review | t6-command-parser | #8 | `task_a0f96dd7e038` |
 | T7 | 콘텐츠 디렉터·크리처 상태 모델(순수 도메인) | T1 | — | in_review | t7-content-director | #6 | `task_e1e7531798ad` |
 | T8 | 상태 엔진(단일 writer·outbox·WS·ACK·유료 멱등) | T1b, T4, T6, T7 | — | pending | t8-state-engine | | `task_0aadf1c96dcf` |
 | T9 | YouTube source adapter(gRPC streamList + REST fallback) | T3, T4, T8 | — | pending | t9-youtube-adapter | | `task_ec3d66a159bd` |
@@ -110,3 +110,4 @@
 | 2026-08-17 09:20 | R-T4-1 verdict **request_changes**(blocker 2: processedSeq 전진이 처리 기록으로 증명되지 않아 미처리 inbox가 복구 커서 아래로 묻힘; 이 Windows 호스트에서 clean `npm ci`가 better-sqlite3 node-gyp rebuild로 실패(prebuild 존재하나 미사용) — T5 worktree setup 실패와 같은 원인 가능성; major 1: 삭제된 마이그레이션 파일 검출 안 됨). F-T4-1 `task_1a6ff0a2a2e1` → T4 터미널 `ctx_7f66d3e1035d`. R-T1b-1 `task_08760cd14f5d` → `ctx_523f03d2d553`. 리뷰 대기열: R-T1b-1(진행) → R-T7-1 → R-T3-2 |
 | 2026-08-17 09:00 | T5 질문(CTA 명령 출처가 계약에 없음) → 답 A(선택창/집계창 우선, fallback §7.1 allowlist 표시; interactionEnabled=false면 숨김). display.cta 필드는 필요 시 T14에서 [contract] 후속 |
 | 2026-08-17 09:45 | R-T1b-1 verdict **approve**(7/7, 495 tests). 최종 게이트 통과 → **PR #7 squash merge**(main 6efc9b5). T1b worker release·worktree 제거. R-T7-1 `task_f31e681919dc` → `ctx_754ab822962b`. 리뷰 대기열: R-T7-1(진행) → R-T3-2 → (F-T4-1 후) R-T4-2 |
+| 2026-08-17 10:00 | T6 worker_done(succeeded, PR #8: normalize→allowlist 파서, §12.3 거부 규칙 ja/en, §6.4 arbiter, 원문 미노출 테스트; .gitignore `data/`가 apps/server/src/input/data를 숨긴 문제 발견 → 파일 이동, 규칙 `/data/`로 좁히기는 T8 명세에 포함 예정). 리뷰 대기열: R-T7-1(진행) → R-T3-2 → R-T6-1 → R-T4-2 |
