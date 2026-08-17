@@ -35,6 +35,38 @@ export function soakCommandEnvelope(sequence: number, receivedAt: string): Inges
   })
 }
 
+/**
+ * A paid event, for the crash windows that need an effect on the wire
+ * (spec §7.3(6)(7), §11 유료 무결성).
+ *
+ * The amount, the currency and the id are obviously synthetic and no `actor`
+ * exists at all: payment buys audit, staging and identity, never game power
+ * (§8.5), and the identity gate is closed (BOARD A-1).
+ */
+export function soakSuperChatEnvelope(sequence: number, receivedAt: string): IngestEnvelope {
+  return IngestEnvelopeSchema.parse({
+    schemaVersion: CONTRACT_VERSION,
+    sourceShape: 'simulator',
+    source: 'simulator',
+    broadcastId: SOAK_BROADCAST_ID,
+    liveChatId: SOAK_LIVE_CHAT_ID,
+    receivedAt,
+    messageId: `msg_soak_paid_${String(sequence).padStart(6, '0')}`,
+    validationStatus: 'valid',
+    kind: 'SUPER_CHAT',
+    occurredAt: receivedAt,
+    command: null,
+    payment: {
+      amountMicros: 500_000_000,
+      currency: 'JPY',
+      tier: 1,
+      jewels: null,
+      comboCount: null,
+      giftName: null,
+    },
+  })
+}
+
 export function soakCommandBatch(
   firstSequence: number,
   count: number,

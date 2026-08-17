@@ -100,14 +100,15 @@ export class FaultyBroadcast {
 
   /** One health poll of `liveStreams.status` + `liveBroadcasts` lifecycle. */
   signals(): readonly HealthSignal[] {
-    const stream: LiveStreamStatus | null = this.#bound && this.#statusReadable
-      ? {
-          streamStatus: this.#live ? 'active' : 'ready',
-          healthStatus: this.#live ? 'good' : 'noData',
-          lastUpdateTimeSeconds: Math.floor(Date.parse(this.#clock.nowUtcIso()) / 1000),
-          configurationIssues: [],
-        }
-      : null
+    const stream: LiveStreamStatus | null =
+      this.#bound && this.#statusReadable
+        ? {
+            streamStatus: this.#live ? 'active' : 'ready',
+            healthStatus: this.#live ? 'good' : 'noData',
+            lastUpdateTimeSeconds: Math.floor(Date.parse(this.#clock.nowUtcIso()) / 1000),
+            configurationIssues: [],
+          }
+        : null
     return deriveBroadcastHealthSignals(
       {
         streamId: this.#bound ? SYNTHETIC_STREAM_ID : null,

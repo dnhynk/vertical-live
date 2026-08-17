@@ -32,7 +32,9 @@ export async function crashChild(
   await new Promise<void>((resolve, reject) => {
     const timer = setTimeout(() => {
       child.kill('SIGKILL')
-      reject(new Error(`crash child did not report ready in ${String(READY_TIMEOUT_MS)}ms: ${stderr}`))
+      reject(
+        new Error(`crash child did not report ready in ${String(READY_TIMEOUT_MS)}ms: ${stderr}`),
+      )
     }, READY_TIMEOUT_MS)
     child.stdout.setEncoding('utf8')
     child.stdout.on('data', (chunk: string) => {

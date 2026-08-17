@@ -13,12 +13,14 @@ export {
   type SoakRunShape,
   type SoakThresholds,
 } from './config.js'
-export { soakCommandBatch, soakCommandEnvelope, SOAK_BROADCAST_ID, SOAK_LIVE_CHAT_ID } from './events.js'
-export * from './injection/index.js'
 export {
-  FAULT_MATRIX_DOC_PATH,
-  renderFaultMatrixDoc,
-} from './matrix/doc.js'
+  soakCommandBatch,
+  soakCommandEnvelope,
+  SOAK_BROADCAST_ID,
+  SOAK_LIVE_CHAT_ID,
+} from './events.js'
+export * from './injection/index.js'
+export { FAULT_MATRIX_DOC_PATH, renderFaultMatrixDoc } from './matrix/doc.js'
 export {
   FAULT_MATRIX,
   findFaultRow,

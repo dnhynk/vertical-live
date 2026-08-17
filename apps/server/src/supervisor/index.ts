@@ -23,6 +23,7 @@ export {
   type SupervisorAlertConfig,
   type SupervisorConfig,
 } from './config.js'
+export { classifyStoreFailure, type StoreFailure } from './db-integrity.js'
 export { DeadManMonitor, type DeadManMonitorOptions } from './deadman.js'
 export {
   AdminKillEndpoint,

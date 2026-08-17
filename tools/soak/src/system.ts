@@ -31,11 +31,17 @@ import { flushEventLoop, postEnvelopes, type VirtualClock } from '@vl/simulator'
 
 import { soakCommandBatch } from './events.js'
 import { FaultyAuth } from './injection/auth.js'
+import { crashChild } from './injection/crash.js'
 import { FaultyBroadcast } from './injection/broadcast.js'
 import { FaultyChat } from './injection/chat.js'
 import { FaultyObs } from './injection/obs.js'
 import { SoakRenderer } from './injection/renderer.js'
-import { captureDiskFullError, withDiskFull, WriteLockHolder, type DiskFullGate } from './injection/storage.js'
+import {
+  captureDiskFullError,
+  withDiskFull,
+  WriteLockHolder,
+  type DiskFullGate,
+} from './injection/storage.js'
 
 /**
  * The whole supervised run in one process, with every collaborator replaceable
@@ -76,6 +82,9 @@ export interface SoakSystemOptions {
 
 export const SOAK_BUSY_TIMEOUT_MS = 250
 
+/** Real-time deadline for one `POST /ingest/simulator`; see `inject()`. */
+const INJECT_TIMEOUT_MS = 5_000
+
 export interface SoakObservation {
   readonly state: SupervisorState
   readonly interactionEnabled: boolean
@@ -99,6 +108,14 @@ export class SoakSystem {
   readonly simulatorToken: string
   readonly rendererToken: string
   readonly alerts = new RecordingAlertSink()
+
+  /**
+   * Whether an accepted batch is drained straight away. `false` leaves committed
+   * inbox rows unprocessed on purpose, which is the state fault matrix row F-10
+   * has to crash in: a restart must find them below the recovery cursor and
+   * drain them, not bury them (spec §11 상태 복구, §7.3(3)(5)).
+   */
+  pumpAfterIngest = true
 
   readonly obs: FaultyObs
   readonly chat: FaultyChat
@@ -330,7 +347,7 @@ export class SoakSystem {
       enabled: true,
       token: this.simulatorToken,
       onIngested: () => {
-        this.engine.pump()
+        if (this.pumpAfterIngest) this.engine.pump()
       },
     })
     const http = createServer({
@@ -424,9 +441,27 @@ export class SoakSystem {
    * renderer reattaches. Only what was committed survives (spec §11 상태 복구).
    */
   async restartBackend(): Promise<void> {
+    await this.#replaceBackend()
+  }
+
+  /**
+   * Fault matrix row F-10: a real host crash between the two backends.
+   *
+   * A child process opens the same file, starts a destructive write transaction
+   * and is `SIGKILL`ed with it open — no shutdown hook, no SQLite close. The
+   * restarted engine then has to recover from whatever the OS left on disk.
+   */
+  async crashHost(): Promise<void> {
+    await this.#replaceBackend(async () => {
+      await crashChild(this.file, this.#busyTimeoutMs, 'uncommitted-delete-then-kill')
+    })
+  }
+
+  async #replaceBackend(between?: () => Promise<void>): Promise<void> {
     const port = this.#port
     await this.renderer.disconnect()
     await this.#teardownBackend()
+    await between?.()
     this.#backendRestarts += 1
     this.#openBackend()
     await this.#listen(port)
@@ -467,19 +502,28 @@ export class SoakSystem {
     await flushEventLoop()
   }
 
-  /** Posts `count` synthetic commands over real HTTP (`POST /ingest/simulator`). */
+  /**
+   * Posts `count` synthetic commands over real HTTP (`POST /ingest/simulator`).
+   *
+   * The post is raced against a real-time deadline. `POST /ingest/simulator`
+   * answers nothing at all when the inbox write throws — the store failure
+   * becomes an unhandled rejection inside the handler and the request is left
+   * open (see the ticket's Follow-ups) — and a 72-hour soak that can be stopped
+   * for good by one unanswered request would measure nothing. A timed-out post is
+   * counted as a refusal, never as an accepted event.
+   */
   async inject(count: number): Promise<number> {
     if (count <= 0) return 0
     const envelopes = soakCommandBatch(this.#sequence, count, this.clock.nowUtcIso())
     this.#sequence += count
-    const response = await postEnvelopes(
-      { baseUrl: this.baseUrl, token: this.simulatorToken },
-      envelopes,
-    )
+    const response = await Promise.race([
+      postEnvelopes({ baseUrl: this.baseUrl, token: this.simulatorToken }, envelopes),
+      sleep(INJECT_TIMEOUT_MS).then(() => null),
+    ])
     this.chat.noteUserEvent()
-    this.engine.pump()
+    if (this.pumpAfterIngest) this.engine.pump()
     await flushEventLoop()
-    return response.inserted
+    return response?.inserted ?? 0
   }
 
   observe(): SoakObservation {

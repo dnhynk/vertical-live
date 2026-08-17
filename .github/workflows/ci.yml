@@ -32,3 +32,9 @@ jobs:
       - run: npm run test
 
       - run: npm run build
+
+      # The accelerated soak of TASK_SPECS §T15 합격 기준 2: 72 hours of scenario
+      # time on a virtual clock, with the recoverable fault matrix rows injected
+      # on a schedule. It runs after `build` because it drives the built CLI, and
+      # it fails the job when an invariant of spec §9.2/§11 is broken.
+      - run: npm run soak:ci

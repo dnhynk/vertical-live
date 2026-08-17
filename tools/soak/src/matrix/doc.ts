@@ -39,7 +39,7 @@ export function renderFaultMatrixDoc(rows: readonly FaultMatrixRow[] = FAULT_MAT
   }
   lines.push('')
   lines.push(
-    '`retry`·`degraded`·`safe_stopped`는 supervisor 상태 이름이 아니라 **대응 방식**입니다(§9.2의 상태는 `offline → starting → live → degraded → recovering → live | safe_stopped`). 표의 "종료 상태" 열이 드릴이 끝났을 때의 §9.2 상태입니다.',
+    '`retry`·`degraded`·`safe_stopped`는 supervisor 상태 이름이 아니라 **대응 방식**입니다(§9.2의 상태는 `offline → starting → live → degraded → recovering → live | safe_stopped`). 표의 "관측 상태" 열이 그 조건이 있는 동안 드릴이 실제로 관측해야 하는 §9.2 상태입니다.',
   )
   lines.push('')
   lines.push(
@@ -49,11 +49,11 @@ export function renderFaultMatrixDoc(rows: readonly FaultMatrixRow[] = FAULT_MAT
 
   lines.push('## 행')
   lines.push('')
-  lines.push('| # | 고장 | 스펙 | 예상 상태 | 종료 상태 | 데이터 보존 |')
+  lines.push('| # | 고장 | 스펙 | 예상 상태 | 관측 상태 | 데이터 보존 |')
   lines.push('|---|---|---|---|---|---|')
   for (const row of rows) {
     lines.push(
-      `| ${row.id} | ${row.fault} | ${row.spec} | \`${row.expected}\` | \`${row.expectedFinalState}\` | ${row.dataPreservation} |`,
+      `| ${row.id} | ${row.fault} | ${row.spec} | \`${row.expected}\` | \`${row.expectedState}\` | ${row.dataPreservation} |`,
     )
   }
   lines.push('')
@@ -65,7 +65,7 @@ export function renderFaultMatrixDoc(rows: readonly FaultMatrixRow[] = FAULT_MAT
     lines.push('')
     lines.push(`- 스펙: ${row.spec}`)
     lines.push(`- 주입: ${row.injection}`)
-    lines.push(`- 예상 상태: \`${row.expected}\` · 종료 상태: \`${row.expectedFinalState}\``)
+    lines.push(`- 예상 상태: \`${row.expected}\` · 관측 상태: \`${row.expectedState}\``)
     lines.push(`- 데이터 보존: ${row.dataPreservation}`)
     lines.push(
       `- 분류기: ${row.classifierSource === null ? '없음(관측으로만 판정)' : `\`${row.classifierSource}\``}`,

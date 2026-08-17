@@ -138,11 +138,6 @@ export class FaultyObs {
     }
     if (this.#fault === 'rtmps_cut') this.#fault = 'none'
     this.#streamActive = true
-    // A restarted output resets OBS's own counters; the production derivation
-    // treats a negative delta as a new counter, and this is what produces one.
-    this.#bytes = 0
-    this.#durationMs = 0
-    this.#outputFrames = 0
     return Promise.resolve()
   }
 

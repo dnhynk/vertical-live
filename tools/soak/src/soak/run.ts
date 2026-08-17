@@ -1,4 +1,5 @@
 import { systemClock } from '@vl/server'
+import type { Alert } from '@vl/server/supervisor'
 import { fetchMetrics, VirtualClock } from '@vl/simulator'
 
 import { loadSoakConfig, type SoakConfig, type SoakMode, type SoakRunShape } from '../config.js'
@@ -38,6 +39,20 @@ export interface SoakFault {
   /** Undone after `holdSlices`; a fault the system heals itself needs no undo. */
   readonly clear?: (system: SoakSystem) => void
   readonly holdSlices: number
+  /**
+   * Skip the synthetic load while this fault is held.
+   *
+   * Only `F-11` sets it, and for a defect this task found rather than for
+   * convenience: `POST /ingest/simulator` answers **nothing** when the inbox
+   * write throws — `SimulatorIngestEndpoint.handle` is called inside a `.then()`
+   * and a `SQLITE_BUSY` from `commitIngestBatch` becomes an unhandled rejection
+   * with the request still open (`apps/server/src/server.ts`). Posting into a
+   * held write lock therefore hangs the caller. The soak does not paper over it:
+   * it is written up in the ticket's Follow-ups, `inject()` has a deadline so a
+   * soak can never be stopped by it, and the row itself is still drilled — with
+   * the lock and without the endpoint — in `matrix.test.ts`.
+   */
+  readonly skipsInjection?: boolean
 }
 
 /** Recoverable rows only (see the module comment). */
@@ -90,6 +105,7 @@ export const RECOVERABLE_FAULTS: readonly SoakFault[] = Object.freeze([
       system.releaseWriteLock()
     },
     holdSlices: 2,
+    skipsInjection: true,
   },
   {
     row: 'F-08',
@@ -232,7 +248,7 @@ export async function runSoak(options: RunSoakOptions): Promise<SoakReport> {
       }
       previousState = observation.state
 
-      if (scenarioMs >= nextInjectionAtMs) {
+      if (scenarioMs >= nextInjectionAtMs && activeFault?.fault.skipsInjection !== true) {
         nextInjectionAtMs = scenarioMs + shape.injectIntervalMs
         const before = system.postedEnvelopes
         const inserted = await system.inject(shape.commandsPerInjection)
@@ -272,7 +288,11 @@ export async function runSoak(options: RunSoakOptions): Promise<SoakReport> {
     // never recovered when it simply had not been given a pass to recover in.
     activeFault?.fault.clear?.(system)
     activeFault = null
-    for (let settle = 0; settle < SETTLE_SLICES && system.supervisor.state !== 'live'; settle += 1) {
+    for (
+      let settle = 0;
+      settle < SETTLE_SLICES && system.supervisor.state !== 'live';
+      settle += 1
+    ) {
       await system.tick(shape.sliceMs)
       scenarioMs += shape.sliceMs
     }
@@ -307,9 +327,11 @@ export async function runSoak(options: RunSoakOptions): Promise<SoakReport> {
       freezeEvents,
       freezeEventsDuringInjection,
       backendRestarts: system.backendRestarts,
-      componentRestarts: Object.fromEntries(
-        system.supervisor.components().map((component) => [component.component, component.attempts]),
-      ),
+      // Counted from the attempt alerts, not from `ComponentHealth.attempts`:
+      // that counter is the *current* budget and `noteHealthy()` returns it once
+      // the component is well again, so a healthy end state would report zero
+      // restarts for a run full of them.
+      componentRestarts: countRestartAttempts(system.alerts.alerts),
       faultsInjected,
       alerts: countAlerts(system.alerts.alerts.map((alert) => alert.kind)),
       safeStops,
@@ -317,7 +339,9 @@ export async function runSoak(options: RunSoakOptions): Promise<SoakReport> {
     }
 
     const outages = interruptions.map((interruption) =>
-      interruption.durationMs === null ? shape.durationMs - interruption.atScenarioMs : interruption.durationMs,
+      interruption.durationMs === null
+        ? shape.durationMs - interruption.atScenarioMs
+        : interruption.durationMs,
     )
     const recovered = interruptions
       .map((interruption) => interruption.durationMs)
@@ -358,5 +382,16 @@ const SETTLE_SLICES = 12
 function countAlerts(kinds: readonly string[]): Record<string, number> {
   const counts: Record<string, number> = {}
   for (const kind of kinds) counts[kind] = (counts[kind] ?? 0) + 1
+  return counts
+}
+
+function countRestartAttempts(alerts: readonly Alert[]): Record<string, number> {
+  const counts: Record<string, number> = {}
+  for (const alert of alerts) {
+    if (alert.kind !== 'supervisor.restart_attempt') continue
+    const component = alert.detail['component']
+    if (typeof component !== 'string') continue
+    counts[component] = (counts[component] ?? 0) + 1
+  }
   return counts
 }

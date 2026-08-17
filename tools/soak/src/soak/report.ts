@@ -118,8 +118,7 @@ export interface BuildSoakReportInput {
 
 export function buildSoakReport(input: BuildSoakReportInput): SoakReport {
   const { counters } = input
-  const broadcastAvailability =
-    counters.slices === 0 ? 0 : counters.liveSlices / counters.slices
+  const broadcastAvailability = counters.slices === 0 ? 0 : counters.liveSlices / counters.slices
   const interactionAvailability =
     counters.slices === 0 ? 0 : counters.interactionEnabledSlices / counters.slices
 
@@ -172,7 +171,13 @@ export function buildSoakReport(input: BuildSoakReportInput): SoakReport {
     check('maxRecoveryMs', input.maxRecoveryMs, input.thresholds.maxRecoveryMs, 'ms', 'max'),
     check('freezeEvents', counters.freezeEvents, input.thresholds.maxFreezeEvents, 'count', 'max'),
     check('alertDeliveryMs', null, input.thresholds.maxAlertDeliveryMs, 'ms', 'max'),
-    check('endToEndP95Ms', input.latency.endToEndP95Ms, input.thresholds.endToEndP95Ms, 'ms', 'max'),
+    check(
+      'endToEndP95Ms',
+      input.latency.endToEndP95Ms,
+      input.thresholds.endToEndP95Ms,
+      'ms',
+      'max',
+    ),
     check(
       'broadcastAvailability',
       broadcastAvailability,
@@ -297,9 +302,7 @@ export function formatSoakReport(report: SoakReport): string {
   lines.push('')
 
   lines.push(`latency (${String(report.latency.samples)} samples, ${report.clock} clock)`)
-  lines.push(
-    `  received→committed p95    ${formatMs(report.latency.receivedToCommittedP95Ms)}`,
-  )
+  lines.push(`  received→committed p95    ${formatMs(report.latency.receivedToCommittedP95Ms)}`)
   lines.push(`  committed→published p95   ${formatMs(report.latency.committedToPublishedP95Ms)}`)
   lines.push(`  published→acked p95       ${formatMs(report.latency.publishedToAckedP95Ms)}`)
   lines.push(`  received→acked p95        ${formatMs(report.latency.endToEndP95Ms)}`)
