@@ -23,6 +23,25 @@ import {
 } from './errors.js'
 import { migrate } from './migrate.js'
 import { openDatabase } from './open.js'
+import {
+  countRows,
+  deleteAllRows,
+  deleteExpiredByColumn,
+  deleteOrphanedGiftCombos,
+  insertRetentionLedger,
+  latestInstant,
+  listColumnNames,
+  listRetentionLedger,
+  listTableNames,
+  schemaDefinitions,
+  tableExists,
+  type DeleteAllOptions,
+  type DeleteExpiredOptions,
+  type DeleteSweepResult,
+  type RetentionLedgerEntry,
+  type RetentionLedgerFilter,
+  type RetentionLedgerRow,
+} from './retention.js'
 import type {
   DeadlineRecord,
   EffectMarkResult,
@@ -828,6 +847,64 @@ export class PersistenceStore {
       )
       .all()
     return rows.map(toCheckpoint)
+  }
+
+  // -------------------------------------------------------------- retention
+  //
+  // T13's surface (spec §12.4). The statements live in `db/retention.ts`; these
+  // methods exist so the retention job goes through the single store interface
+  // instead of opening a second connection to the same WAL file.
+
+  /** Every table in the open schema, including SQLite's own bookkeeping ones. */
+  listTables(): string[] {
+    return listTableNames(this.#db)
+  }
+
+  /** Column names of one table; empty when the table does not exist. */
+  listColumns(table: string): string[] {
+    return listColumnNames(this.#db, table)
+  }
+
+  hasTable(table: string): boolean {
+    return tableExists(this.#db, table)
+  }
+
+  /** `CREATE` text of every schema object — used by the identity-column audit. */
+  listSchemaDefinitions(): { name: string; sql: string }[] {
+    return schemaDefinitions(this.#db)
+  }
+
+  countRows(table: string): number {
+    return countRows(this.#db, table)
+  }
+
+  /** Highest value of an instant column, i.e. when the table was last written. */
+  latestInstant(table: string, column: string): string | null {
+    return latestInstant(this.#db, table, column)
+  }
+
+  deleteExpiredByColumn(options: DeleteExpiredOptions): DeleteSweepResult {
+    return deleteExpiredByColumn(this.#db, options)
+  }
+
+  deleteAllRows(options: DeleteAllOptions): DeleteSweepResult {
+    return deleteAllRows(this.#db, options)
+  }
+
+  deleteOrphanedGiftCombos(options: {
+    batchLimit: number
+    maxBatches: number
+  }): DeleteSweepResult {
+    return deleteOrphanedGiftCombos(this.#db, options)
+  }
+
+  /** Appends one retention audit row and returns its `entry_id`. */
+  recordRetention(entry: RetentionLedgerEntry): number {
+    return insertRetentionLedger(this.#db, entry)
+  }
+
+  listRetentionLedger(filter: RetentionLedgerFilter = {}): RetentionLedgerRow[] {
+    return listRetentionLedger(this.#db, filter)
   }
 }
 

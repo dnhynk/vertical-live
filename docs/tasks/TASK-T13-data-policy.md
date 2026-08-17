@@ -96,5 +96,3 @@ client-side 7일 / Google 측 30일 분기로 처리하고, 사용자 삭제 요
 ## Follow-ups
 
 - (작업 중)
-</content>
-</invoke>

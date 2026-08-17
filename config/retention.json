@@ -1,0 +1,246 @@
+{
+  "$comment": [
+    "Field-level retention schedule (spec §12.4: 보존은 단일 '30일' 규칙으로 축약하지 않고 field별 schedule로 관리한다).",
+    "This file is the authority; apps/server/src/privacy loads it and docs/ops/data-map.md is generated from it.",
+    "No entry stores a user name, a channel id or a reversible/stable hash: while the identity gate is closed the",
+    "schema has no column for them at all (spec §7.4, §12.4, BOARD A-1), which is why every entry declares",
+    "personalIdentifiers: \"none\"."
+  ],
+  "version": 1,
+  "sourceDataRetentionDays": 30,
+  "sweep": {
+    "intervalMs": 3600000,
+    "batchLimit": 5000,
+    "maxBatchesPerEntry": 200,
+    "provisional": ["intervalMs", "batchLimit", "maxBatchesPerEntry"]
+  },
+  "revocation": {
+    "$comment": [
+      "spec §12.4: client-side consent 철회는 token을 즉시 revoke하고 그 동의로 접근·저장한 Authorized Data를 최대 7일",
+      "안에 삭제한다 / Google 설정에서의 권한 철회는 정책의 별도 최대 30일 규칙을 적용한다.",
+      "Deletion runs immediately in both branches; the branch decides the recorded deadline (allowed_until)."
+    ],
+    "clientSideDeletionDays": 7,
+    "providerSideDeletionDays": 30,
+    "userRequestDeletionDays": 7,
+    "reasonClass": {
+      "operator_revoked": "client_side",
+      "invalid_grant": "provider_side",
+      "missing_refresh_token": "client_side"
+    }
+  },
+  "fields": [
+    {
+      "key": "ingest_inbox.envelope",
+      "table": "ingest_inbox",
+      "status": "present",
+      "source": "youtube_api",
+      "dataClass": "authorized_api_data",
+      "purpose": "policy-filtered ingest inbox: single-writer replay after a restart and event-key idempotency (spec §7.3(1)(2)(3)(4), §10.2)",
+      "storedColumns": [
+        "message_id",
+        "source",
+        "source_shape",
+        "broadcast_id",
+        "live_chat_id",
+        "received_at",
+        "validation_status",
+        "gift_effective_count",
+        "envelope_json",
+        "processed_at",
+        "processing_result"
+      ],
+      "personalIdentifiers": "none",
+      "policy": "delete",
+      "allowedPeriodDays": 30,
+      "expiry": { "kind": "column", "column": "received_at" },
+      "unfinishedColumn": "processed_at",
+      "specRef": "§12.4 일반 Authorized/Non-Authorized API Data는 정책에 따라 30일 안에 refresh 또는 delete한다 / A-7"
+    },
+    {
+      "key": "source_checkpoint.next_page_token",
+      "table": "source_checkpoint",
+      "status": "present",
+      "source": "youtube_api",
+      "dataClass": "authorized_api_data",
+      "purpose": "reconnect continuation token committed with the envelopes it covers (spec §7.3(2))",
+      "storedColumns": [
+        "source_key",
+        "live_chat_id",
+        "next_page_token",
+        "last_ingest_seq",
+        "updated_at"
+      ],
+      "personalIdentifiers": "none",
+      "policy": "delete",
+      "allowedPeriodDays": 30,
+      "expiry": { "kind": "column", "column": "updated_at" },
+      "specRef": "§12.4 30일 refresh-or-delete. A token untouched for 30 days points at a live chat that no longer exists"
+    },
+    {
+      "key": "state_transitions.caused_by_event_key",
+      "table": "state_transitions",
+      "status": "present",
+      "source": "youtube_api",
+      "dataClass": "authorized_api_data",
+      "purpose": "audit trail of committed transitions; the cause column carries the API message id inside the event key (spec §7.3(5), §9.4(2))",
+      "storedColumns": ["revision", "caused_by_event_key", "kind", "at"],
+      "personalIdentifiers": "none",
+      "policy": "delete",
+      "allowedPeriodDays": 30,
+      "expiry": { "kind": "column", "column": "at" },
+      "specRef": "§12.4 30일 refresh-or-delete"
+    },
+    {
+      "key": "effect_outbox.caused_by_event_key",
+      "table": "effect_outbox",
+      "status": "present",
+      "source": "youtube_api",
+      "dataClass": "authorized_api_data",
+      "purpose": "durable outbox for side effects that cannot be regenerated, i.e. paid audit staging (spec §7.3(6)(7), §10.2)",
+      "storedColumns": [
+        "effect_id",
+        "cause_kind",
+        "caused_by_event_key",
+        "cause_deadline_kind",
+        "cause_deadline_id",
+        "kind",
+        "paid",
+        "state_revision",
+        "starts_at",
+        "ends_at",
+        "payload_json",
+        "published_at",
+        "acked_at",
+        "expired_at"
+      ],
+      "personalIdentifiers": "none",
+      "policy": "delete",
+      "allowedPeriodDays": 30,
+      "expiry": { "kind": "column", "column": "ends_at" },
+      "specRef": "§12.4 30일 refresh-or-delete"
+    },
+    {
+      "key": "paid_ledger.event_key",
+      "table": "paid_ledger",
+      "status": "present",
+      "source": "youtube_api",
+      "dataClass": "authorized_api_data",
+      "purpose": "paid audit idempotency: the same Super Chat is applied once (spec §7.4, §11 유료 무결성). Amount, tier and jewels are staging and event-analysis data only — 확정 수익은 AdSense 정산이 권위값이다 (spec §8.6)",
+      "storedColumns": [
+        "event_key",
+        "kind",
+        "amount_micros",
+        "currency",
+        "tier",
+        "jewels",
+        "applied_at"
+      ],
+      "personalIdentifiers": "none",
+      "policy": "delete",
+      "allowedPeriodDays": 30,
+      "expiry": { "kind": "column", "column": "applied_at" },
+      "specRef": "§12.4 30일 refresh-or-delete + §8.6 (장기 수익 정본은 정산, 장기 KPI는 무식별 집계)"
+    },
+    {
+      "key": "gift_combo.stored_max",
+      "table": "gift_combo",
+      "status": "present",
+      "source": "youtube_api",
+      "dataClass": "authorized_api_data",
+      "purpose": "non-decreasing gift combo maximum per base event key, so a replayed combo step applies delta 0 (spec §7.4)",
+      "storedColumns": ["base_key", "stored_max"],
+      "personalIdentifiers": "none",
+      "policy": "delete",
+      "allowedPeriodDays": 30,
+      "expiry": { "kind": "orphan", "referencesTable": "ingest_inbox" },
+      "specRef": "§12.4 30일 refresh-or-delete. The row has no instant of its own: it exists only to deduplicate against inbox rows, so it expires with the last inbox row for its base key"
+    },
+    {
+      "key": "deadlines.payload",
+      "table": "deadlines",
+      "status": "present",
+      "source": "internal",
+      "dataClass": "derived_state",
+      "purpose": "absolute UTC deadlines with the per-kind downtime policy; content-defined payloads carry no source data (spec §10.2)",
+      "storedColumns": ["id", "kind", "due_at", "policy", "payload_json", "status"],
+      "personalIdentifiers": "none",
+      "policy": "delete",
+      "allowedPeriodDays": 30,
+      "expiry": { "kind": "column", "column": "due_at" },
+      "specRef": "§12.4 field별 schedule. Internal state, but a settled deadline older than the source-data window has no further use"
+    },
+    {
+      "key": "broadcast_resources.ids",
+      "table": "broadcast_resources",
+      "status": "present",
+      "source": "youtube_api",
+      "dataClass": "authorized_api_data",
+      "purpose": "broadcast/stream/live-chat resource ids for lifecycle and reconcile (spec §9.2, §9.3; columns fixed by T10)",
+      "storedColumns": [
+        "broadcast_id",
+        "live_chat_id",
+        "stream_id",
+        "lifecycle",
+        "created_at",
+        "updated_at"
+      ],
+      "personalIdentifiers": "none",
+      "policy": "delete",
+      "allowedPeriodDays": 30,
+      "expiry": { "kind": "column", "column": "updated_at" },
+      "specRef": "§12.4 30일 refresh-or-delete"
+    },
+    {
+      "key": "world_snapshot.snapshot",
+      "table": "world_snapshot",
+      "status": "present",
+      "source": "internal",
+      "dataClass": "derived_state",
+      "purpose": "current authoritative world state the renderer recovers from. Derived creature/environment/aggregate values only — the snapshot contract has no event key, broadcast id or identifier (spec §10.2, §12.4 장기 KPI는 개인 식별자가 없는 집계)",
+      "storedColumns": [
+        "world_id",
+        "state_revision",
+        "processed_ingest_seq",
+        "snapshot_json",
+        "updated_at"
+      ],
+      "personalIdentifiers": "none",
+      "policy": "refresh",
+      "allowedPeriodDays": null,
+      "reverifyPeriodDays": 30,
+      "expiry": { "kind": "column", "column": "updated_at" },
+      "specRef": "§12.4 장기 보존이 허용된 …은 30일마다 권한과 삭제 여부를 다시 확인한다. The row is rewritten on every state transition; a snapshot untouched for 30 days is reported for re-verification instead of being deleted, because deleting it would destroy the world the renderer recovers from"
+    },
+    {
+      "key": "metrics_daily.aggregates",
+      "table": "metrics_daily",
+      "status": "planned",
+      "plannedBy": "T12/T15",
+      "source": "internal",
+      "dataClass": "identifier_free_aggregate",
+      "purpose": "long-term KPI as identifier-free per-day/per-broadcast aggregates (spec §12.4 장기 KPI, §14.1). Official Analytics figures, internal identifier-free event counts and confirmed settlement stay separate (spec §12.4 [S42])",
+      "storedColumns": [],
+      "personalIdentifiers": "none",
+      "policy": "refresh",
+      "allowedPeriodDays": null,
+      "reverifyPeriodDays": 30,
+      "expiry": { "kind": "column", "column": "updated_at" },
+      "specRef": "§12.4 장기 보존이 허용된 Analytics·Reporting·일부 statistics는 30일마다 권한과 삭제 여부를 다시 확인한다"
+    }
+  ],
+  "schemaOnlyTables": [
+    {
+      "table": "retention_ledger",
+      "reason": "This file's own audit trail: field key, source, purpose, allowed deadline, outcome, row count and deletion instant. It is the §12.4 evidence that deletions ran, holds no API data and no identifier, and is therefore retained rather than swept — deleting it would destroy the record the policy requires"
+    },
+    {
+      "table": "schema_migrations",
+      "reason": "Migration bookkeeping (version, name, checksum, applied_at). No API data and no user data"
+    },
+    {
+      "table": "sqlite_sequence",
+      "reason": "SQLite's own AUTOINCREMENT bookkeeping for ingest_inbox. Holds the highest sequence ever used so a deleted ingest_seq is never reused (https://sqlite.org/autoinc.html); no API data"
+    }
+  ]
+}
