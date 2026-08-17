@@ -40,7 +40,9 @@ export class RetentionScheduler {
   constructor(options: RetentionSchedulerOptions) {
     const intervalMs = options.intervalMs ?? options.sweeper.config.sweep.intervalMs
     if (!Number.isInteger(intervalMs) || intervalMs <= 0) {
-      throw new Error(`retention sweep intervalMs must be a positive integer, got ${String(intervalMs)}`)
+      throw new Error(
+        `retention sweep intervalMs must be a positive integer, got ${String(intervalMs)}`,
+      )
     }
     this.#sweeper = options.sweeper
     this.#clock = options.clock

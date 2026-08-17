@@ -29,6 +29,26 @@
 | 사용자 삭제 요청 | `privacy/deletion-request.ts` | 운영자가 요청을 받았을 때 `handle()` 호출 |
 | 파생 지표 가드 | `privacy/derived-metrics.ts` | 테스트(`derived-metrics.test.ts`)가 저장소 소스·스키마를 스캔 |
 
+T13은 모듈과 계약만 제공한다. 프로세스 수명주기(DB 열기·supervisor)는 T12 소관이므로 기동 배선은 T12가 다음처럼 한다:
+
+```ts
+const config = loadRetentionConfig()
+const sweeper = new RetentionSweeper({ store, clock, config, logger })
+const scheduler = new RetentionScheduler({ sweeper, clock, onResult: alertOnUnmetObligations })
+scheduler.start() // 즉시 1회 + sweep.intervalMs마다
+
+// 철회: TokenManager의 이벤트 sink에 연결
+const revocation = new RevocationHandler({
+  store,
+  clock,
+  config,
+  grantRevoker: vaultGrantRevoker(vault),
+})
+const authEvents = new RevocationAuthEventSink({ handler: revocation, onError: alert })
+```
+
+`onResult`는 `clean === false`(=`reverificationDue`·`truncated`·`failed`가 비어 있지 않음)를 알림 대상으로 삼는다.
+
 `delete` 정책은 만료 행을 배치로 삭제한다. `refresh` 정책은 **삭제하지 않는다** — 허용 기간 안에 다시 쓰였는지
 확인하고, 아니면 `reverification_due`로 기록해 사람 판단을 요구한다(§12.4 "30일마다 권한과 삭제 여부를 다시 확인").
 `Reverifier`를 주입하면 재확인 결과(`still_authorized` / `delete`)가 그대로 집행된다.

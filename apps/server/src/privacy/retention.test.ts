@@ -36,7 +36,10 @@ function open(): RetentionHarness {
   return harness
 }
 
-function sweeper(active: RetentionHarness, options: { reverify?: Reverifier } = {}): RetentionSweeper {
+function sweeper(
+  active: RetentionHarness,
+  options: { reverify?: Reverifier } = {},
+): RetentionSweeper {
   return new RetentionSweeper({
     store: active.store,
     clock: active.clock,
@@ -265,7 +268,9 @@ describe('refresh policy (spec §12.4 30일마다 권한과 삭제 여부를 다
     await active.clock.advance(31 * DAY_MS)
 
     const result = sweeper(active, { reverify: () => 'delete' }).run()
-    expect(result.entries.find((entry) => entry.table === 'world_snapshot')?.outcome).toBe('deleted')
+    expect(result.entries.find((entry) => entry.table === 'world_snapshot')?.outcome).toBe(
+      'deleted',
+    )
     expect(active.store.countRows('world_snapshot')).toBe(0)
   })
 
@@ -294,6 +299,77 @@ describe('refresh policy (spec §12.4 30일마다 권한과 삭제 여부를 다
       )
     }
     expect(result.failed).toEqual([])
+  })
+})
+
+describe('retention_ledger constraints (migration 002)', () => {
+  const base = {
+    fieldKey: 'ingest_inbox.envelope',
+    source: 'youtube_api',
+    purpose: 'test',
+    policy: 'delete',
+    reason: 'scheduled',
+    allowedPeriodDays: 30,
+    cutoffAt: T0,
+    deadlineAt: null,
+    recordedAt: T0,
+  } as const
+
+  it('accepts a well-formed scheduled deletion row', () => {
+    const active = open()
+    expect(
+      active.store.recordRetention({
+        ...base,
+        outcome: 'deleted',
+        rowsDeleted: 2,
+        deletedAt: T0,
+      }),
+    ).toBeGreaterThan(0)
+  })
+
+  it('refuses a deletion that claims no rows or no instant', () => {
+    const active = open()
+    expect(() =>
+      active.store.recordRetention({ ...base, outcome: 'deleted', rowsDeleted: 0, deletedAt: T0 }),
+    ).toThrow(/CHECK constraint failed/)
+    expect(() =>
+      active.store.recordRetention({ ...base, outcome: 'deleted', rowsDeleted: 2 }),
+    ).toThrow(/CHECK constraint failed/)
+  })
+
+  it('refuses a non-deletion outcome that claims rows', () => {
+    const active = open()
+    expect(() =>
+      active.store.recordRetention({ ...base, outcome: 'nothing_expired', rowsDeleted: 1 }),
+    ).toThrow(/CHECK constraint failed/)
+  })
+
+  it('refuses more unprocessed rows than deleted rows', () => {
+    const active = open()
+    expect(() =>
+      active.store.recordRetention({
+        ...base,
+        outcome: 'deleted',
+        rowsDeleted: 1,
+        rowsUnprocessed: 2,
+        deletedAt: T0,
+      }),
+    ).toThrow(/CHECK constraint failed/)
+  })
+
+  it('refuses a scheduled row with a deadline, or a triggered row with a cutoff', () => {
+    const active = open()
+    expect(() =>
+      active.store.recordRetention({ ...base, outcome: 'nothing_expired', deadlineAt: T0 }),
+    ).toThrow(/CHECK constraint failed/)
+    expect(() =>
+      active.store.recordRetention({
+        ...base,
+        reason: 'consent_revoked',
+        outcome: 'nothing_expired',
+        deadlineAt: T0,
+      }),
+    ).toThrow(/CHECK constraint failed/)
   })
 })
 

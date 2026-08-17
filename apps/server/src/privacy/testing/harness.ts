@@ -156,7 +156,12 @@ export function seedState(store: PersistenceStore, options: SeededStateOptions):
     revision: options.revision,
     processedSeq: options.processedSeq,
     transitions: [
-      { revision: options.revision, causedByEventKey: paidKey, kind: 'PAID_THANKS', at: options.at },
+      {
+        revision: options.revision,
+        causedByEventKey: paidKey,
+        kind: 'PAID_THANKS',
+        at: options.at,
+      },
     ],
     processed: (options.processed ?? []).map((ingestSeq) => ({
       ingestSeq,

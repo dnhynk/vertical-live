@@ -23,7 +23,8 @@ client-side 7일 / Google 측 30일 분기로 처리하고, 사용자 삭제 요
 2. **로더 `apps/server/src/privacy/config.ts`** — 엄격 검증(정책별 필수 필드, 식별자 정규식, 알 수 없는 키 거부)과
    거부 경로 테스트. 임의 숫자 금지: 30/7/30일은 스펙 §12.4 값, 그 외 운영 수치는 `provisional`.
 3. **마이그레이션 `002_retention-ledger.sql`** — T4가 스켈레톤으로 남긴(§T4 주석) `retention_ledger`를 append-only
-   감사 원장으로 재정의: `field_key·source·purpose·policy·reason·allowed_until·outcome·rows_deleted·deleted_at·recorded_at`.
+   감사 원장으로 재정의: `field_key·source·purpose·policy·reason·allowed_period_days·cutoff_at·deadline_at·outcome·
+   rows_deleted·rows_unprocessed·deleted_at·recorded_at`.
    식별자 컬럼을 두지 않는다(삭제 요청 기록이 스스로 §12.4를 위반하면 안 된다).
 4. **`apps/server/src/db/retention.ts` + `PersistenceStore` 위임 메서드** — 스키마 조회(테이블·컬럼), 컬럼 기준
    만료 삭제(batch), orphan 삭제(gift_combo), 최신 갱신 시각, 전체 삭제(철회용), 원장 기록·조회. SQL은 db 계층에만 둔다
@@ -80,19 +81,56 @@ client-side 7일 / Google 측 30일 분기로 처리하고, 사용자 삭제 요
 
 | # | 기준 | 상태(met/unmet/unverifiable) | 근거(테스트 파일·명령·출력) |
 |---|---|---|---|
-| 1 | 가상 시계로 30일 경과 시 삭제·기록, 철회 시 7일 내 삭제 테스트 통과 | (작업 중) | |
-| 2 | DB 스키마 전체에서 author/channel/hash 컬럼이 없음을 테스트 | (작업 중) | |
+| 1 | 가상 시계로 30일 경과 시 삭제·기록 | **met** | `apps/server/src/privacy/retention.test.ts` — "keeps source data until its allowed period has fully elapsed"(29일·정확히 30일 무삭제), "deletes and records once 30 days have passed"(30일+1ms에 3행 삭제, 원장 `outcome=deleted`·`rowsDeleted=3`·`cutoffAt=now-30d`·`deletedAt` 확인), "expires every table that carries source data"(inbox·checkpoint·transitions·deadlines·effect_outbox·paid_ledger·gift_combo·broadcast_resources 8개 테이블 0행), `scheduler.test.ts` — "deletes expired rows on the tick that crosses the 30-day line". 모두 `FakeClock.advance()`로만 시간을 움직인다 |
+| 1 | 철회 시 7일 내 삭제 | **met** | `apps/server/src/privacy/revocation.test.ts` — "leaves no usable grant and deletes the authorized data inside the window"(`operator_revoked` → 7개 authorized 테이블 0행, `deadlineAt = 철회+7일`, `withinDeadline=true`), "records every deletion against the 7-day deadline"(원장 `reason=consent_revoked`, `allowedPeriodDays=7`, `deletedAt <= deadline`), "applies the separate 30-day rule to an invalid_grant"(Google 측 30일 분기), "reports a deletion that finished after the deadline"(기한 초과를 숨기지 않음) |
+| 2 | DB 스키마 전체에서 author/channel/hash 컬럼 부재 | **met** | `apps/server/src/privacy/schema-identity.test.ts` — 마이그레이션 적용된 실제 DB의 모든 테이블(11개 이상, 컬럼 50개 이상)에서 `findIdentityColumns` 0건, 인덱스·뷰 SQL(주석 제외)에서 0건, `author`/`channel`/`hash` 3개 이름이 목록에 있음, 양성 대조(`author_channel_id` 컬럼을 심으면 검출)까지 포함 |
+| 추가 | 승인 전 파생 지표 계산·저장 코드 부재 | **met** | `apps/server/src/privacy/derived-metrics.test.ts` — workspace 소스 파일 60개 이상 + 라이브 스키마 스캔 0건, 스캐너 양성 대조 포함 |
 
 ### Gates (executed)
 
 ```text
-(작업 중)
+npm run format:check  -> All matched files use Prettier code style!
+npm run lint          -> eslint 통과 · check-no-legacy-imports: ok (0 legacy imports) · check-install-scripts: ok (3 reviewed, better-sqlite3 binding loads)
+npm run typecheck     -> tsc --build tsconfig.json (출력 없음 = 통과)
+npm run test          -> Test Files 67 passed (67) / Tests 1107 passed | 1 skipped (1108)
+npm run build         -> contract·renderer·server·simulator 통과; server: "copied 2 migration(s) to dist/db/migrations", "docs/ops/data-map.md up to date"
 ```
+
+`git fetch origin && git rebase origin/main`(#8·#9·T7 머지 반영) 후 위 5개 게이트를 모두 실행했다.
+rebase 직후 renderer 테스트가 `jsdom` 미설치로 실패했고 `npm install`(T5가 추가한 devDependency 반영)로 해결했다 —
+`package-lock.json`은 변경되지 않았다.
 
 ## Not done / out of scope
 
-- (작업 중)
+- **프로세스 배선 없음.** `main.ts`는 아직 T0 스텁(HTTP `/health`만)이고 DB 열기·supervisor 수명주기는 T12 소관이므로
+  `RetentionScheduler.start()`·`RevocationAuthEventSink` 연결을 T12에 남겼다. 배선 코드 예시는
+  `docs/ops/data-map.md` §2에 적었다. 지금 main.ts에서 DB를 열면 T8/T12의 단일 writer 경계를 T13이 선점하게 된다.
+- **운영자 CLI 없음.** 사용자 삭제 요청은 `UserDeletionRequestHandler.handle()` 인터페이스로 제공한다(명세가 요구한 것).
+  `npm run` 진입점은 T16/T17의 운영 스크립트 범위.
+- **`metrics_daily` 테이블 생성 없음.** 정책만 `status: "planned"`로 고정했다(테이블 소유는 T12/T15).
+  테이블이 생기면 `assertSchemaCoverage`가 `status`를 `present`로 바꾸라고 실패한다.
+- **`refresh` 재확인의 자동 판정 없음.** `Reverifier`를 주입하면 집행되지만, 주입이 없으면 삭제하지도 방치하지도 않고
+  `reverification_due`로 기록해 사람 판단을 요구한다(§12.4는 "권한과 삭제 여부를 다시 확인"을 요구하며,
+  그 판정은 이 job이 스스로 만들 수 있는 값이 아니다).
+- 정책 원문([S12] [S41] [S42]) HTTP 재확인은 **실행하지 않았음**: 오프라인 worker 환경. 스펙 §12.4·§14.1이 조문 단위로
+  옮겨 적은 내용을 근거로 구현했고, 원문 재확인은 Gate 2 항목으로 data-map.md §8에 남겼다.
+
+## 범위 밖으로 보일 수 있는 변경 (근거)
+
+| 변경 | 근거 |
+|---|---|
+| `apps/server/src/db/store.ts`에 retention 메서드 추가 | `db/index.ts`가 이미 "T13(retention)은 SQL을 직접 만지지 않고 `PersistenceStore`를 쓴다"고 규정한다. 두 번째 커넥션을 여는 대안은 같은 WAL 파일에 두 writer를 만든다 |
+| `001_initial.sql`의 `retention_ledger`를 002에서 재정의 | 001 주석이 "T13 fills and enforces this"라고 명시. 001은 checksum이 기록되어 편집이 금지되므로 새 마이그레이션이 유일한 경로. 운영 DB 없음은 R-T4-2에서 확인됨 |
+| `apps/server/src/db/migrate.test.ts` 기대값 2건 수정 | 그 테스트가 "적용된 마이그레이션은 001뿐"을 단정하고 있어 002 추가 시 반드시 깨진다. 값만 갱신했고 단정의 정밀도는 유지했다 |
+| `apps/server/package.json` build에 `generate-data-map.mjs --check` 추가 | 생성물 드리프트 방지(CLAUDE.md §4). `packages/contract`의 `generate-schema.mjs --check`와 같은 패턴 |
 
 ## Follow-ups
 
-- (작업 중)
+- **T12**: 기동 시 `RetentionScheduler.start()` 호출, `RevocationAuthEventSink`를 `TokenManager` 이벤트 sink에 연결,
+  sweep 결과의 `clean === false`(`reverificationDue`/`truncated`/`failed`)와 `rowsUnprocessed > 0`를 Discord 알림 대상으로.
+- **T12/T15**: `metrics_daily` 집계 테이블을 만들 때 `config/retention.json`의 `status`를 `present`로 바꾸고
+  `npm run data-map:generate -w @vl/server` 재실행.
+- **T15**: fault matrix에 "sweep 중 DB lock", "철회 중 프로세스 종료 후 재기동 시 삭제 재실행" 행 추가.
+- **T16**: `docs/ops/data-map.md`를 Gate 2 체크리스트와 연결하고 provisional 수치(§8) 확정.
+- 향후 새 테이블을 만드는 모든 task는 `config/retention.json`에 항목을 추가해야 한다 —
+  누락하면 `RetentionSweeper` 생성이 `RetentionConfigError`로 실패한다(테스트로 고정).

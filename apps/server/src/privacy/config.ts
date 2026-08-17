@@ -27,7 +27,8 @@ import type { AuthRevokedReason } from '../youtube/auth/events.js'
  *   back to a default.
  */
 
-export type RetentionDataClass = 'authorized_api_data' | 'derived_state' | 'identifier_free_aggregate'
+export type RetentionDataClass =
+  'authorized_api_data' | 'derived_state' | 'identifier_free_aggregate'
 export type RetentionFieldStatus = 'present' | 'planned'
 /** Which §12.4 window a revocation falls under. */
 export type RevocationClass = 'client_side' | 'provider_side'
@@ -236,16 +237,15 @@ function parseSweep(value: unknown): RetentionSweepConfig {
   const provisional = readStringArray(section['provisional'], 'sweep.provisional')
   for (const name of provisional) {
     if (!keys.includes(name) || name === 'provisional') {
-      throw new RetentionConfigError(`sweep.provisional names ${name}, which is not a sweep setting`)
+      throw new RetentionConfigError(
+        `sweep.provisional names ${name}, which is not a sweep setting`,
+      )
     }
   }
   return Object.freeze({
     intervalMs: readPositiveInt(section['intervalMs'], 'sweep.intervalMs'),
     batchLimit: readPositiveInt(section['batchLimit'], 'sweep.batchLimit'),
-    maxBatchesPerEntry: readPositiveInt(
-      section['maxBatchesPerEntry'],
-      'sweep.maxBatchesPerEntry',
-    ),
+    maxBatchesPerEntry: readPositiveInt(section['maxBatchesPerEntry'], 'sweep.maxBatchesPerEntry'),
     provisional: Object.freeze(provisional),
   })
 }
@@ -310,7 +310,11 @@ function parseRevocation(value: unknown): RevocationConfig {
   })
 }
 
-function parseField(value: unknown, label: string, sourceDataRetentionDays: number): RetentionField {
+function parseField(
+  value: unknown,
+  label: string,
+  sourceDataRetentionDays: number,
+): RetentionField {
   const entry = asObject(value, label)
   rejectUnknownKeys(entry, label, [
     'key',
@@ -410,10 +414,7 @@ function parseField(value: unknown, label: string, sourceDataRetentionDays: numb
     ...common,
     policy: 'refresh',
     allowedPeriodDays: null,
-    reverifyPeriodDays: readPositiveInt(
-      entry['reverifyPeriodDays'],
-      `${label}.reverifyPeriodDays`,
-    ),
+    reverifyPeriodDays: readPositiveInt(entry['reverifyPeriodDays'], `${label}.reverifyPeriodDays`),
   })
 }
 
@@ -501,9 +502,7 @@ function rejectUnknownKeys(
   label: string,
   allowed: readonly string[],
 ): void {
-  const unknown = Object.keys(record).filter(
-    (key) => key !== '$comment' && !allowed.includes(key),
-  )
+  const unknown = Object.keys(record).filter((key) => key !== '$comment' && !allowed.includes(key))
   if (unknown.length > 0) {
     throw new RetentionConfigError(`${label} has unknown key(s): ${unknown.sort().join(', ')}`)
   }

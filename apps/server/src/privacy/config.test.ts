@@ -163,7 +163,9 @@ describe('rejected configs', () => {
 
   it('refuses a table name that is not a plain SQL identifier', () => {
     expect(() =>
-      parseRetentionConfig(withField('ingest_inbox.envelope', { table: 'ingest_inbox; DROP TABLE' })),
+      parseRetentionConfig(
+        withField('ingest_inbox.envelope', { table: 'ingest_inbox; DROP TABLE' }),
+      ),
     ).toThrow(/lower-snake-case SQL identifier/)
   })
 

@@ -891,10 +891,7 @@ export class PersistenceStore {
     return deleteAllRows(this.#db, options)
   }
 
-  deleteOrphanedGiftCombos(options: {
-    batchLimit: number
-    maxBatches: number
-  }): DeleteSweepResult {
+  deleteOrphanedGiftCombos(options: { batchLimit: number; maxBatches: number }): DeleteSweepResult {
     return deleteOrphanedGiftCombos(this.#db, options)
   }
 

@@ -2,7 +2,12 @@ import { afterEach, describe, expect, it } from 'vitest'
 
 import { RetentionScheduler } from './scheduler.js'
 import { RetentionSweeper, type RetentionSweepResult } from './retention.js'
-import { DAY_MS, createRetentionHarness, seedInbox, type RetentionHarness } from './testing/harness.js'
+import {
+  DAY_MS,
+  createRetentionHarness,
+  seedInbox,
+  type RetentionHarness,
+} from './testing/harness.js'
 
 /**
  * The periodic driver of the sweep. Time comes from the injected `Clock`, so a

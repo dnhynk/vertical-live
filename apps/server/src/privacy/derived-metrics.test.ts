@@ -103,7 +103,10 @@ describe('approval-gated derived metrics', () => {
     const store = harness.store
     const targets = store
       .listTables()
-      .flatMap((table) => [table, ...store.listColumns(table).map((column) => `${table}.${column}`)])
+      .flatMap((table) => [
+        table,
+        ...store.listColumns(table).map((column) => `${table}.${column}`),
+      ])
     expect(targets.length).toBeGreaterThan(50)
 
     const offenders = targets.filter((target) => findForbiddenMetricTokens(target).length > 0)

@@ -100,7 +100,10 @@ describe('migrate', () => {
     const database = openDatabase({ file, busyTimeoutMs: BUSY_TIMEOUT_MS })
     try {
       const result = migrate(database, { clock: new FakeClock() })
-      expect(result.applied.map((migration) => migration.fileName)).toEqual(['001_initial.sql'])
+      expect(result.applied.map((migration) => migration.fileName)).toEqual([
+        '001_initial.sql',
+        '002_retention-ledger.sql',
+      ])
 
       const tables = (
         database
@@ -134,8 +137,8 @@ describe('migrate', () => {
       migrate(database, { clock: new FakeClock() })
       const second = migrate(database, { clock: new FakeClock() })
       expect(second.applied).toEqual([])
-      expect(second.alreadyApplied.map((row) => row.version)).toEqual([1])
-      expect(listAppliedMigrations(database)).toHaveLength(1)
+      expect(second.alreadyApplied.map((row) => row.version)).toEqual([1, 2])
+      expect(listAppliedMigrations(database)).toHaveLength(2)
     } finally {
       database.close()
     }
