@@ -23,7 +23,7 @@
 | T10 | broadcast lifecycle·reconcile·한도 | T3, T4 | — | changes_requested | t10-broadcast-lifecycle | #11 | `task_41769f69d4b7` |
 | T11 | 로컬 시뮬레이터·replay·지연 계측 | T5, T8 | — | pending | t11-simulator-replay | | `task_9470df5be9b8` |
 | T12 | supervisor 상태기계·건강 집계·kill switch·알림·dead-man | T2, T8, T9, T10 | — | pending | t12-supervisor | | `task_560530cfb813` |
-| T13 | 데이터 보존·삭제·철회 자동화 | T3, T4 | — | changes_requested | t13-data-policy | #10 | `task_15cd2ae24e82` |
+| T13 | 데이터 보존·삭제·철회 자동화 | T3, T4 | — | merged | t13-data-policy | #10 | `task_15cd2ae24e82` |
 | T14 | 렌더러 화면 완성(5초 무음·감사 연출·i18n) | T5, T7 | — | changes_requested | t14-renderer-screen | #13 | `task_82f32652b3cf` |
 | T15 | fault matrix·72h soak harness | T11, T12, T13 | — | pending | t15-fault-soak | | `task_f32603eaee51` |
 | T16 | 문서 정합화·운영 런북·Gate 체크리스트 | T12 | — | pending | t16-docs-alignment | | `task_60d68899d24c` |
@@ -134,3 +134,4 @@
 | 2026-08-17 19:00 | R-T8-1 verdict **request_changes**(blocker 4: 창 마감 시 처리 기록 순서 위반으로 writer wedge, 유료 ACK↔fallback 해제 비원자(2회 감사), /ws/renderer 무인증(§10.2), 어휘 밖 argument 'applied'+원문 저장; major 2: simulator가 프로덕션 checkpoint 덮어씀, lockfile ws 분류) → F-T8-1 `task_38cdad7ca3b2` → T8 터미널 `ctx_360c7f676409`(렌더러 connection 토큰 전달 최소 수정 승인). R-T10-2 `task_c0fb438d4e34` → `ctx_84210b4b2171`(review). 진행: R-T14-1(review2) |
 | 2026-08-17 19:30 | F-T13-2 완료. R-T14-1 verdict request_changes(major 1: 챕터 변주가 배경·조명 미반영; minor FPS 문서) → F-T14-1 `task_5a5a9fc62e47` → T14 터미널 `ctx_cdfd5b721a25`. R-T13-3 `task_545e7bfa8730` → `ctx_bbe76f99104a`(review2). 진행: R-T10-2(review), F-T8-1, F-T14-1 |
 | 2026-08-17 19:55 | R-T10-2 verdict request_changes(round 1 8건 해소 확인, 신규 blocker 1: scheduledStartTime만으로 reconcile 채택 → 충돌 저항 attempt 마커 필요; minor 2 문서) → F-T10-2 `task_f5b33d1e0cb2` → T10 터미널. 진행: R-T13-3(review2), F-T8-1, F-T14-1, F-T10-2 |
+| 2026-08-17 20:15 | R-T13-3 verdict **approve** → 최종 게이트 → **PR #10 squash merge**(main afc7018; 마이그레이션 002 확정). T13 worker release·worktree 제거. F-T14-1 완료 → R-T14-2 `task_7100bf58dfb6` → `ctx_7c1b153d8fbe`(review). 진행: F-T8-1, F-T10-2 |
