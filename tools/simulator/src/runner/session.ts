@@ -50,6 +50,12 @@ export interface SimulatorSession {
   readonly target: InjectTarget
   run(scenario: Scenario): Promise<RunResult>
   metrics(): EngineMetricsSnapshot
+  /**
+   * Attaches a stub renderer to a session that was opened without one, which is
+   * how a recovery test clears the `no_renderer` degraded condition and lets the
+   * recovered backlog drain (spec §9.2, §11 상태 복구).
+   */
+  attachRenderer(): Promise<StubRenderer>
   /** Restarts the backend and reattaches the renderer (spec §11 상태 복구). */
   restart(): Promise<void>
   close(): Promise<void>
@@ -68,8 +74,8 @@ export async function openSession(options: SessionOptions = {}): Promise<Simulat
   await harness.start()
 
   let renderer: StubRenderer | null = null
-  if (options.attachRenderer !== false) {
-    renderer = new StubRenderer({
+  const attach = async (): Promise<StubRenderer> => {
+    const attached = new StubRenderer({
       wsUrl: harness.wsUrl,
       token: harness.rendererToken,
       clock: harness.clock,
@@ -78,18 +84,24 @@ export async function openSession(options: SessionOptions = {}): Promise<Simulat
         : { ackEffects: options.rendererAckEffects }),
       ...(options.rendererAckStates === undefined ? {} : { ackStates: options.rendererAckStates }),
     })
-    await renderer.connect()
+    await attached.connect()
+    renderer = attached
     // The hello of spec §7.3(7) is answered on a writer pass, so the world knows
     // it has a renderer before the first scenario batch arrives.
     harness.engine.pump()
+    return attached
   }
+  if (options.attachRenderer !== false) await attach()
 
   const target: InjectTarget = { baseUrl: harness.baseUrl, token: harness.simulatorToken }
   const parseCommand = simulatorCommandParser({ inputConfig })
 
   return {
     harness,
-    renderer,
+    // A getter: `attachRenderer()` may bind one after the session was opened.
+    get renderer() {
+      return renderer
+    },
     clock,
     target,
     async run(scenario) {
@@ -112,13 +124,14 @@ export async function openSession(options: SessionOptions = {}): Promise<Simulat
     metrics() {
       return harness.engine.metrics()
     },
+    attachRenderer: attach,
     async restart() {
-      if (renderer !== null) await renderer.disconnect()
+      const attached = renderer
+      if (attached !== null) await attached.disconnect()
       await harness.restart()
-      if (renderer !== null) {
-        await renderer.connect()
-        harness.engine.pump()
-      }
+      // A restart drops the socket; a renderer that was attached reconnects and
+      // is re-sent the recovery snapshot (spec §7.3(7), §10.2).
+      if (attached !== null) await attach()
     },
     async close() {
       if (renderer !== null) await renderer.disconnect()
