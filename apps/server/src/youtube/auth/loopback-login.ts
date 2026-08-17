@@ -159,13 +159,20 @@ function awaitAuthorizationCode(
 
       const code = url.searchParams.get('code')
       if (code === null || code === '') {
-        respond(res, 400, 'Sign-in was not completed', 'The redirect carried no authorization code.')
+        respond(
+          res,
+          400,
+          'Sign-in was not completed',
+          'The redirect carried no authorization code.',
+        )
         finish(() =>
-          reject(new OAuthRequestError('authorization redirect carried no code', {
-            kind: 'invalid_request',
-            retryable: false,
-            faultAction: 'degraded',
-          })),
+          reject(
+            new OAuthRequestError('authorization redirect carried no code', {
+              kind: 'invalid_request',
+              retryable: false,
+              faultAction: 'degraded',
+            }),
+          ),
         )
         return
       }

@@ -1,3 +1,5 @@
 export { createServer, handleRequest, resolvePort, DEFAULT_HOST, DEFAULT_PORT } from './server.js'
 export { systemClock, type Clock, type TimerHandle } from './clock.js'
 export * from './db/index.js'
+export * from './secrets/index.js'
+export * from './youtube/index.js'

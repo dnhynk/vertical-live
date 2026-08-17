@@ -74,7 +74,10 @@ export class WindowsCredentialManagerVault implements SecretVault {
         `cannot load @napi-rs/keyring: ${(error as Error).message}`,
       )
     }
-    return new WindowsCredentialManagerVault(service, (svc, account) => new AsyncEntry(svc, account))
+    return new WindowsCredentialManagerVault(
+      service,
+      (svc, account) => new AsyncEntry(svc, account),
+    )
   }
 
   async get(name: SecretName): Promise<string | undefined> {

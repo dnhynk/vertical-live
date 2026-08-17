@@ -45,13 +45,18 @@ export function loadQuotaConfig(options: LoadAuthConfigOptions = {}): QuotaConfi
     resetTimeZone: readString(section['resetTimeZone'], 'youtube.quota.resetTimeZone'),
     reserveUnits,
     backoff: Object.freeze({
-      initialDelayMs: readPositiveInt(backoff['initialDelayMs'], 'youtube.quota.backoff.initialDelayMs'),
+      initialDelayMs: readPositiveInt(
+        backoff['initialDelayMs'],
+        'youtube.quota.backoff.initialDelayMs',
+      ),
       maxDelayMs: readPositiveInt(backoff['maxDelayMs'], 'youtube.quota.backoff.maxDelayMs'),
       factor: readPositiveNumber(backoff['factor'], 'youtube.quota.backoff.factor'),
       jitterRatio: readRatio(backoff['jitterRatio'], 'youtube.quota.backoff.jitterRatio'),
       maxAttempts: readPositiveInt(backoff['maxAttempts'], 'youtube.quota.backoff.maxAttempts'),
     }),
-    provisional: Object.freeze(readStringArray(section['provisional'], 'youtube.quota.provisional')),
+    provisional: Object.freeze(
+      readStringArray(section['provisional'], 'youtube.quota.provisional'),
+    ),
   })
 }
 

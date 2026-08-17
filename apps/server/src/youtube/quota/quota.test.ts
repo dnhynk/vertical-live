@@ -75,9 +75,7 @@ describe('minimal scope set', () => {
       ...REQUIRED_SCOPES,
       'https://www.googleapis.com/auth/youtube.upload',
     ])
-    expect(withUpload.extraneousScopes).toEqual([
-      'https://www.googleapis.com/auth/youtube.upload',
-    ])
+    expect(withUpload.extraneousScopes).toEqual(['https://www.googleapis.com/auth/youtube.upload'])
   })
 
   it('keeps unverified methods out of the proof', () => {
@@ -193,11 +191,13 @@ describe('classifyYouTubeApiError', () => {
   })
 
   it('separates quota exhaustion from rate limiting', () => {
-    expect(classifyYouTubeApiError({ httpStatus: 403, body: body('quotaExceeded') })).toMatchObject({
-      kind: 'quotaExceeded',
-      action: 'degraded',
-      retryable: false,
-    })
+    expect(classifyYouTubeApiError({ httpStatus: 403, body: body('quotaExceeded') })).toMatchObject(
+      {
+        kind: 'quotaExceeded',
+        action: 'degraded',
+        retryable: false,
+      },
+    )
     expect(
       classifyYouTubeApiError({ httpStatus: 403, body: body('rateLimitExceeded') }),
     ).toMatchObject({ kind: 'rateLimitExceeded', action: 'retry', retryable: true })
@@ -222,9 +222,9 @@ describe('classifyYouTubeApiError', () => {
     expect(
       classifyYouTubeApiError({ httpStatus: 403, body: body('userBroadcastsExceedLimit') }),
     ).toMatchObject({ kind: 'broadcastLimit', action: 'degraded' })
-    expect(
-      classifyYouTubeApiError({ httpStatus: 403, body: body('liveChatEnded') }),
-    ).toMatchObject({ kind: 'failedPrecondition', action: 'degraded' })
+    expect(classifyYouTubeApiError({ httpStatus: 403, body: body('liveChatEnded') })).toMatchObject(
+      { kind: 'failedPrecondition', action: 'degraded' },
+    )
   })
 
   it('maps gRPC streamList codes', () => {
@@ -247,9 +247,9 @@ describe('classifyYouTubeApiError', () => {
       kind: 'network',
       action: 'retry',
     })
-    expect(
-      classifyYouTubeApiError({ httpStatus: 429, retryAfterHeader: '30' }).retryAfterMs,
-    ).toBe(30_000)
+    expect(classifyYouTubeApiError({ httpStatus: 429, retryAfterHeader: '30' }).retryAfterMs).toBe(
+      30_000,
+    )
     expect(
       classifyYouTubeApiError({
         httpStatus: 429,

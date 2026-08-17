@@ -170,7 +170,8 @@ export function classifyOAuthError(error: unknown): OAuthFailure {
     return makeFailure('network', { description: stringOrUndefined(candidate?.message) })
   }
 
-  const httpStatus = numberOrUndefined(candidate?.response?.status) ?? numberOrUndefined(candidate?.status)
+  const httpStatus =
+    numberOrUndefined(candidate?.response?.status) ?? numberOrUndefined(candidate?.status)
   const data = candidate?.response?.data
   const body = parseErrorBody(data)
   if (body !== undefined) {

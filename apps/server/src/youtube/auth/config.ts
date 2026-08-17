@@ -63,7 +63,9 @@ export function loadYouTubeAuthConfig(options: LoadAuthConfigOptions = {}): YouT
     throw new AuthConfigError(`youtube.auth.scopes is missing ${missing.join(', ')}`)
   }
 
-  const loopbackHost = env['VL_OAUTH_LOOPBACK_HOST'] ?? readString(section['loopbackHost'], 'youtube.auth.loopbackHost')
+  const loopbackHost =
+    env['VL_OAUTH_LOOPBACK_HOST'] ??
+    readString(section['loopbackHost'], 'youtube.auth.loopbackHost')
   if (loopbackHost !== '127.0.0.1' && loopbackHost !== '::1') {
     throw new AuthConfigError(`loopbackHost must be a loopback address, got ${loopbackHost}`)
   }
@@ -112,7 +114,9 @@ export function readClientSecretsFile(path: string): OAuthClientCredentials {
   try {
     parsed = JSON.parse(readFileSync(path, 'utf8'))
   } catch (error) {
-    throw new AuthConfigError(`cannot read client secrets file ${path}: ${(error as Error).message}`)
+    throw new AuthConfigError(
+      `cannot read client secrets file ${path}: ${(error as Error).message}`,
+    )
   }
   const root = asObject(parsed, 'client secrets')
   const installed = root['installed'] ?? root['web']

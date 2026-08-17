@@ -28,7 +28,12 @@ export {
 } from './auth/errors.js'
 export type { FaultAction, OAuthFailure, OAuthFailureKind } from './auth/errors.js'
 export { RecordingAuthEventSink, nullAuthEventSink } from './auth/events.js'
-export type { AuthEvent, AuthEventSink, AuthRevokedEvent, AuthRevokedReason } from './auth/events.js'
+export type {
+  AuthEvent,
+  AuthEventSink,
+  AuthRevokedEvent,
+  AuthRevokedReason,
+} from './auth/events.js'
 export { GOOGLE_OAUTH_ENDPOINTS, OAuthClient } from './auth/oauth-client.js'
 export type { OAuthEndpoints, RefreshResult, TokenSet } from './auth/oauth-client.js'
 export {

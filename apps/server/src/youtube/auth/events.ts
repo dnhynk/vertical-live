@@ -75,6 +75,8 @@ export class RecordingAuthEventSink implements AuthEventSink {
   }
 
   ofType<T extends AuthEvent['type']>(type: T): Extract<AuthEvent, { type: T }>[] {
-    return this.events.filter((event): event is Extract<AuthEvent, { type: T }> => event.type === type)
+    return this.events.filter(
+      (event): event is Extract<AuthEvent, { type: T }> => event.type === type,
+    )
   }
 }

@@ -131,13 +131,27 @@ export class TokenManager {
    */
   async revokeGrant(): Promise<void> {
     const refreshToken = await this.#vault.get(REFRESH_TOKEN_SECRET)
+    let revokeError: unknown
     if (refreshToken !== undefined) {
       this.#redactor.register(refreshToken)
-      await this.#client.revoke(refreshToken)
+      try {
+        await this.#client.revoke(refreshToken)
+      } catch (error) {
+        revokeError = error
+      }
     }
+    // The local copy goes even when Google could not be reached: a withdrawn
+    // consent must not leave a usable token on the host. The caller is told to
+    // finish the revocation by hand.
     await this.#vault.delete(REFRESH_TOKEN_SECRET)
     this.#cached = undefined
     this.#latchRevoked('operator_revoked')
+    if (revokeError !== undefined) {
+      throw new Error(
+        'the stored refresh token was deleted, but revoking it at Google failed; revoke the app manually at https://myaccount.google.com/permissions',
+        { cause: revokeError },
+      )
+    }
   }
 
   #isExpiring(tokenSet: TokenSet): boolean {
@@ -191,19 +205,22 @@ export class TokenManager {
       })
       return tokenSet
     } catch (error) {
-      const failure =
-        error instanceof OAuthRequestError ? error.failure : classifyOAuthError(error)
+      const failure = error instanceof OAuthRequestError ? error.failure : classifyOAuthError(error)
       this.#emitFailure(failure)
       if (isRevocation(failure)) {
         this.#latchRevoked('invalid_grant', failure.description)
-        throw new AuthRevokedError('invalid_grant', this.#redactor.redact(failure.description ?? ''))
+        throw new AuthRevokedError(
+          'invalid_grant',
+          this.#redactor.redact(failure.description ?? ''),
+        )
       }
       throw error
     }
   }
 
   #emitFailure(failure: OAuthFailure): void {
-    const detail = failure.description === undefined ? undefined : this.#redactor.redact(failure.description)
+    const detail =
+      failure.description === undefined ? undefined : this.#redactor.redact(failure.description)
     this.#events.emit({
       type: 'auth_refresh_failed',
       at: this.#clock.nowUtcIso(),
