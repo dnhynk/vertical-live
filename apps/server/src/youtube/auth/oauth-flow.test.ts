@@ -1,9 +1,15 @@
+import { createServer } from 'node:http'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { FakeClock } from '../../testing/fake-clock.js'
 import { FakeOAuthServer } from '../../testing/fake-oauth-server.js'
 import { REQUIRED_SCOPES } from '../scopes.js'
 import { OAuthRequestError } from './errors.js'
-import { LoginStateMismatchError, LoginTimeoutError, loginWithLoopback } from './loopback-login.js'
+import {
+  formatLoopbackAuthority,
+  LoginStateMismatchError,
+  LoginTimeoutError,
+  loginWithLoopback,
+} from './loopback-login.js'
 import { OAuthClient } from './oauth-client.js'
 
 /**
@@ -14,6 +20,8 @@ import { OAuthClient } from './oauth-client.js'
  */
 
 const CLIENT_ID = 'synthetic-client-id.apps.googleusercontent.com'
+/** Resolved once: whether this host can bind the IPv6 loopback address. */
+const ipv6LoopbackAvailable = await probeIpv6Loopback()
 const CLIENT_SECRET = 'synthetic-client-secret-000000'
 
 let server: FakeOAuthServer
@@ -207,12 +215,77 @@ describe('loginWithLoopback', () => {
       }),
     )
     await vi_waitFor(() => consentUrl !== '')
-    await browserRedirect(consentUrl)
+    const response = await browserRedirect(consentUrl)
+
+    // Review round 1, m2: the browser must not be told the credential was
+    // stored when the exchange failed.
+    expect(response.status).toBe(400)
+    const page = await response.text()
+    expect(page).toContain('Sign-in was not completed')
+    expect(page).not.toContain('stored')
 
     const { error } = await login
     expect(error).toBeInstanceOf(OAuthRequestError)
     expect((error as OAuthRequestError).failure.kind).toBe('revoked')
     expect((error as OAuthRequestError).message).toContain('invalid_grant')
+  })
+
+  it('shows the success page only after the grant has been persisted', async () => {
+    // Review round 1, m2: the page claims "the credential was stored", so it may
+    // only be sent once `persistGrant` (the vault write) has resolved.
+    const clock = new FakeClock()
+    const order: string[] = []
+    let consentUrl = ''
+    const login = settle(
+      loginWithLoopback({
+        client: createClient(clock),
+        scopes: REQUIRED_SCOPES,
+        clock,
+        timeoutMs: 60_000,
+        onAuthorizationUrl: (url) => {
+          consentUrl = url
+        },
+        persistGrant: async () => {
+          await new Promise((resolve) => setTimeout(resolve, 10))
+          order.push('persisted')
+        },
+      }),
+    )
+    await vi_waitFor(() => consentUrl !== '')
+
+    const response = await browserRedirect(consentUrl)
+    order.push('page')
+
+    expect(order).toEqual(['persisted', 'page'])
+    expect(response.status).toBe(200)
+    expect(await response.text()).toContain('stored in the Windows Credential Manager')
+    expect((await login).value?.tokenSet.refreshToken).toBe(server.initialRefreshToken)
+  })
+
+  it('fails the login and says so in the browser when persistence fails', async () => {
+    const clock = new FakeClock()
+    let consentUrl = ''
+    const login = settle(
+      loginWithLoopback({
+        client: createClient(clock),
+        scopes: REQUIRED_SCOPES,
+        clock,
+        timeoutMs: 60_000,
+        onAuthorizationUrl: (url) => {
+          consentUrl = url
+        },
+        persistGrant: async () => {
+          throw new Error('credential store is locked')
+        },
+      }),
+    )
+    await vi_waitFor(() => consentUrl !== '')
+
+    const response = await browserRedirect(consentUrl)
+
+    expect(response.status).toBe(400)
+    expect(await response.text()).not.toContain('stored')
+    expect((await login).error).toMatchObject({ message: 'credential store is locked' })
   })
 
   it('refuses to bind anything but a loopback address', async () => {
@@ -226,6 +299,40 @@ describe('loginWithLoopback', () => {
         host: '0.0.0.0',
       }),
     ).rejects.toThrow('must bind a loopback address')
+  })
+})
+
+describe('IPv6 loopback', () => {
+  it('brackets an IPv6 literal in the authority', () => {
+    // Review round 1, m1: `http://::1:52000` is not a URL.
+    expect(formatLoopbackAuthority('::1', 52_000)).toBe('[::1]:52000')
+    expect(formatLoopbackAuthority('::1')).toBe('[::1]')
+    expect(formatLoopbackAuthority('127.0.0.1', 8787)).toBe('127.0.0.1:8787')
+  })
+
+  it.skipIf(!ipv6LoopbackAvailable)('completes a login bound to ::1', async () => {
+    const clock = new FakeClock()
+    let consentUrl = ''
+    const login = settle(
+      loginWithLoopback({
+        client: createClient(clock),
+        scopes: REQUIRED_SCOPES,
+        clock,
+        timeoutMs: 60_000,
+        host: '::1',
+        onAuthorizationUrl: (url) => {
+          consentUrl = url
+        },
+      }),
+    )
+    await vi_waitFor(() => consentUrl !== '')
+
+    const redirectUri = new URL(consentUrl).searchParams.get('redirect_uri') ?? ''
+    expect(redirectUri).toMatch(/^http:\/\/\[::1\]:\d+$/)
+
+    const response = await browserRedirect(consentUrl)
+    expect(response.status).toBe(200)
+    expect((await login).value?.redirectUri).toBe(redirectUri)
   })
 })
 
@@ -250,4 +357,18 @@ async function vi_waitFor(predicate: () => boolean, timeoutMs = 5000): Promise<v
     }
     await new Promise((resolve) => setTimeout(resolve, 5))
   }
+}
+
+/**
+ * Some hosts (and container images) have no IPv6 loopback; the ::1 login test
+ * reports itself as skipped there instead of failing on the environment.
+ */
+async function probeIpv6Loopback(): Promise<boolean> {
+  return new Promise((resolve) => {
+    const probe = createServer()
+    probe.once('error', () => resolve(false))
+    probe.listen(0, '::1', () => {
+      probe.close(() => resolve(true))
+    })
+  })
 }

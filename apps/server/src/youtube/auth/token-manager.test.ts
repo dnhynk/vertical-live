@@ -177,6 +177,42 @@ describe('TokenManager revocation', () => {
     expect(h.events.ofType('auth_revoked')[0]?.reason).toBe('operator_revoked')
   })
 
+  it('still emits auth_revoked when the vault delete fails, and reports the failure', async () => {
+    // Review round 1, M3: consent is gone once the remote revoke succeeds, so
+    // T13's §12.4 deletion trigger must not be lost because the local cleanup
+    // failed — and the cleanup failure must not be swallowed either.
+    const h = createHarness({ storedRefreshToken: server.initialRefreshToken })
+    const deleteFailure = new Error('credential store is locked')
+    h.vault.delete = async (): Promise<boolean> => {
+      throw deleteFailure
+    }
+
+    const error = await h.manager.revokeGrant().catch((caught: unknown) => caught)
+
+    expect(server.revoked).toEqual([server.initialRefreshToken])
+    expect(h.manager.state).toBe('revoked')
+    expect(h.events.ofType('auth_revoked')).toHaveLength(1)
+    expect(h.events.ofType('auth_revoked')[0]?.reason).toBe('operator_revoked')
+    expect((error as Error).message).toContain('deleting the stored refresh token failed')
+    expect((error as Error).message).toContain('credential store is locked')
+    expect((error as Error).cause).toBe(deleteFailure)
+    expect((error as Error).message).not.toContain(server.initialRefreshToken)
+  })
+
+  it('still emits auth_revoked when the vault cannot even be read', async () => {
+    const h = createHarness({ storedRefreshToken: server.initialRefreshToken })
+    h.vault.get = async (): Promise<string | undefined> => {
+      throw new Error('credential store is unavailable')
+    }
+
+    const error = await h.manager.revokeGrant().catch((caught: unknown) => caught)
+
+    expect(server.revoked).toEqual([])
+    expect(h.manager.state).toBe('revoked')
+    expect(h.events.ofType('auth_revoked')).toHaveLength(1)
+    expect((error as Error).message).toContain('no token was revoked at Google')
+  })
+
   it('storeGrant clears a previous revocation and stores the refresh token', async () => {
     const h = createHarness()
     await expect(h.manager.getAccessToken()).rejects.toBeInstanceOf(AuthRevokedError)

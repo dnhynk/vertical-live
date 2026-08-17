@@ -128,9 +128,22 @@ export class TokenManager {
    * Revokes the grant at Google and drops the stored refresh token (spec §12.4:
    * consent withdrawal revokes the token immediately). Emits `auth_revoked` so
    * T13 can start its deletion window from the same signal.
+   *
+   * The event is emitted and the manager latched **before** any failure is
+   * reported (review round 1, M3): once the operator has asked for revocation,
+   * consent is gone as far as this process is concerned, so T13's deletion
+   * trigger must not depend on the remote call or the vault delete succeeding.
+   * Each failure is then surfaced separately — neither is hidden.
    */
   async revokeGrant(): Promise<void> {
-    const refreshToken = await this.#vault.get(REFRESH_TOKEN_SECRET)
+    let refreshToken: string | undefined
+    let readError: unknown
+    try {
+      refreshToken = await this.#vault.get(REFRESH_TOKEN_SECRET)
+    } catch (error) {
+      readError = error
+    }
+
     let revokeError: unknown
     if (refreshToken !== undefined) {
       this.#redactor.register(refreshToken)
@@ -140,16 +153,35 @@ export class TokenManager {
         revokeError = error
       }
     }
+
     // The local copy goes even when Google could not be reached: a withdrawn
-    // consent must not leave a usable token on the host. The caller is told to
-    // finish the revocation by hand.
-    await this.#vault.delete(REFRESH_TOKEN_SECRET)
+    // consent must not leave a usable token on the host.
+    let deleteError: unknown
+    try {
+      await this.#vault.delete(REFRESH_TOKEN_SECRET)
+    } catch (error) {
+      deleteError = error
+    }
+
     this.#cached = undefined
     this.#latchRevoked('operator_revoked')
+
+    if (deleteError !== undefined) {
+      throw new Error(
+        `the grant was revoked, but deleting the stored refresh token failed; remove it with "npm run secrets -w @vl/server -- delete ${REFRESH_TOKEN_SECRET}": ${this.#redactor.redactError(deleteError)}`,
+        { cause: deleteError },
+      )
+    }
     if (revokeError !== undefined) {
       throw new Error(
         'the stored refresh token was deleted, but revoking it at Google failed; revoke the app manually at https://myaccount.google.com/permissions',
         { cause: revokeError },
+      )
+    }
+    if (readError !== undefined) {
+      throw new Error(
+        `the vault could not be read, so no token was revoked at Google; revoke the app manually at https://myaccount.google.com/permissions: ${this.#redactor.redactError(readError)}`,
+        { cause: readError },
       )
     }
   }

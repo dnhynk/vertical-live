@@ -36,6 +36,11 @@ export interface LoopbackLoginOptions {
    * browser. Never auto-opens from tests.
    */
   readonly onAuthorizationUrl?: (url: string) => void | Promise<void>
+  /**
+   * Persists the grant (vault write) before the browser is shown the success
+   * page. A rejection here fails the login and the browser is told so.
+   */
+  readonly persistGrant?: (tokenSet: TokenSet) => Promise<void>
 }
 
 export interface LoopbackLoginResult {
@@ -59,6 +64,15 @@ export class LoginStateMismatchError extends Error {
   }
 }
 
+/**
+ * Formats a host (and optional port) as a URL authority. IPv6 literals need
+ * brackets — `http://::1:52000` is not a URL (review round 1, m1).
+ */
+export function formatLoopbackAuthority(host: string, port?: number): string {
+  const literal = host.includes(':') ? `[${host}]` : host
+  return port === undefined ? literal : `${literal}:${port}`
+}
+
 export async function loginWithLoopback(
   options: LoopbackLoginOptions,
 ): Promise<LoopbackLoginResult> {
@@ -70,7 +84,7 @@ export async function loginWithLoopback(
   const { codeVerifier, codeChallenge } = options.client.createPkcePair()
   const state = options.client.createState()
 
-  const { code, redirectUri } = await awaitAuthorizationCode({
+  const pending = await awaitAuthorizationCode({
     ...options,
     host,
     logger,
@@ -78,12 +92,34 @@ export async function loginWithLoopback(
     codeChallenge,
   })
 
-  const tokenSet = await options.client.exchangeCode({ code, codeVerifier, redirectUri })
-  logger.info('authorization code exchanged', {
-    grantedScopes: tokenSet.grantedScopes.join(' '),
-    accessTokenExpiresAt: tokenSet.expiresAt,
-  })
-  return { tokenSet, redirectUri }
+  try {
+    const tokenSet = await options.client.exchangeCode({
+      code: pending.code,
+      codeVerifier,
+      redirectUri: pending.redirectUri,
+    })
+    logger.info('authorization code exchanged', {
+      grantedScopes: tokenSet.grantedScopes.join(' '),
+      accessTokenExpiresAt: tokenSet.expiresAt,
+    })
+    // Persistence happens before the browser is told anything succeeded
+    // (review round 1, m2): the success page claims the credential is stored,
+    // so it may only appear once it is.
+    await options.persistGrant?.(tokenSet)
+    await pending.settle({
+      ok: true,
+      title: 'Sign-in complete',
+      body: 'The credential was stored in the Windows Credential Manager. You can close this tab.',
+    })
+    return { tokenSet, redirectUri: pending.redirectUri }
+  } catch (error) {
+    await pending.settle({
+      ok: false,
+      title: 'Sign-in was not completed',
+      body: 'The redirect arrived, but the sign-in could not be finished. Check the terminal that started the login.',
+    })
+    throw error
+  }
 }
 
 interface AwaitCodeOptions extends LoopbackLoginOptions {
@@ -93,9 +129,20 @@ interface AwaitCodeOptions extends LoopbackLoginOptions {
   readonly codeChallenge: string
 }
 
-function awaitAuthorizationCode(
-  options: AwaitCodeOptions,
-): Promise<{ code: string; redirectUri: string }> {
+interface FinalPage {
+  readonly ok: boolean
+  readonly title: string
+  readonly body: string
+}
+
+interface PendingRedirect {
+  readonly code: string
+  readonly redirectUri: string
+  /** Sends the final page to the still-open browser request and closes the listener. */
+  settle(page: FinalPage): Promise<void>
+}
+
+function awaitAuthorizationCode(options: AwaitCodeOptions): Promise<PendingRedirect> {
   return new Promise((resolve, reject) => {
     let settled = false
     const server = createServer()
@@ -123,7 +170,7 @@ function awaitAuthorizationCode(
         respond(res, 403, 'Forbidden', 'This listener only accepts loopback requests.')
         return
       }
-      const url = new URL(req.url ?? '/', `http://${options.host}`)
+      const url = new URL(req.url ?? '/', `http://${formatLoopbackAuthority(options.host)}`)
       if (url.pathname === '/favicon.ico') {
         respond(res, 404, 'Not found', '')
         return
@@ -177,14 +224,28 @@ function awaitAuthorizationCode(
         return
       }
 
-      respond(
-        res,
-        200,
-        'Sign-in complete',
-        'The credential was stored in the Windows Credential Manager. You can close this tab.',
-      )
-      finish(() => resolve({ code, redirectUri: redirectUriRef.value }))
+      // The browser is kept waiting: nothing is claimed until the code has been
+      // exchanged and the grant persisted (review round 1, m2). The timeout is
+      // cleared here because the human part of the flow is over; the exchange
+      // that follows is bounded by the HTTP client's own timeouts.
+      if (settled) return
+      settled = true
+      options.clock.clearTimeout(timer)
+      resolve({
+        code,
+        redirectUri: redirectUriRef.value,
+        settle: async (page: FinalPage) => {
+          respond(res, page.ok ? 200 : 400, page.title, page.body)
+          await closeServer()
+        },
+      })
     })
+
+    const closeServer = (): Promise<void> =>
+      new Promise((done) => {
+        server.closeAllConnections()
+        server.close(() => done())
+      })
 
     const redirectUriRef = { value: '' }
     server.listen(options.port ?? 0, options.host, () => {
@@ -193,7 +254,7 @@ function awaitAuthorizationCode(
         finish(() => reject(new Error('login listener did not report an address')))
         return
       }
-      redirectUriRef.value = `http://${options.host}:${address.port}`
+      redirectUriRef.value = `http://${formatLoopbackAuthority(options.host, address.port)}`
       const authorizationUrl = options.client.buildAuthorizationUrl({
         scopes: options.scopes,
         state: options.state,

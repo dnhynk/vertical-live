@@ -110,8 +110,10 @@ export async function runLoginCli(argv: readonly string[], deps: LoginCliDeps): 
       timeoutMs: config.loginTimeoutMs,
       host: config.loopbackHost,
       logger,
+      // The browser only sees "the credential was stored" after this resolves
+      // (review round 1, m2).
+      persistGrant: (grant) => manager.storeGrant(grant),
     })
-    await manager.storeGrant(tokenSet)
 
     const coverage = checkScopeCoverage(tokenSet.grantedScopes)
     if (!coverage.sufficient) {

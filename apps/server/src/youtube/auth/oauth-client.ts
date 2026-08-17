@@ -6,8 +6,21 @@ import { parseScopeString } from '../scopes.js'
 
 /**
  * OAuth 2.0 installed-app client (spec §10.2). Google's own
- * `google-auth-library` (shipped inside `googleapis`) performs the protocol;
- * this wrapper pins the parts the product depends on:
+ * `google-auth-library` performs the protocol; this wrapper pins the parts the
+ * product depends on.
+ *
+ * Why this package and not the `googleapis` barrel (review round 1, M1):
+ * `googleapis` re-exports exactly this library (`export * as Auth from
+ * 'google-auth-library'`) and pins it at the **exact** version `10.5.0`, so a
+ * direct dependency on `google-auth-library@10.5.0` cannot drift from what
+ * `googleapis@174.0.1` itself loads — it is one copy either way. Reaching it
+ * through the barrel costs 5,194 ms of module loading against 4 ms for the
+ * library alone (measured on the T3 host, Node 24.11.1), which every server
+ * start and every auth test would pay. Both packages are declared with exact
+ * versions in `apps/server/package.json`; `googleapis` is the Data API client
+ * T9/T10 call (`TASK_SPECS.md` §T3).
+ *
+ * This wrapper pins:
  *
  * - loopback redirect + PKCE, per
  *   https://developers.google.com/identity/protocols/oauth2/native-app
