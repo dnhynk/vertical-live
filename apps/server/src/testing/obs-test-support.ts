@@ -1,10 +1,12 @@
 import type { ObsConfig } from '../obs/config.js'
+import { FAKE_OBS_DEFAULT_PASSWORD } from './fake-obs-server.js'
 
 /**
  * Obviously synthetic password for the fake obs-websocket server (CLAUDE.md §3:
- * no real secret ever reaches the repository, a test, or a fixture).
+ * no real secret ever reaches the repository, a test, or a fixture). It is the
+ * fake server's own default, so the two can never drift apart.
  */
-export const TEST_OBS_PASSWORD = 'test-obs-websocket-password'
+export const TEST_OBS_PASSWORD = FAKE_OBS_DEFAULT_PASSWORD
 
 /** The same shape `loadObsConfig` produces, with the fake server's URL. */
 export function testObsConfig(url: string, overrides: Partial<ObsConfig> = {}): ObsConfig {

@@ -105,8 +105,15 @@ export interface IdentifyLogEntry {
   readonly eventSubscriptions: number
 }
 
+/**
+ * Obviously synthetic default password (CLAUDE.md §3). The fake server always
+ * challenges, because spec §10.2 makes authentication mandatory and a double
+ * that could skip it would let an unauthenticated client pass its tests.
+ */
+export const FAKE_OBS_DEFAULT_PASSWORD = 'test-obs-websocket-password'
+
 export interface FakeObsServerOptions {
-  /** When set, `Hello` carries a challenge and `Identify` must answer it. */
+  /** Answer to the `Identify` challenge. Defaults to `FAKE_OBS_DEFAULT_PASSWORD`. */
   readonly password?: string
   /** RPC version the server offers and requires. Defaults to 1. */
   readonly rpcVersion?: number
@@ -186,7 +193,7 @@ export class FakeObsServer {
   rejectIdentify = false
 
   readonly #wss: WebSocketServer
-  readonly #password: string | undefined
+  readonly #password: string
   readonly #rpcVersion: number
   readonly #sessions = new Set<Session>()
   readonly #port: number
@@ -195,7 +202,7 @@ export class FakeObsServer {
   private constructor(wss: WebSocketServer, port: number, options: FakeObsServerOptions) {
     this.#wss = wss
     this.#port = port
-    this.#password = options.password
+    this.#password = options.password ?? FAKE_OBS_DEFAULT_PASSWORD
     this.#rpcVersion = options.rpcVersion ?? RPC_VERSION
     this.state = { ...defaultState(), ...options.state }
     this.#wss.on('connection', (socket) => {
@@ -278,9 +285,7 @@ export class FakeObsServer {
       d: {
         obsWebSocketVersion: this.state.obsWebSocketVersion,
         rpcVersion: this.#rpcVersion,
-        ...(this.#password === undefined
-          ? {}
-          : { authentication: { challenge: session.challenge, salt: session.salt } }),
+        authentication: { challenge: session.challenge, salt: session.salt },
       },
     })
   }
@@ -326,13 +331,8 @@ export class FakeObsServer {
       session.socket.close(WEBSOCKET_CLOSE_CODE.unsupportedRpcVersion, 'unsupported rpc version')
       return
     }
-    if (this.#password !== undefined) {
-      const expected = buildAuthenticationString(this.#password, session.salt, session.challenge)
-      if (this.rejectIdentify || data['authentication'] !== expected) {
-        session.socket.close(WEBSOCKET_CLOSE_CODE.authenticationFailed, 'authentication failed')
-        return
-      }
-    } else if (this.rejectIdentify) {
+    const expected = buildAuthenticationString(this.#password, session.salt, session.challenge)
+    if (this.rejectIdentify || data['authentication'] !== expected) {
       session.socket.close(WEBSOCKET_CLOSE_CODE.authenticationFailed, 'authentication failed')
       return
     }

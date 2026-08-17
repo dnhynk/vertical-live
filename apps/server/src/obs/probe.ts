@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto'
 import { realpathSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 
@@ -31,9 +32,12 @@ const USAGE = `Usage: npm run obs:probe -- [--url ws://127.0.0.1:4455] [--json] 
   --json          Print one JSON document instead of a human-readable report.
   --fake          Probe an in-process fake obs-websocket v5 server instead of
                   OBS. Verifies the probe itself; it is NOT an OBS smoke test.
+                  It mints its own synthetic password, so VL_OBS_PASSWORD is
+                  not needed and authentication still happens.
 
 Reads the obs-websocket password from VL_OBS_PASSWORD (T3 replaces this with the
-OS credential vault). The password is never printed.
+OS credential vault). The password is never printed. Authentication is always
+required (spec §10.2); there is no unauthenticated mode.
 `
 
 export function parseProbeArgs(argv: readonly string[]): ProbeArgs {
@@ -218,12 +222,18 @@ async function main(): Promise<number> {
     return 0
   }
 
+  // `--fake` mints its own obviously synthetic password and hands the same one
+  // to both sides, so the probe still authenticates for real (spec §10.2) and
+  // does not depend on VL_OBS_PASSWORD being set. The value lives only in this
+  // process and is never printed (CLAUDE.md §3).
+  const fakePassword = args.fake ? `fake-obs-probe-password-${randomBytes(8).toString('hex')}` : ''
+
   // Imported lazily so a real probe never loads the test double.
   const fakeServer = args.fake
     ? await (
         await import('../testing/fake-obs-server.js')
       ).FakeObsServer.start({
-        password: process.env['VL_OBS_PASSWORD'],
+        password: fakePassword,
         state: {
           streamStatus: {
             outputActive: true,
@@ -254,8 +264,10 @@ async function main(): Promise<number> {
 
   const client = new ObsClient({
     config,
-    secrets: new EnvSecretProvider(),
-    allowUnauthenticated: fakeServer !== undefined && process.env['VL_OBS_PASSWORD'] === undefined,
+    secrets:
+      fakeServer === undefined
+        ? new EnvSecretProvider()
+        : new EnvSecretProvider({ ...process.env, VL_OBS_PASSWORD: fakePassword }),
   })
 
   try {

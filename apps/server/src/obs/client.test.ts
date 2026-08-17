@@ -115,6 +115,34 @@ describe('ObsClient handshake and authentication', () => {
     expect(server.identifyLog).toEqual([])
   })
 
+  it('has no unauthenticated path: a default fake server still challenges', async () => {
+    // Review round 1 finding 1. There is no `allowUnauthenticated` escape hatch
+    // any more, and the double cannot model an auth-disabled OBS either — so a
+    // client that skipped authentication could not pass these tests.
+    const server = await startServer()
+    const unauthenticated = track(
+      new ObsClient({
+        config: testObsConfig(server.url),
+        secrets: new EnvSecretProvider({}),
+        clock: new FakeClock(),
+      }),
+    )
+
+    await expect(unauthenticated.connect()).rejects.toBeInstanceOf(MissingSecretError)
+    expect(server.identifyLog).toEqual([])
+
+    const authenticated = track(
+      new ObsClient({
+        config: testObsConfig(server.url),
+        secrets,
+        clock: new FakeClock(),
+      }),
+    )
+    await authenticated.connect()
+
+    expect(authenticated.identified).toBe(true)
+  })
+
   it('rejects a server whose RPC version we do not speak', async () => {
     const server = await startServer({ password: TEST_OBS_PASSWORD, rpcVersion: 99 })
     const client = track(

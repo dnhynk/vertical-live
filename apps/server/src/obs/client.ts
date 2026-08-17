@@ -34,12 +34,6 @@ export interface ObsClientOptions {
   readonly secrets?: SecretProvider
   readonly clock?: Clock
   readonly onSignal?: HealthSignalSink
-  /**
-   * Allow connecting without a websocket password. Off by default: spec §10.2
-   * requires authentication on the obs-websocket endpoint. Only the probe (with
-   * an explicit flag) and tests against an auth-disabled fake server set it.
-   */
-  readonly allowUnauthenticated?: boolean
   /** Mirrors `loadObsConfig`; the URL is re-checked here because callers may build a config by hand. */
   readonly allowNonLoopback?: boolean
 }
@@ -58,7 +52,6 @@ export class ObsClient {
   readonly #secrets: SecretProvider
   readonly #clock: Clock
   readonly #onSignal: HealthSignalSink | undefined
-  readonly #allowUnauthenticated: boolean
   readonly #obs = new OBSWebSocket()
 
   #state: ObsConnectionState = 'disconnected'
@@ -79,7 +72,6 @@ export class ObsClient {
     this.#secrets = options.secrets ?? new EnvSecretProvider()
     this.#clock = options.clock ?? systemClock
     this.#onSignal = options.onSignal
-    this.#allowUnauthenticated = options.allowUnauthenticated === true
     assertWebSocketUrl(this.#config.url, options.allowNonLoopback === true)
 
     this.#obs.on('ConnectionClosed', () => {
@@ -159,14 +151,18 @@ export class ObsClient {
     this.#obs.off(event, listener as never)
   }
 
+  /**
+   * Authentication is not optional: spec §10.2 requires it on the obs-websocket
+   * endpoint, so there is no way to build this client without a password. Tests
+   * and `--fake` probes point a provider at an obviously synthetic password
+   * rather than turning authentication off.
+   */
   async #openSocket(): Promise<void> {
-    const password = this.#allowUnauthenticated
-      ? await this.#secrets.get('obs.websocketPassword')
-      : await requireSecret(
-          this.#secrets,
-          'obs.websocketPassword',
-          `set ${EnvSecretProvider.envVarFor('obs.websocketPassword')} (spec §10.2 requires authentication on obs-websocket)`,
-        )
+    const password = await requireSecret(
+      this.#secrets,
+      'obs.websocketPassword',
+      `set ${EnvSecretProvider.envVarFor('obs.websocketPassword')} (spec §10.2 requires authentication on obs-websocket)`,
+    )
 
     this.#connectInFlight = true
     try {
