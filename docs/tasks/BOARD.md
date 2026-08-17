@@ -26,9 +26,9 @@
 | T13 | 데이터 보존·삭제·철회 자동화 | T3, T4 | — | merged | t13-data-policy | #10 | `task_15cd2ae24e82` |
 | T14 | 렌더러 화면 완성(5초 무음·감사 연출·i18n) | T5, T7 | — | merged | t14-renderer-screen | #13 | `task_82f32652b3cf` |
 | T15 | fault matrix·72h soak harness | T11, T12, T13 | — | in_review | t15-fault-soak | #18 | `task_f32603eaee51` |
-| T16 | 문서 정합화·운영 런북·Gate 체크리스트 | T12 | — | dispatched | t16-docs-alignment | | `task_60d68899d24c` |
+| T16 | 문서 정합화·운영 런북·Gate 체크리스트 | T12 | — | in_review | t16-docs-alignment | #19 | `task_60d68899d24c` |
 | T17 | Windows 운영 스크립트(자동시작·OBS·아카이브) | T2, T12 | — | changes_requested | t17-windows-ops | #17 | `task_e2466b978ebe` |
-| T8b | 엔진 버그픽스: /ingest/simulator inbox write 예외 시 hang(T15 발견) | T8 | — | ready | t8b-ingest-hang | | `task_f1aeb51337bf` |
+| T8b | 엔진 버그픽스: /ingest/simulator inbox write 예외 시 hang(T15 발견) | T8 | — | dispatched | t8b-ingest-hang | | `task_f1aeb51337bf` |
 
 디스패치 순서 원칙: `ready` 중 T-ID 낮은 것부터, 동시 2, `[contract]`는 하나만. 리뷰 Task는 `R-<T-ID>-<round>`로 별도 등록하고 아래 이력에만 남긴다.
 
@@ -175,3 +175,4 @@
 | 2026-08-17 17:45 | T17 질문(schtasks 등록→해제 1사이클) → A 승인. T17 worker_done(succeeded, PR #17: 자동시작 XML·PS 스크립트, rolling archive dry-run/apply, windows-host.md, obs-process 실행기, 토큰·키 주입/제거; schtasks 사이클 로그 첨부, XML 결함 1건 실행으로 발견·수정; 1802 tests 로컬). **E-7 등록**(OBS 32 safe-mode 프롬프트). R-T17-1 `task_ffd6ba0dd481` → `ctx_8be4d490af8d`(review). **T16 디스패치**. 진행: T15 |
 | 2026-08-17 18:00 | T16 질문(CLAUDE.md/AGENTS.md '구식' 문장 갱신 범위) → A(최소 수정 포함). R-T17-1 verdict request_changes(blocker: archive root junction 추종 삭제; major 2: 시작 스크립트 env override 무시·TCP 포트만으로 준비 판정; minor 테스트 수) → F-T17-1 `task_d21724f0b368` → T17 터미널. 진행: T15, T16 |
 | 2026-08-17 18:14 | T15 worker_done(succeeded, PR #18: fault-matrix.md 생성 18행·전 행 drill(실제 SQLITE_BUSY/FULL·invalid_grant·SIGKILL)·soak 가속/실시간·리포트, 합격선 null(A-15); soak:ci 72h 압축 53.6s PASS). 발견: T8 /ingest/simulator inbox write 예외 시 hang → **T8b 등록**(다음 슬롯). R-T15-1 `task_eaf9fe44e475` → `ctx_26fa724f28b9`(review2). 진행: T16, F-T17-1 |
+| 2026-08-17 18:25 | T16 worker_done(succeeded, PR #19: README·ROADMAP 재작성, 런북 상충 10건 정정, ops 문서 4종 신설, CLAUDE.md/AGENTS.md 2줄; .md만). 발견: `review` worktree에 잔여 codex 터미널 18개(close가 tab_not_found로 실패해 온 누적) → `orca terminal stop --worktree` 로 정리, 런북에 기록 예정. R-T16-1 첫 터미널 exited → 재생성 `task_e5c9cf0c8737` → `ctx_1c043e9d3647`(review). **T8b 디스패치** `ctx_8691c39fdcf8`. 진행: R-T15-1(review2), F-T17-1 |
