@@ -60,6 +60,7 @@
 | A-13 | 리뷰어 codex는 `--dangerously-bypass-approvals-and-sandbox`로 기동(무인·review 전용·`gh` 네트워크 필요; claude worker의 skip-permissions와 같은 신뢰 수준) | 런북 0장 | 리뷰 |
 | A-14 | 공용 규격: 서버 `127.0.0.1:8787`, WS `/ws/renderer`, `/health`, `/metrics`, `/ingest/simulator`, `/admin/kill`; DB `data/vertical-live.db`; 패키지명 `@vl/*` | TASK_SPECS 공통 규약 | 전체 |
 | A-15 | 합격선 숫자(soak 중단·복구 허용치, freeze 허용치, p95 합격선, 신선도 최소치)는 코드에 하드코딩하지 않고 `provisional` config로 두며 Gate 0/2 승인값으로 교체 | 스펙 §7.5, §11 | T7, T11, T15 |
+| A-18 | broadcast attempt 마커(`vl-attempt:<id>`, snippet.description)는 privacyStatus=private 상태에서만 존재하고, broadcast ID가 durable하게 채택된 직후 `liveBroadcasts.update`로 제거한 뒤에만 공개 전환을 허용(제거 전 공개 전환 차단). 근거: §9.1 reconcile 식별성 vs §4·§12.5(공개 메타데이터 품질) — R-T10-3 finding | 스펙 §9.1 §4 §12.5 | T10, T12 |
 | A-17 | 타이머(deadline) 유래 effect는 `cause:{kind:'deadline',deadlineKind}`로 표기하고 `causedByEventKey=null`; event 유래는 `cause:{kind:'event',eventKey}`이며 causedByEventKey와 일치; 유료 effect는 event 유래만. T7은 EffectDraft(cause 판별자)만 반환하고 T8이 Effect를 조립 | 스펙 §2.1·§6.2(무입력 진행) vs §7.3(6)·§10.2(원인 event key) — T7 질문(2026-08-17)으로 발견 | T1b, T7, T8 |
 | A-16 | stream key는 vault(SecretProvider)가 정본. 서버가 StartStream 전 obs-websocket `SetStreamServiceSettings`로 런타임 주입하고 운영자는 OBS UI에 키를 입력하지 않는다. OBS가 서비스 설정을 프로파일 디렉터리(service.json)에 저장하는 사실은 문서에 명시(저장소·DB·로그·화면 밖), 정지 시 제거·디렉터리 ACL은 T17 | 스펙 §10.2, R-T2-1 리뷰 finding | T2, T12, T17 |
 
@@ -139,3 +140,4 @@
 | 2026-08-17 21:00 | R-T14-2 verdict **approve** → 최종 게이트(ASSETS.md만 렌더러 밖, 금지 패턴 0, ja.json pending) → **PR #13 squash merge**(main a5cb885). T14 worker release·worktree 제거. 남은 open PR: #11(T10, F-T10-2 진행), #12(T8, R-T8-2 진행). 머지 후 대기: T9·T11(T8), T12(T2✓·T8·T9·T10), T15, T16, T17 |
 | 2026-08-17 21:20 | F-T10-2 완료(attempt 마커 vl-attempt:<id>@snippet.description + broadcast_resources.attempt_marker, T13 retention 통합; 1235 tests). R-T10-3 `task_a05cfe9402db` → `ctx_c7f8d9d6fc76`(review). 진행: R-T8-2(review2) |
 | 2026-08-17 21:45 | R-T8-2 verdict request_changes(blocker 2: DevPanel이 토큰 포함 wsUrl 화면 노출(§10.2), 어휘 밖 argument가 'applied'로만 기록) → F-T8-2 `task_f121a06adbef` → T8 터미널. round 3에도 실패하면 런북 2.5(4) 에스컬레이션. 진행: R-T10-3(review) |
+| 2026-08-17 22:05 | R-T10-3 verdict request_changes(blocker: 절단 목록+가시 마커 채택; major: 마커 공개 description 잔존; minor stale 서술). 코디네이터 판단: 각 round의 지적은 해소됐고 리뷰어가 인접 갭을 더 찾은 것이므로 **A-18 마커 생명주기 결정** 후 F-T10-3 `task_f60ae9ddfa44` → T10 터미널 1회 더 진행. round 4에도 미승인이면 2.5(4) 에스컬레이션 |
