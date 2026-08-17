@@ -23,8 +23,8 @@
 | T10 | broadcast lifecycle·reconcile·한도 | T3, T4 | — | dispatched | t10-broadcast-lifecycle | | `task_41769f69d4b7` |
 | T11 | 로컬 시뮬레이터·replay·지연 계측 | T5, T8 | — | pending | t11-simulator-replay | | `task_9470df5be9b8` |
 | T12 | supervisor 상태기계·건강 집계·kill switch·알림·dead-man | T2, T8, T9, T10 | — | pending | t12-supervisor | | `task_560530cfb813` |
-| T13 | 데이터 보존·삭제·철회 자동화 | T3, T4 | — | dispatched | t13-data-policy | | `task_15cd2ae24e82` |
-| T14 | 렌더러 화면 완성(5초 무음·감사 연출·i18n) | T5, T7 | — | ready | t14-renderer-screen | | `task_82f32652b3cf` |
+| T13 | 데이터 보존·삭제·철회 자동화 | T3, T4 | — | in_review | t13-data-policy | #10 | `task_15cd2ae24e82` |
+| T14 | 렌더러 화면 완성(5초 무음·감사 연출·i18n) | T5, T7 | — | dispatched | t14-renderer-screen | | `task_82f32652b3cf` |
 | T15 | fault matrix·72h soak harness | T11, T12, T13 | — | pending | t15-fault-soak | | `task_f32603eaee51` |
 | T16 | 문서 정합화·운영 런북·Gate 체크리스트 | T12 | — | pending | t16-docs-alignment | | `task_60d68899d24c` |
 | T17 | Windows 운영 스크립트(자동시작·OBS·아카이브) | T2, T12 | — | pending | t17-windows-ops | | `task_e2466b978ebe` |
@@ -124,3 +124,4 @@
 | 2026-08-17 14:10 | F-T7-2 rebase 완료 → 코디네이터 해결 diff 검사(index.ts re-export, @vl/contract 의존·tsconfig reference 추가만) → **PR #6 squash merge**(main ccfe601). T7 worker release·worktree 제거. T8은 T6(PR #8) 머지 후 디스패치 |
 | 2026-08-17 14:40 | R-T6-2 verdict **approve** → F-T6-2 rebase → 검사(config input 블록만) → **PR #8 squash merge**(main 70c96db). T6 worker release·worktree 제거. F-T5-1 완료 → R-T5-2 `task_ba0788367e14` → `ctx_a89d991c1819`(review). TASK_SPECS §T8에 선행 리뷰 후속(Effect 조립 A-17, 커서 규칙, tuning 주입, arbiter payload, argument 어휘, `.gitignore /data/`, simulator 엔드포인트) 반영(e7248b9). **T8 ready** — D-4 상한(T10·T13 진행 중)으로 다음 슬롯에 기동 |
 | 2026-08-17 15:05 | R-T5-2 verdict **approve** → 최종 게이트(ASSETS.md·금지 패턴 0·eslint 렌더러 TS 블록만) → **PR #9 squash merge**(main 06bb020). T5 worker release·worktree 제거. **T8 디스패치** `ctx_658aa3ad45d1`(활성: T10·T13·T8, 리뷰어 0). T14 ready(다음 슬롯). 남은 pending: T9(T3·T4·T8), T11(T5·T8), T12, T15, T16, T17 |
+| 2026-08-17 15:30 | T8 질문(도메인 상태를 snapshot과 같은 트랜잭션으로 영속 — T4 store 확장) → A 승인(새 마이그레이션, 선택 필드, 원자성 테스트). T13 worker_done(succeeded, PR #10: retention.json·002 마이그레이션·sweeper·revocation·derived-metric 가드·data-map, 1107 tests). T8에 마이그레이션 번호 **003** 사용 지시(002는 T13). R-T13-1 `task_4ceb16bbaa80` → `ctx_3062b29c2793`(review). T14 디스패치 `ctx_a4ea3cc17273`(활성: T10·T8·T14 + 리뷰어 1) |
