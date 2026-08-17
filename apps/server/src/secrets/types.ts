@@ -16,6 +16,12 @@ export const SECRET_NAMES = [
   // *authenticated*: the OBS Browser Source presents this token on the
   // `/ws/renderer` upgrade (T8, R-T8-1 blocker 3).
   'server.rendererToken',
+  // Both of T12's outbound operator channels carry their credential *in the URL*
+  // — a Discord webhook URL and an Uptime Kuma push URL are each a bearer token
+  // in path form — so they are vault entries, not configuration (spec §10.2,
+  // BOARD D-3, [S23]).
+  'alerts.discordWebhookUrl',
+  'monitoring.deadManPushUrl',
 ] as const
 
 export type SecretName = (typeof SECRET_NAMES)[number]

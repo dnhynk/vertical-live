@@ -13,8 +13,18 @@ export type HealthStatus =
   /** The producer could not observe the thing at all (e.g. no connection). */
   | 'unknown'
 
-/** The component a signal belongs to. Extended as later tasks add producers. */
-export type HealthComponent = 'obs' | 'youtube' | 'youtube-chat'
+/**
+ * The component a signal belongs to. Extended as later tasks add producers:
+ * T12 adds the three the supervisor derives itself from readings that are
+ * pulled rather than pushed (spec §9.4(1)(2)(4)(8)).
+ */
+export type HealthComponent =
+  | 'obs'
+  | 'youtube'
+  | 'youtube-chat'
+  | 'engine'
+  | 'renderer'
+  | 'supervisor'
 
 /** Detail values stay primitive so signals can be serialized to `/health` as-is. */
 export type HealthDetailValue = string | number | boolean | null

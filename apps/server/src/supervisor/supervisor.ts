@@ -1,0 +1,600 @@
+import type { Clock, TimerHandle } from '../clock.js'
+import type { EngineHealth, InputHealth } from '../engine/engine.js'
+import type { RendererHealthReport } from '../engine/publisher.js'
+import type { HealthSignal, HealthStatus } from '../health/types.js'
+import { silentLogger, type Logger } from '../secrets/redaction.js'
+import type { AuthEvent, AuthEventSink } from '../youtube/auth/events.js'
+import type { SafeStopRequest } from '../youtube/broadcast/alerts.js'
+import { createExponentialBackoff } from '../youtube/quota/backoff.js'
+import { nullAlertSink, type Alert, type AlertSeverity, type AlertSink } from './alerts.js'
+import type { SupervisorConfig } from './config.js'
+import type { DeadManMonitor } from './deadman.js'
+import type { KillSwitchRequest } from './kill-switch.js'
+import { runPreflight, type PreflightProbes } from './preflight.js'
+import {
+  RestartSupervisor,
+  SupervisorRegistry,
+  type RestartAction,
+  type RestartExhaustedEvent,
+} from './restart.js'
+import type { DiagnosticScreenshotRecorder } from './screenshot.js'
+import { HealthAggregator, MODERATION_HEALTHY, type ModerationHealth } from './signals.js'
+import { runStartupSequence, type StartupResult, type StartupSteps } from './startup.js'
+import { componentsToRestart, nextSupervisorState } from './transitions.js'
+import {
+  HEALTH_FAMILIES,
+  HEALTH_FAMILY_SPEC_ITEM,
+  type ComponentHealth,
+  type HealthAggregate,
+  type PreflightResult,
+  type SafeStopKind,
+  type SafeStopTrigger,
+  type SupervisedComponent,
+  type SupervisorHealthSummary,
+  type SupervisorState,
+} from './types.js'
+
+/**
+ * The single supervisor of spec §9.2 / §10.2.
+ *
+ * It is the only thing in the process that turns observations into decisions:
+ * the aggregator folds the eight §9.4 signal families, the pure table in
+ * `transitions.ts` maps them onto `offline → starting → live → degraded →
+ * recovering → live | safe_stopped`, one restart supervisor per component acts,
+ * and every state change reaches an operator through `AlertSink`.
+ *
+ * Three things it deliberately does not do:
+ *
+ * - it does not restart a component that already owns a restart loop
+ *   (`obs-connection` is `ObsClient`'s — spec §10.2 allows exactly one);
+ * - it does not leave `safe_stopped` on its own (§9.1, §9.2);
+ * - it does not decide anything from a screenshot (§9.4).
+ */
+
+/** What the supervisor needs from the state engine — a port, not the class. */
+export interface SupervisedEngine {
+  health(): EngineHealth
+  /** Spec §9.2/§12.3: how the CTA is switched off (`interactionEnabled`). */
+  reportInputHealth(health: InputHealth): void
+}
+
+export interface ComponentActions {
+  readonly engine: RestartAction
+  readonly chatSource: RestartAction
+  readonly obsStream: RestartAction
+  readonly rendererSource: RestartAction
+  /**
+   * Relaunching OBS itself. The Windows implementation is T17's; until it is
+   * injected the action rejects, which is honest — an escalation that cannot
+   * act must fail and reach `safe_stopped`, not pretend to have recovered.
+   */
+  readonly obsProcess: RestartAction
+  /**
+   * `ObsClient`'s own reconnect counter. The supervisor observes it instead of
+   * dialling OBS a second time (spec §10.2).
+   */
+  readonly obsConnectionAttempts: () => number
+}
+
+export interface SupervisorOptions {
+  readonly config: SupervisorConfig
+  readonly clock: Clock
+  readonly engine: SupervisedEngine
+  readonly actions: ComponentActions
+  /** Last renderer health frame (`RendererHub.lastHealth`), spec §9.4(4). */
+  readonly renderer?: () => RendererHealthReport | null
+  readonly alerts?: AlertSink
+  readonly deadMan?: DeadManMonitor
+  readonly screenshots?: DiagnosticScreenshotRecorder
+  readonly preflight?: PreflightProbes
+  readonly startup?: StartupSteps
+  readonly logger?: Logger
+  /**
+   * Runs once when the machine enters `safe_stopped`: stopping the encoder
+   * output, closing the source, whatever this deployment must not leave running.
+   * It never restarts anything.
+   */
+  readonly onSafeStop?: (trigger: SafeStopTrigger) => Promise<void> | void
+  /** Injected in tests; defaults to the shared exponential backoff jitter. */
+  readonly random?: () => number
+  /** Schedule the evaluation loop on `start()`. Off in tests (fake clocks). */
+  readonly autoEvaluate?: boolean
+}
+
+const OWNER_OBS_CLIENT = 'obs.ObsClient'
+
+export class Supervisor {
+  readonly #options: SupervisorOptions
+  readonly #config: SupervisorConfig
+  readonly #clock: Clock
+  readonly #logger: Logger
+  readonly #alerts: AlertSink
+  readonly #aggregator: HealthAggregator
+  readonly registry = new SupervisorRegistry()
+
+  #state: SupervisorState = 'offline'
+  #since: string
+  #lastTransitionReason = 'not_started'
+  #startRequested = false
+  #safeStop: SafeStopTrigger | null = null
+  #preflight: PreflightResult | null = null
+  #startupResult: StartupResult | null = null
+  #moderation: ModerationHealth = MODERATION_HEALTHY
+  #lastEvaluationMonotonicMs: number | null = null
+  #lastAggregate: HealthAggregate | null = null
+  #interactionEnabled = true
+  #timer: TimerHandle | undefined
+  #stopped = false
+
+  constructor(options: SupervisorOptions) {
+    this.#options = options
+    this.#config = options.config
+    this.#clock = options.clock
+    this.#logger = options.logger ?? silentLogger
+    this.#alerts = options.alerts ?? nullAlertSink
+    this.#aggregator = new HealthAggregator(options.config)
+    this.#since = options.clock.nowUtcIso()
+    this.#registerComponents()
+  }
+
+  /** Sink handed to every health producer (`HealthSignalSink`). */
+  readonly report = (signal: HealthSignal): void => {
+    this.#aggregator.report(signal)
+  }
+
+  get state(): SupervisorState {
+    return this.#state
+  }
+
+  get aggregate(): HealthAggregate | null {
+    return this.#lastAggregate
+  }
+
+  get startupResult(): StartupResult | null {
+    return this.#startupResult
+  }
+
+  /**
+   * `offline → starting`, then the §7.3(3) start-up sequence and the §9.2
+   * pre-checks. Returns once the sequence has been attempted; the state machine
+   * keeps running on the evaluation loop afterwards.
+   */
+  async start(): Promise<void> {
+    this.#startRequested = true
+    await this.#evaluate('start_requested')
+    if (this.#state === 'safe_stopped') return
+
+    if (this.#options.startup !== undefined) {
+      this.#startupResult = await runStartupSequence({
+        steps: this.#options.startup,
+        clock: this.#clock,
+        logger: this.#logger,
+      })
+      if (!this.#startupResult.completed) {
+        await this.#alert('warning', 'supervisor.startup_failed', {
+          reason: this.#startupResult.failedStep ?? 'unknown_step',
+          detail: { error: this.#startupResult.error },
+        })
+      }
+    }
+
+    this.#options.deadMan?.start()
+    this.#options.screenshots?.start()
+    await this.#runPreflight()
+    await this.#evaluate('startup_complete')
+    if (this.#options.autoEvaluate !== false) this.#scheduleNext()
+  }
+
+  /** Stops the supervisor's own timers. It never stops the components. */
+  stop(): void {
+    this.#stopped = true
+    if (this.#timer !== undefined) {
+      this.#clock.clearTimeout(this.#timer)
+      this.#timer = undefined
+    }
+    this.#options.deadMan?.stop()
+    this.#options.screenshots?.stop()
+  }
+
+  /** One evaluation: aggregate → transition → recovery → CTA. */
+  async evaluate(): Promise<HealthAggregate> {
+    return this.#evaluate('signals')
+  }
+
+  /** Re-runs the `starting` pre-checks (spec §9.2). */
+  async runPreflight(): Promise<PreflightResult> {
+    const result = await this.#runPreflight()
+    await this.#evaluate('preflight')
+    return result
+  }
+
+  /** Moderation control health (spec §12.3). Reported by whoever observes it. */
+  reportModerationHealth(status: HealthStatus, reason: string | null = null): void {
+    this.#moderation = { status, reason }
+  }
+
+  /** Adapter for T10's `SafeStopRequestSink` (spec §9.1). */
+  readonly onBroadcastSafeStopRequest = (request: SafeStopRequest): void => {
+    void this.requestSafeStop({
+      kind: 'rights_or_policy',
+      at: request.at,
+      reason: request.reason,
+      detail: request.detail,
+    })
+  }
+
+  /**
+   * Adapter for T3's `AuthEventSink`. A revoked or unrecoverable grant is
+   * §9.1's "재동의 필요" — outside the automation boundary, so it stops the run
+   * instead of retrying it.
+   */
+  readonly onAuthEvent = (event: AuthEvent): void => {
+    if (event.type === 'auth_revoked') {
+      void this.requestSafeStop({
+        kind: 'account_action',
+        at: event.at,
+        reason: `auth_revoked:${event.reason}`,
+        detail: { reason: event.reason },
+      })
+      return
+    }
+    if (event.type === 'auth_refresh_failed' && !event.retryable) {
+      void this.requestSafeStop({
+        kind: 'account_action',
+        at: event.at,
+        reason: `auth_refresh_failed:${event.kind}`,
+        detail: { kind: event.kind },
+      })
+    }
+  }
+
+  /** `AuthEventSink` shape, for callers that want the object form. */
+  get authEventSink(): AuthEventSink {
+    return { emit: this.onAuthEvent }
+  }
+
+  /** Any of the three kill-switch paths (spec §11 안전 정지). */
+  readonly onKillSwitch = (request: KillSwitchRequest): void => {
+    void this.requestSafeStop({
+      kind: 'kill_switch',
+      at: request.at,
+      reason: request.reason,
+      detail: { source: request.source },
+    })
+  }
+
+  /**
+   * Enters `safe_stopped`. Idempotent: the first trigger is the one reported,
+   * because it is the one that explains the stop.
+   */
+  async requestSafeStop(trigger: SafeStopTrigger): Promise<void> {
+    if (this.#safeStop !== null) return
+    this.#safeStop = trigger
+    this.#logger.error('supervisor safe stop', {
+      kind: trigger.kind,
+      reason: trigger.reason,
+    })
+    await this.#evaluate(`safe_stop:${trigger.kind}`)
+  }
+
+  /** T13 sweep results (`onResult`/`onError`) — see TASK_SPECS §T12 배선. */
+  readonly onRetentionResult = (result: {
+    readonly clean: boolean
+    readonly rowsUnprocessed: number
+  }): void => {
+    if (result.clean && result.rowsUnprocessed === 0) return
+    void this.#alert('warning', 'retention.sweep_incomplete', {
+      reason: result.clean ? 'rows_unprocessed' : 'sweep_not_clean',
+      detail: { clean: result.clean, rowsUnprocessed: result.rowsUnprocessed },
+    })
+  }
+
+  readonly onRetentionError = (error: unknown): void => {
+    void this.#alert('warning', 'retention.sweep_failed', {
+      reason: 'sweep_error',
+      detail: { error: error instanceof Error ? error.message : String(error) },
+    })
+  }
+
+  health(): SupervisorHealthSummary {
+    const aggregate = this.#lastAggregate
+    return {
+      state: this.#state,
+      since: this.#since,
+      lastTransitionReason: this.#lastTransitionReason,
+      safeStop: this.#safeStop,
+      interactionEnabled: this.#interactionEnabled,
+      families: HEALTH_FAMILIES.map((family) => ({
+        ...(aggregate?.families[family] ?? {
+          family,
+          status: 'unknown' as const,
+          reason: 'not_evaluated',
+          sources: [],
+          observedAtUtc: null,
+          unknownForMs: null,
+          unobservableEscalated: false,
+        }),
+        specItem: HEALTH_FAMILY_SPEC_ITEM[family],
+      })),
+      components: this.components(),
+      preflight: this.#preflight?.checks ?? [],
+      deadMan: this.#options.deadMan?.status() ?? {
+        enabled: false,
+        lastPushAt: null,
+        lastPushOk: null,
+        consecutiveFailures: 0,
+        lastError: null,
+      },
+    }
+  }
+
+  components(): readonly ComponentHealth[] {
+    return this.registry.all().map((supervisor) => supervisor.health())
+  }
+
+  // ------------------------------------------------------------- internals
+
+  #registerComponents(): void {
+    const { actions } = this.#options
+    const backoffFor = (component: SupervisedComponent) =>
+      createExponentialBackoff({
+        initialDelayMs: this.#config.restart.initialDelayMs,
+        maxDelayMs: this.#config.restart.maxDelayMs,
+        factor: this.#config.restart.factor,
+        jitterRatio: this.#config.restart.jitterRatio,
+        maxAttempts: this.#config.restart.maxAttempts[component],
+        ...(this.#options.random === undefined ? {} : { random: this.#options.random }),
+      })
+
+    const owned: readonly (readonly [SupervisedComponent, RestartAction])[] = [
+      ['engine', actions.engine],
+      ['chat-source', actions.chatSource],
+      ['obs-stream', actions.obsStream],
+      ['renderer-source', actions.rendererSource],
+      ['obs-process', actions.obsProcess],
+    ]
+    for (const [component, restart] of owned) {
+      this.registry.register(
+        new RestartSupervisor({
+          component,
+          restart,
+          backoff: backoffFor(component),
+          clock: this.#clock,
+          logger: this.#logger,
+          onAttempt: (event) => {
+            void this.#alert('info', 'supervisor.restart_attempt', {
+              reason: `${event.component}:${event.reason}`,
+              detail: {
+                component: event.component,
+                attempt: event.attempt,
+                maxAttempts: event.maxAttempts,
+                delayMs: event.delayMs,
+              },
+            })
+          },
+          onExhausted: (event) => {
+            void this.#handleExhausted(event)
+          },
+        }),
+      )
+    }
+
+    // The OBS connection already has a restart loop inside `ObsClient` (T2).
+    // Spec §10.2 allows exactly one per component, so this entry observes that
+    // loop and escalates to the process when it has retried past its budget.
+    this.registry.register(
+      new RestartSupervisor({
+        component: 'obs-connection',
+        owner: OWNER_OBS_CLIENT,
+        escalatesTo: 'obs-process',
+        backoff: backoffFor('obs-connection'),
+        clock: this.#clock,
+        logger: this.#logger,
+        onExhausted: (event) => {
+          void this.#handleExhausted(event)
+        },
+      }),
+    )
+    this.registry.assertComplete()
+  }
+
+  async #handleExhausted(event: RestartExhaustedEvent): Promise<void> {
+    if (event.escalatesTo !== null) {
+      const target = this.registry.require(event.escalatesTo)
+      await this.#alert('warning', 'supervisor.restart_escalated', {
+        reason: `${event.component}->${event.escalatesTo}`,
+        detail: { attempts: event.attempts, reason: event.reason },
+      })
+      target.request(`escalated_from:${event.component}`)
+      return
+    }
+    await this.requestSafeStop({
+      kind: 'restart_budget_exhausted',
+      at: event.at,
+      reason: `${event.component}:${event.reason}`,
+      detail: { component: event.component, attempts: event.attempts },
+    })
+  }
+
+  async #runPreflight(): Promise<PreflightResult> {
+    if (this.#options.preflight === undefined) {
+      // No probes injected (unit tests, and the bare health server of T0):
+      // "not checked" must not read as "passed".
+      this.#preflight = {
+        passed: false,
+        at: this.#clock.nowUtcIso(),
+        checks: [],
+        failed: [],
+        safeStop: null,
+      }
+      return this.#preflight
+    }
+    const result = await runPreflight(this.#options.preflight, this.#clock)
+    this.#preflight = result
+    if (result.safeStop !== null) {
+      await this.requestSafeStop(result.safeStop)
+    } else if (!result.passed) {
+      await this.#alert('warning', 'supervisor.preflight_failed', {
+        reason: result.failed.join('+'),
+        detail: Object.fromEntries(
+          result.checks.map((check) => [check.check, check.passed ? 'ok' : (check.reason ?? '')]),
+        ),
+      })
+    }
+    return result
+  }
+
+  async #evaluate(cause: string): Promise<HealthAggregate> {
+    const nowMonotonicMs = this.#clock.monotonicMs()
+    const engine = this.#options.engine.health()
+    const aggregate = this.#aggregator.evaluate({
+      engine,
+      renderer: this.#options.renderer?.() ?? null,
+      deadMan: this.#options.deadMan?.status() ?? {
+        enabled: false,
+        lastPushAt: null,
+        lastPushOk: null,
+        consecutiveFailures: 0,
+        lastError: null,
+      },
+      moderation: this.#moderation,
+      lastEvaluationMonotonicMs: this.#lastEvaluationMonotonicMs,
+      nowUtc: this.#clock.nowUtcIso(),
+      nowMonotonicMs,
+    })
+    this.#lastEvaluationMonotonicMs = nowMonotonicMs
+    this.#lastAggregate = aggregate
+
+    // §12.3: an unhealthy moderation control turns the CTA off first, and stops
+    // the run only if safety cannot be assured. That second step is a human
+    // judgement, so it is a configured safe-stop condition rather than an
+    // automatic one — the supervisor never invents the escalation.
+    this.#applyInteractionGate(aggregate)
+
+    const recovering = this.registry.all().some((supervisor) => supervisor.inFlight)
+    const transition = nextSupervisorState(this.#state, {
+      aggregate,
+      preflight: this.#preflight,
+      recovering,
+      safeStop: this.#safeStop,
+      startRequested: this.#startRequested,
+    })
+
+    if (transition.changed) {
+      this.#state = transition.to
+      this.#since = aggregate.atUtc
+      this.#lastTransitionReason = transition.reason
+      await this.#onEnter(transition.to, transition.reason, cause, aggregate)
+    } else {
+      this.#lastTransitionReason = transition.reason
+    }
+
+    if (this.#state !== 'safe_stopped') this.#driveRecovery(aggregate)
+    return aggregate
+  }
+
+  #applyInteractionGate(aggregate: HealthAggregate): void {
+    const enabled = aggregate.inputHealthy && this.#safeStop === null
+    this.#interactionEnabled = enabled
+    // The engine owns `interactionEnabled` in the published read model; the
+    // supervisor instructs it through the input-health port rather than
+    // computing a second, competing answer (spec §9.2, TASK_SPECS §T12).
+    this.#options.engine.reportInputHealth(enabled ? 'ok' : 'degraded')
+  }
+
+  /** Asks the responsible component's single supervisor to act (spec §10.2). */
+  #driveRecovery(aggregate: HealthAggregate): void {
+    const wanted = componentsToRestart(aggregate)
+    for (const supervisor of this.registry.all()) {
+      const needed = wanted.includes(supervisor.component)
+      if (!needed) {
+        supervisor.noteHealthy()
+        continue
+      }
+      const reason = aggregate.degradedFamilies.join('+')
+      if (supervisor.delegated) {
+        const attempts =
+          supervisor.component === 'obs-connection'
+            ? this.#options.actions.obsConnectionAttempts()
+            : 0
+        supervisor.observeExternalAttempts(attempts, reason)
+        continue
+      }
+      supervisor.request(reason)
+    }
+  }
+
+  async #onEnter(
+    state: SupervisorState,
+    reason: string,
+    cause: string,
+    aggregate: HealthAggregate,
+  ): Promise<void> {
+    this.#logger.info('supervisor state', { state, reason, cause })
+    const severity: AlertSeverity =
+      state === 'safe_stopped' ? 'critical' : state === 'degraded' ? 'warning' : 'info'
+    await this.#alert(severity, `supervisor.${state}`, {
+      reason,
+      detail: {
+        degradedFamilies: aggregate.degradedFamilies.join(',') || null,
+        unknownFamilies: aggregate.unknownFamilies.join(',') || null,
+        interactionEnabled: this.#interactionEnabled,
+      },
+    })
+
+    if (state === 'safe_stopped') {
+      // Stop pushing the dead-man heartbeat: a stopped broadcast needs a human,
+      // and the external monitor is how one is reached when nobody is watching
+      // this process's logs ([S23], §11 관측성).
+      this.#options.deadMan?.stop()
+      this.#options.screenshots?.stop()
+      if (this.#timer !== undefined) {
+        this.#clock.clearTimeout(this.#timer)
+        this.#timer = undefined
+      }
+      if (this.#options.onSafeStop !== undefined && this.#safeStop !== null) {
+        try {
+          await this.#options.onSafeStop(this.#safeStop)
+        } catch (error) {
+          this.#logger.error('safe stop handler failed', {
+            error: error instanceof Error ? error.message : String(error),
+          })
+        }
+      }
+    }
+  }
+
+  async #alert(
+    severity: AlertSeverity,
+    kind: string,
+    body: { readonly reason: string; readonly detail: Alert['detail'] },
+  ): Promise<void> {
+    try {
+      await this.#alerts.deliver({
+        kind,
+        severity,
+        at: this.#clock.nowUtcIso(),
+        reason: body.reason,
+        detail: body.detail,
+      })
+    } catch (error) {
+      // An alert sink that throws must not take the supervisor with it.
+      this.#logger.error('alert sink threw', {
+        kind,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
+
+  #scheduleNext(): void {
+    if (this.#stopped || this.#state === 'safe_stopped') return
+    this.#timer = this.#clock.setTimeout(() => {
+      this.#timer = undefined
+      void this.#evaluate('tick').then(() => {
+        this.#scheduleNext()
+      })
+    }, this.#config.evaluateIntervalMs)
+  }
+}
+
+export type { SafeStopKind }

@@ -75,6 +75,89 @@
   "simulator": {
     "enabled": false
   },
+  "supervisor": {
+    "evaluateIntervalMs": 2000,
+    "coordinatorHeartbeatTimeoutMs": 15000,
+    "stateCommitStaleAfterMs": 120000,
+    "signalStaleAfterMs": 30000,
+    "unobservableGraceMs": 30000,
+    "requiredFamilies": [
+      "coordinator",
+      "state_commit",
+      "renderer",
+      "obs_output",
+      "youtube_broadcast"
+    ],
+    "renderer": {
+      "minFps": 20,
+      "reportStaleAfterMs": 15000
+    },
+    "restart": {
+      "initialDelayMs": 2000,
+      "maxDelayMs": 120000,
+      "factor": 2,
+      "jitterRatio": 0.2,
+      "maxAttempts": {
+        "engine": 3,
+        "chat-source": 3,
+        "obs-connection": 5,
+        "obs-stream": 3,
+        "renderer-source": 3,
+        "obs-process": 2
+      }
+    },
+    "alerts": {
+      "suppressWindowMs": {
+        "info": 3600000,
+        "warning": 900000,
+        "critical": 60000
+      },
+      "deliveryTimeoutMs": 10000,
+      "discordEnabled": true
+    },
+    "deadMan": {
+      "enabled": false,
+      "intervalMs": 60000,
+      "requestTimeoutMs": 10000
+    },
+    "killSwitch": {
+      "flagFile": "data/kill-switch.flag",
+      "pollIntervalMs": 2000
+    },
+    "screenshot": {
+      "enabled": false,
+      "intervalMs": 300000,
+      "directory": "data/diagnostics/screenshots",
+      "keep": 24,
+      "sourceName": "vertical-live-renderer",
+      "imageFormat": "jpg",
+      "imageWidth": 540
+    },
+    "moderation": {
+      "approved": false,
+      "onCallOwner": null,
+      "maxResponseMinutes": null,
+      "escalationChannel": null,
+      "autoBlockScope": null,
+      "safeStopConditions": []
+    },
+    "provisional": [
+      "evaluateIntervalMs",
+      "coordinatorHeartbeatTimeoutMs",
+      "stateCommitStaleAfterMs",
+      "signalStaleAfterMs",
+      "unobservableGraceMs",
+      "requiredFamilies",
+      "renderer",
+      "restart",
+      "alerts.suppressWindowMs",
+      "alerts.deliveryTimeoutMs",
+      "deadMan.intervalMs",
+      "deadMan.requestTimeoutMs",
+      "killSwitch.pollIntervalMs",
+      "screenshot"
+    ]
+  },
   "world": {
     "tuning": {
       "provisional": true,

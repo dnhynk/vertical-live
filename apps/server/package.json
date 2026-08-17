@@ -21,7 +21,8 @@
     "start": "node dist/main.js",
     "obs:probe": "tsc --build && node dist/obs/probe.js",
     "auth:login": "npm run build && node dist/bin/auth-login.js",
-    "secrets": "npm run build && node dist/bin/secrets.js"
+    "secrets": "npm run build && node dist/bin/secrets.js",
+    "kill": "npm run build && node dist/bin/kill.js"
   },
   "dependencies": {
     "@grpc/grpc-js": "1.14.4",
