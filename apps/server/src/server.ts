@@ -105,10 +105,7 @@ function statusLine(engine: EngineHealth, supervisor: SupervisorHealthSummary | 
  * when it cannot: a bare `internal_error`, with no detail from the exception,
  * because nothing here knows what the exception is carrying.
  */
-function failClosed(
-  res: ServerResponse,
-  headers: Readonly<Record<string, string>> = {},
-): void {
+function failClosed(res: ServerResponse, headers: Readonly<Record<string, string>> = {}): void {
   if (res.writableEnded) return
   // Headers already out means part of an answer was sent; the only thing left to
   // do is stop the caller from waiting for the rest of it.
