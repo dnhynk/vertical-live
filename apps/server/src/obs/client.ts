@@ -156,8 +156,12 @@ export class ObsClient {
    * endpoint, so there is no way to build this client without a password. Tests
    * and `--fake` probes point a provider at an obviously synthetic password
    * rather than turning authentication off.
+   *
+   * `onEstablished` runs after the handshake succeeds but before the `connected`
+   * signal is emitted, so bookkeeping the signal reports (the reconnect count)
+   * is already up to date when T12 observes it.
    */
-  async #openSocket(): Promise<void> {
+  async #openSocket(onEstablished?: () => void): Promise<void> {
     const password = await requireSecret(
       this.#secrets,
       'obs.websocketPassword',
@@ -195,6 +199,7 @@ export class ObsClient {
 
     this.#retryAttempt = 0
     this.#autoReconnect = true
+    onEstablished?.()
     this.#setState('connected')
   }
 
@@ -241,8 +246,11 @@ export class ObsClient {
     }
     this.#reconnectAttempts += 1
     try {
-      await this.#openSocket()
-      this.#reconnectCount += 1
+      // Counted before the `connected` signal goes out, so the signal T12 reads
+      // already includes this completed reconnect.
+      await this.#openSocket(() => {
+        this.#reconnectCount += 1
+      })
     } catch (error) {
       if (this.#stopped) {
         return

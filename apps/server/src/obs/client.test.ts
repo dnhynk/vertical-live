@@ -241,6 +241,12 @@ describe('ObsClient reconnection', () => {
       'reconnecting',
       'connected',
     ])
+
+    // Review round 1 finding 4: the completed reconnect has to be visible in the
+    // signal itself, not only through the getter — T12 aggregates signals, it
+    // does not hold this object.
+    expect(signals.map((signal) => signal.detail['reconnectCount'])).toEqual([0, 0, 0, 1])
+    expect(signals.at(-1)).toMatchObject({ status: 'ok', detail: { state: 'connected' } })
     expect(await client.call('GetVersion')).toMatchObject({ obsWebSocketVersion: '5.6.3' })
   })
 
