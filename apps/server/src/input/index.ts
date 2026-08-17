@@ -21,6 +21,13 @@ export {
   type InputConfig,
   type LoadInputConfigOptions,
 } from './config.js'
+export {
+  ACCEPTED_VECTORS,
+  LEAK_MARKERS,
+  REJECTED_VECTORS,
+  type AcceptedVector,
+  type RejectedVector,
+} from './fixtures/adversarial.js'
 export { CommandMetrics, type CommandMetricsSnapshot } from './metrics.js'
 export { moderate } from './moderation.js'
 export { normalizeText, type NormalizedText } from './normalize.js'

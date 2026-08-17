@@ -10,6 +10,11 @@ export {
 export { systemClock, type Clock, type TimerHandle } from './clock.js'
 export * from './db/index.js'
 export * from './engine/index.js'
+// `./input/index.js` is deliberately *not* re-exported here: it and
+// `./world/types.js` both own a `RejectionReason`, and collapsing the two into
+// one barrel would make the ambiguity a compile error for every consumer. The
+// input module is published on its own path (`@vl/server/input`), which is what
+// T11's simulator imports to replay raw text through the real parser.
 export {
   SimulatorIngestEndpoint,
   isLoopbackAddress,
