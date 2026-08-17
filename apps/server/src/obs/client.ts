@@ -1,4 +1,8 @@
-import OBSWebSocket, { type OBSEventTypes, type OBSRequestTypes, type OBSResponseTypes } from 'obs-websocket-js/json'
+import OBSWebSocket, {
+  type OBSEventTypes,
+  type OBSRequestTypes,
+  type OBSResponseTypes,
+} from 'obs-websocket-js/json'
 
 import { systemClock, type Clock, type TimerHandle } from '../clock.js'
 import type { HealthSignal, HealthSignalSink } from '../health/types.js'
@@ -256,7 +260,12 @@ export class ObsClient {
     const signal: HealthSignal = {
       component: 'obs',
       name: OBS_CONNECTION_SIGNAL,
-      status: this.#state === 'connected' ? 'ok' : this.#state === 'disconnected' ? 'unknown' : 'degraded',
+      status:
+        this.#state === 'connected'
+          ? 'ok'
+          : this.#state === 'disconnected'
+            ? 'unknown'
+            : 'degraded',
       observedAtUtc: this.#clock.nowUtcIso(),
       observedAtMonotonicMs: this.#clock.monotonicMs(),
       ...(reason === undefined ? {} : { reason }),

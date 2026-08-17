@@ -37,7 +37,9 @@ export interface ObsConfig {
 }
 
 /** `config/default.json` at the repository root, from `src/obs/` or `dist/obs/`. */
-const DEFAULT_CONFIG_PATH = fileURLToPath(new URL('../../../../config/default.json', import.meta.url))
+const DEFAULT_CONFIG_PATH = fileURLToPath(
+  new URL('../../../../config/default.json', import.meta.url),
+)
 
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]', '::1'])
 

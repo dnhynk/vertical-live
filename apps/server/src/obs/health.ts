@@ -142,9 +142,15 @@ export function deriveObsHealthSignals(
   } else {
     // A restarted output resets the counters, so a negative delta means "new
     // counter", not "negative frames".
-    const outputSkippedDelta = nonNegativeDelta(sample.outputSkippedFrames, previous.outputSkippedFrames)
+    const outputSkippedDelta = nonNegativeDelta(
+      sample.outputSkippedFrames,
+      previous.outputSkippedFrames,
+    )
     const outputTotalDelta = nonNegativeDelta(sample.outputTotalFrames, previous.outputTotalFrames)
-    const renderSkippedDelta = nonNegativeDelta(sample.renderSkippedFrames, previous.renderSkippedFrames)
+    const renderSkippedDelta = nonNegativeDelta(
+      sample.renderSkippedFrames,
+      previous.renderSkippedFrames,
+    )
     const renderTotalDelta = nonNegativeDelta(sample.renderTotalFrames, previous.renderTotalFrames)
     const outputSkippedRatio = ratio(outputSkippedDelta, outputTotalDelta)
     const renderSkippedRatio = ratio(renderSkippedDelta, renderTotalDelta)
@@ -279,7 +285,12 @@ export class ObsHealthMonitor {
         renderSkippedFrames: stats.renderSkippedFrames,
         renderTotalFrames: stats.renderTotalFrames,
       }
-      const derived = deriveObsHealthSignals(sample, this.#state, this.#config.thresholds, observedAt)
+      const derived = deriveObsHealthSignals(
+        sample,
+        this.#state,
+        this.#config.thresholds,
+        observedAt,
+      )
       this.#state = derived.state
       signals = derived.signals
     } catch (error) {

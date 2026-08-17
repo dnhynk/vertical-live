@@ -95,7 +95,10 @@ export class ObsControl {
 
     const inputKind = readString(input, 'inputKind') ?? ''
     const unversionedInputKind = readString(input, 'unversionedInputKind') ?? ''
-    if (inputKind !== BROWSER_SOURCE_INPUT_KIND && unversionedInputKind !== BROWSER_SOURCE_INPUT_KIND) {
+    if (
+      inputKind !== BROWSER_SOURCE_INPUT_KIND &&
+      unversionedInputKind !== BROWSER_SOURCE_INPUT_KIND
+    ) {
       throw new ObsCommandError(
         'not_a_browser_source',
         `input ${JSON.stringify(name)} is kind ${JSON.stringify(inputKind)}, not ${BROWSER_SOURCE_INPUT_KIND}`,
@@ -116,7 +119,10 @@ export class ObsControl {
 
     const known = scenes.some((entry) => readString(entry, 'sceneName') === sceneName)
     if (!known) {
-      throw new ObsCommandError('scene_not_found', `no OBS scene named ${JSON.stringify(sceneName)}`)
+      throw new ObsCommandError(
+        'scene_not_found',
+        `no OBS scene named ${JSON.stringify(sceneName)}`,
+      )
     }
     if (currentProgramSceneName === sceneName) {
       return { sceneName, changed: false }
@@ -138,10 +144,13 @@ export class ObsControl {
     }
 
     await this.#source.call(active ? 'StartStream' : 'StopStream')
-    await this.#waitUntil(async () => {
-      const status = await this.#source.call('GetStreamStatus')
-      return status.outputActive === active
-    }, `outputActive = ${String(active)}`)
+    await this.#waitUntil(
+      async () => {
+        const status = await this.#source.call('GetStreamStatus')
+        return status.outputActive === active
+      },
+      `outputActive = ${String(active)}`,
+    )
 
     return { outputActive: active, changed: true }
   }

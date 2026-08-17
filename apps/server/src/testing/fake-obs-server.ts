@@ -70,6 +70,12 @@ export interface FakeObsState {
   obsVersion: string
   obsWebSocketVersion: string
   platform: string
+  /**
+   * Models OBS's real `OBS_WEBSOCKET_OUTPUT_STARTING` window: `StartStream`
+   * succeeds, but `outputActive` only flips after this many further
+   * `GetStreamStatus` reads. 0 flips immediately.
+   */
+  startStreamLatencySamples: number
 }
 
 export interface ButtonPress {
@@ -136,7 +142,11 @@ function defaultState(): FakeObsState {
         inputKind: 'browser_source',
         unversionedInputKind: 'browser_source',
       },
-      { inputName: 'test-color-source', inputKind: 'color_source_v3', unversionedInputKind: 'color_source' },
+      {
+        inputName: 'test-color-source',
+        inputKind: 'color_source_v3',
+        unversionedInputKind: 'color_source',
+      },
     ],
     videoSettings: {
       fpsNumerator: 30,
@@ -149,6 +159,7 @@ function defaultState(): FakeObsState {
     obsVersion: '32.0.2',
     obsWebSocketVersion: '5.6.3',
     platform: 'windows',
+    startStreamLatencySamples: 0,
   }
 }
 
@@ -166,6 +177,7 @@ export class FakeObsServer {
   readonly #rpcVersion: number
   readonly #sessions = new Set<Session>()
   readonly #port: number
+  #pendingStartSamples = 0
 
   private constructor(wss: WebSocketServer, port: number, options: FakeObsServerOptions) {
     this.#wss = wss
@@ -294,7 +306,8 @@ export class FakeObsServer {
     }
     this.identifyLog.push({
       rpcVersion,
-      eventSubscriptions: typeof data['eventSubscriptions'] === 'number' ? data['eventSubscriptions'] : 0,
+      eventSubscriptions:
+        typeof data['eventSubscriptions'] === 'number' ? data['eventSubscriptions'] : 0,
     })
     if (rpcVersion !== this.#rpcVersion) {
       session.socket.close(WEBSOCKET_CLOSE_CODE.unsupportedRpcVersion, 'unsupported rpc version')
@@ -313,7 +326,9 @@ export class FakeObsServer {
 
     session.identified = true
     session.eventSubscriptions =
-      typeof data['eventSubscriptions'] === 'number' ? data['eventSubscriptions'] : EVENT_SUBSCRIPTION.none
+      typeof data['eventSubscriptions'] === 'number'
+        ? data['eventSubscriptions']
+        : EVENT_SUBSCRIPTION.none
     send(session.socket, {
       op: WEBSOCKET_OP_CODE.identified,
       d: { negotiatedRpcVersion: this.#rpcVersion },
@@ -363,6 +378,12 @@ export class FakeObsServer {
         return ok({ ...state.stats })
 
       case 'GetStreamStatus':
+        if (this.#pendingStartSamples > 0) {
+          this.#pendingStartSamples -= 1
+          if (this.#pendingStartSamples === 0) {
+            state.streamStatus.outputActive = true
+          }
+        }
         return ok({ ...state.streamStatus })
 
       case 'GetVideoSettings':
@@ -372,13 +393,18 @@ export class FakeObsServer {
         if (state.streamStatus.outputActive) {
           return fail(REQUEST_STATUS.outputRunning, 'stream already active')
         }
-        state.streamStatus.outputActive = true
+        if (state.startStreamLatencySamples > 0) {
+          this.#pendingStartSamples = state.startStreamLatencySamples
+        } else {
+          state.streamStatus.outputActive = true
+        }
         return ok(undefined)
 
       case 'StopStream':
         if (!state.streamStatus.outputActive) {
           return fail(REQUEST_STATUS.outputNotRunning, 'stream not active')
         }
+        this.#pendingStartSamples = 0
         state.streamStatus.outputActive = false
         state.streamStatus.outputReconnecting = false
         return ok(undefined)
@@ -422,7 +448,9 @@ export class FakeObsServer {
           typeof inputKind === 'string'
             ? state.inputs.filter((input) => input.inputKind === inputKind)
             : state.inputs
-        return ok({ inputs: inputs.map((input) => ({ ...input, inputUuid: `uuid-${input.inputName}` })) })
+        return ok({
+          inputs: inputs.map((input) => ({ ...input, inputUuid: `uuid-${input.inputName}` })),
+        })
       }
 
       case 'PressInputPropertiesButton': {
