@@ -74,7 +74,7 @@ Official reference (not re-verified in T16):
 
 - Verify your YouTube account: https://support.google.com/youtube/answer/171664
 
-### Step 4: Request / Unlock Advanced Features
+### Step 4: Advanced Features Status
 
 What the spec supports: advanced-features status is one of the items the Gate 0 account audit records, alongside
 2-Step Verification, strikes and the AdSense link (spec §8.1).
@@ -165,7 +165,9 @@ These are account-side milestones. They are **not** the product gates — those 
 - Google account created, 2-Step Verification on
 - YouTube Brand Account channel created
 - Phone verified
-- Advanced features unlocked
+- Advanced-features state read from YouTube Studio and recorded in the Gate 0 audit
+  (`docs/ops/gate0-checklist.md` §1.2). This is an audit record, not a precondition: whether advanced features are
+  *required* for live streaming is **확인 필요(출처 없음)** (Step 4)
 - Live streaming enabled
 - First private/unlisted technical stream completed
 

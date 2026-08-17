@@ -72,7 +72,8 @@ Confirm these in the real YouTube account and record the evidence. The full Gate
 - [ ] Dedicated Google account exists.
 - [ ] Brand Account YouTube channel exists.
 - [ ] Google account has 2-Step Verification enabled.
-- [ ] Channel has advanced features access.
+- [ ] Advanced-features state read from Studio and recorded (§8.1 — an eligibility input, not a live-streaming
+      precondition).
 - [ ] Channel has no active Community Guidelines strikes.
 - [ ] Channel has no live streaming restrictions in the recent period.
 - [ ] Channel is phone/identity verified for live streaming.
@@ -173,8 +174,10 @@ The account-side work, mapped onto the product gates (`docs/ROADMAP.md`). The ga
 
 ### Before Gate 0 — create the account
 
-Create the dedicated Google account and Brand Account channel, verify by phone, unlock advanced features, enable live
-streaming, complete branding with original assets. Detailed checklist: `docs/ACCOUNT_SETUP_FROM_ZERO.md`.
+Create the dedicated Google account and Brand Account channel, verify by phone, enable live streaming, complete
+branding with original assets. Detailed checklist: `docs/ACCOUNT_SETUP_FROM_ZERO.md` — its §2 Step 4 covers the
+advanced-features state, which is read and recorded in the Gate 0 audit (§3 above) rather than assumed to be a
+live-streaming precondition (**확인 필요(출처 없음)**).
 
 ### Gate 0 — audit and approve
 
