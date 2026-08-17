@@ -28,6 +28,8 @@ function fs(entries: readonly ArchiveDirEntry[]): ArchiveFsPort & { readonly rem
   return {
     removed,
     exists: () => true,
+    isLink: () => false,
+    realPath: (path) => path,
     list: () => entries,
     remove: (path) => {
       removed.push(path)
@@ -144,6 +146,23 @@ describe('runArchiveCli', () => {
     expect(code).toBe(0)
     expect(port.removed).toEqual([])
     expect(lines.join('\n')).toContain('archive.enabled is false')
+  })
+
+  it('exits non-zero and says REFUSED when a root is a link (review round 1, B1)', () => {
+    const port = fs([old])
+    const linked: ArchiveFsPort = { ...port, isLink: () => true }
+    const lines: string[] = []
+
+    const code = runArchiveCli(['--apply'], {
+      io: { write: (line) => lines.push(line) },
+      config,
+      fs: linked,
+      clock,
+    })
+
+    expect(code).toBe(1)
+    expect(lines.join('\n')).toContain('REFUSED (reparse_point)')
+    expect(port.removed).toEqual([])
   })
 
   it('refuses an unknown argument instead of guessing', () => {

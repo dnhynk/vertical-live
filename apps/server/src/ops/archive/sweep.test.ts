@@ -1,8 +1,16 @@
-import { mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  rmSync,
+  symlinkSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { FakeClock } from '../../testing/fake-clock.js'
 import { loadArchiveConfig, type ArchiveConfig } from './config.js'
@@ -45,6 +53,14 @@ interface FakeFs extends ArchiveFsPort {
   readonly removed: string[]
 }
 
+interface FakeFsOptions {
+  readonly freeBytes?: Record<string, number>
+  /** Paths the fake reports as symlinks/junctions (review round 1, B1). */
+  readonly links?: readonly string[]
+  /** Canonical path per lexical path; anything absent resolves to itself. */
+  readonly realPaths?: Record<string, string>
+}
+
 /**
  * Keys are resolved the same way the sweeper resolves roots, so the fake
  * behaves on Windows (BOARD D-2) as it does on a POSIX host: `/archive/...`
@@ -52,16 +68,24 @@ interface FakeFs extends ArchiveFsPort {
  */
 function fakeFs(
   contents: Record<string, readonly ArchiveDirEntry[]>,
-  freeBytes: Record<string, number> = {},
+  options: FakeFsOptions = {},
 ): FakeFs {
   const removed: string[] = []
   const listings = new Map(
     Object.entries(contents).map(([path, entries]) => [resolve(path), entries]),
   )
-  const free = new Map(Object.entries(freeBytes).map(([path, bytes]) => [resolve(path), bytes]))
+  const free = new Map(
+    Object.entries(options.freeBytes ?? {}).map(([path, bytes]) => [resolve(path), bytes]),
+  )
+  const links = new Set((options.links ?? []).map((path) => resolve(path)))
+  const realPaths = new Map(
+    Object.entries(options.realPaths ?? {}).map(([path, real]) => [resolve(path), resolve(real)]),
+  )
   return {
     removed,
     exists: (path) => listings.has(resolve(path)),
+    isLink: (path) => links.has(resolve(path)),
+    realPath: (path) => realPaths.get(resolve(path)) ?? resolve(path),
     list: (path) => listings.get(resolve(path)) ?? [],
     remove: (path) => {
       removed.push(path)
@@ -101,8 +125,9 @@ describe('runArchiveSweep', () => {
     const result = runArchiveSweep({ config, fs, clock, apply: true })
 
     expect(result.applied).toBe(true)
-    expect(fs.removed).toEqual(['/archive/recordings/old.mkv'])
-    expect(result.deleted).toEqual(['/archive/recordings/old.mkv'])
+    // Deletions name the canonical path the guard checked, not the listed one.
+    expect(fs.removed).toEqual([resolve('/archive/recordings/old.mkv')])
+    expect(result.deleted).toEqual([resolve('/archive/recordings/old.mkv')])
     expect(result.failed).toEqual([])
   })
 
@@ -122,12 +147,12 @@ describe('runArchiveSweep', () => {
 
     expect(result.deleted).toEqual([])
     expect(result.failed).toEqual([
-      { path: '/archive/recordings/locked.mkv', error: 'EBUSY: resource busy or locked' },
+      { path: resolve('/archive/recordings/locked.mkv'), error: 'EBUSY: resource busy or locked' },
     ])
   })
 
   it('falls back to the working directory for free space when no root exists', () => {
-    const fs = fakeFs({}, { [resolve('/repo')]: 42 * MB })
+    const fs = fakeFs({}, { freeBytes: { [resolve('/repo')]: 42 * MB } })
 
     const result = runArchiveSweep({ config, fs, clock, cwd: '/repo' })
 
@@ -138,6 +163,8 @@ describe('runArchiveSweep', () => {
   it('reports free space as unknown when no reading is available at all', () => {
     const unreadable: ArchiveFsPort = {
       exists: () => false,
+      isLink: () => false,
+      realPath: (path) => path,
       list: () => [],
       remove: () => {},
       freeBytes: () => {
@@ -173,7 +200,7 @@ describe('runArchiveSweep', () => {
 
     const result = runArchiveSweep({ config, fs, clock, apply: true })
 
-    expect(fs.removed).toEqual(['/archive/recordings/sweep.MKV'])
+    expect(fs.removed).toEqual([resolve('/archive/recordings/sweep.MKV')])
     expect(result.plan.scannedFiles).toBe(1)
   })
 
@@ -189,7 +216,7 @@ describe('runArchiveSweep', () => {
 
     const result = runArchiveSweep({ config, fs, clock, apply: true })
 
-    expect(fs.removed).toEqual(['/archive/recordings/inside.mkv'])
+    expect(fs.removed).toEqual([resolve('/archive/recordings/inside.mkv')])
     expect(result.plan.scannedFiles).toBe(1)
   })
 
@@ -199,7 +226,7 @@ describe('runArchiveSweep', () => {
         '/archive/recordings': [entry('/archive/recordings/a.mkv', 5, 20)],
         '/archive/shots': [],
       },
-      { '/archive/recordings': 500 * MB, '/archive/shots': 10 * MB },
+      { freeBytes: { '/archive/recordings': 500 * MB, '/archive/shots': 10 * MB } },
     )
 
     const result = runArchiveSweep({ config, fs, clock })
@@ -212,6 +239,95 @@ describe('runArchiveSweep', () => {
     const fs = fakeFs({ '/archive/recordings': [], '/archive/shots': [] })
 
     expect(runArchiveSweep({ config, fs, clock }).at).toBe(new Date(NOW_MS).toISOString())
+  })
+
+  it('refuses a root that is itself a link instead of sweeping its target', () => {
+    // Review round 1, B1: with the root a junction, everything under it is
+    // lexically "inside" while really living somewhere the operator never
+    // configured.
+    const fs = fakeFs(
+      {
+        '/archive/recordings': [entry('/archive/recordings/victim.mkv', 30, 1)],
+        '/archive/shots': [],
+      },
+      { links: ['/archive/recordings'] },
+    )
+
+    const result = runArchiveSweep({ config, fs, clock, apply: true })
+
+    expect(result.roots[0]).toMatchObject({
+      name: 'recordings',
+      refused: 'reparse_point',
+      files: 0,
+      realPath: null,
+    })
+    expect(result.plan.scannedFiles).toBe(0)
+    expect(fs.removed).toEqual([])
+  })
+
+  it('refuses a root whose canonical path cannot be read', () => {
+    const fs = fakeFs({
+      '/archive/recordings': [entry('/archive/recordings/a.mkv', 30, 1)],
+      '/archive/shots': [],
+    })
+    const unresolvable: ArchiveFsPort = {
+      ...fs,
+      realPath: (path) => {
+        if (resolve(path) === resolve('/archive/recordings')) throw new Error('EACCES')
+        return resolve(path)
+      },
+    }
+
+    const result = runArchiveSweep({ config, fs: unresolvable, clock, apply: true })
+
+    expect(result.roots[0]).toMatchObject({ name: 'recordings', refused: 'unresolvable' })
+    expect(fs.removed).toEqual([])
+  })
+
+  it('drops an entry whose canonical path leaves the root', () => {
+    // The listing looks local; `realpath` says the parent directory is a link.
+    const fs = fakeFs(
+      {
+        '/archive/recordings': [
+          entry('/archive/recordings/inside.mkv', 30, 1),
+          entry('/archive/recordings/nested/escaped.mkv', 30, 1),
+        ],
+        '/archive/shots': [],
+      },
+      { realPaths: { '/archive/recordings/nested/escaped.mkv': '/elsewhere/escaped.mkv' } },
+    )
+
+    const result = runArchiveSweep({ config, fs, clock, apply: true })
+
+    expect(result.plan.scannedFiles).toBe(1)
+    expect(fs.removed).toEqual([resolve('/archive/recordings/inside.mkv')])
+  })
+
+  it('refuses at delete time when the target became a link after the scan', () => {
+    // The scan and the delete are two moments (TOCTOU). The fake reports the
+    // file as a link only once the plan has been made.
+    const fs = fakeFs({
+      '/archive/recordings': [entry('/archive/recordings/old.mkv', 30, 1)],
+      '/archive/shots': [],
+    })
+    let checks = 0
+    const swapped: ArchiveFsPort = {
+      ...fs,
+      isLink: (path) => {
+        if (resolve(path) !== resolve('/archive/recordings/old.mkv')) return false
+        // First check is the scan, second is the delete-time re-check.
+        checks += 1
+        return checks > 1
+      },
+    }
+
+    const result = runArchiveSweep({ config, fs: swapped, clock, apply: true })
+
+    expect(fs.removed).toEqual([])
+    expect(result.deleted).toEqual([])
+    expect(result.failed).toEqual([
+      { path: resolve('/archive/recordings/old.mkv'), error: 'path_escaped_root' },
+    ])
   })
 })
 
@@ -278,6 +394,110 @@ describe('nodeArchiveFs', () => {
     mkdirSync(root, { recursive: true })
 
     expect(nodeArchiveFs.freeBytes(root)).toBeGreaterThan(0)
+  })
+
+  it('reports a real junction/symlink as a link and resolves canonical paths', () => {
+    mkdirSync(join(root, 'real'), { recursive: true })
+    writeFileSync(join(root, 'real', 'a.mkv'), 'aaaa')
+    // `junction` is the only link type Windows creates without elevation or
+    // developer mode; on POSIX the type argument is ignored (Node docs).
+    symlinkSync(join(root, 'real'), join(root, 'link'), 'junction')
+
+    expect(nodeArchiveFs.isLink(join(root, 'link'))).toBe(true)
+    expect(nodeArchiveFs.isLink(join(root, 'real'))).toBe(false)
+    expect(nodeArchiveFs.realPath(join(root, 'link', 'a.mkv'))).toBe(
+      nodeArchiveFs.realPath(join(root, 'real', 'a.mkv')),
+    )
+  })
+})
+
+/**
+ * Review round 1, B1 — reproduced against the real filesystem rather than a
+ * fake: the reviewer configured a root that was a junction, and `--apply`
+ * deleted the file in the junction's target, outside the configured directory.
+ */
+describe('runArchiveSweep against real links (review round 1, B1)', () => {
+  const base = join(tmpdir(), `vl-archive-links-${String(process.pid)}`)
+  const outside = join(base, 'outside')
+  const configured = join(base, 'configured')
+  const victim = join(outside, 'victim.mkv')
+  /** Older than the retention window, measured against the fake clock. */
+  const oldTime = new Date(NOW_MS - 30 * DAY_MS)
+
+  function rootConfig(path: string): ArchiveConfig {
+    return { ...config, roots: [{ name: 'recordings', path, extensions: ['.mkv'] }] }
+  }
+
+  beforeEach(() => {
+    mkdirSync(outside, { recursive: true })
+    writeFileSync(victim, 'victim')
+    utimesSync(victim, oldTime, oldTime)
+  })
+
+  afterEach(() => {
+    rmSync(base, { recursive: true, force: true })
+  })
+
+  it('refuses a configured root that is a junction and deletes nothing', () => {
+    symlinkSync(outside, configured, 'junction')
+
+    const result = runArchiveSweep({
+      config: rootConfig(configured),
+      fs: nodeArchiveFs,
+      clock,
+      apply: true,
+    })
+
+    expect(result.roots[0]).toMatchObject({ name: 'recordings', refused: 'reparse_point' })
+    expect(result.plan.scannedFiles).toBe(0)
+    expect(result.deleted).toEqual([])
+    expect(existsSync(victim)).toBe(true)
+  })
+
+  it('does not follow a junction inside a real root, but still sweeps the root', () => {
+    mkdirSync(configured, { recursive: true })
+    const own = join(configured, 'own.mkv')
+    writeFileSync(own, 'own')
+    utimesSync(own, oldTime, oldTime)
+    symlinkSync(outside, join(configured, 'link'), 'junction')
+    // Read while the file still exists: the sweep reports canonical paths.
+    const ownReal = nodeArchiveFs.realPath(own)
+
+    const result = runArchiveSweep({
+      config: rootConfig(configured),
+      fs: nodeArchiveFs,
+      clock,
+      apply: true,
+    })
+
+    expect(result.plan.scannedFiles).toBe(1)
+    expect(result.deleted).toEqual([ownReal])
+    expect(existsSync(own)).toBe(false)
+    expect(existsSync(victim)).toBe(true)
+  })
+
+  it('does not delete through a symlinked file inside a real root', () => {
+    mkdirSync(configured, { recursive: true })
+    const linked = join(configured, 'linked.mkv')
+    try {
+      symlinkSync(victim, linked, 'file')
+    } catch {
+      // Creating a *file* symlink on Windows needs developer mode or elevation.
+      // Where that is unavailable the junction cases above already cover the
+      // behaviour, so this case is skipped rather than faked.
+      return
+    }
+
+    const result = runArchiveSweep({
+      config: rootConfig(configured),
+      fs: nodeArchiveFs,
+      clock,
+      apply: true,
+    })
+
+    expect(result.plan.scannedFiles).toBe(0)
+    expect(result.deleted).toEqual([])
+    expect(existsSync(victim)).toBe(true)
   })
 })
 

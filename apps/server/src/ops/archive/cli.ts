@@ -75,9 +75,12 @@ export function runArchiveCli(argv: readonly string[], deps: ArchiveCliDeps): nu
     for (const line of report(result, config)) deps.io.write(line)
   }
 
-  // A failed delete is the operator's problem to look at, so it is an exit
-  // code; an unmet rule is not, because the sweeper did everything it could.
-  return result.failed.length > 0 ? 1 : 0
+  // A failed delete and a refused root are both the operator's problem to look
+  // at — the second means the archive is not being enforced where they pointed
+  // it — so both are exit codes. An unmet rule is not, because the sweeper did
+  // everything it could.
+  const refused = result.roots.filter((root) => root.refused !== null)
+  return result.failed.length > 0 || refused.length > 0 ? 1 : 0
 }
 
 function report(result: ArchiveSweepResult, config: ArchiveConfig): string[] {
@@ -87,10 +90,18 @@ function report(result: ArchiveSweepResult, config: ArchiveConfig): string[] {
   ]
 
   for (const root of result.roots) {
+    if (!root.exists) {
+      lines.push(`root ${root.name}: (missing) ${root.path}`)
+      continue
+    }
+    if (root.refused !== null) {
+      // A refused root is louder than a missing one: the operator configured a
+      // path this sweeper will not delete from (review round 1, B1).
+      lines.push(`root ${root.name}: REFUSED (${root.refused}) ${root.path}`)
+      continue
+    }
     lines.push(
-      root.exists
-        ? `root ${root.name}: ${String(root.files)} file(s), ${mib(root.bytes)} — ${root.path}`
-        : `root ${root.name}: (missing) ${root.path}`,
+      `root ${root.name}: ${String(root.files)} file(s), ${mib(root.bytes)} — ${root.path}`,
     )
   }
 
