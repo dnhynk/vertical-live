@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
+import { parseScenario, planScenario } from '@vl/simulator/scenario'
+
 import { SimulatorClient, SINGLE_EVENTS, panelScenarios } from './inject'
 
 /**
@@ -36,14 +38,20 @@ function recordingFetch(status = 202, payload: unknown = { inserted: 1, duplicat
 
 function client(status = 202, token: string | null = 'sim_token_test') {
   const { calls, fetchImpl } = recordingFetch(status)
+  /** Every interval the runner asked to wait, so a skipped one is visible. */
+  const waits: number[] = []
   return {
     calls,
+    waits,
     simulator: new SimulatorClient({
       apiUrl: 'http://127.0.0.1:8787',
       token,
       fetchImpl,
       now: () => Date.UTC(2026, 7, 16),
-      delay: () => Promise.resolve(),
+      delay: (millis) => {
+        waits.push(millis)
+        return Promise.resolve()
+      },
     }),
   }
 }
@@ -145,6 +153,36 @@ describe('SimulatorClient.runScenario', () => {
         call.body.envelopes.every((envelope) => envelope.source === 'simulator'),
       ),
     ).toBe(true)
+  })
+
+  it('crosses the whole scenario, including the trailing wait', async () => {
+    const { waits, simulator } = client()
+    const scenario = panelScenarios().find((entry) => entry.id === 'direct-low')
+    if (scenario === undefined) throw new Error('expected direct-low in the panel scenarios')
+    const plan = planScenario(scenario)
+
+    await simulator.runScenario(scenario)
+
+    // The last batch is at 9,000 ms and the scenario ends at 19,000 ms: the
+    // trailing `wait` is where the window closes and the tally lands on screen
+    // (spec §6.4). Returning at the last POST skipped it (review round 1, M3).
+    expect(plan.batches.at(-1)?.atMs).toBeLessThan(plan.endsAtMs)
+    expect(waits.reduce((sum, millis) => sum + millis, 0)).toBe(plan.endsAtMs)
+  })
+
+  it('waits the full duration of a scenario that is nothing but an interval', async () => {
+    const { calls, waits, simulator } = client()
+    const scenario = parseScenario({
+      id: 'wait-only',
+      title: 'Wait only',
+      summary: 'One interval and no input at all.',
+      steps: [{ kind: 'wait', atMs: 0, durationMs: 4_000 }],
+    })
+
+    await simulator.runScenario(scenario)
+
+    expect(calls).toEqual([])
+    expect(waits.reduce((sum, millis) => sum + millis, 0)).toBe(4_000)
   })
 
   it('stops at the first refusal instead of finishing the run', async () => {

@@ -1,8 +1,17 @@
 import { effectiveGiftCount } from '@vl/contract'
+import { RetentionSweeper, loadRetentionConfig } from '@vl/server'
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { findBuiltinScenario, scenarioIdentity, type Scenario } from '../scenario/index.js'
+import {
+  findBuiltinScenario,
+  parseScenario,
+  planScenario,
+  scenarioIdentity,
+  type Scenario,
+} from '../scenario/index.js'
+import { postEnvelopes } from '../runner/inject.js'
 import { openSession, type SimulatorSession } from '../runner/session.js'
+import { settle, waitFor } from './support.js'
 
 /**
  * Spec §11 "유료 무결성":
@@ -31,6 +40,9 @@ import { openSession, type SimulatorSession } from '../runner/session.js'
  */
 const APPLIED_PAID_EVENTS = 7
 
+const HOUR_MS = 60 * 60 * 1000
+const DAY_MS = 24 * HOUR_MS
+
 let session: SimulatorSession | null = null
 
 afterEach(async () => {
@@ -48,6 +60,15 @@ function keyOf(scenario: Scenario, messageId: string, giftCount?: number): strin
   const { broadcastId } = scenarioIdentity(scenario)
   const base = `simulator:${broadcastId}:${messageId}`
   return giftCount === undefined ? base : `${base}:gift:${String(giftCount)}`
+}
+
+/** Distinct paid effect ids the renderer was told to stage for one event key. */
+function paidEffectIdsFor(active: SimulatorSession, eventKey: string): Set<string> {
+  return new Set(
+    (active.renderer?.effectFrames ?? [])
+      .filter((effect) => effect.paid && effect.causedByEventKey === eventKey)
+      .map((effect) => effect.effectId),
+  )
 }
 
 describe('§11 유료 무결성 — same Super Chat once', () => {
@@ -96,54 +117,124 @@ describe('§11 유료 무결성 — gift combo delta only', () => {
     expect(counters['gift_no_delta']).toBeGreaterThan(0)
   }, 60_000)
 
-  it('refuses an already-applied paid event when it reaches the writer a second time', async () => {
-    // The second defence, exercised on its own: the same event key is offered to
-    // the writer again through a *different* inbox row, which is what a ring
-    // eviction or a rebuilt in-memory audit would produce. Only the paid
-    // ledger's primary key can catch this one (spec §11, §T8 idempotency 1).
-    const scenario = paidScenario()
-    session = await openSession()
-    await session.run(scenario)
-
-    const key = keyOf(scenario, 'msg_sim_paid_sc_a')
-    const ledgerRowsBefore = session.harness.store.countRows('paid_ledger')
-    expect(session.harness.store.hasPaidLedgerEntry(key)).toBe(true)
-
-    const { broadcastId, liveChatId } = scenarioIdentity(scenario)
-    const engine = session.harness.engine
-    engine.ingest(
-      [
+  it('refuses a redelivery whose inbox row retention has already swept', async () => {
+    // The second defence, exercised where it is the *only* one left.
+    //
+    // Under normal ingest the two defences are congruent: the inbox key is
+    // `(source, broadcastId, messageId, giftEffectiveCount)` and the event key is
+    // built from the same four values, so a redelivery never gets past the inbox
+    // and the ledger guard is never asked (review round 1, M1 — the previous
+    // version of this test asserted nothing for that reason).
+    //
+    // They come apart when the inbox row is deleted and the ledger row is not.
+    // `config/retention.json` gives both 30 days but keys them on different
+    // columns — the inbox on `received_at`, the ledger on `applied_at` — so an
+    // event received while the broadcast was degraded and applied hours later
+    // (spec §9.2: paid events are held, never dropped) leaves a window in which
+    // the source row is gone and the audit row is still owed. A redelivery in
+    // that window — spec §11 연결 복구 — creates a genuinely new inbox row, and
+    // only `paid_ledger`'s primary key can stop a second audit staging.
+    const scenario = parseScenario({
+      id: 'paid-retention-replay',
+      title: 'Paid redelivery after the inbox was swept',
+      summary: 'One Super Chat, held while degraded, applied late, redelivered after retention.',
+      steps: [
         {
-          schemaVersion: 1,
-          sourceShape: 'simulator',
-          source: 'simulator',
-          broadcastId,
-          liveChatId,
-          // A different message id would be a different event; this row carries
-          // the *same* one, arriving on a fresh gift-count slot so the inbox
-          // accepts it and the ledger has to be the thing that says no.
-          messageId: 'msg_sim_paid_sc_a',
-          receivedAt: session.harness.clock.nowUtcIso(),
-          validationStatus: 'valid',
-          kind: 'SUPER_CHAT',
-          occurredAt: session.harness.clock.nowUtcIso(),
-          command: null,
-          payment: {
-            amountMicros: 500_000,
-            currency: 'JPY',
-            tier: 1,
-            jewels: null,
-            comboCount: null,
-            giftName: null,
-          },
+          kind: 'superChat',
+          atMs: 0,
+          amountMicros: 500_000,
+          currency: 'JPY',
+          tier: 1,
+          messageId: 'msg_sim_retention_sc',
         },
       ],
-      { sourceKey: `simulator:${liveChatId}`, liveChatId, nextPageToken: null },
-    )
-    engine.pump()
+    })
+    const plan = planScenario(scenario)
+    const batch = plan.batches[0]
+    if (batch === undefined) throw new Error('expected a batch')
+    const key = keyOf(scenario, 'msg_sim_retention_sc')
 
+    // No renderer: the writer is degraded and holds the row (spec §9.2).
+    session = await openSession({ attachRenderer: false })
+    const clock = session.clock
+    if (clock === null) throw new Error('expected a virtual clock')
+    const target = session.target
+
+    const firstDelivery = await postEnvelopes(target, batch.build(clock.nowUtcIso()))
+    expect(firstDelivery.status).toBe(202)
+    expect(firstDelivery.inserted).toBe(1)
+
+    // Held for two hours, then applied. `applied_at` is now two hours behind
+    // `received_at`, which is the whole point of the window.
+    await clock.advance(2 * HOUR_MS)
+    await session.attachRenderer()
+    session.harness.engine.pump()
+    expect(session.harness.store.hasPaidLedgerEntry(key)).toBe(true)
+    const ledgerRowsBefore = session.harness.store.countRows('paid_ledger')
+    // The clock is virtual but the socket is real: the staging reaches the
+    // renderer a few turns of the event loop after the commit, not inside it.
+    const active = session
+    await waitFor(() => paidEffectIdsFor(active, key).size > 0)
+    const paidEffectsBefore = paidEffectIdsFor(session, key)
+    // At least the original staging. A two-hour hold also outlives
+    // `tuning.paid.originalStagingWindowMs`, so §9.2's substitute acknowledgement
+    // may have staged as well — that rule is T8's, and what this test is about is
+    // that the *redelivery* adds nothing to whatever is here.
+    expect(paidEffectsBefore.size).toBeGreaterThan(0)
+
+    // Move to `received_at + 30 days + 1 hour`. The sweep cutoff is then
+    // `received_at + 1 hour`: past the inbox row's `received_at`, short of the
+    // ledger row's `applied_at` two hours in. The engine is restarted rather than
+    // pumped across the gap, which is what the §10.2 deadline policies are for.
+    await clock.advance(30 * DAY_MS - HOUR_MS)
+    await session.restart()
+
+    const sweep = new RetentionSweeper({
+      store: session.harness.store,
+      clock: session.harness.clock,
+      config: loadRetentionConfig({ env: {} }),
+    }).run()
+    const inbox = sweep.entries.find((entry) => entry.fieldKey === 'ingest_inbox.envelope')
+    const ledger = sweep.entries.find((entry) => entry.fieldKey === 'paid_ledger.event_key')
+
+    expect(inbox?.rowsDeleted).toBeGreaterThan(0)
+    expect(ledger?.rowsDeleted).toBe(0)
+    expect(session.harness.store.countRows('ingest_inbox')).toBe(0)
+    expect(session.harness.store.hasPaidLedgerEntry(key)).toBe(true)
+
+    // What the renderer attached after the restart has been told to stage for
+    // this event so far. The redelivery may not add to it.
+    const stagedSinceRestart = paidEffectIdsFor(session, key)
+
+    // The redelivery, over the same HTTP endpoint as every other injection.
+    const redelivery = await postEnvelopes(target, batch.build(clock.nowUtcIso()))
+
+    // The assertion the previous version was missing: the row is genuinely new,
+    // so the writer really does reach the ledger check.
+    expect(redelivery.status).toBe(202)
+    expect(redelivery.inserted).toBe(1)
+    expect(redelivery.duplicates).toBe(0)
+    expect(session.harness.store.countRows('ingest_inbox')).toBe(1)
+
+    session.harness.engine.pump()
+    // Long enough for a second staging to have arrived if one had been made:
+    // the first one took a fraction of this.
+    await settle()
+
+    const counters = session.harness.engine.metrics().counters
+    // `paid_duplicate` is incremented by the ledger guard and by nothing else,
+    // which is what makes this line the discriminator. It is also the *only*
+    // line that can be: `paid_ledger`'s insert is `ON CONFLICT DO NOTHING` and
+    // the world keeps its own acknowledged ring, so the row count and the
+    // staging below stay correct even with the guard gone — they are the
+    // consequences being protected, not the proof that this defence ran.
+    // Verified by removing the guard: this line failed with `undefined`
+    // (round 1 fix, see the ticket's `## Review round 1`).
+    expect(counters['paid_duplicate']).toBe(1)
+    expect(counters['paid_applied'] ?? 0).toBe(0)
     expect(session.harness.store.countRows('paid_ledger')).toBe(ledgerRowsBefore)
-  }, 60_000)
+    expect(paidEffectIdsFor(session, key)).toEqual(stagedSinceRestart)
+  }, 120_000)
 })
 
 describe('§11 유료 무결성 — a retransmitted paid effect does not restart', () => {

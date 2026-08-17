@@ -117,6 +117,13 @@ export class SimulatorClient {
    * Plays a scenario in real time. The panel is a diagnostic, so the offsets are
    * honoured rather than compressed: the window boundaries of spec §6.4 are what
    * an operator is usually watching for.
+   *
+   * The run is not over when the last envelope is posted. A scenario's trailing
+   * `wait` is the part where the aggregate window closes, the mode falls back to
+   * `direct` and the tally reaches the screen (spec §6.4), so the runner crosses
+   * `plan.endsAtMs` before it reports a result. Returning early made "run" look
+   * finished while the thing the scenario exists to show had not happened yet
+   * (review round 1, M3).
    */
   async runScenario(
     scenario: Scenario,
@@ -126,9 +133,13 @@ export class SimulatorClient {
     let inserted = 0
     let duplicates = 0
     let cursorMs = 0
+    const advanceTo = async (atMs: number): Promise<void> => {
+      if (atMs <= cursorMs) return
+      await this.#sleep(atMs - cursorMs)
+      cursorMs = atMs
+    }
     for (const batch of plan.batches) {
-      if (batch.atMs > cursorMs) await this.#sleep(batch.atMs - cursorMs)
-      cursorMs = batch.atMs
+      await advanceTo(batch.atMs)
       const envelopes = batch.build(this.#nowIso())
       if (envelopes.length === 0) continue
       const result = await this.post(envelopes)
@@ -137,6 +148,7 @@ export class SimulatorClient {
       inserted += result.inserted
       duplicates += result.duplicates
     }
+    await advanceTo(plan.endsAtMs)
     return { outcome: 'accepted', status: 202, inserted, duplicates }
   }
 
