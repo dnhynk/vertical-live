@@ -163,3 +163,4 @@
 | 2026-08-17 15:19 | R-T12-1 verdict request_changes(blocker 3: safe_stopped 후 예약 restart 실행, chat producer 부재를 live/CTA-on 판정, obs-connection→obs-process 승격 예산 미소진; major 3: preflight 실패 캐시 고착, moderation safe-stop 미배선, DB corruption data_integrity 미배선) → F-T12-1 `task_8aaca7930fe5` → T12 터미널 |
 | 2026-08-17 15:41 | F-T12-1 완료(6건, 1708 tests 로컬). R-T12-2 `task_60811f7134df` → `ctx_58553ce04460`(review) |
 | 2026-08-17 15:53 | R-T12-2 verdict request_changes(잔존 blocker 1: chat 4신호 단일 가족 any-ok 집계로 idle transport unknown이 ok로 덮임, started()가 객체 존재 판단) → F-T12-2 `task_b6fcee937b5c` → T12 터미널 |
+| 2026-08-17 16:05 | F-T12-2 완료(readiness 신호 개념·started() 실기동 판정, 1715 tests). R-T12-3 `task_09f9c22548e8` → `ctx_8ec17a69bd89`(review) |
