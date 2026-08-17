@@ -1,7 +1,7 @@
 # TASK-T13-data-policy
 
 - Task: T13 데이터 보존·삭제·철회 자동화 (`docs/tasks/TASK_SPECS.md` §T13)
-- Branch: `dnhynk/t13-data-policy` · PR: #(TBD)
+- Branch: `dnhynk/t13-data-policy` · PR: #10
 - Orca: task `task_15cd2ae24e82` · dispatch `ctx_2cc8eb9d4f98`
 - Spec sections read: §7.4, §8.6, §10.2, §12.3, §12.4, §14.1, §14.2, [S12] [S41] [S42]
 - BOARD decisions/assumptions relied on: D-1, D-4, A-1(identity gate 닫힘), A-7(`sourceDataExpiresAt = receivedAt + 30일`), A-14(공용 규격), A-15(provisional 숫자)
