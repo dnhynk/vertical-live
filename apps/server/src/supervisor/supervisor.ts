@@ -314,11 +314,38 @@ export class Supervisor {
   async requestSafeStop(trigger: SafeStopTrigger): Promise<void> {
     if (this.#safeStop !== null) return
     this.#safeStop = trigger
+    // Everything that *stops* work happens here, synchronously, before the first
+    // `await` of this method — telling an operator comes after (review round 4).
+    this.#haltOutwardWork()
     this.#logger.error('supervisor safe stop', {
       kind: trigger.kind,
       reason: trigger.reason,
     })
     await this.#evaluate(`safe_stop:${trigger.kind}`)
+  }
+
+  /**
+   * Cancels every scheduled restart, aborts the ones already running, and stops
+   * the supervisor's own loops. Synchronous and idempotent, on purpose.
+   *
+   * Round 4 found the ordering that made this necessary: the halt used to live
+   * after `await`ing the `safe_stopped` alert, so while a Discord webhook was in
+   * flight an already-running chat restart finished its `stop()` and went on to
+   * `start()` the listener again. Nothing that can block may sit between
+   * deciding to stop and stopping — the alert is *reporting*, and reporting
+   * never gates safety (spec §9.1, §9.2).
+   */
+  #haltOutwardWork(): void {
+    this.registry.stopAll()
+    // Stop pushing the dead-man heartbeat: a stopped broadcast needs a human,
+    // and the external monitor is how one is reached when nobody is watching
+    // this process's logs ([S23], §11 관측성).
+    this.#options.deadMan?.stop()
+    this.#options.screenshots?.stop()
+    if (this.#timer !== undefined) {
+      this.#clock.clearTimeout(this.#timer)
+      this.#timer = undefined
+    }
   }
 
   /** T13 sweep results (`onResult`/`onError`) — see TASK_SPECS §T12 배선. */
@@ -715,6 +742,11 @@ export class Supervisor {
     aggregate: HealthAggregate,
   ): Promise<void> {
     this.#logger.info('supervisor state', { state, reason, cause })
+    // Idempotent, and deliberately ahead of every `await` below: whichever path
+    // reached `safe_stopped`, nothing is left scheduled or running by the time
+    // anything can block (review rounds 1 and 4; spec §9.1, §9.2).
+    if (state === 'safe_stopped') this.#haltOutwardWork()
+
     const severity: AlertSeverity =
       state === 'safe_stopped' ? 'critical' : state === 'degraded' ? 'warning' : 'info'
     await this.#alert(severity, `supervisor.${state}`, {
@@ -727,19 +759,6 @@ export class Supervisor {
     })
 
     if (state === 'safe_stopped') {
-      // Every scheduled restart is cancelled *before* anything else: one that is
-      // waiting out its backoff would otherwise start an encoder the safe-stop
-      // handler is about to stop (review round 1, B1; spec §9.1, §9.2).
-      this.registry.stopAll()
-      // Stop pushing the dead-man heartbeat: a stopped broadcast needs a human,
-      // and the external monitor is how one is reached when nobody is watching
-      // this process's logs ([S23], §11 관측성).
-      this.#options.deadMan?.stop()
-      this.#options.screenshots?.stop()
-      if (this.#timer !== undefined) {
-        this.#clock.clearTimeout(this.#timer)
-        this.#timer = undefined
-      }
       if (this.#options.onSafeStop !== undefined && this.#safeStop !== null) {
         try {
           await this.#options.onSafeStop(this.#safeStop)

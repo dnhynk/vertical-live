@@ -2,7 +2,7 @@ import type { EngineHealth, InputHealth } from '../../engine/engine.js'
 import type { RendererHealthReport } from '../../engine/publisher.js'
 import type { HealthSignal } from '../../health/types.js'
 import { FakeClock } from '../../testing/fake-clock.js'
-import { RecordingAlertSink } from '../alerts.js'
+import { RecordingAlertSink, type AlertSink } from '../alerts.js'
 import { loadSupervisorConfig, type SupervisorConfig } from '../config.js'
 import type { DeadManMonitor } from '../deadman.js'
 import type { DiagnosticScreenshotRecorder } from '../screenshot.js'
@@ -119,6 +119,13 @@ export interface HarnessOptions {
   /** Real collaborators, so a test can assert they were never started. */
   readonly deadMan?: DeadManMonitor
   readonly screenshots?: DiagnosticScreenshotRecorder
+  /**
+   * Replaces the recording sink — for a test that needs delivery to *block*,
+   * which is where the safe-stop ordering matters (review round 4).
+   */
+  readonly alerts?: AlertSink
+  /** Replaces individual component actions, e.g. with one that can be gated. */
+  readonly actions?: Partial<ComponentActions>
 }
 
 /** All six pre-checks passing; a test that cares overrides the ones it tests. */
@@ -180,6 +187,7 @@ export function createSupervisorHarness(options: HarnessOptions = {}): Superviso
     rendererSource: action('renderer-source'),
     obsProcess: action('obs-process'),
     obsConnectionAttempts: () => state.obsConnectionAttempts,
+    ...options.actions,
   }
 
   const supervisor = new Supervisor({
@@ -192,7 +200,7 @@ export function createSupervisorHarness(options: HarnessOptions = {}): Superviso
       },
     },
     renderer: rendererHealth,
-    alerts,
+    alerts: options.alerts ?? alerts,
     actions,
     autoEvaluate: false,
     // Fixed jitter so the backoff delays in a test are the same every run.

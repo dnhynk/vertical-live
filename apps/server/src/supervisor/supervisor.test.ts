@@ -4,6 +4,7 @@ import { testChatConfig } from '../testing/chat-test-support.js'
 import { FakeClock, flushMicrotasks } from '../testing/fake-clock.js'
 import { buildChatHealthSignals } from '../youtube/chat/health.js'
 import { ChatSourceState } from '../youtube/chat/state.js'
+import { DELIVERED, type AlertSink } from './alerts.js'
 import { DeadManMonitor } from './deadman.js'
 import { STARTUP_STEP_ORDER, type StartupStep, type StartupSteps } from './startup.js'
 import { SUPERVISED_COMPONENTS } from './types.js'
@@ -605,6 +606,88 @@ describe('supervisor state machine', () => {
       await harness.clock.advance(harness.config.restart.maxDelayMs * 2)
 
       expect(harness.restarts).toEqual([])
+      expect(harness.supervisor.components().every((entry) => !entry.inFlight)).toBe(true)
+    })
+
+    it('halts before it reports, so a blocked alert cannot let a restart finish (round 4)', async () => {
+      // The reviewer's production-path probe. The chat restart is two-phase —
+      // `await stop()` then `start()` — and the safe-stop alert is a webhook that
+      // can take seconds or time out. Round 3 aborted in-flight actions, but the
+      // abort happened *after* awaiting that alert, so the listener still came
+      // back up: observed `["stop-began","safe-stop-alert-began","start-after-stop"]`.
+      const order: string[] = []
+      let releaseStop = (): void => {}
+      const stopping = new Promise<void>((resolve) => {
+        releaseStop = resolve
+      })
+      let releaseAlert = (): void => {}
+      const alerting = new Promise<void>((resolve) => {
+        releaseAlert = resolve
+      })
+
+      const alerts: AlertSink = {
+        name: 'blocking',
+        deliver: async (alert) => {
+          if (alert.kind !== 'supervisor.safe_stopped') return DELIVERED
+          order.push('safe-stop-alert-began')
+          await alerting
+          order.push('safe-stop-alert-delivered')
+          return DELIVERED
+        },
+      }
+
+      const harness = createSupervisorHarness({
+        preflight: passingPreflight(),
+        alerts,
+        actions: {
+          // The shape `main.ts` really uses for the chat source.
+          chatSource: async (signal) => {
+            order.push('stop-began')
+            await stopping
+            if (signal.aborted) return
+            order.push('start-after-stop')
+          },
+        },
+      })
+      await goLive(harness)
+
+      // Put the chat restart in flight: degrade the transport, let the attempt
+      // be scheduled, and advance past its backoff so the action is awaiting.
+      await harness.clock.advance(1000)
+      harness.pushHealthy(['youtube.chat.transport'])
+      harness.push(
+        signal('youtube.chat.transport', 'degraded', {
+          component: 'youtube-chat',
+          reason: 'retry_budget_exhausted',
+          at: harness.clock.nowUtcIso(),
+          monotonicMs: harness.clock.monotonicMs(),
+        }),
+      )
+      await harness.supervisor.evaluate()
+      await harness.clock.advance(harness.config.restart.initialDelayMs)
+      expect(order).toEqual(['stop-began'])
+
+      // The real request path. It must have halted everything by the time it
+      // returns control, even though the alert is still blocked.
+      const stopping2 = harness.supervisor.requestSafeStop({
+        kind: 'rights_or_policy',
+        at: harness.clock.nowUtcIso(),
+        reason: 'rights_claim',
+        detail: {},
+      })
+      await flushMicrotasks()
+      expect(order).toEqual(['stop-began', 'safe-stop-alert-began'])
+
+      // Release the action's awaited `stop()` while the alert is still in flight.
+      releaseStop()
+      await flushMicrotasks()
+      expect(order).toEqual(['stop-began', 'safe-stop-alert-began'])
+
+      releaseAlert()
+      await stopping2
+
+      expect(order).toEqual(['stop-began', 'safe-stop-alert-began', 'safe-stop-alert-delivered'])
+      expect(harness.supervisor.state).toBe('safe_stopped')
       expect(harness.supervisor.components().every((entry) => !entry.inFlight)).toBe(true)
     })
 
