@@ -29,11 +29,20 @@ def tail(handle, n=1200):
     return txt[-n:]
 
 d = run(["terminal", "create", "--worktree", WT, "--title", f"review-pr-{pr}", "--command", CMD])
-if not d.get("ok"):
-    print("terminal create failed", json.dumps(d, ensure_ascii=False)[:600]); sys.exit(1)
-r = d["result"]; handle = (r.get("terminal") or r).get("handle")
-print("handle:", handle)
-w = run(["terminal", "wait", "--terminal", handle, "--for", "tui-idle", "--timeout-ms", "90000"])
+if d.get("ok"):
+    r = d["result"]; handle = (r.get("terminal") or r).get("handle")
+    print("handle:", handle, "(agent-first)")
+else:
+    # Fallback (2026-08-17: create --command timed out after runtime restart): plain shell, then type the codex command.
+    print("terminal create --command failed:", json.dumps(d.get("error"), ensure_ascii=False)[:200], "-> two-step fallback")
+    d2 = run(["terminal", "create", "--worktree", WT, "--title", f"review-pr-{pr}"])
+    if not d2.get("ok"):
+        print("terminal create (shell) failed", json.dumps(d2, ensure_ascii=False)[:600]); sys.exit(1)
+    r = d2["result"]; handle = (r.get("terminal") or r).get("handle")
+    time.sleep(3)
+    run(["terminal", "send", "--terminal", handle, "--text", CMD, "--enter"])
+    print("handle:", handle, "(shell + codex command)")
+w = run(["terminal", "wait", "--terminal", handle, "--for", "tui-idle", "--timeout-ms", "120000"])
 print("tui-idle:", json.dumps(w.get("result", {}).get("wait", {}), ensure_ascii=False)[:200])
 time.sleep(5)
 dsp = run(["orchestration", "dispatch", "--task", task_id, "--to", handle, "--inject"])

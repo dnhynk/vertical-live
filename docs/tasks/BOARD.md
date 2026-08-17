@@ -1,7 +1,7 @@
 # BOARD — 스펙 v1 구현 상태판
 
 > 갱신 주체: 코디네이터만(main 직접 커밋 예외). 절차: `docs/runbooks/agent-orchestration.md`. 명세: `docs/tasks/TASK_SPECS.md`.
-> Orca Run: `run_1c93e897ee3e` · 코디네이터 터미널: `term_27da0856-6d72-4358-99da-88a7dac8fabc`(2026-08-17 재바인딩; 이전 `term_1bb65169…`)
+> Orca Run: `run_1c93e897ee3e` · 코디네이터 터미널: `term_062ef090-2f5a-4c05-869c-fd7766d2ce80`(2026-08-17 03:29 UTC 재바인딩; 이전 `term_27da0856…`, `term_1bb65169…`)
 
 ## 1. 작업 상태
 
@@ -10,7 +10,7 @@
 | T-ID | 제목 | 의존 | [contract] | 상태 | 브랜치 slug | PR | Orca task |
 |---|---|---|---|---|---|---|---|
 | T0 | 모노레포 스캐폴드·CI | — | — | merged | t0-scaffold | #1 | `task_658a82e9f356` |
-| T1 | 정규 이벤트·snapshot·effect 계약과 fixture | T0 | ✔ | dispatched | t1-contract | | `task_1acc78f93775` |
+| T1 | 정규 이벤트·snapshot·effect 계약과 fixture | T0 | ✔ | in_review | t1-contract | #2 | `task_1acc78f93775` |
 | T2 | obs-websocket 5 감시·제어 + OBS 프로파일 | T0 | — | dispatched | t2-obs-monitor | | `task_6e0c43d6b74c` |
 | T3 | OAuth·비밀정보 vault·quota | T0 | — | ready | t3-auth-vault | | `task_62829ec3ab8b` |
 | T4 | SQLite 영속층(inbox·checkpoint·snapshot·outbox·deadline) | T1 | — | pending | t4-persistence | | `task_6bb9ff9f79c8` |
@@ -79,3 +79,6 @@
 | 2026-08-16 14:47 | **호스트 BSOD** bugcheck 0x00000050(PAGE_FAULT_IN_NONPAGED_AREA), 코디네이터·T1·T2 worker 세션 소실. T2의 OBS 스모크 질문에 대한 답(B)은 전달 전 소실. 이후 사용자가 15:35 UTC PC 종료, 2026-08-17 02:38 UTC 재기동 |
 | 2026-08-17 02:45 | 복구(런북 2.8): run-use로 재바인딩(새 터미널 `term_27da0856…`), T1/T2 dispatch는 Orca가 failed→task ready로 정리됨. `gh pr list`: #1만(merged). worktree 점검: t1-contract 커밋 1(b968e13, origin push됨)+미커밋 15항목, t2-obs-monitor 커밋 0+미커밋 8항목, NUL 손상 없음 |
 | 2026-08-17 03:00 | 같은 worktree에 재디스패치: T1 `ctx_7a375bf27a44`(term_52569c58…), T2 `ctx_67c1bd15a86b`(term_a6713d4e…). 복구 안내(새 ID만 사용·미커밋 보존·즉시 WIP 커밋+push·rebase·T2 질문 답 B)를 TASK와 함께 제출. 두 worker 모두 WIP 커밋·push 확인(T2 5b34f0e). 런북 3.6에 커밋 주기(10분 내 첫 커밋, 30분마다) 추가 |
+| 2026-08-17 03:13 | T1 worker_done(succeeded, PR #2, 251 tests, CI green). R-T1-1 리뷰 디스패치(ctx_d8d9a74e3fe2). `terminal create --command codex…`가 런타임 재시작 후 타임아웃 → 셸 생성 후 codex 명령 전송하는 2단계 fallback(`start_reviewer.py`) |
+| 2026-08-17 03:24 | **호스트 BSOD 2회째** bugcheck 0x00000050(minidump `081726-14937-01.dmp`; 1차와 동일 코드·유사 주소 `…880e`). 리뷰어(R-T1-1)·T2 worker 세션 소실. PR #2 리뷰 코멘트 없음 |
+| 2026-08-17 03:35 | 복구: run-use 재바인딩(`term_062ef090…`), 죽은 리뷰 task `task_fad386982ded`를 failed로 정리(저수준 dispatch라 worker-abandon 불가 → task-update), T2 재디스패치 `ctx_b7a70a2f34f8`(worktree 미커밋 3항목 보존, WIP 53e2375 push 확인), PR #2 리뷰 재시도 task `task_90e4598e62ac` → `ctx_06bc622a953d`. Orca는 T1 worker_done 시점에 T4–T7을 ready로 올리지만 **PR #2 머지 전에는 디스패치하지 않는다**(BOARD가 권위). 잠정 완화: 리뷰 진행 중에는 새 worker를 추가하지 않아 동시 에이전트 ≤2 유지(D-4 범위 내) |
