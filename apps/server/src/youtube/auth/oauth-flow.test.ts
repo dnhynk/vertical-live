@@ -95,8 +95,13 @@ describe('loginWithLoopback', () => {
     expect(response.status).toBe(200)
     const page = await response.text()
     expect(page).not.toContain('synthetic-authorization-code')
+    // No `persistGrant` here, so nothing was stored and the page says so
+    // (review round 2).
+    expect(page).toContain('Nothing was stored')
+    expect(page).not.toContain('was stored.')
 
-    const { tokenSet } = await login
+    const { tokenSet, persisted } = await login
+    expect(persisted).toBe(false)
     expect(tokenSet.refreshToken).toBe(server.initialRefreshToken)
     expect(tokenSet.accessToken).toContain('synthetic-access-token')
     expect(tokenSet.grantedScopes).toEqual([...REQUIRED_SCOPES])
@@ -258,8 +263,36 @@ describe('loginWithLoopback', () => {
 
     expect(order).toEqual(['persisted', 'page'])
     expect(response.status).toBe(200)
-    expect(await response.text()).toContain('stored in the Windows Credential Manager')
-    expect((await login).value?.tokenSet.refreshToken).toBe(server.initialRefreshToken)
+    expect(await response.text()).toContain('The credential was stored.')
+    const result = (await login).value
+    expect(result?.persisted).toBe(true)
+    expect(result?.tokenSet.refreshToken).toBe(server.initialRefreshToken)
+  })
+
+  it('claims storage only when a persistGrant callback actually ran', async () => {
+    // Review round 2: the exported helper — not just the CLI caller — has to
+    // tell the truth. This is the reviewer's probe: call it without
+    // `persistGrant` and check the page makes no storage claim.
+    const clock = new FakeClock()
+    let consentUrl = ''
+    const login = settle(
+      loginWithLoopback({
+        client: createClient(clock),
+        scopes: REQUIRED_SCOPES,
+        clock,
+        timeoutMs: 60_000,
+        onAuthorizationUrl: (url) => {
+          consentUrl = url
+        },
+      }),
+    )
+    await vi_waitFor(() => consentUrl !== '')
+
+    const page = await (await browserRedirect(consentUrl)).text()
+
+    expect(page).not.toMatch(/credential was stored|Credential Manager/i)
+    expect(page).toContain('handed to the terminal that started the login')
+    expect((await login).value?.persisted).toBe(false)
   })
 
   it('fails the login and says so in the browser when persistence fails', async () => {

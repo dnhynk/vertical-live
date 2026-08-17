@@ -39,6 +39,10 @@ export interface LoopbackLoginOptions {
   /**
    * Persists the grant (vault write) before the browser is shown the success
    * page. A rejection here fails the login and the browser is told so.
+   *
+   * Optional, and the page tells the truth either way (review round 2): without
+   * this callback nothing is stored, so the page says so and `persisted` is
+   * false. Only a caller that actually persists gets the "it was stored" claim.
    */
   readonly persistGrant?: (tokenSet: TokenSet) => Promise<void>
 }
@@ -46,6 +50,11 @@ export interface LoopbackLoginOptions {
 export interface LoopbackLoginResult {
   readonly tokenSet: TokenSet
   readonly redirectUri: string
+  /**
+   * Whether a `persistGrant` callback ran to completion. False means the grant
+   * exists only in the returned `tokenSet` — the caller owns storing it.
+   */
+  readonly persisted: boolean
 }
 
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1', 'localhost'])
@@ -104,14 +113,22 @@ export async function loginWithLoopback(
     })
     // Persistence happens before the browser is told anything succeeded
     // (review round 1, m2): the success page claims the credential is stored,
-    // so it may only appear once it is.
-    await options.persistGrant?.(tokenSet)
+    // so it may only appear once it is. When no `persistGrant` was supplied,
+    // nothing was stored and the page must not claim otherwise (round 2) — the
+    // claim follows what actually happened, not what the caller intended.
+    let persisted = false
+    if (options.persistGrant !== undefined) {
+      await options.persistGrant(tokenSet)
+      persisted = true
+    }
     await pending.settle({
       ok: true,
       title: 'Sign-in complete',
-      body: 'The credential was stored in the Windows Credential Manager. You can close this tab.',
+      body: persisted
+        ? 'The credential was stored. You can close this tab.'
+        : 'Nothing was stored: the credential was handed to the terminal that started the login. You can close this tab.',
     })
-    return { tokenSet, redirectUri: pending.redirectUri }
+    return { tokenSet, redirectUri: pending.redirectUri, persisted }
   } catch (error) {
     await pending.settle({
       ok: false,
