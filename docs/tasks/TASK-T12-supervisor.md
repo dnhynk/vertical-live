@@ -81,6 +81,17 @@ npm run test         -> Test Files 122 passed, Tests 1689 passed | 1 skipped (16
 npm run build        -> 전 워크스페이스 통과(@vl/server: copied 5 migration(s), docs/ops/data-map.md up to date)
 ```
 
+**GitHub Actions CI는 실행되지 못했다(이 브랜치 문제 아님).** PR #16의 run 32039717223은 3번의 attempt 모두 **step을 하나도 실행하지 못한 채** 2초 만에 실패했고, check-run annotation이 원인을 명시한다:
+
+```text
+gh api repos/dnhynk/vertical-live/check-runs/<job>/annotations
+→ "The job was not started because recent account payments have failed or your
+   spending limit needs to be increased. Please check the 'Billing & plans'
+   section in your settings"
+```
+
+같은 증상이 **`main`에서도** 2026-08-17 13:45 UTC 이후 전부 발생한다(4023689·688afd1·628e7cf·a885e6f 모두 failure, 마지막 성공은 13:42 UTC의 T9 브랜치 f35df65). 계정 결제·지출 한도 문제이므로 worker가 고칠 수 없다 — 코디네이터 경유로 사용자 결정이 필요하다(런북 2.5(6) 외부 자원·비용·계정). 위 게이트는 전부 로컬에서 CI와 **같은 명령**으로 실행해 통과했다.
+
 ## Not done / out of scope
 
 - **실계정 스모크**: 실제 OBS(E-3)·YouTube 방송·Discord·Uptime Kuma 검증. Gate 2와 T15 soak에서.
