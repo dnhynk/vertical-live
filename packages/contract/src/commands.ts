@@ -39,9 +39,10 @@ export const COMMAND_ALIASES: Readonly<Record<CommandName, CommandAliasEntry>> =
   PET: { ja: ['なでる'], icons: ['❤️'], en: ['PET'], nativeReview: 'pending' },
   // Vote commands only exist inside an open choice window (spec §7.1) and are
   // only user-attributable when the identity gate is open (spec §6.4, BOARD A-1).
-  VOTE_A: { ja: ['A'], icons: ['🅰️'], en: ['A'], nativeReview: 'pending' },
-  VOTE_B: { ja: ['B'], icons: ['🅱️'], en: ['B'], nativeReview: 'pending' },
-  VOTE_C: { ja: ['C'], icons: ['🇨'], en: ['C'], nativeReview: 'pending' },
+  // §7.1 lists the bare letters and no icon alias for them; none is invented here.
+  VOTE_A: { ja: [], icons: [], en: ['A'], nativeReview: 'pending' },
+  VOTE_B: { ja: [], icons: [], en: ['B'], nativeReview: 'pending' },
+  VOTE_C: { ja: [], icons: [], en: ['C'], nativeReview: 'pending' },
 }
 
 /**
