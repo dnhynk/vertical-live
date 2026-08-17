@@ -1,7 +1,7 @@
 # TASK-T14-renderer-screen
 
 - Task: T14 렌더러 화면 완성: 5초 무음 이해·감사 연출·i18n (`docs/tasks/TASK_SPECS.md` §T14)
-- Branch: `dnhynk/t14-renderer-screen` · PR: #<n>
+- Branch: `dnhynk/t14-renderer-screen` · PR: #13
 - Orca: task `task_82f32652b3cf` · dispatch `ctx_a4ea3cc17273`
 - Spec sections read: §5.1, §5.2, §5.3, §6.1, §6.2, §6.3, §6.4, §7.1, §7.3(6)(7), §8.3, §8.4, §8.5, §9.2, §9.4(4), §11 "화면", §12.1, §12.3, §12.5
 - BOARD decisions/assumptions relied on: D-1, A-1, A-9, A-10(정정본), A-11, A-14, A-15
