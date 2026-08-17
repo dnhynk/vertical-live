@@ -19,7 +19,7 @@
 | T6 | 명령 파서·모더레이션·입력 arbiter | T1 | — | merged | t6-command-parser | #8 | `task_a0f96dd7e038` |
 | T7 | 콘텐츠 디렉터·크리처 상태 모델(순수 도메인) | T1 | — | merged | t7-content-director | #6 | `task_e1e7531798ad` |
 | T8 | 상태 엔진(단일 writer·outbox·WS·ACK·유료 멱등) | T1b, T4, T6, T7 | — | merged | t8-state-engine | #12 | `task_0aadf1c96dcf` |
-| T9 | YouTube source adapter(gRPC streamList + REST fallback) | T3, T4, T8 | — | dispatched | t9-youtube-adapter | | `task_ec3d66a159bd` |
+| T9 | YouTube source adapter(gRPC streamList + REST fallback) | T3, T4, T8 | — | in_review | t9-youtube-adapter | #14 | `task_ec3d66a159bd` |
 | T10 | broadcast lifecycle·reconcile·한도 | T3, T4 | — | changes_requested | t10-broadcast-lifecycle | #11 | `task_41769f69d4b7` |
 | T11 | 로컬 시뮬레이터·replay·지연 계측 | T5, T8 | — | dispatched | t11-simulator-replay | | `task_9470df5be9b8` |
 | T12 | supervisor 상태기계·건강 집계·kill switch·알림·dead-man | T2, T8, T9, T10 | — | pending | t12-supervisor | | `task_560530cfb813` |
@@ -147,3 +147,4 @@
 | 2026-08-17 23:35 | R-T10-4 verdict request_changes(blocker: 절단 liveStreams reconcile이 decoy 키를 vault에 선기록; major 2: update 본문의 scheduledEndTime 미보존·title 재전송 불필요, selfDeclaredMadeForKids는 update 불가) → F-T10-4 `task_4cc98e9a8711` → T10 터미널. **E-4 보고 항목 등록**(round 4 도달). 진행: T9, T11 |
 | 2026-08-18 00:00 | F-T10-4 완료(vault 선기록 제거, update 본문 정확화; 1404 tests). R-T10-5 `task_7135e2ceb60d` → `ctx_3b684c6cc3cc`(review). 진행: T9, T11 |
 | 2026-08-18 00:30 | R-T10-5 verdict request_changes(잔존 blocker 1: 완전 목록에서 same-title stream 복수 시 decoy 선택·vault 기록) → F-T10-5 `task_e2ff1075905a`(stream attempt 마커/복수 후보 inconclusive). E-4 갱신: round 5. 진행: T9, T11 |
+| 2026-08-18 00:55 | T9 worker_done(succeeded, PR #14: [S4] proto verbatim(+import 1줄 표기), grpc-js 클라이언트 id,snippet만, 재연결·REST fallback·checkpoint 동일 트랜잭션·poison 전진, §9.4(3) 신호, 1354 tests; 실계정 필요 5항목 unverifiable 표기). R-T9-1 `task_dd6ff56bb263` → `ctx_d916a3197476`(review2). 진행: T11, F-T10-5 |
