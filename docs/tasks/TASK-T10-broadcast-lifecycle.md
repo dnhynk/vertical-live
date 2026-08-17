@@ -150,7 +150,9 @@ $ npm run build          -> contract, renderer(vite ✓ built), server(copied 2 
 
 round 1 수정 후 재실행(base `44fefaa`로 rebase): 위 5개 게이트 모두 통과, 테스트 **1129 passed | 1 skipped (1130)**, `copied 2 migration(s)`(003 재번호 후 dist 정리 확인).
 
-round 3 수정 후 재실행(base `7aee54d`로 rebase): format pass · lint pass · typecheck pass · test **1289 passed | 1 skipped (1290)** · build pass(`copied 3 migration(s)`, `docs/ops/data-map.md up to date`). `marker_cleared_at` 컬럼을 T13 데이터 맵에 선언하고 생성 스크립트를 다시 돌렸다.
+round 3 수정 후 재실행: format pass · lint pass · typecheck pass · test **1289 passed | 1 skipped (1290)** · build pass. `marker_cleared_at` 컬럼을 T13 데이터 맵에 선언하고 생성 스크립트를 다시 돌렸다.
+
+그 뒤 **T8(PR #12)이 머지되어 다시 rebase**했다(base `5df160b`). 충돌 2건은 통합 처리했다: (1) T8이 `migrate.test.ts`의 마이그레이션 목록을 디렉터리에서 파생하도록 바꿨으므로(새 마이그레이션이 머지 충돌이 되지 않게) 고정 목록을 버리고 T8 쪽을 채택했다 — 003은 T8의 004·005와 번호가 겹치지 않아 재번호가 필요 없다, (2) 생성물인 `docs/ops/data-map.md`는 손으로 병합하지 않고 `npm run data-map:generate -w @vl/server`로 다시 만들었다. 최종 게이트: format pass · lint pass · typecheck pass · test **1399 passed | 1 skipped (1400)** · build pass(`copied 5 migration(s)`, `docs/ops/data-map.md up to date`).
 
 round 2 수정 후 재실행(`git fetch && git rebase origin/main`): format `All matched files use Prettier code style!` · lint 0 problems · typecheck 무출력 · test **1141 passed | 1 skipped (1142)** · build `copied 2 migration(s)`.
 
