@@ -13,7 +13,9 @@ interface Harness {
   effectAcks: { effectId: string; appliedAt: string }[]
 }
 
-function createHarness(options: { effectRetentionMs?: number; maxRememberedEffects?: number } = {}): Harness {
+function createHarness(
+  options: { effectRetentionMs?: number; maxRememberedEffects?: number } = {},
+): Harness {
   const clock = new FakeClock()
   const log = new RendererLog(clock)
   const model = new ReadModel({ clock, log, ...options })
@@ -43,9 +45,7 @@ describe('ReadModel snapshots (spec §7.3(6)(7), §10.2)', () => {
     expect(harness.stateAcks).toEqual([])
 
     harness.model.markFramePresented()
-    expect(harness.stateAcks).toEqual([
-      { stateRevision: 7, appliedAt: '2026-08-17T00:00:00.000Z' },
-    ])
+    expect(harness.stateAcks).toEqual([{ stateRevision: 7, appliedAt: '2026-08-17T00:00:00.000Z' }])
     expect(harness.model.lastAppliedStateRevision).toBe(7)
   })
 

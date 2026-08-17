@@ -179,7 +179,11 @@ export class FakeTimers implements ConnectionTimers, HealthTimers {
       let next: ScheduledTask | null = null
       for (const task of this.#tasks.values()) {
         if (task.runAt > target) continue
-        if (next === null || task.runAt < next.runAt || (task.runAt === next.runAt && task.handle < next.handle)) {
+        if (
+          next === null ||
+          task.runAt < next.runAt ||
+          (task.runAt === next.runAt && task.handle < next.handle)
+        ) {
           next = task
         }
       }

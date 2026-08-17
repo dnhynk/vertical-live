@@ -56,7 +56,10 @@ export function sampleSnapshot(overrides: Partial<WorldSnapshot> = {}): WorldSna
         appliedAt: '2026-08-17T00:00:30.000Z',
         contributionCount: 12,
       },
-      growthOrChapterProgress: { textKey: 'sample.chapter_progress', progress: { current: 1, target: 3 } },
+      growthOrChapterProgress: {
+        textKey: 'sample.chapter_progress',
+        progress: { current: 1, target: 3 },
+      },
       nextChoiceAt: '2026-08-17T00:10:00.000Z',
     },
     ...overrides,
@@ -88,7 +91,12 @@ export function samplePaidThanksEffect(overrides: Record<string, unknown> = {}):
     endsAt: '2026-08-17T00:00:06.000Z',
     paid: true,
     kind: 'PAID_THANKS',
-    payload: { paidEventKind: 'SUPER_CHAT', iconId: 'sample-icon-thanks', tier: 2, fallback: false },
+    payload: {
+      paidEventKind: 'SUPER_CHAT',
+      iconId: 'sample-icon-thanks',
+      tier: 2,
+      fallback: false,
+    },
     ...overrides,
   })
 }

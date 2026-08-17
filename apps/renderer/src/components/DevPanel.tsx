@@ -52,8 +52,8 @@ export default function DevPanel({ runtime }: DevPanelProps) {
         </dd>
         <dt>webgl</dt>
         <dd data-testid="dev-webgl">
-          {runtime.health.webglContextLost ? 'lost' : 'ok'} (lost {runtime.webgl.lossCount},
-          restore attempts {runtime.webgl.restoreAttempts}, restored {runtime.webgl.restoredCount})
+          {runtime.health.webglContextLost ? 'lost' : 'ok'} (lost {runtime.webgl.lossCount}, restore
+          attempts {runtime.webgl.restoreAttempts}, restored {runtime.webgl.restoredCount})
         </dd>
         <dt>ja nativeReview</dt>
         <dd>{JA_NATIVE_REVIEW}</dd>
@@ -67,7 +67,9 @@ export default function DevPanel({ runtime }: DevPanelProps) {
           .map((entry, index) => (
             <li key={`${entry.at}-${index}`} className={`dev-log-${entry.level}`}>
               <span className="dev-log-code">{entry.code}</span>
-              {entry.detail === null ? null : <span className="dev-log-detail">{entry.detail}</span>}
+              {entry.detail === null ? null : (
+                <span className="dev-log-detail">{entry.detail}</span>
+              )}
             </li>
           ))}
       </ol>

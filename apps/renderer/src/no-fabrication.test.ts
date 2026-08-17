@@ -1,3 +1,6 @@
+// The renderer compiles without Node types on purpose (browser code). This one
+// test reads the sources from disk, so it asks for them locally.
+/// <reference types="node" />
 import { readFileSync, readdirSync } from 'node:fs'
 import { dirname, join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -50,10 +53,7 @@ const APPLICATION_FILES = FILES.filter(
   (file) => !file.path.includes('.test.') && !file.path.startsWith('testing/'),
 )
 
-function offenders(
-  files: readonly { path: string; source: string }[],
-  pattern: RegExp,
-): string[] {
+function offenders(files: readonly { path: string; source: string }[], pattern: RegExp): string[] {
   return files
     .filter((file) => pattern.test(file.source))
     .map((file) => file.path)
@@ -75,8 +75,9 @@ describe('renderer source invariants', () => {
   })
 
   it('keeps no state in the browser', () => {
-    expect(offenders(APPLICATION_FILES, /localStorage|sessionStorage|indexedDB|document\.cookie/))
-      .toEqual([])
+    expect(
+      offenders(APPLICATION_FILES, /localStorage|sessionStorage|indexedDB|document\.cookie/),
+    ).toEqual([])
   })
 
   it('only uses randomness through the injected reconnect-jitter seam', () => {

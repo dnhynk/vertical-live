@@ -1,18 +1,26 @@
-import { useEffect, useRef } from 'react'
-import { useGLTF } from '@react-three/drei'
+import { useRef } from 'react'
 import { useFrame, type ThreeElements } from '@react-three/fiber'
 import * as THREE from 'three'
 
 /**
- * Idle-pose constants. Everything here is purely visual — the renderer owns no
- * state (spec §10.2), so this component reads props only, never a store.
+ * Placeholder creature built from primitives in code.
  *
- * `public/pet.glb` is a development placeholder, not a release asset
- * (BOARD A-10, spec §16).
+ * It is deliberately generic — a rounded body, a head and two eyes, with no
+ * silhouette, marking or feature borrowed from anything: CLAUDE.md §3 and spec
+ * §12.1 forbid third-party characters and assets of unclear rights, and the
+ * prototype's `pet.glb` was found to be exactly that (2026-08-17, ticket
+ * "Questions asked"). It now sits in `legacy/renderer-prototype/`, off the
+ * product path, and `ASSETS.md` records both. The original creature design is
+ * T14.
+ *
+ * Everything here is visual: the renderer owns no state (spec §10.2) and this
+ * component reads props only, never a store. `isEating` is driven by an active
+ * ACTION_REACTION effect from the server.
  */
 const IDLE_COLOR = 0xffd84d
+const EYE_COLOR = 0x2b2118
 const IDLE_SCALE = 0.82
-const IDLE_POSITION_Y = -0.38
+const IDLE_POSITION_Y = -1.15
 const IDLE_SPIN_SPEED = 0.5
 
 export type PetProps = ThreeElements['group'] & {
@@ -22,18 +30,6 @@ export type PetProps = ThreeElements['group'] & {
 
 export default function Pet({ isEating = false, ...props }: PetProps) {
   const group = useRef<THREE.Group>(null)
-  const { scene } = useGLTF('/pet.glb')
-
-  useEffect(() => {
-    scene.traverse((child: THREE.Object3D) => {
-      if (!(child instanceof THREE.Mesh)) return
-      const materials = Array.isArray(child.material) ? child.material : [child.material]
-      for (const material of materials) {
-        const color = (material as { color?: THREE.Color }).color
-        if (color instanceof THREE.Color) color.setHex(IDLE_COLOR)
-      }
-    })
-  }, [scene])
 
   useFrame((state, delta) => {
     const current = group.current
@@ -56,9 +52,22 @@ export default function Pet({ isEating = false, ...props }: PetProps) {
 
   return (
     <group ref={group} {...props} dispose={null}>
-      <primitive object={scene} scale={0.78} position={[0, -0.35, 0]} />
+      <mesh position={[0, -0.15, 0]} scale={[1, 0.86, 1]}>
+        <sphereGeometry args={[0.62, 32, 24]} />
+        <meshStandardMaterial color={IDLE_COLOR} roughness={0.55} metalness={0.05} />
+      </mesh>
+      <mesh position={[0, 0.5, 0]}>
+        <sphereGeometry args={[0.42, 32, 24]} />
+        <meshStandardMaterial color={IDLE_COLOR} roughness={0.55} metalness={0.05} />
+      </mesh>
+      <mesh position={[-0.16, 0.56, 0.36]}>
+        <sphereGeometry args={[0.06, 16, 12]} />
+        <meshStandardMaterial color={EYE_COLOR} roughness={0.35} />
+      </mesh>
+      <mesh position={[0.16, 0.56, 0.36]}>
+        <sphereGeometry args={[0.06, 16, 12]} />
+        <meshStandardMaterial color={EYE_COLOR} roughness={0.35} />
+      </mesh>
     </group>
   )
 }
-
-useGLTF.preload('/pet.glb')

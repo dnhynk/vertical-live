@@ -50,7 +50,8 @@ export interface Timers {
 }
 
 export const globalTimers: Timers = {
-  setTimeout: (handler, timeoutMs) => globalThis.setTimeout(handler, timeoutMs) as unknown as number,
+  setTimeout: (handler, timeoutMs) =>
+    globalThis.setTimeout(handler, timeoutMs) as unknown as number,
   clearTimeout: (handle) => {
     globalThis.clearTimeout(handle)
   },

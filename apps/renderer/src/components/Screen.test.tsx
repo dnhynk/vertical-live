@@ -114,8 +114,10 @@ describe('Screen (spec §5.2, §9.2, §12.3)', () => {
     // 2026-08-17T00:00:30Z is 09:00 JST (spec §5.3).
     expect(query(harness, 'slot-last-action')?.textContent).toContain('09:00 JST')
     expect(query(harness, 'slot-progress')?.textContent).toContain('1 / 3')
-    expect(query(harness, 'slot-progress-bar')?.querySelector<HTMLElement>('.progress-fill')?.style
-      .width).toBe('33.33333333333333%')
+    expect(
+      query(harness, 'slot-progress-bar')?.querySelector<HTMLElement>('.progress-fill')?.style
+        .width,
+    ).toBe('33.33333333333333%')
     expect(query(harness, 'slot-next-choice')?.textContent).toContain('09:10 JST')
   })
 
