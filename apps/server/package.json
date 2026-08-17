@@ -14,5 +14,8 @@
   "scripts": {
     "build": "tsc --build",
     "start": "node dist/main.js"
+  },
+  "dependencies": {
+    "obs-websocket-js": "5.0.8"
   }
 }
