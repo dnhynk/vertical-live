@@ -114,6 +114,8 @@ interface SnapshotColumns {
   readonly state_revision: number
   readonly processed_ingest_seq: number
   readonly snapshot_json: string
+  /** Opaque writer-owned domain state (migration 002); NULL before T8. */
+  readonly engine_state_json: string | null
 }
 
 interface EffectColumns {
@@ -448,7 +450,7 @@ export class PersistenceStore {
         }
       }
 
-      this.#writeSnapshot(snapshot, input.revision, input.processedSeq)
+      this.#writeSnapshot(snapshot, input.revision, input.processedSeq, input.engineState)
       this.#writeTransitions(transitions)
       this.#markProcessed(processed)
       this.#assertCursorEarned(previousProcessedSeq, input.processedSeq)
@@ -473,26 +475,39 @@ export class PersistenceStore {
   #readSnapshotRow(): SnapshotColumns | null {
     const row = this.#db
       .prepare<[string], SnapshotColumns>(
-        `SELECT state_revision, processed_ingest_seq, snapshot_json
+        `SELECT state_revision, processed_ingest_seq, snapshot_json, engine_state_json
            FROM world_snapshot WHERE world_id = ?`,
       )
       .get(this.#worldId)
     return row ?? null
   }
 
-  #writeSnapshot(snapshot: WorldSnapshot, revision: number, processedSeq: number): void {
+  #writeSnapshot(
+    snapshot: WorldSnapshot,
+    revision: number,
+    processedSeq: number,
+    engineState: unknown,
+  ): void {
     this.#db
       .prepare(
         `INSERT INTO world_snapshot
-           (world_id, state_revision, processed_ingest_seq, snapshot_json, updated_at)
-         VALUES (?, ?, ?, ?, ?)
+           (world_id, state_revision, processed_ingest_seq, snapshot_json, engine_state_json, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)
          ON CONFLICT (world_id) DO UPDATE SET
            state_revision = excluded.state_revision,
            processed_ingest_seq = excluded.processed_ingest_seq,
            snapshot_json = excluded.snapshot_json,
+           engine_state_json = excluded.engine_state_json,
            updated_at = excluded.updated_at`,
       )
-      .run(this.#worldId, revision, processedSeq, JSON.stringify(snapshot), this.#clock.nowUtcIso())
+      .run(
+        this.#worldId,
+        revision,
+        processedSeq,
+        JSON.stringify(snapshot),
+        engineState === undefined ? null : JSON.stringify(engineState),
+        this.#clock.nowUtcIso(),
+      )
   }
 
   #writeTransitions(transitions: readonly StateTransitionRecord[]): void {
@@ -670,6 +685,20 @@ export class PersistenceStore {
     return { inserted, duplicate }
   }
 
+  /**
+   * Whether this paid event was already applied. The ledger's primary key makes
+   * the *write* idempotent; the writer needs the same answer one step earlier so
+   * it does not stage a second thanks for an event it already acknowledged
+   * (spec §11 유료 무결성). Single writer, so a read here and the commit that
+   * follows cannot interleave with another writer.
+   */
+  hasPaidLedgerEntry(eventKey: string): boolean {
+    const row = this.#db
+      .prepare<[string], { event_key: string }>('SELECT event_key FROM paid_ledger WHERE event_key = ?')
+      .get(eventKey)
+    return row !== undefined
+  }
+
   // ------------------------------------------------------------ gift combo
 
   /**
@@ -801,6 +830,10 @@ export class PersistenceStore {
       snapshot: row === null ? null : WorldSnapshotSchema.parse(JSON.parse(row.snapshot_json)),
       stateRevision: row?.state_revision ?? 0,
       processedIngestSeq: row?.processed_ingest_seq ?? 0,
+      engineState:
+        row?.engine_state_json === undefined || row.engine_state_json === null
+          ? null
+          : JSON.parse(row.engine_state_json),
       unackedEffects: this.listUnackedEffects(),
       dueDeadlines: this.listPendingDeadlines(now),
       checkpoints: this.listSourceCheckpoints(),
