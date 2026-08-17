@@ -9,11 +9,7 @@ import { createRng } from './rng.js'
 import { runWorld } from './run.js'
 import { commandEvent, paidEvent, testEvent } from './test-support.js'
 import { MILLIS_PER_HOUR, addMillis } from './time.js'
-import type {
-  StepInput,
-  WorldState,
-  WorldEffectCauseIsContractCause,
-} from './types.js'
+import type { StepInput, WorldState, WorldEffectCauseIsContractCause } from './types.js'
 
 const START = '2026-08-17T21:00:00.000Z' // 2026-08-18 06:00 JST, a chapter anchor
 const tuning = DEFAULT_WORLD_TUNING

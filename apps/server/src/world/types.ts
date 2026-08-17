@@ -203,8 +203,7 @@ export type EffectCause =
   | { readonly kind: 'deadline'; readonly deadlineKind: DeadlineKind }
 
 /** `true` only while every world cause is also a valid contract cause. */
-export type WorldEffectCauseIsContractCause =
-  EffectCause extends ContractEffectCause ? true : false
+export type WorldEffectCauseIsContractCause = EffectCause extends ContractEffectCause ? true : false
 
 /** Cause of an effect that must be traceable to a real event (paid audit). */
 export type EventCause = Extract<EffectCause, { kind: 'event' }>
