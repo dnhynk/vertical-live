@@ -164,6 +164,13 @@
   - 지연 계측(§7.3(8), §7.5): receivedAt→committedAt→publishedAt→ackedAt 히스토그램을 `/metrics`에 노출.
   - Effect 발행 멱등: 같은 effectId 재전송 시 렌더러가 무시하는 것을 전제로 재전송 정책(미ACK 재전송 간격)을 둔다.
   - `Clock` 주입, `POST /ingest/simulator`(T11이 사용) 수신 → `commitIngestBatch`.
+  - **추가(2026-08-17, 선행 task 리뷰 결과 — 의존 T1b·T4·T6·T7 머지본 기준)**:
+    - Effect 조립(A-17): T7 reducer가 반환하는 `EffectDraft.cause`({kind:'event',eventKey}|{kind:'deadline',deadlineKind})로 `@vl/contract` `Effect`를 조립한다 — `effectId` 발급, `stateRevision`, `causedByEventKey`(event면 eventKey, deadline이면 null), 유료는 event 유래만. T4 `effect_outbox`의 cause 컬럼(cause_kind/cause_deadline_kind/cause_deadline_id, CHECK 제약)에 맞춰 저장한다.
+    - T4 `commitStateTransition`의 커서 규칙: `processedSeq` 전진은 (이전, 새] 구간 모든 inbox 행의 처리 기록을 함께 넘겨야 통과한다(`ProcessedCursorError`) — 무효/미지원 envelope도 처리 기록을 남겨 전진시킨다(§7.3(3)).
+    - T7 `planDeadlineRecovery`/`recoverDeadlines`(replay/coalesce/skip + recurrence)를 시작 시 적용하고, 결과 `deliver`만 reducer에 전달한다. world tuning(`FRESHNESS_MINIMUMS` 등 provisional 값)은 `config/default.json`(`provisional: true`)에서 읽어 `step()`에 주입한다(A-15).
+    - T6 arbiter의 창 마감 payload는 명령별 `{directApplied, aggregatedOnly}`이다 — `aggregatedOnly`만 집계 적용해 재적용·유실을 막는다(§6.4). `command.argument`는 현재 선택창(`mission.choices`)이 기대하는 어휘일 때만 상태에 들어가고, 그 외는 이유 코드와 함께 버린다(원문 미저장).
+    - `.gitignore`의 `data/` 규칙을 `/data/`(저장소 루트 DB 디렉터리만)로 좁힌다 — T6에서 `apps/server/src/input/data`가 숨겨졌던 사례.
+    - `POST /ingest/simulator`는 `simulator.enabled=false`면 404, loopback + bearer token(vault)이며 envelope 스키마 검증 실패는 400.
 - **합격 기준**
   1. replay 테스트: 같은 inbox 내용으로 두 번 부팅하면 같은 snapshot·revision(결정성) — T7 시드 고정.
   2. 유료 무결성: 동일 Super Chat 두 번 → paid_ledger 1건·effect 1건; Gift combo 시퀀스에서 delta만 반영; 같은 paid effectId 재발행 시 새 effect row 없음.
