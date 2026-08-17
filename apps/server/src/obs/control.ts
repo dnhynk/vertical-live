@@ -65,6 +65,17 @@ export interface StreamServiceResult {
   readonly keyConfigured: boolean
 }
 
+/**
+ * Outcome of a Browser Source URL command. Like `StreamServiceResult` it names
+ * no secret: `url` is the tokenless configured URL, and `tokenConfigured` says
+ * whether OBS now holds one (spec §10.2).
+ */
+export interface BrowserSourceUrlResult {
+  readonly inputName: string
+  readonly url: string
+  readonly tokenConfigured: boolean
+}
+
 export interface ObsControlOptions {
   readonly source: ObsRequester
   readonly config: ObsConfig
@@ -139,6 +150,108 @@ export class ObsControl {
     }
   }
 
+  /**
+   * Removes the injected stream key from OBS again (BOARD A-16, the half
+   * `docs/ops/obs-setup.md` §3 left to T17).
+   *
+   * OBS serialises the service settings it holds into the active profile's
+   * `service.json`, so after a run the key sits on disk next to the profile.
+   * Clearing it on stop means the window in which the host holds a copy is the
+   * run itself, not "until someone remembers". The vault keeps its copy — it is
+   * the system of record — so the next start injects the key again.
+   *
+   * Refuses while the output is active: emptying the key under a live stream
+   * would leave OBS with no credentials for the next `StartStream` while
+   * nothing looked wrong.
+   */
+  async clearStreamServiceKey(): Promise<StreamServiceResult> {
+    const status = await this.#source.call('GetStreamStatus')
+    if (status.outputActive) {
+      throw new ObsCommandError(
+        'stream_active',
+        'refusing to clear the stream key while the output is active; stop the stream first',
+      )
+    }
+
+    const server = this.#config.streamIngestUrl
+    await this.#source.call('SetStreamServiceSettings', {
+      streamServiceType: CUSTOM_STREAM_SERVICE_TYPE,
+      streamServiceSettings: { server, key: '' },
+    })
+
+    const applied = await this.#source.call('GetStreamServiceSettings')
+    const appliedKey = readString(applied.streamServiceSettings, 'key')
+    if (appliedKey !== undefined && appliedKey !== '') {
+      throw new ObsCommandError(
+        'stream_service_not_cleared',
+        'obs still reports a configured stream key after the clear',
+      )
+    }
+
+    return { streamServiceType: applied.streamServiceType, server, keyConfigured: false }
+  }
+
+  /**
+   * Points the renderer Browser Source at the loopback page **with the vault's
+   * renderer token** (spec §10.2: `/ws/renderer` authenticates the upgrade).
+   *
+   * Same custody rule as the stream key (BOARD A-16): the operator never types
+   * the token into OBS, `config/default.json` carries the tokenless URL, and the
+   * token reaches OBS only at runtime. The result deliberately carries the
+   * redacted URL — the token is not returned, and so cannot be logged by a
+   * caller that logs the result (the mistake R-T8-2 found in the dev panel).
+   */
+  async setRendererSourceFromVault(): Promise<BrowserSourceUrlResult> {
+    const token = await requireSecret(
+      this.#secrets,
+      'server.rendererToken',
+      'store it with "npm run secrets -w @vl/server -- set server.rendererToken". Spec §10.2, BOARD A-16: the vault is the token\'s system of record — it is never in the repository, the game DB, logs, or on screen. OBS caches the URL it is given in the scene-collection JSON; clearRendererSourceToken() removes it on stop',
+    )
+    const name = this.#config.browserSourceName
+    await this.#assertBrowserSource(name)
+
+    const url = new URL(this.#config.browserSourceUrl)
+    url.searchParams.set('token', token)
+    await this.#source.call('SetInputSettings', {
+      inputName: name,
+      inputSettings: { url: url.toString() },
+    })
+
+    const applied = await this.#readBrowserSourceUrl(name)
+    if (applied === undefined || applied.searchParams.get('token') !== token) {
+      throw new ObsCommandError(
+        'browser_source_not_applied',
+        `obs did not apply the renderer URL on ${JSON.stringify(name)}`,
+      )
+    }
+
+    return { inputName: name, url: this.#config.browserSourceUrl, tokenConfigured: true }
+  }
+
+  /**
+   * Puts the tokenless URL back, so OBS's scene-collection JSON stops holding
+   * the renderer token once the run is over (BOARD A-16, `docs/ops/obs-setup.md`).
+   */
+  async clearRendererSourceToken(): Promise<BrowserSourceUrlResult> {
+    const name = this.#config.browserSourceName
+    await this.#assertBrowserSource(name)
+
+    await this.#source.call('SetInputSettings', {
+      inputName: name,
+      inputSettings: { url: this.#config.browserSourceUrl },
+    })
+
+    const applied = await this.#readBrowserSourceUrl(name)
+    if (applied !== undefined && applied.searchParams.has('token')) {
+      throw new ObsCommandError(
+        'browser_source_not_cleared',
+        `obs still reports a token on ${JSON.stringify(name)} after the clear`,
+      )
+    }
+
+    return { inputName: name, url: this.#config.browserSourceUrl, tokenConfigured: false }
+  }
+
   /** Idempotent: an already-running output is reported, not re-started. */
   async startStream(): Promise<StreamCommandResult> {
     return this.#setStreamActive(true)
@@ -158,31 +271,14 @@ export class ObsControl {
    */
   async refreshBrowserSource(inputName?: string): Promise<BrowserSourceRefreshResult> {
     const name = inputName ?? this.#config.browserSourceName
-    const { inputs } = await this.#source.call('GetInputList')
-
-    const input = inputs.find((entry) => readString(entry, 'inputName') === name)
-    if (input === undefined) {
-      throw new ObsCommandError('input_not_found', `no OBS input named ${JSON.stringify(name)}`)
-    }
-
-    const inputKind = readString(input, 'inputKind') ?? ''
-    const unversionedInputKind = readString(input, 'unversionedInputKind') ?? ''
-    if (
-      inputKind !== BROWSER_SOURCE_INPUT_KIND &&
-      unversionedInputKind !== BROWSER_SOURCE_INPUT_KIND
-    ) {
-      throw new ObsCommandError(
-        'not_a_browser_source',
-        `input ${JSON.stringify(name)} is kind ${JSON.stringify(inputKind)}, not ${BROWSER_SOURCE_INPUT_KIND}`,
-      )
-    }
+    const inputKind = await this.#assertBrowserSource(name)
 
     await this.#source.call('PressInputPropertiesButton', {
       inputName: name,
       propertyName: BROWSER_SOURCE_REFRESH_PROPERTY,
     })
 
-    return { inputName: name, inputKind: inputKind === '' ? unversionedInputKind : inputKind }
+    return { inputName: name, inputKind }
   }
 
   /** Switches the program scene and waits until OBS reports it as current. */
@@ -207,6 +303,41 @@ export class ObsControl {
     }, `program scene = ${sceneName}`)
 
     return { sceneName, changed: true }
+  }
+
+  /**
+   * Shared by the refresh and both URL commands: the input must exist and be a
+   * Browser Source. Returns the kind OBS reported, for callers that echo it.
+   */
+  async #assertBrowserSource(name: string): Promise<string> {
+    const { inputs } = await this.#source.call('GetInputList')
+    const input = inputs.find((entry) => readString(entry, 'inputName') === name)
+    if (input === undefined) {
+      throw new ObsCommandError('input_not_found', `no OBS input named ${JSON.stringify(name)}`)
+    }
+    const inputKind = readString(input, 'inputKind') ?? ''
+    const unversionedInputKind = readString(input, 'unversionedInputKind') ?? ''
+    if (
+      inputKind !== BROWSER_SOURCE_INPUT_KIND &&
+      unversionedInputKind !== BROWSER_SOURCE_INPUT_KIND
+    ) {
+      throw new ObsCommandError(
+        'not_a_browser_source',
+        `input ${JSON.stringify(name)} is kind ${JSON.stringify(inputKind)}, not ${BROWSER_SOURCE_INPUT_KIND}`,
+      )
+    }
+    return inputKind === '' ? unversionedInputKind : inputKind
+  }
+
+  async #readBrowserSourceUrl(name: string): Promise<URL | undefined> {
+    const applied = await this.#source.call('GetInputSettings', { inputName: name })
+    const value = readString(applied.inputSettings, 'url')
+    if (value === undefined) return undefined
+    try {
+      return new URL(value)
+    } catch {
+      return undefined
+    }
   }
 
   async #setStreamActive(active: boolean): Promise<StreamCommandResult> {

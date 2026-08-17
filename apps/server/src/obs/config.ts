@@ -22,6 +22,29 @@ export interface ObsThresholdConfig {
   readonly stalledSamplesDegradedAt: number
 }
 
+/**
+ * How the host launches OBS itself (T17). It is off by default because the
+ * executable path is host-specific and because a deployment without it is a
+ * legitimate one: spec §9.1 leaves 최초 공개 and the host setup with a person.
+ * When it is off, the supervisor's `obs-process` escalation fails honestly
+ * instead of pretending to have relaunched anything.
+ */
+export interface ObsProcessConfig {
+  readonly enabled: boolean
+  readonly executablePath: string
+  /** OBS profile to start with (`--profile`, official launch parameter). */
+  readonly profile: string
+  /** OBS scene collection to start with (`--collection`). */
+  readonly sceneCollection: string
+  /**
+   * Extra documented launch parameters. Only flags listed in
+   * https://obsproject.com/kb/launch-parameters belong here; a flag that is not
+   * in that list is either ignored or gone (`--disable-shutdown-check` was
+   * removed in OBS 32.0.0), and an ops script must not depend on it.
+   */
+  readonly extraArgs: readonly string[]
+}
+
 export interface ObsConfig {
   readonly url: string
   readonly connectTimeoutMs: number
@@ -30,6 +53,14 @@ export interface ObsConfig {
   readonly commandVerifyIntervalMs: number
   /** Browser Source input that shows the renderer; target of `refreshnocache`. */
   readonly browserSourceName: string
+  /**
+   * The renderer page that Browser Source opens, **without** the token. The
+   * token is a vault secret (`server.rendererToken`, T8) that the server injects
+   * at runtime with `SetInputSettings`, the same custody rule the stream key
+   * follows (BOARD A-16). It is never in this file, and OBS's cached copy in the
+   * scene-collection JSON is cleared on stop.
+   */
+  readonly browserSourceUrl: string
   /**
    * RTMPS ingestion URL the server injects with the vault's stream key before
    * going live. The key itself never appears in config: the vault is its system
@@ -40,6 +71,7 @@ export interface ObsConfig {
   readonly streamIngestUrl: string
   readonly reconnect: ObsReconnectConfig
   readonly thresholds: ObsThresholdConfig
+  readonly process: ObsProcessConfig
   /** Keys whose values are provisional (BOARD A-15). */
   readonly provisional: readonly string[]
 }
@@ -86,6 +118,7 @@ export function loadObsConfig(options: LoadObsConfigOptions = {}): ObsConfig {
   const section = readObject(obs, 'obs')
   const reconnect = readObject(section['reconnect'], 'obs.reconnect')
   const thresholds = readObject(section['thresholds'], 'obs.thresholds')
+  const obsProcess = readObject(section['process'], 'obs.process')
 
   const url = env['VL_OBS_URL'] ?? readString(section['url'], 'obs.url')
   assertWebSocketUrl(url, options.allowNonLoopback === true)
@@ -103,6 +136,9 @@ export function loadObsConfig(options: LoadObsConfigOptions = {}): ObsConfig {
       'obs.commandVerifyIntervalMs',
     ),
     browserSourceName: readString(section['browserSourceName'], 'obs.browserSourceName'),
+    browserSourceUrl: assertTokenlessUrl(
+      readString(section['browserSourceUrl'], 'obs.browserSourceUrl'),
+    ),
     streamIngestUrl: readString(section['streamIngestUrl'], 'obs.streamIngestUrl'),
     reconnect: Object.freeze({
       initialDelayMs: readPositiveInt(reconnect['initialDelayMs'], 'obs.reconnect.initialDelayMs'),
@@ -122,6 +158,19 @@ export function loadObsConfig(options: LoadObsConfigOptions = {}): ObsConfig {
         thresholds['stalledSamplesDegradedAt'],
         'obs.thresholds.stalledSamplesDegradedAt',
       ),
+    }),
+    process: Object.freeze({
+      enabled: readBoolean(
+        env['VL_OBS_PROCESS_ENABLED'] ?? obsProcess['enabled'],
+        'obs.process.enabled',
+      ),
+      executablePath: readString(
+        env['VL_OBS_EXECUTABLE'] ?? obsProcess['executablePath'],
+        'obs.process.executablePath',
+      ),
+      profile: readString(obsProcess['profile'], 'obs.process.profile'),
+      sceneCollection: readString(obsProcess['sceneCollection'], 'obs.process.sceneCollection'),
+      extraArgs: Object.freeze(readStringArray(obsProcess['extraArgs'], 'obs.process.extraArgs')),
     }),
     provisional: Object.freeze(readStringArray(section['provisional'], 'obs.provisional')),
   })
@@ -146,6 +195,34 @@ export function assertWebSocketUrl(url: string, allowNonLoopback: boolean): void
   }
 }
 
+/**
+ * The renderer page URL in config must not carry a token: the vault is the
+ * token's system of record and the server injects it at runtime (spec §10.2,
+ * BOARD A-16). A token here would be a secret in the repository.
+ */
+export function assertTokenlessUrl(url: string): string {
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    throw new ObsConfigError(`obs.browserSourceUrl is not a URL: ${url}`)
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new ObsConfigError(`obs.browserSourceUrl must be http(s), got ${parsed.protocol}`)
+  }
+  if (!LOOPBACK_HOSTS.has(parsed.hostname)) {
+    throw new ObsConfigError(
+      `obs.browserSourceUrl must be loopback (spec §10.2), got host ${parsed.hostname}`,
+    )
+  }
+  if (parsed.searchParams.has('token')) {
+    throw new ObsConfigError(
+      'obs.browserSourceUrl must not contain a token; the vault is its system of record (BOARD A-16)',
+    )
+  }
+  return url
+}
+
 function readObject(value: unknown, path: string): Record<string, unknown> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     throw new ObsConfigError(`${path} must be an object`)
@@ -158,6 +235,13 @@ function readString(value: unknown, path: string): string {
     throw new ObsConfigError(`${path} must be a non-empty string`)
   }
   return value
+}
+
+function readBoolean(value: unknown, path: string): boolean {
+  if (typeof value === 'boolean') return value
+  if (value === 'true') return true
+  if (value === 'false') return false
+  throw new ObsConfigError(`${path} must be a boolean`)
 }
 
 function readPositiveNumber(value: unknown, path: string): number {

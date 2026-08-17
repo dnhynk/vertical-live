@@ -1,4 +1,25 @@
 {
+  "archive": {
+    "enabled": true,
+    "retentionDays": 7,
+    "maxTotalBytes": 214748364800,
+    "minFreeBytes": 53687091200,
+    "activeFileGraceMs": 600000,
+    "roots": [
+      {
+        "name": "recordings",
+        "path": "data/archive/recordings",
+        "extensions": [".mkv", ".mp4", ".flv", ".ts", ".mov"]
+      },
+      {
+        "name": "diagnostics",
+        "path": "data/diagnostics/screenshots",
+        "extensions": [".jpg", ".jpeg", ".png"]
+      },
+      { "name": "ops-logs", "path": "data/ops/logs", "extensions": [".log"] }
+    ],
+    "provisional": ["retentionDays", "maxTotalBytes", "minFreeBytes", "activeFileGraceMs", "roots"]
+  },
   "db": {
     "file": "data/vertical-live.db",
     "busyTimeoutMs": 5000,
@@ -45,6 +66,11 @@
       "window.maxDirectPerWindow"
     ]
   },
+  "renderer": {
+    "staticDir": "apps/renderer/dist",
+    "host": "127.0.0.1",
+    "port": 5173
+  },
   "obs": {
     "url": "ws://127.0.0.1:4455",
     "connectTimeoutMs": 5000,
@@ -52,6 +78,7 @@
     "commandVerifyTimeoutMs": 5000,
     "commandVerifyIntervalMs": 250,
     "browserSourceName": "vertical-live-renderer",
+    "browserSourceUrl": "http://127.0.0.1:5173/?mode=broadcast",
     "streamIngestUrl": "rtmps://a.rtmps.youtube.com:443/live2",
     "reconnect": {
       "initialDelayMs": 1000,
@@ -62,6 +89,13 @@
       "congestionDegradedAt": 0.2,
       "skippedFrameRatioDegradedAt": 0.01,
       "stalledSamplesDegradedAt": 2
+    },
+    "process": {
+      "enabled": false,
+      "executablePath": "C:\\Program Files\\obs-studio\\bin\\64bit\\obs64.exe",
+      "profile": "vertical-live",
+      "sceneCollection": "vertical-live",
+      "extraArgs": ["--disable-updater", "--disable-missing-files-check"]
     },
     "provisional": [
       "pollIntervalMs",

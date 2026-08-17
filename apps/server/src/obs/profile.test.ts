@@ -3,6 +3,8 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
+import { loadObsConfig } from './config.js'
+
 /**
  * Guards the shipped OBS profile in `ops/obs/` against the official recommended
  * settings it claims to implement, so `docs/ops/obs-setup.md`'s comparison table
@@ -128,6 +130,15 @@ describe('ops/obs scene collection', () => {
     expect(settings['width']).toBe(1080)
     expect(settings['height']).toBe(1920)
     expect(settings['url']).toBe('http://127.0.0.1:5173/?mode=broadcast')
+  })
+
+  it('ships the same tokenless URL the server injects into (T17, BOARD A-16)', () => {
+    // The scene JSON and `obs.browserSourceUrl` must name the same page: the
+    // server rewrites this URL at start-up to add the vault's renderer token,
+    // and a scene pointing somewhere else would silently keep the old page.
+    const settings = browser?.['settings'] as Record<string, unknown>
+    expect(settings['url']).toBe(loadObsConfig().browserSourceUrl)
+    expect(String(settings['url'])).not.toContain('token=')
   })
 
   it('keeps the Browser Source running unattended and without OBS page control', () => {

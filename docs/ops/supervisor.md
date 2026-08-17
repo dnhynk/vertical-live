@@ -6,7 +6,7 @@
 
 ## 0. 이 문서가 다루지 않는 것
 
-- OBS 프로세스 자동 시작·재시작 스크립트, Windows 로그온 세션·sleep·GPU reset → **T17**. T12는 `obs-process` 컴포넌트의 자리와 escalation만 만들어 두고, 실제 실행기는 T17이 주입한다(주입 전에는 escalation이 정직하게 실패하고 `safe_stopped`로 간다).
+- OBS 프로세스 자동 시작·재시작 스크립트, Windows 로그온 세션·sleep·GPU reset → **`docs/ops/windows-host.md`(T17)**. T12는 `obs-process` 컴포넌트의 자리와 escalation만 만들어 뒀고, 실행기는 T17이 주입했다(`ObsProcessLauncher`, `obs.process`).
 - fault matrix·72시간 soak 실행 → **T15**
 - 합격선 숫자 확정 → Gate 0/2(BOARD A-15). `config/default.json`의 `supervisor.provisional`에 있는 값은 전부 잠정치이며 **합격선이 아니다**.
 
@@ -86,7 +86,7 @@ npm run kill -w @vl/server -- --clear
 | `obs-connection` | **`obs.ObsClient`** | 없음 — T2가 이미 backoff 재연결 루프를 가지고 있어 T12는 **관찰만** 한다 | `obs-process`로 escalation(아래) |
 | `obs-stream` | supervisor | `startStream()` | `safe_stopped` |
 | `renderer-source` | supervisor | Browser Source `refreshnocache` | `safe_stopped` |
-| `obs-process` | supervisor | OBS 실행기(**T17 주입 전에는 실패**) | `safe_stopped` |
+| `obs-process` | supervisor | `ObsProcessLauncher`(T17). `obs.process.enabled=false`이거나 실행 파일이 없거나 **OBS가 이미 떠 있으면 거부**한다 | `safe_stopped` |
 
 degraded family → 컴포넌트 대응은 `componentsToRestart()`에 있다. 두 family는 일부러 아무 재시작도 요청하지 않는다.
 
@@ -218,6 +218,6 @@ npm run secrets -w @vl/server -- set monitoring.deadManPushUrl
 
 ## 8. 알려진 한계
 
-- **`obs-process` 실행기 없음**: T17이 주입하기 전에는 escalation이 실패하고 `safe_stopped`로 간다(위장된 성공보다 낫다).
+- **`obs-process` 실행기는 죽은 OBS만 되살린다**(T17): OBS가 살아 있는데 obs-websocket이 응답하지 않으면 실행기가 `already_running`으로 거부한다. 두 번째 인스턴스는 "이미 실행 중" 대화상자만 띄우고 아무것도 복구하지 못하며, 이 프로세스는 운영자의 OBS를 스스로 죽이지 않는다. 그 상황은 예산이 소진되면 `safe_stopped`가 되고 사람이 처리한다(`docs/ops/windows-host.md` 7장). `obs.process.enabled=false`일 때도 같은 방식으로 정직하게 실패한다.
 - **실제 OBS·YouTube·Discord·Uptime Kuma 스모크 미실행**: 이 저장소의 테스트는 전부 fake·mock이다. 실제 자원 검증은 Gate 2(E-2·E-3)와 T15 soak에서 한다. 특히 `integrations.obs`/`integrations.broadcast`를 켠 상태의 `main.ts` 조립은 실계정·실 OBS가 있어야 확인되므로, 부품별 테스트는 있어도 **조립 자체는 아직 실행 검증되지 않았다**.
 - **시작 순서 재시도는 전체 재실행**: step은 각각 멱등이지만(§5), 부분 재개가 아니라 처음부터 다시 돈다.

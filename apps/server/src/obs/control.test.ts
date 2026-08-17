@@ -265,6 +265,100 @@ describe('ObsControl stream service injection', () => {
   })
 })
 
+/**
+ * BOARD A-16's remaining half, assigned to T17: what OBS keeps after a run.
+ * The stream key lands in the profile's `service.json` and the renderer token
+ * lands in the scene-collection JSON, so both are put in at start and taken out
+ * at stop, and the vault stays the system of record for both.
+ */
+describe('ObsControl secret custody on stop (T17, BOARD A-16)', () => {
+  const TEST_RENDERER_TOKEN = 'test-renderer-token'
+
+  function commandsWithToken() {
+    return control(
+      { streamIngestUrl: TEST_INGEST_URL },
+      new EnvSecretProvider({
+        VL_YOUTUBE_STREAM_KEY: TEST_STREAM_KEY,
+        VL_RENDERER_TOKEN: TEST_RENDERER_TOKEN,
+      }),
+    )
+  }
+
+  it('clears the injected stream key so the profile stops holding it', async () => {
+    const commands = commandsWithToken()
+    await commands.setStreamServiceFromVault()
+
+    const result = await commands.clearStreamServiceKey()
+
+    expect(result.keyConfigured).toBe(false)
+    expect(server.state.streamService.streamServiceSettings['key']).toBe('')
+    expect(JSON.stringify(result)).not.toContain(TEST_STREAM_KEY)
+  })
+
+  it('refuses to clear the key while the output is active', async () => {
+    const commands = commandsWithToken()
+    server.state.streamStatus.outputActive = true
+
+    const error = await commands.clearStreamServiceKey().catch((caught: unknown) => caught)
+
+    expect((error as ObsCommandError).reason).toBe('stream_active')
+    expect(requestTypes()).not.toContain('SetStreamServiceSettings')
+  })
+
+  it('injects the renderer token into the Browser Source URL', async () => {
+    const result = await commandsWithToken().setRendererSourceFromVault()
+
+    const applied = String(
+      server.state.inputs.find((input) => input.inputName === 'test-browser-source')
+        ?.inputSettings?.['url'],
+    )
+    expect(new URL(applied).searchParams.get('token')).toBe(TEST_RENDERER_TOKEN)
+    expect(new URL(applied).searchParams.get('mode')).toBe('broadcast')
+    // The result is what a caller might log, so it carries no token.
+    expect(result).toEqual({
+      inputName: 'test-browser-source',
+      url: 'http://127.0.0.1:5173/?mode=broadcast',
+      tokenConfigured: true,
+    })
+    expect(JSON.stringify(result)).not.toContain(TEST_RENDERER_TOKEN)
+  })
+
+  it('removes the token from the Browser Source URL again', async () => {
+    const commands = commandsWithToken()
+    await commands.setRendererSourceFromVault()
+
+    const result = await commands.clearRendererSourceToken()
+
+    const applied = String(
+      server.state.inputs.find((input) => input.inputName === 'test-browser-source')
+        ?.inputSettings?.['url'],
+    )
+    expect(new URL(applied).searchParams.has('token')).toBe(false)
+    expect(result.tokenConfigured).toBe(false)
+  })
+
+  it('refuses to inject into an input that is not a Browser Source', async () => {
+    const commands = control(
+      { browserSourceName: 'test-color-source' },
+      new EnvSecretProvider({ VL_RENDERER_TOKEN: TEST_RENDERER_TOKEN }),
+    )
+
+    const error = await commands.setRendererSourceFromVault().catch((caught: unknown) => caught)
+
+    expect((error as ObsCommandError).reason).toBe('not_a_browser_source')
+  })
+
+  it('refuses to inject when the vault has no renderer token, and names no value', async () => {
+    const commands = control({}, new EnvSecretProvider({}))
+
+    const error = await commands.setRendererSourceFromVault().catch((caught: unknown) => caught)
+
+    expect(error).toBeInstanceOf(MissingSecretError)
+    expect((error as Error).message).toContain('server.rendererToken')
+    expect((error as Error).message).not.toContain(TEST_RENDERER_TOKEN)
+  })
+})
+
 describe('ObsControl without a connection', () => {
   it('refuses every command when the client is not connected', async () => {
     const commands = control()
