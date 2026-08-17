@@ -35,7 +35,7 @@ client-side 7일 / Google 측 30일 분기로 처리하고, 사용자 삭제 요
 6. **scheduler `privacy/scheduler.ts`** — 주입된 `Clock`으로 주기 실행, `runNow()`/`start()`/`stop()`, 결과 sink(T12 알림용).
 7. **철회 `privacy/revocation.ts`** — `AuthRevokedEvent` → (a) vault의 refresh token 제거(원격 revoke는 T3
    `TokenManager.revokeGrant`가 이미 수행; 이미 latch된 상태면 중복 호출하지 않는다), (b) `authorized_api_data` 전량 삭제,
-   (c) reason→class로 `allowed_until`(7일/30일) 기록.
+   (c) reason→class로 `deadline_at`(7일/30일) 기록.
 8. **사용자 삭제 요청 `privacy/deletion-request.ts`** — 식별자를 **인자로 받지 않는다**. 라이브 스키마에서 식별자 컬럼을
    스캔해 0건임을 확인하고 원장에 `no_stored_identifiers`로 기록. 식별자 컬럼이 존재하면(gate 개방 후) 명시적으로 실패한다.
 9. **파생 지표 가드 `privacy/derived-metrics.ts` + 테스트** — §14.1 "승인 후 후보" 지표 레지스트리와, 저장소 소스·DB
@@ -71,7 +71,7 @@ client-side 7일 / Google 측 30일 분기로 처리하고, 사용자 삭제 요
 | `sweep.intervalMs` | 3600000 (1시간) | provisional | 스펙에 sweep 주기 값이 없다. 30일 기한을 1시간 해상도로 지키기에 충분하고 부하가 낮다. Gate 2에서 교체(A-15) |
 | `sweep.batchLimit` | 5000 | provisional | 단일 DELETE가 write lock을 오래 잡지 않게 하는 배치 크기. 근거 수치 없음 |
 | `missing_refresh_token` → `client_side`(7일) | client_side | 결정(근거 있음) | vault에 refresh token이 없다는 것은 "이 프로세스가 쓸 수 있는 동의가 남아 있지 않다"는 뜻이고, 이 부재가 철회의 **영속 기록**이다(재시작 시 `auth_revoked`가 다시 발생해 삭제가 재실행된다). 두 분기 중 더 엄격한 쪽을 택하는 것은 항상 정책 준수 방향이다 |
-| `invalid_grant` → `google_side`(30일) | google_side | 결정(근거 있음) | token endpoint가 `invalid_grant`를 주는 대표 원인이 Google 계정 설정에서의 권한 철회(§12.4 마지막 분기) |
+| `invalid_grant` → `provider_side`(30일) | provider_side | 결정(근거 있음) | token endpoint가 `invalid_grant`를 주는 대표 원인이 Google 계정 설정에서의 권한 철회(§12.4 마지막 분기) |
 | `operator_revoked` → `client_side`(7일) | client_side | 결정(근거 있음) | 운영자가 우리 CLI로 철회 = client-side consent 철회(§12.4) |
 | `metrics_daily` 항목 | `status: "planned"` | provisional(스키마 미존재) | 지표 집계 테이블은 T12/T15 소관. 정책은 지금 고정하고, 테이블이 생기면 커버리지 테스트가 실재를 요구한다 |
 
