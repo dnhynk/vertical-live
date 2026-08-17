@@ -56,6 +56,8 @@
 
 ## Result
 
+> **정정(round 2, 2026-08-17).** 아래 round 1 서술은 합격 기준 1과 4를 "met"으로 적었지만 리뷰가 반례를 냈고 재현됐다. 기준 1은 체크인된 fixture만 통과했을 뿐 형식 오류 숫자·비ISO 시각은 envelope를 만들지 못하고 throw했으며, 기준 4는 생성된 JSON Schema만 검사해 TS 전용 필드 `NormalizedItemFacts.commandText`를 보지 못했다. 두 기준의 현재 상태와 근거는 아래 표(round 2 행)와 `## Review round 1`에 있다.
+
 Plan 1~10을 모두 구현했다. `packages/contract`에 zod 4.4.3 정본 스키마 8개 모듈, 두 source adapter, gRPC/REST fixture 19케이스 × 2 shape, JSON Schema 6개 생성물, 테스트 6개 파일이 있다.
 
 계획 대비 바뀐 점 2가지:
@@ -84,11 +86,13 @@ AssertionError: effect.schema.json is stale — run `npm run schema:generate -w 
 | 1 | 모든 fixture가 스키마 테스트를 통과하고 `unsupported`/`invalid` fixture도 최소 envelope를 만든다(§7.3(1)) | met | `packages/contract/src/adapters/adapters.test.ts`. shape별로 19 fixture 전수: `%s produces a schema-valid envelope`(`IngestEnvelopeSchema.safeParse`), `%s matches its expectation row exactly`가 valid는 12키(`VALID_KEYS`), unsupported/invalid는 9키(`REJECTED_KEYS`)와 정확히 일치하는지 `Object.keys().sort()`로 검사한다. `covers every fixture with an expectation row`가 fixture 디렉터리와 기대표를 대조하므로 fixture를 추가하고 분류를 빼면 실패한다. `npm run test` → 251 passed |
 | 2 | Gift fixture 시퀀스로 `eventKey`·`effectiveCount`가 §7.4 규칙대로 나온다 | met | `packages/contract/src/event.test.ts` → `%s gift fixtures 0/1/3/5 collapse to the effective-count keys 1/1/3/5`. combo 0/1/3/5(같은 `msg_test_gift_0001`)이 `:gift:1`, `:gift:1`, `:gift:3`, `:gift:5`가 되고 서로 다른 키는 3개다. `effectiveGiftCount` 단위 테스트가 0→1, 음수·NaN·null→1을 고정하고, `EventKeySchema`는 `:gift:0`을 거부한다. delta·storedMax는 T8 |
 | 3 | 5개 타입의 JSON Schema가 `packages/contract/schema/*.json`으로 생성되고 CI에서 최신인지 검사한다 | met | 생성: `npm run schema:generate -w @vl/contract` → 6개 파일(`ingest-envelope`, `canonical-event`, `effect`, `world-snapshot`, `ws-server-message`, `ws-renderer-message`). 검사: `packages/contract/src/schema/registry.test.ts`가 `serializeSchemaDocument()`와 커밋된 파일을 byte-for-byte 비교하고 이름이 바뀐 고아 파일도 잡는다 → `npm run test`(=CI)에 포함. `npm run build`도 `generate-schema.mjs --check`를 돌려 두 번째 게이트로 막는다. 부정 대조는 위 "실행 확인" 참조 |
+| 1 (round 2) | 같은 기준 — 리뷰 반례 반영 | met | fixture는 shape별 24개로 늘었고(negative 5쌍 추가), 그중 `invalid-negative-tier`·`invalid-negative-jewels`·`invalid-negative-combo-count`·`invalid-message-id-charset`·`invalid-date-only-published-at`이 최소 envelope(9키)를 만든다. fixture 밖 입력은 `malformed source numbers and ids stay envelopes` 블록이 검사한다: 숫자 필드 4개 × hostile 값 13~14개 × 2 shape 전수로 (1) 예외 없음, (2) `IngestEnvelopeSchema.safeParse` 통과, (3) 기대 코드, (4) 키 집합이 정확히 `REJECTED_KEYS`. 비ISO 시각 6종과 사용 불가 id 5종도 같은 방식. `npm run test` → 375 passed |
 | 4 | 타입 어디에도 author/표시명/channelId 필드가 없다(테스트로 키 목록 검사) | met | `packages/contract/src/privacy.test.ts`가 생성된 JSON Schema 6개를 재귀 순회해 모든 `properties`/`patternProperties`/`required` 이름을 모으고(41개 이상, 워커 자체를 검증하는 assertion 포함) `author`·`channelid`·`displayname`·`profileimage`·`messagetext`·`usercomment`·`nickname`·`avatar`·`email` 등 22개 금칙 substring과 대조한다 → 0건. 추가로 모든 object가 `additionalProperties: false`임을 확인해 런타임 주입도 막고, `actor`가 `{"type":"null"}`임을 확인한다. 값 수준은 `adapters.test.ts`의 `no identity or raw text survives normalization`이 fixture의 합성 채널 ID·표시명·원문 텍스트 15개가 어떤 envelope에도 나타나지 않음을 shape별 전수로 검사한다 |
+| 4 (round 2) | 같은 기준 — TS 타입 표면까지 | met | JSON Schema는 TS 전용 타입을 못 본다는 리뷰 지적에 따라 `privacy.test.ts`에 선언 표면 검사를 추가했다: 패키지의 비테스트 소스를 TS 프로그램으로 만들어 `.d.ts`를 **메모리에 emit**하고(빌드 산출물에 의존하지 않는다), 각 선언 파일을 AST로 파싱해 property/method/enum member/interface/type alias/class/function/variable 이름을 모아(80개 이상) 같은 금칙 목록과 대조한다 → 0건. 부정 대조: `NormalizedItemFacts.commandText`를 되살리면 `expected [ 'commandText' ] to deeply equal []`로 실패 |
 
 ### Gates (executed)
 
-`git fetch origin && git rebase origin/main`(origin/main = `789be11`) 뒤 실행:
+round 1 — `git fetch origin && git rebase origin/main`(origin/main = `789be11`) 뒤 실행:
 
 ```text
 npm run format:check  -> All matched files use Prettier code style!
@@ -98,18 +102,55 @@ npm run test          -> Test Files 9 passed (9) / Tests 251 passed (251)
 npm run build         -> @vl/contract: schema up to date (6 files); @vl/renderer ✓ built in 27.37s; @vl/server, @vl/simulator tsc --build ok
 ```
 
+round 2 — 위 4개 수정 뒤, `git fetch origin && git rebase origin/main`(origin/main = `855b8a9`) 뒤 실행:
+
+```text
+npm run format:check  -> All matched files use Prettier code style!
+npm run lint          -> eslint 0 problems; check-no-legacy-imports: ok (0 legacy imports)
+npm run typecheck     -> tsc --build tsconfig.json (no output, exit 0)
+npm run test          -> Test Files 10 passed (10) / Tests 375 passed (375)
+npm run build         -> @vl/contract: schema up to date (6 files); @vl/renderer ✓ built in 9.86s; @vl/server, @vl/simulator tsc --build ok
+```
+
 실행하지 않은 게이트: 없음.
 
 ## Review round 1
 
 리뷰: PR #2 `pullrequestreview-4948249749`(verdict `request_changes`, blocker 1 + major 3). Orca task `task_df3f5c1e4034` · dispatch `ctx_457f6a165433`.
 
-| # | Finding | 판정 | 커밋 | 내용 |
+4건 모두 재현한 뒤 고쳤다. 반박 없음.
+
+| # | Finding | 판정 | 커밋 | 수정 내용 |
 |---|---|---|---|---|
-| 1 | [blocker] `adapters/shared.ts:101` — 형식 오류 숫자(음수 `tier`/`jewels`/`comboCount` 등)가 `IngestEnvelopeSchema.parse`에서 throw | 고침 | (SHA-1) | |
-| 2 | [major] `primitives.ts:61` — `Date.parse`는 ISO 8601 검증기가 아님 | 고침 | (SHA-2) | |
-| 3 | [major] `event.ts:29-31` — `CanonicalEventSchema`가 §7.4 `eventKey` 관계를 강제하지 않음 | 고침 | (SHA-3) | |
-| 4 | [major] `adapters/shared.ts:43` — `NormalizedItemFacts.commandText`가 TS 계약 타입·dist `.d.ts`에 노출 | 고침 | (SHA-4) | |
+| 1 | [blocker] `adapters/shared.ts:101` — 형식 오류 숫자(음수 `tier`/`jewels`/`comboCount`/`amountMicros`)가 `IngestEnvelopeSchema.parse`에서 throw | 고침 | `450bf7c` | `readInteger`가 source 숫자를 absent/in-contract/malformed 3상태로 읽고 스키마와 **같은 하한**을 적용한다. 어댑터가 malformed를 `MALFORMED_AMOUNT`·`MALFORMED_TIER`·`MALFORMED_JEWELS`·`MALFORMED_COMBO_COUNT`로 매핑하고 위반 필드 경로를 남긴다. 같은 부류인데 리뷰에 없던 구멍 1건도 함께 닫았다: `id`가 external-id 문자셋 밖이면 조립에서 throw했고, `:`가 든 id는 `eventKey` 구분자를 위조할 수 있어 `MALFORMED_MESSAGE_ID`(+`messageId: null`)로 거부한다 |
+| 2 | [major] `primitives.ts:61` — `Date.parse`는 ISO 8601 검증기가 아님 | 고침 | `94cd6fe` | ISO 8601 date-time 정규식으로 형식을 먼저 확인하고, 모든 컴포넌트가 `Date.UTC` round-trip을 통과하는지 검사한 뒤 RFC 3339 offset을 UTC로 정규화한다. date-only·zone 없음·불가능한 날짜/시각은 `MALFORMED_PUBLISHED_AT` |
+| 3 | [major] `event.ts:29-31` — `CanonicalEventSchema`가 §7.4 `eventKey` 관계를 강제하지 않음 | 고침 | `0b61164` | refine 4개: key의 source·broadcast 세그먼트가 같은 이벤트의 필드와 일치, `:gift:{effectiveCount}` 접미사는 `kind === 'GIFT'`일 때만 존재하고 GIFT면 반드시 존재, 이벤트가 combo를 보고하면 접미사가 `effectiveCount`와 일치. 위반은 모두 `path: ['eventKey']` |
+| 4 | [major] `adapters/shared.ts:43` — `NormalizedItemFacts.commandText`가 TS 계약 타입·dist `.d.ts`에 노출 | 고침 | `f13e572` | 각 shape reader가 자기 블록에서 raw text를 읽어 파싱하고 `CommandRef`만 넘긴다. `privacy.test.ts`가 `.d.ts`를 메모리에서 emit해 모든 멤버·선언 이름을 같은 금칙 목록과 대조하고, 목록에 `commandtext`를 추가했다 |
+
+관측(수정 전 재현, `vitest` 프로브):
+
+```text
+grpc tier=-1      -> THROW ZodError: too_small path ["payment","tier"]
+grpc jewels=-5    -> THROW ZodError: too_small path ["payment","jewels"]
+grpc amount=-1    -> THROW ZodError: too_small path ["payment","amountMicros"]
+grpc id="msg:evil"-> THROW ZodError: invalid_format path ["messageId"]
+toIsoUtcInstant("0")                    -> 1999-12-31T15:00:00.000Z
+toIsoUtcInstant("08/17/2026")           -> 2026-08-16T15:00:00.000Z
+toIsoUtcInstant("2026-08-17")           -> 2026-08-17T00:00:00.000Z
+toIsoUtcInstant("2026-02-30T00:00:00Z") -> 2026-03-02T00:00:00.000Z   (Date.UTC roll-over)
+CanonicalEvent: non-gift with :gift:3 / gift without suffix / source mismatch / broadcast mismatch -> 모두 ACCEPTED
+```
+
+부정 대조 2건(수정이 실제로 잡는지 확인):
+
+- finding 4: `NormalizedItemFacts`에 `commandText`를 되살리면 `privacy.test.ts` → `AssertionError: expected [ 'commandText' ] to deeply equal []`. 되돌리면 통과.
+- finding 1·3: 스키마 재생성 없이 테스트를 돌리면 `registry.test.ts`가 stale 파일을 잡는다(`ingest-envelope`는 새 코드 4개, `canonical-event`/`effect`/`ws-server-message`는 key pattern).
+
+판단 2가지를 남긴다.
+
+- **JSON Schema는 §7.4 관계를 담지 못한다.** draft 2020-12에는 두 속성의 동등성을 표현할 수단이 없어 생성물은 key pattern만 유지한다. 정본은 zod 스키마이고(CLAUDE.md §4) 서버·시뮬레이터는 zod로 검증한다. 재생성 결과 실제로 바뀐 것은 `ingest-envelope`의 code enum과 4개 파일의 pattern 문자열이다.
+- **함수 파라미터 이름은 선언 표면 검사에서 제외한다.** `CommandParser = (rawText: string) => CommandRef | null`은 T6 파서가 텍스트를 **받는** 유일한 지점이고 값을 보관하는 필드가 아니다. 멤버·타입·변수·함수 선언 이름은 모두 검사한다.
+- **범위를 지킨 것**: `currency`·`giftName`은 형식이 어긋나도 throw하지 않고 `null`로 떨어진다(스키마가 nullable). 이번 blocker는 "throw" 부류라 손대지 않았다. 특히 gift 이름은 일본어 등 비ASCII가 정상 값이라, 형식 불일치를 `invalid`로 올리면 실제 gift를 통째로 버리게 된다 — 필요하면 후속 `[contract]` task에서 다룬다
 
 ## Not done / out of scope
 
