@@ -148,6 +148,56 @@ $ npm run build
 @vl/contract · @vl/renderer · @vl/server · @vl/simulator -> ok
 ```
 
+### Rebase (round 2 approve 이후, PR #8 `DIRTY` 해소)
+
+리뷰 round 2에서 approve된 뒤 `origin/main`이 PR #4(T3)·#5(T4)·#6(T7) 머지로 전진해 PR #8이 `DIRTY`가 됐다. **코드 기능 변경 없이** rebase만 했다.
+
+```text
+$ git fetch origin && git rebase origin/main
+Successfully rebased and updated refs/heads/dnhynk/t6-command-parser.   (base 1c501b9)
+
+충돌 3건, 전부 "같은 파일에 각자 추가" 형태라 union으로 풀었다:
+- apps/server/package.json  dependencies에 main의 @napi-rs/keyring(T3)을 남기고
+                            @vl/contract·better-sqlite3·google-auth-library·
+                            googleapis·obs-websocket-js와 나란히 둠. 삭제 0
+- apps/server/tsconfig.json 내용은 양쪽이 같고 키 순서만 달랐다(main이 이미
+                            packages/contract project reference를 갖고 있다).
+                            main 쪽 순서를 채택
+- package-lock.json         origin/main 것으로 되돌린 뒤 npm install로 재생성
+
+config/default.json과 apps/server/src/index.ts는 충돌하지 않았다: 전자는 T3의
+youtube 절이 내 input 절 옆에 자동 병합됐고(git diff a5cc285 HEAD로 input 절이
+바이트 단위로 동일함을 확인), 후자는 T6이 건드린 적이 없다.
+
+$ git diff --stat a5cc285 HEAD -- apps/server/src/input
+(출력 없음 — rebase 전후 T6 소스가 동일하다)
+```
+
+rebase 결과 PR 대상 파일이 22개로 줄었다. `apps/server/package.json`·`apps/server/tsconfig.json`·`package-lock.json`·`vitest.config.ts`는 main이 T3·T4·T7 경유로 이미 같은 내용을 갖고 있어 diff에서 사라졌고, 남은 것은 `apps/server/src/input/**` 20개 + `config/default.json`(input 절) + 이 티켓이다. `packages/contract` 변경 0.
+
+게이트 5개를 rebase 후 다시 돌렸다:
+
+```text
+$ npm run format:check
+All matched files use Prettier code style!
+
+$ npm run lint
+eslint . -> no findings
+check-no-legacy-imports: ok (0 legacy imports)
+check-install-scripts: ok (3 reviewed, better-sqlite3 binding loads)
+
+$ npm run typecheck
+tsc --build tsconfig.json -> no output (success)
+
+$ npm run test
+Test Files  51 passed (51)
+Tests  980 passed | 1 skipped (981)
+(그중 apps/server/src/input: Test Files 8 passed, Tests 195 passed — round 1과 동일)
+
+$ npm run build
+@vl/contract · @vl/renderer · @vl/server · @vl/simulator -> ok
+```
+
 첫 CI(run 32002801241)는 `TS2307`로 실패했다. 원인은 아래 Follow-up의 `.gitignore` `data/` 규칙이며, 로컬에는 파일이 있어 같은 게이트가 통과했다. 파일을 옮긴 뒤 CI가 통과했다.
 
 ## Not done / out of scope
@@ -166,6 +216,7 @@ $ npm run build
 - **`.gitignore`의 `data/` 규칙**(33행, "Local data / secrets")은 경로 어디에 있든 `data/` 디렉터리를 전부 무시한다. 처음에 데이터 모듈을 `apps/server/src/input/data/`에 두었더니 커밋되지 않은 채 로컬 게이트만 통과하고 CI에서 `TS2307`로 드러났다(run 32002801241). 이 PR은 파일을 `apps/server/src/input/` 바로 아래로 옮겨 회피했다. 규칙을 `/data/`(저장소 루트 한정)로 좁힐지는 다른 worker의 무시 대상에도 영향을 주므로 코디네이터 판단이 필요하다.
 - 모더레이션이 과차단한 사례를 실제 파일럿에서 표본 검토(§12.3 "사람 호출" 운영표와 함께). 현재는 과차단이 거부 코드만 바꾸므로 무해하지만, 명령 성공 지표를 왜곡할 수 있다.
 - **인자 어휘(vocabulary)**: round 1 이후 인자는 구분자 없는 낱말 하나(`[a-z0-9]{1,32}`)다. 이것으로 구분자 위장은 닫혔지만, 최대 32자의 임의 낱말이 여전히 `CommandRef.argument`로 상태에 들어간다(화면에는 못 간다 — `DisplayState`에 인자 슬롯이 없다). 인자를 진짜 allowlist로 만들려면 소비자(T7 미션·선택지 id)가 어휘를 제공해야 한다. T8이 파서를 배선할 때 어휘 주입 여부를 정하는 것이 자연스럽다.
+- **`apps/server/src/index.ts`에 `input` 재export가 없다.** `index.ts`를 가진 5개 모듈 중 `db`·`secrets`·`world`·`youtube`는 서버 배럴에서 재export되는데 `input`만 빠져 있다. 이 PR에서 고치지 않은 이유는 (a) rebase task의 범위 밖이고(코드 기능 변경 금지), (b) 배럴은 `@vl/server`를 **패키지 밖에서** 쓰는 소비자용인데 T6의 소비자인 T8은 같은 패키지 안(`apps/server/src/`)이라 `../input/index.js` 상대 경로로 충분하기 때문이다. 패키지 밖 소비자가 생기면 한 줄 추가하면 된다.
 
 ## Review round 1
 
