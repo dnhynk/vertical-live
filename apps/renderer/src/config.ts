@@ -43,11 +43,53 @@ export const PROVISIONAL_CONFIG_KEYS = [
 
 export interface RendererConfig {
   readonly mode: RendererMode
+  /**
+   * The `/ws/renderer` URL **without** the token: this is the value anything on
+   * screen or in a log may use.
+   *
+   * The split is structural on purpose. The dev panel renders configuration
+   * verbatim, so a single field holding both the address and a vault secret put
+   * that secret on air the moment `?mode=dev` was opened (R-T8-2 blocker 1).
+   * Keeping the secret out of the field everything reads means a future panel,
+   * log line or diagnostic cannot leak it by being written the obvious way.
+   */
   readonly wsUrl: string
+  /**
+   * `server.rendererToken` from the page query string, or `null` when the page
+   * was opened without one. Only `authenticatedWsUrl()` reads it (spec §10.2).
+   */
+  readonly wsToken: string | null
   readonly rendererId: RendererId
   readonly backoff: BackoffConfig
   readonly healthIntervalMs: number
   readonly provisional: readonly string[]
+}
+
+/**
+ * The URL the socket actually opens: `wsUrl` plus the token the server checks on
+ * the upgrade. This is the *only* place the two are put back together, and its
+ * result must never be rendered or logged.
+ */
+export function authenticatedWsUrl(config: RendererConfig): string {
+  if (config.wsToken === null) return config.wsUrl
+  const url = new URL(config.wsUrl)
+  url.searchParams.set('token', config.wsToken)
+  return url.toString()
+}
+
+/**
+ * Strips a `token` parameter from any URL, for diagnostics that were handed a
+ * URL rather than a `RendererConfig`.
+ */
+export function redactWsUrl(url: string): string {
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    return url
+  }
+  parsed.searchParams.delete('token')
+  return parsed.toString()
 }
 
 /**
@@ -76,32 +118,37 @@ function readMode(params: URLSearchParams, log: RendererLog): RendererMode {
 }
 
 /**
- * The `/ws/renderer` URL, with the renderer token carried over from the page
- * query string.
+ * The `/ws/renderer` address, with any `token` parameter removed.
  *
- * The server authenticates the upgrade (spec §10.2), and an OBS Browser Source
- * can only pass values through its URL, so the token arrives as `?token=` on the
- * page and is forwarded to the socket URL. It is never logged and never stored:
- * `config_token_missing` records the absence, not the value, and the renderer
- * keeps nothing across a reload (spec §10.2, §12.4).
+ * A `token` in the `ws=` override is dropped here rather than carried: the token
+ * has exactly one channel into this renderer (the page's own `?token=`), and
+ * accepting a second one would mean a URL on screen could contain a secret again.
  */
 function readWsUrl(params: URLSearchParams, log: RendererLog): string {
   const raw = params.get('ws')
-  let base = DEFAULT_WS_URL
-  if (raw !== null) {
-    if (isLoopbackWebSocketUrl(raw)) base = raw
-    else log.warn('config_ws_rejected')
-  }
+  if (raw === null) return DEFAULT_WS_URL
+  if (isLoopbackWebSocketUrl(raw)) return redactWsUrl(raw)
+  log.warn('config_ws_rejected')
+  return DEFAULT_WS_URL
+}
+
+/**
+ * The renderer token from the page query string.
+ *
+ * The server authenticates the upgrade (spec §10.2) and an OBS Browser Source can
+ * only pass values through its URL, so the token arrives as `?token=`. It is
+ * never logged and never stored: `config_token_missing` records the absence, not
+ * the value, and the renderer keeps nothing across a reload (§10.2, §12.4).
+ */
+function readWsToken(params: URLSearchParams, log: RendererLog): string | null {
   const token = params.get('token')
   if (token === null || token === '') {
-    // Left as-is: the server refuses the upgrade with 4401 and the connection
+    // Left absent: the server refuses the upgrade with 4401 and the connection
     // log says why. Inventing a token here would only hide the misconfiguration.
     log.warn('config_token_missing')
-    return base
+    return null
   }
-  const url = new URL(base)
-  url.searchParams.set('token', token)
-  return url.toString()
+  return token
 }
 
 function readRendererId(
@@ -140,6 +187,7 @@ export function readRendererConfig(options: ReadRendererConfigOptions): Renderer
   return {
     mode: readMode(params, options.log),
     wsUrl: readWsUrl(params, options.log),
+    wsToken: readWsToken(params, options.log),
     rendererId: readRendererId(
       params,
       options.log,

@@ -153,7 +153,7 @@ run `npm run data-map:generate -w @vl/server`.
 
 | field key | purpose | spec |
 |---|---|---|
-| `ingest_inbox.envelope` | policy-filtered ingest inbox: single-writer replay after a restart and event-key idempotency (spec §7.3(1)(2)(3)(4), §10.2) | §12.4 일반 Authorized/Non-Authorized API Data는 정책에 따라 30일 안에 refresh 또는 delete한다 / A-7 |
+| `ingest_inbox.envelope` | policy-filtered ingest inbox: single-writer replay after a restart and event-key idempotency (spec §7.3(1)(2)(3)(4), §10.2). `argument_rejected` is a boolean marker saying a command argument outside the content vocabulary was removed before the write (T8); the removed token itself is never stored | §12.4 일반 Authorized/Non-Authorized API Data는 정책에 따라 30일 안에 refresh 또는 delete한다 / A-7 |
 | `source_checkpoint.next_page_token` | reconnect continuation token committed with the envelopes it covers (spec §7.3(2)) | §12.4 30일 refresh-or-delete. A token untouched for 30 days points at a live chat that no longer exists |
 | `state_transitions.caused_by_event_key` | audit trail of committed transitions; the cause column carries the API message id inside the event key (spec §7.3(5), §9.4(2)) | §12.4 30일 refresh-or-delete |
 | `effect_outbox.caused_by_event_key` | durable outbox for side effects that cannot be regenerated, i.e. paid audit staging (spec §7.3(6)(7), §10.2) | §12.4 30일 refresh-or-delete |

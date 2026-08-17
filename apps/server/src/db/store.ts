@@ -44,6 +44,8 @@ import {
 } from './retention.js'
 import type {
   DeadlineRecord,
+  InboxInput,
+  InboxSubmission,
   EffectMarkResult,
   GiftComboRequest,
   GiftDelta,
@@ -100,6 +102,7 @@ interface InboxRowColumns {
   readonly validation_status: string
   readonly received_at: string
   readonly envelope_json: string
+  readonly argument_rejected: number
 }
 
 interface CheckpointColumns {
@@ -210,21 +213,27 @@ export class PersistenceStore {
    * duplicate estimate (spec §11 연결 복구) without a second query.
    */
   commitIngestBatch(
-    envelopes: readonly IngestEnvelope[],
+    inputs: readonly InboxInput[],
     checkpoint: SourceCheckpointInput,
   ): IngestBatchResult {
-    const validated = envelopes.map((envelope) => IngestEnvelopeSchema.parse(envelope))
+    const validated = inputs.map((input) => {
+      const submission = toSubmission(input)
+      return {
+        envelope: IngestEnvelopeSchema.parse(submission.envelope),
+        argumentRejected: submission.argumentRejected === true,
+      }
+    })
     assertNonEmptyString(checkpoint.sourceKey, 'checkpoint.sourceKey')
     assertNonEmptyString(checkpoint.liveChatId, 'checkpoint.liveChatId')
 
     const insert = this.#db.prepare<
-      [string | null, string, string, string, string, string, string, number, string],
+      [string | null, string, string, string, string, string, string, number, string, number],
       { ingest_seq: number }
     >(
       `INSERT INTO ingest_inbox
          (message_id, source, source_shape, broadcast_id, live_chat_id, received_at,
-          validation_status, gift_effective_count, envelope_json)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          validation_status, gift_effective_count, envelope_json, argument_rejected)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (source, broadcast_id, message_id, gift_effective_count) DO NOTHING
        RETURNING ingest_seq`,
     )
@@ -235,7 +244,7 @@ export class PersistenceStore {
 
     const commit = this.#db.transaction((): IngestBatchResult => {
       const results: IngestInsertResult[] = []
-      for (const envelope of validated) {
+      for (const { envelope, argumentRejected } of validated) {
         const giftCount = giftEffectiveCountOf(envelope)
         const inserted = insert.get(
           envelope.messageId,
@@ -247,6 +256,7 @@ export class PersistenceStore {
           envelope.validationStatus,
           giftCount,
           JSON.stringify(envelope),
+          argumentRejected ? 1 : 0,
         )
         if (inserted !== undefined) {
           results.push({
@@ -298,7 +308,7 @@ export class PersistenceStore {
     assertPositiveInt(limit, 'limit')
     const rows = this.#db
       .prepare<[number, number], InboxRowColumns>(
-        `SELECT ingest_seq, validation_status, received_at, envelope_json
+        `SELECT ingest_seq, validation_status, received_at, envelope_json, argument_rejected
            FROM ingest_inbox
           WHERE ingest_seq > ? AND processed_at IS NULL
           ORDER BY ingest_seq
@@ -310,6 +320,7 @@ export class PersistenceStore {
       validationStatus: row.validation_status as ValidationStatus,
       receivedAt: row.received_at,
       envelope: IngestEnvelopeSchema.parse(JSON.parse(row.envelope_json)),
+      argumentRejected: row.argument_rejected === 1,
     }))
   }
 
@@ -972,6 +983,11 @@ const DEADLINE_COLUMNS = `SELECT id, kind, due_at, policy, payload_json, status 
 function giftEffectiveCountOf(envelope: IngestEnvelope): number {
   if (envelope.validationStatus !== 'valid' || envelope.kind !== 'GIFT') return 0
   return effectiveGiftCount(envelope.payment?.comboCount ?? null)
+}
+
+/** A bare envelope declares nothing; a submission declares what was filtered. */
+function toSubmission(input: InboxInput): InboxSubmission {
+  return 'envelope' in input ? input : { envelope: input }
 }
 
 function toCheckpoint(row: CheckpointColumns): SourceCheckpoint {

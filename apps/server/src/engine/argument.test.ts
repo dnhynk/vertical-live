@@ -8,6 +8,7 @@ import {
   createEngineHarness,
   ingest,
   resetMessageIds,
+  restartEngine,
   type EngineHarness,
 } from './testing/harness.js'
 
@@ -27,6 +28,7 @@ interface InboxObservation {
   readonly ingest_seq: number
   readonly processing_result: string | null
   readonly envelope_json: string
+  readonly argument_rejected: number
 }
 
 describe('command argument handling', () => {
@@ -47,7 +49,7 @@ describe('command argument handling', () => {
     try {
       return database
         .prepare(
-          'SELECT ingest_seq, processing_result, envelope_json FROM ingest_inbox ORDER BY ingest_seq',
+          'SELECT ingest_seq, processing_result, envelope_json, argument_rejected FROM ingest_inbox ORDER BY ingest_seq',
         )
         .all() as InboxObservation[]
     } finally {
@@ -74,9 +76,40 @@ describe('command argument handling', () => {
     expect(JSON.parse(rows[0]?.envelope_json as string)).toMatchObject({
       command: { name: 'FEED', argument: null },
     })
-    // The command itself still applied: only its argument was refused.
-    expect(rows[0]?.processing_result).toBe('applied')
+    // The token is gone, but the refusal is not: the row carries a marker and
+    // the processing record names the reason (R-T8-2 blocker 2).
+    expect(rows[0]?.argument_rejected).toBe(1)
+    expect(rows[0]?.processing_result).toBe('applied:argument_rejected')
     expect(harness.engine.metrics().counters['ingest_argument_dropped']).toBe(1)
+    expect(harness.engine.metrics().counters['command_argument_rejected_at_ingest']).toBe(1)
+  })
+
+  it('keeps the marker across a restart, so the reason survives the process', async () => {
+    harness.engine.start()
+    ingest(harness.engine, [
+      commandEnvelope({
+        messageId: 'msg_test_arg_restart',
+        command: 'FEED',
+        receivedAt: at(1_000),
+        argument: 'not_a_choice',
+      }),
+    ])
+    // Ingested but not processed: the marker has to be durable, not in-memory.
+    expect(inbox()[0]?.argument_rejected).toBe(1)
+
+    const restarted = restartEngine(harness)
+    restarted.engine.start()
+    await restarted.clock.advance(1_000)
+    restarted.engine.runPending()
+
+    const rows = inbox()
+    expect(rows).toHaveLength(1)
+    expect(rows[0]?.processing_result).toBe('applied:argument_rejected')
+    expect(rows[0]?.envelope_json).not.toContain('not_a_choice')
+    // The restarted process never saw the batch counter; it read the row.
+    expect(restarted.engine.metrics().counters['ingest_argument_dropped']).toBeUndefined()
+    expect(restarted.engine.metrics().counters['command_argument_rejected_at_ingest']).toBe(1)
+    restarted.engine.stop()
   })
 
   it('records a reason when the open window does not expect a storable token', async () => {
@@ -114,6 +147,7 @@ describe('command argument handling', () => {
     harness.engine.runPending()
 
     expect(inbox()[0]?.processing_result).toBe('applied')
+    expect(inbox()[0]?.argument_rejected).toBe(0)
     expect(harness.engine.metrics().counters['ingest_argument_dropped']).toBeUndefined()
     expect(harness.engine.metrics().counters['command_argument_rejected']).toBeUndefined()
   })
@@ -128,7 +162,7 @@ describe('sanitizeEnvelopeArgument', () => {
         receivedAt: at(0),
         argument: choiceId,
       })
-      expect(sanitizeEnvelopeArgument(envelope)).toEqual({ envelope, dropped: false })
+      expect(sanitizeEnvelopeArgument(envelope)).toEqual({ envelope, argumentRejected: false })
     }
   })
 
@@ -140,7 +174,7 @@ describe('sanitizeEnvelopeArgument', () => {
     })
     const sanitized = sanitizeEnvelopeArgument(envelope)
 
-    expect(sanitized.dropped).toBe(true)
+    expect(sanitized.argumentRejected).toBe(true)
     expect(sanitized.envelope).toEqual({ ...envelope, command: { name: 'FEED', argument: null } })
   })
 
@@ -148,6 +182,6 @@ describe('sanitizeEnvelopeArgument', () => {
     const envelope = commandEnvelope({ command: 'FEED', receivedAt: at(0) })
     const rejected = { ...envelope, validationStatus: 'invalid' as const }
 
-    expect(sanitizeEnvelopeArgument(rejected as never).dropped).toBe(false)
+    expect(sanitizeEnvelopeArgument(rejected as never).argumentRejected).toBe(false)
   })
 })

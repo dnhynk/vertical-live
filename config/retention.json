@@ -36,7 +36,7 @@
       "status": "present",
       "source": "youtube_api",
       "dataClass": "authorized_api_data",
-      "purpose": "policy-filtered ingest inbox: single-writer replay after a restart and event-key idempotency (spec §7.3(1)(2)(3)(4), §10.2)",
+      "purpose": "policy-filtered ingest inbox: single-writer replay after a restart and event-key idempotency (spec §7.3(1)(2)(3)(4), §10.2). `argument_rejected` is a boolean marker saying a command argument outside the content vocabulary was removed before the write (T8); the removed token itself is never stored",
       "storedColumns": [
         "ingest_seq",
         "message_id",
@@ -49,7 +49,8 @@
         "gift_effective_count",
         "envelope_json",
         "processed_at",
-        "processing_result"
+        "processing_result",
+        "argument_rejected"
       ],
       "personalIdentifiers": "none",
       "policy": "delete",

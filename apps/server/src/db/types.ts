@@ -43,12 +43,33 @@ export interface IngestBatchResult {
   readonly checkpoint: SourceCheckpoint
 }
 
+/**
+ * One envelope on its way into the inbox, plus what a storage-boundary filter
+ * did to it.
+ *
+ * `commitIngestBatch` also accepts a bare `IngestEnvelope`, which means "nothing
+ * was filtered" — every caller that has nothing to declare stays unchanged.
+ */
+export interface InboxSubmission {
+  readonly envelope: IngestEnvelope
+  /**
+   * A `command.argument` outside the storable vocabulary was removed before this
+   * write (T8). Persisted as a flag; the removed token is never stored anywhere
+   * (spec §12.3).
+   */
+  readonly argumentRejected?: boolean
+}
+
+export type InboxInput = IngestEnvelope | InboxSubmission
+
 /** An inbox row handed to the single writer for processing (spec §7.3(3)). */
 export interface InboxRow {
   readonly ingestSeq: number
   readonly validationStatus: ValidationStatus
   readonly receivedAt: string
   readonly envelope: IngestEnvelope
+  /** True when a storage-boundary filter removed this row's command argument. */
+  readonly argumentRejected: boolean
 }
 
 /** One committed transition of the authoritative state (spec §7.3(5)). */

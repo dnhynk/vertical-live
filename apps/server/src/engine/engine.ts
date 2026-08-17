@@ -167,6 +167,8 @@ interface HeldCommand {
   readonly windowSequence: number
   readonly commandName: CommandName
   readonly event: CanonicalEvent
+  /** The row's persisted storage-boundary rejection marker (spec §7.3(3)). */
+  readonly argumentRejected: boolean
 }
 
 interface OpenEffect {
@@ -324,7 +326,7 @@ export class StateEngine {
     if (sanitized.droppedCount > 0) {
       this.#metrics.count('ingest_argument_dropped', sanitized.droppedCount)
     }
-    const result = this.#store.commitIngestBatch(sanitized.envelopes, checkpoint)
+    const result = this.#store.commitIngestBatch(sanitized.submissions, checkpoint)
     this.notifyIngest()
     return result
   }
@@ -646,6 +648,7 @@ export class StateEngine {
         windowSequence: admission.windowSequence,
         commandName: command.name,
         event,
+        argumentRejected: row.argumentRejected,
       })
       this.#metrics.count('command_aggregated')
       return null
@@ -653,9 +656,13 @@ export class StateEngine {
 
     const sanitized = this.#sanitizeArgument(event)
     // Both facts belong in the §7.3(3) audit trail: the command was applied, and
-    // its argument was refused. Recording only `applied` hid the rejection
-    // (R-T8-1 blocker 4).
-    this.#resolve(row.ingestSeq, sanitized.rejected ? APPLIED_ARGUMENT_REJECTED : 'applied')
+    // its argument was refused. The refusal can come from either half of the
+    // rule — the row's persisted storage-boundary marker, or the open window's
+    // vocabulary — and recording only `applied` hid both (R-T8-1 blocker 4,
+    // R-T8-2 blocker 2).
+    const argumentRejected = row.argumentRejected || sanitized.rejected
+    if (row.argumentRejected) this.#metrics.count('command_argument_rejected_at_ingest')
+    this.#resolve(row.ingestSeq, argumentRejected ? APPLIED_ARGUMENT_REJECTED : 'applied')
     this.#metrics.count('command_direct')
     return {
       input: { kind: 'event', event: sanitized.event, contributions: 1 },
@@ -755,7 +762,7 @@ export class StateEngine {
         })
       }
       for (const entry of held) {
-        const rejected = this.#sanitizeArgument(entry.event).rejected
+        const rejected = entry.argumentRejected || this.#sanitizeArgument(entry.event).rejected
         this.#resolve(entry.ingestSeq, rejected ? AGGREGATED_ARGUMENT_REJECTED : 'aggregated')
       }
       this.#metrics.count('aggregate_window_closed')
