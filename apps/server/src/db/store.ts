@@ -114,7 +114,7 @@ interface SnapshotColumns {
   readonly state_revision: number
   readonly processed_ingest_seq: number
   readonly snapshot_json: string
-  /** Opaque writer-owned domain state (migration 003); NULL before T8. */
+  /** Opaque writer-owned domain state (migration 004); NULL before T8. */
   readonly engine_state_json: string | null
 }
 

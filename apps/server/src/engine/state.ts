@@ -3,7 +3,7 @@ import { InputModeSchema, type InputMode } from '@vl/contract'
 import type { WorldState } from '../world/types.js'
 
 /**
- * The writer's durable domain state (migration 003, `world_snapshot.engine_state_json`).
+ * The writer's durable domain state (migration 004, `world_snapshot.engine_state_json`).
  *
  * `WorldSnapshot` is the renderer's read model: it carries the four screen slots
  * and the current values, not the seed, the step counter, the need pressures,

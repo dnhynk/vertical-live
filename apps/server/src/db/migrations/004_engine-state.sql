@@ -1,4 +1,4 @@
--- 002_engine-state — durable domain state of the single-writer engine (T8).
+-- 004_engine-state — durable domain state of the single-writer engine (T8).
 --
 -- `world_snapshot.snapshot_json` is the renderer's read model (spec §10.2): it
 -- carries what the screen draws, not what the content director needs to keep

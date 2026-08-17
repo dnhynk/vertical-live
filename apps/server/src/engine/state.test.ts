@@ -5,7 +5,7 @@ import { initialWorldState } from '../world/reducer.js'
 import { EngineStateError, parseEngineState, serializeEngineState } from './state.js'
 
 /**
- * The durable domain state (migration 003). A misread here would silently reset
+ * The durable domain state (migration 004). A misread here would silently reset
  * the creature's history, which spec §6.3 forbids as firmly as it forbids death,
  * so every failure mode is a throw and never a fallback to a fresh world.
  */

@@ -145,7 +145,7 @@ switch (mode) {
   }
 
   // Crash window "state 쓰기 중" with the writer's own domain state attached
-  // (migration 003): the snapshot and `engine_state_json` are one row written in
+  // (migration 004): the snapshot and `engine_state_json` are one row written in
   // one transaction, so a kill before COMMIT must leave neither behind. If they
   // could disagree, a restart would resume a world the recovery cursor has
   // already moved past (TASK_SPECS §T8).
