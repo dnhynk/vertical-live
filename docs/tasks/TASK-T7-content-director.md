@@ -1,7 +1,7 @@
 # TASK-T7-content-director
 
 - Task: T7 콘텐츠 디렉터·크리처 상태 모델 (순수 도메인) (`docs/tasks/TASK_SPECS.md` §T7)
-- Branch: `dnhynk/t7-content-director` · PR: #<n>
+- Branch: `dnhynk/t7-content-director` · PR: #6
 - Orca: task `task_e1e7531798ad` · dispatch `ctx_f38356ff64be`
 - Spec sections read: §2.1–§2.4, §5.2, §5.3, §6.1–§6.4, §7.1, §7.3, §7.4, §8.4, §8.5, §9.2, §10.2, §12.3, §12.5, §14.1
 - BOARD decisions/assumptions relied on: D-1, A-1, A-3, A-9, A-15
