@@ -17,7 +17,7 @@ import { ObsClient } from './obs/client.js'
 import { loadObsConfig } from './obs/config.js'
 import { ObsControl } from './obs/control.js'
 import { ObsHealthMonitor } from './obs/health.js'
-import type { LogFields, Logger } from './secrets/redaction.js'
+import { SecretRedactor, type LogFields, type Logger } from './secrets/redaction.js'
 import { defaultSecretProvider, resolveSecretVault } from './secrets/resolve.js'
 import { requireSecret } from './secrets/types.js'
 import { createServer, DEFAULT_HOST, resolvePort } from './server.js'
@@ -38,11 +38,20 @@ import {
 } from './supervisor/runtime.js'
 import { DiagnosticScreenshotRecorder } from './supervisor/screenshot.js'
 import { Supervisor } from './supervisor/supervisor.js'
-import { loadYouTubeAuthConfig } from './youtube/auth/config.js'
-import type { AuthEventSink } from './youtube/auth/events.js'
+import { loadOAuthClientCredentials, loadYouTubeAuthConfig } from './youtube/auth/config.js'
+import { OAuthClient } from './youtube/auth/oauth-client.js'
+import { TokenManager } from './youtube/auth/token-manager.js'
+import { YouTubeLiveApi } from './youtube/broadcast/api.js'
+import { loadBroadcastConfig } from './youtube/broadcast/config.js'
+import { BroadcastHealthMonitor } from './youtube/broadcast/health.js'
+import { BroadcastLifecycle, type BroadcastBinding } from './youtube/broadcast/lifecycle.js'
+import { StreamKeyCustodian } from './youtube/broadcast/stream-key.js'
 import type { ChatSource } from './youtube/chat/chat-source.js'
 import { loadChatConfig } from './youtube/chat/config.js'
 import { createChatSource } from './youtube/chat/runtime.js'
+import { createExponentialBackoff } from './youtube/quota/backoff.js'
+import { loadQuotaConfig } from './youtube/quota/config.js'
+import { QuotaTracker } from './youtube/quota/tracker.js'
 
 /**
  * Process entry point: one store, one engine, one renderer hub, one HTTP
@@ -232,13 +241,146 @@ if (supervisorConfig.integrations.obs) {
   }
 }
 
-// ------------------------------------------------------------- supervisor
+// --------------------------------------------------------- YouTube (T3/T10)
 
-// The YouTube broadcast lifecycle (T10) needs an OAuth grant and a channel, so
-// it is only wired where an operator has provisioned one. Without it the run
-// keeps its world going (spec §2.1) and the `api`/`credentials` pre-checks fail
-// with `not_configured` instead of pretending a broadcast exists.
-const broadcastPort: BroadcastPort | null = null
+/**
+ * One `TokenManager` for the whole process. The chat source (T9) and the
+ * broadcast lifecycle (T10) share it: two managers on one grant would both
+ * refresh and rotate the same refresh token.
+ *
+ * Auth events go to two places at once (TASK_SPECS §T12 배선): T13 deletes the
+ * data collected under the withdrawn consent (§12.4) and T12 stops the run,
+ * because a revoked or unrenewable grant is outside the automation boundary
+ * (§9.1).
+ */
+const chatConfig = loadChatConfig()
+const needsGrant = chatConfig.enabled || supervisorConfig.integrations.broadcast
+
+let tokens: TokenManager | null = null
+let broadcastPort: BroadcastPort | null = null
+let broadcastLifecycle: BroadcastLifecycle | null = null
+
+if (needsGrant) {
+  const authConfig = loadYouTubeAuthConfig()
+  const credentials = loadOAuthClientCredentials()
+  const redactor = new SecretRedactor()
+  redactor.register(credentials.clientSecret)
+  const vault = await resolveSecretVault({
+    service: authConfig.credentialService,
+    logger: stdoutLogger,
+  })
+  const revocation = new RevocationAuthEventSink({
+    handler: new RevocationHandler({
+      store,
+      clock: systemClock,
+      config: loadRetentionConfig(),
+      grantRevoker: vaultGrantRevoker(vault),
+      logger: stdoutLogger,
+    }),
+    onResult: (result) => {
+      supervisor.onRevocationResult(result)
+    },
+    onError: (error) => {
+      supervisor.onRetentionError(error)
+    },
+    logger: stdoutLogger,
+  })
+
+  tokens = new TokenManager({
+    client: new OAuthClient({
+      clientId: credentials.clientId,
+      ...(credentials.clientSecret === undefined ? {} : { clientSecret: credentials.clientSecret }),
+      clock: systemClock,
+    }),
+    vault,
+    clock: systemClock,
+    refreshSkewMs: authConfig.accessTokenRefreshSkewMs,
+    logger: stdoutLogger,
+    redactor,
+    events: {
+      emit: (event) => {
+        revocation.emit(event)
+        supervisor.onAuthEvent(event)
+      },
+    },
+  })
+
+  if (supervisorConfig.integrations.broadcast) {
+    const broadcastConfig = loadBroadcastConfig()
+    const quotaConfig = loadQuotaConfig()
+    const custodian = new StreamKeyCustodian({ vault, redactor, logger: stdoutLogger })
+    const api = new YouTubeLiveApi({
+      tokens,
+      clock: systemClock,
+      requestTimeoutMs: broadcastConfig.requestTimeoutMs,
+      // The custodian owns the key between the API response and the vault write;
+      // the API client keeps no copy (BOARD A-16).
+      streamKeySink: custodian.sink,
+      quota: new QuotaTracker({
+        clock: systemClock,
+        dailyUnits: quotaConfig.dailyUnits,
+        reserveUnits: quotaConfig.reserveUnits,
+        timeZone: quotaConfig.resetTimeZone,
+      }),
+      logger: stdoutLogger,
+      redactor,
+    })
+    const lifecycle = new BroadcastLifecycle({
+      api,
+      store,
+      config: broadcastConfig,
+      clock: systemClock,
+      backoff: createExponentialBackoff({
+        initialDelayMs: quotaConfig.backoff.initialDelayMs,
+        maxDelayMs: quotaConfig.backoff.maxDelayMs,
+        factor: quotaConfig.backoff.factor,
+        jitterRatio: quotaConfig.backoff.jitterRatio,
+        maxAttempts: quotaConfig.backoff.maxAttempts,
+      }),
+      streamKeys: custodian,
+      alerts: (alert) => {
+        stdoutLogger.info('broadcast alert', { kind: alert.kind, reason: alert.reason })
+      },
+      // Spec §9.1: a limit the lifecycle cannot recover from is a `safe_stopped`.
+      safeStop: (request) => {
+        supervisor.onBroadcastSafeStopRequest(request)
+      },
+      logger: stdoutLogger,
+    })
+    broadcastLifecycle = lifecycle
+
+    let binding: BroadcastBinding | null = null
+    new BroadcastHealthMonitor({
+      api,
+      config: broadcastConfig,
+      clock: systemClock,
+      resources: () => ({
+        streamId: binding?.streamId ?? null,
+        broadcastId: binding?.broadcastId ?? null,
+      }),
+      onSignal: (signal) => {
+        supervisor.report(signal)
+      },
+    }).start()
+
+    broadcastPort = {
+      ensureBound: async () => {
+        binding = await lifecycle.ensureBound()
+        return { broadcastId: binding.broadcastId, liveChatId: binding.liveChatId }
+      },
+      goLive: async () => {
+        binding = await lifecycle.goLive()
+      },
+      publish: () => lifecycle.publish(),
+      bound: () => binding !== null,
+      // Spec §9.1 keeps 최초 공개 with the operator: while the configured privacy
+      // is `private` there is nothing to publish (BOARD A-18).
+      publishable: () => broadcastConfig.privacyStatus !== 'private',
+    }
+  }
+}
+
+// ------------------------------------------------------------- supervisor
 
 const deadMan: DeadManMonitor = new DeadManMonitor({
   pushUrl: () => secrets.get('monitoring.deadManPushUrl'),
@@ -361,45 +503,11 @@ new KillSwitchFileWatcher({
 }).start()
 
 /**
- * Auth events go to two places at once (TASK_SPECS §T12 배선): T13 deletes the
- * data collected under the withdrawn consent (§12.4) and T12 stops the run,
- * because a revoked or unrenewable grant is outside the automation boundary
- * (§9.1). The sink is only built when there is a `TokenManager` to attach it to.
+ * The chat source waits for `engine.ready` on its own (spec §7.3(3)), so it can
+ * be built before the engine has finished its recovery drain. Its `liveChatId`
+ * comes from the open attempt in `broadcast_resources` when the lifecycle is
+ * wired; the config value stays as the development injection point §T9 allows.
  */
-const chatConfig = loadChatConfig()
-let authEvents: AuthEventSink | undefined
-if (chatConfig.enabled) {
-  const authConfig = loadYouTubeAuthConfig()
-  const vault = await resolveSecretVault({
-    service: authConfig.credentialService,
-    logger: stdoutLogger,
-  })
-  const revocation = new RevocationAuthEventSink({
-    handler: new RevocationHandler({
-      store,
-      clock: systemClock,
-      config: loadRetentionConfig(),
-      grantRevoker: vaultGrantRevoker(vault),
-      logger: stdoutLogger,
-    }),
-    onResult: (result) => {
-      supervisor.onRevocationResult(result)
-    },
-    onError: (error) => {
-      supervisor.onRetentionError(error)
-    },
-    logger: stdoutLogger,
-  })
-  authEvents = {
-    emit: (event) => {
-      revocation.emit(event)
-      supervisor.onAuthEvent(event)
-    },
-  }
-}
-
-// The YouTube chat source waits for `engine.ready` on its own (spec §7.3(3)),
-// so it can be built before the engine has finished its recovery drain.
 chatSource = await createChatSource({
   store,
   inbox: { ingest: (envelopes, checkpoint) => engine.ingest(envelopes, checkpoint) },
@@ -414,7 +522,17 @@ chatSource = await createChatSource({
   identityGateOpen: config.engine.identityGateOpen,
   config: chatConfig,
   logger: stdoutLogger,
-  ...(authEvents === undefined ? {} : { authEvents }),
+  ...(tokens === null ? {} : { auth: tokens }),
+  ...(broadcastLifecycle === null
+    ? {}
+    : {
+        resolveTarget: async () => {
+          const binding = await broadcastLifecycle.ensureBound()
+          return binding.liveChatId === null
+            ? null
+            : { liveChatId: binding.liveChatId, broadcastId: binding.broadcastId }
+        },
+      }),
   onIngested: () => {
     engine.pump()
   },

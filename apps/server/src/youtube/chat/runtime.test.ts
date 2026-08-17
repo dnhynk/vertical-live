@@ -38,6 +38,34 @@ describe('createChatSource', () => {
       temp.dispose()
     }
   })
+
+  it('uses an injected access-token source instead of building a second one', async () => {
+    // T12 wires one `TokenManager` for the process and shares it with the
+    // broadcast lifecycle: two managers on one grant would both refresh and
+    // rotate the same refresh token. With one injected, this factory must not
+    // reach for a client id or the OS vault either.
+    const temp = createTempStore({ clock: new FakeClock() })
+    try {
+      const source = await createChatSource({
+        store: temp.store,
+        inbox: storeInbox(temp.store),
+        engine: { ready: true, snapshot: () => snapshotWith(null) },
+        clock: temp.clock,
+        inputConfig,
+        identityGateOpen: false,
+        config: testChatConfig({ enabled: true }),
+        auth: {
+          getAccessToken: () => Promise.resolve('synthetic-access-token'),
+          forceRefresh: () => Promise.resolve(undefined),
+        },
+      })
+
+      expect(source).not.toBeNull()
+      expect(source?.observe().mode).toBe('idle')
+    } finally {
+      temp.dispose()
+    }
+  })
 })
 
 describe('chatParserPort', () => {
