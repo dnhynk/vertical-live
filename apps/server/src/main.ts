@@ -28,6 +28,7 @@ import {
   type AlertSink,
 } from './supervisor/alerts.js'
 import { loadSupervisorConfig } from './supervisor/config.js'
+import { classifyStoreFailure } from './supervisor/db-integrity.js'
 import { DeadManMonitor } from './supervisor/deadman.js'
 import { AdminKillEndpoint, KillSwitchFileWatcher } from './supervisor/kill-switch.js'
 import {
@@ -84,9 +85,66 @@ const config = loadEngineConfig()
 const inputConfig = loadInputConfig()
 const supervisorConfig = loadSupervisorConfig()
 const port = resolvePort()
-const store = PersistenceStore.fromConfig({ clock: systemClock })
 
 const secrets = defaultSecretProvider()
+
+// ------------------------------------------------------------------ alerts
+//
+// Built before the store, so the one failure that happens *before* a supervisor
+// can exist still reaches a human (review round 1, M3). Opening the database is
+// the first thing that can fail on a damaged host, and §11 asks for an alert on
+// exactly that class of failure.
+
+const alertSinks: AlertSink[] = []
+if (supervisorConfig.alerts.discordEnabled) {
+  alertSinks.push(
+    new DiscordWebhookAlertSink({
+      // Read per delivery: the webhook URL is a credential and is never held in
+      // config, logs or `/health` (spec §10.2, BOARD D-3).
+      webhookUrl: () => secrets.get('alerts.discordWebhookUrl'),
+      config: supervisorConfig.alerts,
+      clock: systemClock,
+      logger: stdoutLogger,
+    }),
+  )
+}
+const alerts = new SuppressingAlertSink({
+  delegate: new CompositeAlertSink(alertSinks),
+  config: supervisorConfig.alerts,
+  clock: systemClock,
+})
+
+/**
+ * The database is the authority (spec §10.2), so a store that cannot be opened
+ * is not a start-up that continues. A damaged file or an unverifiable migration
+ * history is §11's data-integrity condition: it is reported as a `safe_stopped`
+ * alert and the process exits instead of dying with a stack trace nobody sees.
+ * Once the supervisor exists, the same classification runs inside the `state`
+ * pre-check and produces the real `safe_stopped` state (`runtime.ts`).
+ */
+async function openStoreOrStop(): Promise<PersistenceStore> {
+  try {
+    return PersistenceStore.fromConfig({ clock: systemClock })
+  } catch (error) {
+    const failure = classifyStoreFailure(error)
+    stdoutLogger.error('database unavailable at start-up', {
+      integrity: failure.integrity,
+      reason: failure.reason,
+    })
+    await alerts.deliver({
+      kind: failure.integrity ? 'supervisor.safe_stopped' : 'store.unavailable',
+      severity: 'critical',
+      at: systemClock.nowUtcIso(),
+      reason: failure.integrity ? `data_integrity:${failure.reason}` : failure.reason,
+      detail: { phase: 'startup', integrity: failure.integrity },
+    })
+    // No automatic restart: a data-integrity stop is a human decision (§9.1).
+    process.exitCode = 1
+    throw error
+  }
+}
+
+const store = await openStoreOrStop()
 
 // The renderer API is loopback *and* authenticated (spec §10.2), so the token is
 // required to start: a server that silently accepted no renderer would look
@@ -174,27 +232,6 @@ const engine = new StateEngine({
   inputConfig,
   publisher: hub,
   logger: stdoutLogger,
-})
-
-// ------------------------------------------------------------------ alerts
-
-const alertSinks: AlertSink[] = []
-if (supervisorConfig.alerts.discordEnabled) {
-  alertSinks.push(
-    new DiscordWebhookAlertSink({
-      // Read per delivery: the webhook URL is a credential and is never held in
-      // config, logs or `/health` (spec §10.2, BOARD D-3).
-      webhookUrl: () => secrets.get('alerts.discordWebhookUrl'),
-      config: supervisorConfig.alerts,
-      clock: systemClock,
-      logger: stdoutLogger,
-    }),
-  )
-}
-const alerts = new SuppressingAlertSink({
-  delegate: new CompositeAlertSink(alertSinks),
-  config: supervisorConfig.alerts,
-  clock: systemClock,
 })
 
 // --------------------------------------------------------------------- OBS
@@ -435,11 +472,24 @@ const runtimeDeps = {
   }),
   broadcast: broadcastPort,
   obs: obsPort,
-  chat: {
-    start: () => {
-      chatSource?.start()
-    },
-  },
+  // Null when `youtube.chat.enabled` is false — a deployment posture, reported as
+  // `not_configured` like OBS and broadcast. When chat *is* configured the port
+  // must not paper over a missing source: a start-up step that succeeded while
+  // no listener existed is what let the run go live without an input path
+  // (review round 1, B2).
+  chat: chatConfig.enabled
+    ? {
+        start: () => {
+          if (chatSource === null) {
+            throw new Error(
+              'youtube.chat.enabled is true but no chat source was created; check the OAuth client credentials and the vault',
+            )
+          }
+          chatSource.start()
+        },
+        started: () => chatSource !== null,
+      }
+    : null,
   logger: stdoutLogger,
 }
 

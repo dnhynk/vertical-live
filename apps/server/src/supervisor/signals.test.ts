@@ -105,12 +105,44 @@ describe('health aggregator (spec §9.4)', () => {
 
   it('leaves a non-required family unknown however long it stays unobservable', () => {
     const aggregator = new HealthAggregator(config)
-    // `chat_transport` is not required: a chat nobody has connected yet is not a
-    // broadcast fault (spec §9.4(3), §2.1).
+    // The dead-man monitor is off in the default config, and an external monitor
+    // this host cannot reach is not a reason to stop a broadcast that is fine.
     const result = aggregator.evaluate(readings({ nowMonotonicMs: 10 * 60_000 }))
 
-    expect(result.families.chat_transport.status).toBe('unknown')
-    expect(config.requiredFamilies).not.toContain('chat_transport')
+    expect(result.families.dead_man.status).toBe('unknown')
+    expect(config.requiredFamilies).not.toContain('dead_man')
+    expect(result.requiredNotOk).not.toContain('dead_man')
+  })
+
+  it('treats an absent chat producer as degraded, not as silence (review round 1, B2)', () => {
+    // Spec §9.4(3) protects a chat *nobody is typing in* — T9 keeps reporting
+    // `youtube.chat.user_events=ok` throughout that silence. A transport that
+    // reports nothing at all is a producer that is not there, and §9.2's `live`
+    // requires a chat listener that is normal, not one nobody can see.
+    const aggregator = new HealthAggregator(config)
+    const withoutChat = healthySignals().filter((item) => !item.name.startsWith('youtube.chat.'))
+    for (const item of withoutChat) aggregator.report(item)
+
+    const early = aggregator.evaluate(readings())
+    expect(early.families.chat_transport.status).toBe('unknown')
+    expect(early.inputHealthy).toBe(false)
+    expect(early.requiredNotOk).toContain('chat_transport')
+
+    const later = aggregator.evaluate(readings({ nowMonotonicMs: config.unobservableGraceMs + 1 }))
+    expect(later.families.chat_transport.status).toBe('degraded')
+    expect(later.degradedFamilies).toContain('chat_transport')
+    expect(config.requiredFamilies).toContain('chat_transport')
+  })
+
+  it('keeps a silent but reporting chat healthy for the CTA (spec §9.4(3))', () => {
+    const aggregator = new HealthAggregator(config)
+    for (const item of healthySignals()) aggregator.report(item)
+
+    const result = aggregator.evaluate(readings())
+
+    expect(result.families.chat_transport.status).toBe('ok')
+    expect(result.inputHealthy).toBe(true)
+    expect(result.requiredNotOk).toEqual([])
   })
 
   it('never lets a silent chat make the input path unhealthy', () => {

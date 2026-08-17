@@ -137,12 +137,16 @@ export class HealthAggregator {
     const families = {} as Record<HealthFamily, FamilyVerdict>
     const degradedFamilies: HealthFamily[] = []
     const unknownFamilies: HealthFamily[] = []
+    const requiredNotOk: HealthFamily[] = []
 
     for (const family of HEALTH_FAMILIES) {
       const verdict = this.#verdict(family, byFamily.get(family) ?? [], readings)
       families[family] = verdict
       if (verdict.status === 'degraded') degradedFamilies.push(family)
       else if (verdict.status === 'unknown') unknownFamilies.push(family)
+      if (verdict.status !== 'ok' && this.#config.requiredFamilies.includes(family)) {
+        requiredNotOk.push(family)
+      }
     }
 
     return {
@@ -151,11 +155,18 @@ export class HealthAggregator {
       families: Object.freeze(families),
       degradedFamilies,
       unknownFamilies,
+      requiredNotOk,
       unmappedSignals: [...this.#unmapped],
       // Spec §9.2 and §12.3: an unhealthy input path or moderation control turns
-      // the CTA off first. Silence never does (§9.4(3)), so `unknown` is not it.
-      inputHealthy:
-        families.chat_transport.status !== 'degraded' && readings.moderation.status === 'ok',
+      // the CTA off first.
+      //
+      // The distinction that matters (review round 1, B2): a chat *nobody is
+      // typing in* still reports — T9 emits `youtube.chat.user_events=ok`
+      // throughout the silence — and that is the §9.4(3) case where silence must
+      // not count as a fault. A chat transport that reports **nothing at all** is
+      // a producer that is not there, which is not evidence of health. So the CTA
+      // needs a positive `ok`, not merely the absence of `degraded`.
+      inputHealthy: families.chat_transport.status === 'ok' && readings.moderation.status === 'ok',
     }
   }
 

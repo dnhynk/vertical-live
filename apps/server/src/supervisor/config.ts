@@ -114,6 +114,12 @@ export interface SupervisorConfig {
   readonly signalStaleAfterMs: number
   /** How long a required family may stay unobservable before it is degraded. */
   readonly unobservableGraceMs: number
+  /**
+   * How often the `starting` pre-checks are re-read while they are failing for a
+   * reason a retry can fix (spec §9.1 자동 복구). Rate-limited because the
+   * `secrets` probe reads the OS credential vault.
+   */
+  readonly preflightRetryIntervalMs: number
   /** Families whose absence is itself a fault (see `unobservableGraceMs`). */
   readonly requiredFamilies: readonly HealthFamily[]
   readonly renderer: SupervisorRendererConfig
@@ -190,6 +196,10 @@ export function loadSupervisorConfig(options: LoadSupervisorConfigOptions = {}):
     unobservableGraceMs: readNonNegativeInt(
       section['unobservableGraceMs'],
       'supervisor.unobservableGraceMs',
+    ),
+    preflightRetryIntervalMs: readPositiveInt(
+      section['preflightRetryIntervalMs'],
+      'supervisor.preflightRetryIntervalMs',
     ),
     requiredFamilies: Object.freeze(
       readFamilies(section['requiredFamilies'], 'supervisor.requiredFamilies'),

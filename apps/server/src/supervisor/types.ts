@@ -90,6 +90,14 @@ export interface HealthAggregate {
   readonly degradedFamilies: readonly HealthFamily[]
   readonly unknownFamilies: readonly HealthFamily[]
   /**
+   * Required families (`supervisor.requiredFamilies`) that are not `ok` right
+   * now, degraded or merely unobserved. Spec §9.2 defines `live` as 송출·chat
+   * listener·상태 tick·렌더러 heartbeat **all** normal, so a required family
+   * nobody can confirm is not a `live` broadcast — it is a broadcast we cannot
+   * vouch for (review round 1, B2).
+   */
+  readonly requiredNotOk: readonly HealthFamily[]
+  /**
    * Signal names no family claims. Empty in practice — `signals.test.ts` pins
    * the map to every name the producers export — and reported rather than
    * dropped so a new producer cannot become an invisible hole in §9.4 coverage.

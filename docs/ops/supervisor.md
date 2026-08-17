@@ -34,12 +34,16 @@ offline → starting → live → degraded → recovering → live
 |---|---|---|
 | `kill_switch` | 운영자가 3경로 중 하나를 당김 | 2장 |
 | `rights_or_policy` | 권리·정책·약관 문제, 방송 한도에서 복구 불가 | T10 `SafeStopRequestSink` |
-| `data_integrity` | 영속 상태를 신뢰할 수 없음 | 사전 점검 `state` |
+| `data_integrity` | DB 파일 손상(`SQLITE_CORRUPT`·`SQLITE_NOTADB`) 또는 검증 불가한 마이그레이션 이력 | 사전 점검 `state`(`db-integrity.ts`가 분류). 잠금·디스크 가득·I/O는 **아님** — 운영자가 해소할 일시 장애(§9.1) |
 | `account_action` | 계정 정지·strike·재동의 필요, grant 철회 | T3 `AuthEventSink`(`auth_revoked`, 재시도 불가 `auth_refresh_failed`) |
-| `moderation_unhealthy` | 모더레이션 제어 불건전이 안전을 보장할 수 없는 수준 | 운영자 판단 → 4.3 |
+| `moderation_unhealthy` | 보고된 사유가 승인된 호출표의 `safeStopConditions`에 있음 | `reportModerationHealth()` → 4.3 |
 | `restart_budget_exhausted` | 컴포넌트 재시도 예산 소진, 또는 시작 순서 재시도 소진 | 3장 |
 
-`safe_stopped`에 들어가면 dead-man push를 **멈춘다**. 외부 monitor가 사건을 올려서 사람을 부르는 것이 목적이다([S23]).
+`safe_stopped`에 들어가면:
+
+- **예약된 재시작을 전부 취소한다**(`registry.stopAll()`). backoff를 기다리던 재시작이 남아 있으면 안전 정지 처리가 끈 인코더를 다시 켜게 된다 — §9.1·§9.2가 금지하는 자동 재시작이다(리뷰 round 1 B1). 실행 직전에도 상태를 한 번 더 확인한다.
+- dead-man push를 **멈춘다**. 외부 monitor가 사건을 올려서 사람을 부르는 것이 목적이다([S23]).
+- DB를 아예 열지 못해 supervisor가 만들어지기도 전이라면, `main.ts`가 같은 분류로 critical alert를 보내고 프로세스를 종료한다(자동 재시작 없음).
 
 ## 2. kill switch 3경로 (§9.1 비상 중지, §11 안전 정지)
 
@@ -76,7 +80,7 @@ npm run kill -w @vl/server -- --clear
 |---|---|---|---|
 | `engine` | supervisor | `stop()` → `start()`(snapshot 복구) | `safe_stopped` |
 | `chat-source` | supervisor | `stop()` → `start()` | `safe_stopped` |
-| `obs-connection` | **`obs.ObsClient`** | 없음 — T2가 이미 backoff 재연결 루프를 가지고 있어 T12는 **관찰만** 한다 | `obs-process`로 escalation |
+| `obs-connection` | **`obs.ObsClient`** | 없음 — T2가 이미 backoff 재연결 루프를 가지고 있어 T12는 **관찰만** 한다 | `obs-process`로 escalation(아래) |
 | `obs-stream` | supervisor | `startStream()` | `safe_stopped` |
 | `renderer-source` | supervisor | Browser Source `refreshnocache` | `safe_stopped` |
 | `obs-process` | supervisor | OBS 실행기(**T17 주입 전에는 실패**) | `safe_stopped` |
@@ -85,6 +89,8 @@ degraded family → 컴포넌트 대응은 `componentsToRestart()`에 있다. �
 
 - `frame_loss`(§9.4(7)): congestion·skipped frame은 부하이지 죽은 컴포넌트가 아니다. 출력을 재시작하면 살아 있는 송출을 일부러 끊게 된다.
 - `youtube_broadcast`의 lifecycle·health(§9.4(6)): 방송 생명주기는 T10이 YouTube와 reconcile하고, 불가능하면 스스로 `safe_stopped`를 요청한다. 단 `streamStatus`가 "ingest가 안 들어온다"고 말할 때만 로컬 인코더 출력(`obs-stream`)을 재시작한다.
+
+**escalation은 대상이 자기 예산을 다 쓸 때까지 이어진다.** OBS가 계속 닿지 않는 동안 *신호*는 계속 `obs-connection`을 가리키지만, 그때 뭔가 할 수 있는 컴포넌트는 `obs-process`다. 그래서 소진된 컴포넌트에 escalation 대상이 있으면 평가마다 그 대상이 일을 받고, 대상은 "직접 지목되지 않았다"는 이유로 건강 판정을 받지 않는다. 이렇게 하지 않으면 실패한 시도마다 예산이 되돌아가 `safe_stopped`에 영원히 도달하지 못한다(리뷰 round 1 B3).
 
 ## 4. 건강 신호 8종 (§9.4)
 
@@ -101,15 +107,18 @@ degraded family → 컴포넌트 대응은 `componentsToRestart()`에 있다. �
 | 7 | `frame_loss` | T2 `obs.frames`, `obs.congestion` |
 | 8 | `dead_man` | 이 프로세스의 Uptime Kuma push 결과 |
 
-세 가지 판정 규칙:
+네 가지 판정 규칙:
 
-1. **침묵은 고장이 아니다.** 채팅 메시지가 없다고 degraded가 되지 않는다(§9.4(3)). `youtube.chat.user_events`는 항상 `ok`다.
-2. **`unknown`은 `degraded`가 아니다.** 다만 `supervisor.requiredFamilies`에 있는 family가 `unobservableGraceMs`를 넘겨 계속 관측 불가면 degraded로 올린다 — 아예 닿지 않는 인코더는 "조용한" 것이 아니다.
-3. **screenshot은 판정에 쓰지 않는다**(§9.4). 4.4 참조.
+1. **침묵은 고장이 아니다.** 채팅 메시지가 없다고 degraded가 되지 않는다(§9.4(3)). 조용한 채팅에서도 T9는 `youtube.chat.user_events=ok`를 계속 보고한다.
+2. **보고가 전혀 없는 것은 침묵이 아니라 producer 부재다.** 1번이 보호하는 것은 "메시지가 없다"이지 "전송 계층이 아무 말도 안 한다"가 아니다. `supervisor.requiredFamilies`(= coordinator·state_commit·**chat_transport**·renderer·obs_output·youtube_broadcast)에 있는 family가 `unobservableGraceMs`를 넘겨 계속 관측 불가면 degraded로 올린다(리뷰 round 1 B2).
+3. **`live`는 required family가 전부 `ok`일 때만이다.** degraded가 0이어도 required 중 확인되지 않은 것이 있으면 `live`가 아니다 — §9.2의 live는 "송출·chat listener·상태 tick·렌더러 heartbeat가 **모두 정상**"이다.
+4. **screenshot은 판정에 쓰지 않는다**(§9.4). 4.4 참조.
 
 ### 4.1 입력·모더레이션과 CTA (§9.2, §12.3)
 
 입력 경로(chat transport)나 모더레이션 제어가 불건전하면 supervisor가 엔진에 `reportInputHealth('degraded')`로 알리고, 엔진이 published read model의 `interactionEnabled`를 끈다. 화면 CTA는 그 값을 따른다. supervisor가 두 번째 답을 계산하지 않는 이유는 렌더러가 재접속해도 서버 snapshot과 같은 값을 봐야 하기 때문이다(§10.2).
+
+CTA를 켜려면 `chat_transport`가 **`ok`여야 한다** — "degraded가 아니다"로는 부족하다. 아무 보고도 없는 전송 계층은 건전하다는 증거가 아니기 때문이다(4장 규칙 2).
 
 ### 4.2 알림 (BOARD D-3)
 
@@ -130,7 +139,12 @@ npm run secrets -w @vl/server -- set alerts.discordWebhookUrl   # 값은 stdin�
 
 `supervisor.moderation`은 **자리만** 있고 값은 비어 있다(`approved: false`). 스펙 §12.3은 "24시간 호출 책임자, 최대 응답시간, escalation 채널, 자동 차단 범위와 safe-stop 조건"을 Gate 0에서 승인하도록 하고, 그 표가 없으면 Gate 3 public 파일럿을 시작하지 않는다. `assertModerationCallTableApproved(config.moderation)`가 그 게이트이며, 승인 전에는 무엇이 비었는지 이름을 대고 throw한다. **코드가 값을 채우지 않는다.**
 
-모더레이션 제어 불건전은 `supervisor.reportModerationHealth('degraded', '<사유>')`로 보고되면 즉시 CTA를 끈다. 거기서 `safe_stopped`까지 갈지는 사람의 판단이라, 승인된 호출표의 safe-stop 조건에 따라 운영자가 kill switch를 쓴다.
+모더레이션 제어 불건전은 `supervisor.reportModerationHealth('degraded', '<사유>')`로 보고한다. §12.3의 2단계가 그대로 코드다.
+
+1. **CTA를 끈다** — 항상. 그리고 `moderation.unhealthy` warning alert를 보낸다(리뷰 round 1 M2: 조용히 CTA만 끄는 것은 사람 호출이 아니다).
+2. **안전을 보장할 수 없으면 멈춘다** — 보고된 사유가 `supervisor.moderation.safeStopConditions`에 있으면 `moderation_unhealthy` → `safe_stopped` + critical alert.
+
+어떤 사유가 2단계인지는 사람의 판단이라 코드가 정하지 않는다. 목록이 비어 있는 동안(=Gate 0 미승인) 불건전 보고는 CTA를 끄고 알림만 보내며, alert 본문의 `safeStopConditionMatched=false`가 왜 멈추지 않았는지 알려준다. 사유 토큰은 보고하는 쪽과 호출표가 같은 문자열을 쓴다.
 
 ### 4.4 진단 screenshot (§9.4)
 
@@ -160,7 +174,7 @@ npm run secrets -w @vl/server -- set monitoring.deadManPushUrl
 | 5 | `streamService` | vault의 stream key를 obs-websocket으로 주입(A-16) |
 | 6 | `startStream` | 인코더 출력 시작 |
 | 7 | `goLive` | auto-start 대기 후 필요하면 transition(§4 `invalidAutoStart`) |
-| 8 | `chatSource` | `liveChatId`로 chat listener 시작 |
+| 8 | `chatSource` | `liveChatId`로 chat listener 시작. **source가 실제로 시작됐을 때만 성공**(리뷰 round 1 B2) |
 | 9 | `publish` | 마커 제거 확인 후 공개 전환(A-18). `privacyStatus=private`이면 하지 않는다 |
 
 7번(`goLive`)은 TASK_SPECS 목록에 없지만 8·9번이 그것을 필요로 해서 추가했다(방송이 live가 되어야 `liveChatId`가 생기고, auto-start가 거부될 수 있다).
@@ -173,12 +187,14 @@ npm run secrets -w @vl/server -- set monitoring.deadManPushUrl
 |---|---|---|
 | `credentials` | broadcast 바인딩이 성립(= 토큰이 실제로 통했다) | grant 철회는 T3 sink가 별도로 stop |
 | `secrets` | 필요한 vault 항목이 전부 있음(이름만 보고, 값은 절대 출력하지 않음) | 아니오 |
-| `state` | 엔진이 `ready` | 무결성 오류면 예 |
+| `state` | DB 핸들이 살아 있고(마이그레이션 적용됨) 엔진이 `ready` | **파일 손상·검증 불가 이력이면 예**(`data_integrity`). 잠금·디스크 가득은 아니오 |
 | `api` | broadcast 바인딩 존재 | 아니오 |
 | `renderer` | 렌더러가 1개 이상 붙음 | 아니오 |
 | `encoder` | OBS 연결됨 | 아니오 |
 
 여섯 개는 하나가 실패해도 전부 실행한다. 한 번의 시도로 운영자가 전부 볼 수 있어야 하기 때문이다. 통합이 구성되지 않은 배포에서는 `not_configured:<무엇>`으로 실패한다 — **점검하지 않은 것을 통과로 적지 않는다.**
+
+**실패는 캐시되지 않는다.** `starting`에 있는 동안 재시도로 고쳐질 수 있는 실패(safe-stop이 아닌 것)는 `supervisor.preflightRetryIntervalMs`마다 다시 읽는다. 부팅 뒤에 붙는 렌더러, 늦게 뜨는 인코더, 돌아오는 API가 §9.1의 "일시 장애 자동 복구"이기 때문이다(리뷰 round 1 M1). vault를 읽는 `secrets` 점검 때문에 매 평가마다 돌리지는 않는다.
 
 ## 7. 배포 스위치
 
@@ -189,6 +205,8 @@ npm run secrets -w @vl/server -- set monitoring.deadManPushUrl
 ```
 
 기본값은 둘 다 꺼져 있다(개발 호스트). 켜는 방법은 `config/default.json` 또는 `VL_OBS_ENABLED=true` / `VL_BROADCAST_ENABLED=true`다. 꺼져 있으면 해당 시작 step은 "not_configured"로 건너뛰고 대응 사전 점검이 실패하므로, 세계는 계속 돌지만(§2.1) supervisor는 `starting`에 머무르고 `live`라고 말하지 않는다.
+
+`youtube.chat.enabled=false`도 같은 posture다: chat step은 `not_configured`로 건너뛰고, `chat_transport`는 required family라 관측 불가로 남아 `live`가 되지 않는다. 반대로 chat이 **켜져 있는데** source가 만들어지지 않으면 시작 순서가 **실패한다** — 조용히 성공하지 않는다(리뷰 round 1 B2).
 
 `broadcast: true`는 T10 lifecycle(+ §9.4(6) health monitor)을 붙인다. `youtube.chat.enabled` 또는 이 스위치가 켜져 있으면 프로세스가 **하나의** `TokenManager`를 만들어 둘이 공유한다 — 같은 grant에 관리자를 두 개 두면 둘 다 같은 refresh token을 갱신·회전하게 된다. auth 이벤트는 T13 철회 sink와 T12 supervisor 양쪽으로 간다.
 

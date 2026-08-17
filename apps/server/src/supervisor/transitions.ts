@@ -96,15 +96,30 @@ function decide(from: SupervisorState, input: TransitionInput): Decision {
   return healthyDecision(input, 'signals')
 }
 
+/**
+ * `live` needs every required family to say `ok` — not merely "nothing said
+ * degraded".
+ *
+ * Review round 1 (B2) found the difference: with the chat producer absent
+ * entirely, every family was either `ok` or `unknown`, no family was `degraded`,
+ * and the machine reported `live` with the CTA on. Spec §9.2 defines `live` as
+ * "영상 송출, chat listener, 상태 tick, 렌더러 heartbeat가 모두 정상" — a
+ * listener nobody can observe is not evidence of that. An unobserved required
+ * family is therefore a `degraded` broadcast, and the aggregator's grace window
+ * is what keeps a momentary gap from flapping the state.
+ */
 function healthyDecision(input: TransitionInput, cause: string): Decision {
   const degraded = input.aggregate.degradedFamilies
-  if (degraded.length === 0) {
+  const requiredNotOk = input.aggregate.requiredNotOk
+  if (degraded.length === 0 && requiredNotOk.length === 0) {
     return { state: 'live', reason: `${cause}:all_families_ok` }
   }
+  const blocking = degraded.length > 0 ? degraded : requiredNotOk
+  const label = degraded.length > 0 ? 'degraded' : 'unconfirmed'
   if (input.recovering) {
-    return { state: 'recovering', reason: `recovering:${degraded.join('+')}` }
+    return { state: 'recovering', reason: `recovering:${blocking.join('+')}` }
   }
-  return { state: 'degraded', reason: `degraded:${degraded.join('+')}` }
+  return { state: 'degraded', reason: `${label}:${blocking.join('+')}` }
 }
 
 /**

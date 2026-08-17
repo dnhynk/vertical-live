@@ -81,9 +81,11 @@
     "stateCommitStaleAfterMs": 120000,
     "signalStaleAfterMs": 30000,
     "unobservableGraceMs": 30000,
+    "preflightRetryIntervalMs": 15000,
     "requiredFamilies": [
       "coordinator",
       "state_commit",
+      "chat_transport",
       "renderer",
       "obs_output",
       "youtube_broadcast"
@@ -154,6 +156,7 @@
       "stateCommitStaleAfterMs",
       "signalStaleAfterMs",
       "unobservableGraceMs",
+      "preflightRetryIntervalMs",
       "requiredFamilies",
       "renderer",
       "startup.maxAttempts",

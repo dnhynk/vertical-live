@@ -129,6 +129,7 @@ export class Supervisor {
   #startupAttempts = 0
   #moderation: ModerationHealth = MODERATION_HEALTHY
   #lastEvaluationMonotonicMs: number | null = null
+  #lastPreflightMonotonicMs: number | null = null
   #lastAggregate: HealthAggregate | null = null
   #interactionEnabled = true
   #timer: TimerHandle | undefined
@@ -212,9 +213,43 @@ export class Supervisor {
     return result
   }
 
-  /** Moderation control health (spec §12.3). Reported by whoever observes it. */
+  /**
+   * Moderation control health (spec §12.3). Reported by whoever observes it.
+   *
+   * §12.3 defines two levels and this method implements both (review round 1,
+   * M2): an unhealthy display filter or block control turns the CTA off first,
+   * and when safety **cannot be assured** the run stops. Which reasons mean the
+   * second level is a human decision, so it is read from the Gate 0 call table
+   * (`supervisor.moderation.safeStopConditions`) rather than invented here —
+   * while that list is empty, an unhealthy control turns the CTA off and alerts,
+   * and nothing stops the run on its own.
+   */
   reportModerationHealth(status: HealthStatus, reason: string | null = null): void {
+    const previous = this.#moderation
     this.#moderation = { status, reason }
+    if (status === 'ok') return
+    if (previous.status === status && previous.reason === reason) return
+
+    const token = reason ?? 'moderation_unhealthy'
+    if (reason !== null && this.#config.moderation.safeStopConditions.includes(reason)) {
+      void this.requestSafeStop({
+        kind: 'moderation_unhealthy',
+        at: this.#clock.nowUtcIso(),
+        reason: token,
+        detail: { status, approvedCallTable: this.#config.moderation.approved },
+      })
+      return
+    }
+    void this.#alert('warning', 'moderation.unhealthy', {
+      reason: token,
+      detail: {
+        status,
+        // Says plainly why this did not stop the run, so an operator reading the
+        // alert knows the Gate 0 table is what decides that (spec §12.3).
+        safeStopConditionMatched: false,
+        approvedCallTable: this.#config.moderation.approved,
+      },
+    })
   }
 
   /** Adapter for T10's `SafeStopRequestSink` (spec §9.1). */
@@ -399,6 +434,7 @@ export class Supervisor {
           onExhausted: (event) => {
             void this.#handleExhausted(event)
           },
+          canRestart: () => this.#restartsAllowed(),
         }),
       )
     }
@@ -422,6 +458,11 @@ export class Supervisor {
     this.registry.assertComplete()
   }
 
+  /** No restart, of any component, once the run has stopped (spec §9.1, §9.2). */
+  #restartsAllowed(): boolean {
+    return this.#safeStop === null && this.#state !== 'safe_stopped' && !this.#stopped
+  }
+
   async #handleExhausted(event: RestartExhaustedEvent): Promise<void> {
     if (event.escalatesTo !== null) {
       const target = this.registry.require(event.escalatesTo)
@@ -429,6 +470,9 @@ export class Supervisor {
         reason: `${event.component}->${event.escalatesTo}`,
         detail: { attempts: event.attempts, reason: event.reason },
       })
+      // The first attempt of the escalation target starts here; `#driveRecovery`
+      // keeps driving it while the condition lasts, so the target really spends
+      // its own budget instead of trying once (review round 1, B3).
       target.request(`escalated_from:${event.component}`)
       return
     }
@@ -500,6 +544,7 @@ export class Supervisor {
       }
       return this.#preflight
     }
+    this.#lastPreflightMonotonicMs = this.#clock.monotonicMs()
     const result = await runPreflight(this.#options.preflight, this.#clock)
     this.#preflight = result
     if (result.safeStop !== null) {
@@ -515,7 +560,33 @@ export class Supervisor {
     return result
   }
 
+  /**
+   * Re-runs the `starting` pre-checks while they are failing for a reason a
+   * retry can fix (review round 1, M1).
+   *
+   * The first run happens in `start()`, but a renderer that attaches a minute
+   * later, an encoder that finishes booting, or an API that comes back are all
+   * §9.1 "일시 장애 자동 복구" cases — and the machine cannot leave `starting`
+   * until the checks are re-read. It is rate-limited by
+   * `supervisor.preflightRetryIntervalMs` because the `secrets` probe reads the
+   * OS credential vault, which is not free.
+   */
+  async #maybeRetryPreflight(): Promise<void> {
+    if (this.#state !== 'starting' || this.#options.preflight === undefined) return
+    const previous = this.#preflight
+    if (previous === null || previous.passed || previous.safeStop !== null) return
+    if (
+      this.#lastPreflightMonotonicMs !== null &&
+      this.#clock.monotonicMs() - this.#lastPreflightMonotonicMs <
+        this.#config.preflightRetryIntervalMs
+    ) {
+      return
+    }
+    await this.#runPreflight()
+  }
+
   async #evaluate(cause: string): Promise<HealthAggregate> {
+    await this.#maybeRetryPreflight()
     const nowMonotonicMs = this.#clock.monotonicMs()
     for (const signal of this.#options.sources?.() ?? []) this.#aggregator.report(signal)
     const engine = this.#options.engine.health()
@@ -574,16 +645,32 @@ export class Supervisor {
     this.#options.engine.reportInputHealth(enabled ? 'ok' : 'degraded')
   }
 
-  /** Asks the responsible component's single supervisor to act (spec §10.2). */
+  /**
+   * Asks the responsible component's single supervisor to act (spec §10.2).
+   *
+   * The escalation edge needs care (review round 1, B3). While the OBS
+   * connection stays unreachable, the *signal* keeps naming `obs-connection`;
+   * the component that can still do something about it is `obs-process`. So an
+   * exhausted component with a declared escalation target hands the work to that
+   * target on every pass, and the target is not told it is healthy just because
+   * no signal names it directly — otherwise its budget resets after each failed
+   * attempt and `safe_stopped` is never reached.
+   */
   #driveRecovery(aggregate: HealthAggregate): void {
-    const wanted = componentsToRestart(aggregate)
+    const reason = aggregate.degradedFamilies.join('+')
+    const wanted = new Set<SupervisedComponent>(componentsToRestart(aggregate))
+    for (const component of [...wanted]) {
+      const supervisor = this.registry.get(component)
+      if (supervisor?.exhausted === true && supervisor.escalatesTo !== null) {
+        wanted.add(supervisor.escalatesTo)
+      }
+    }
+
     for (const supervisor of this.registry.all()) {
-      const needed = wanted.includes(supervisor.component)
-      if (!needed) {
+      if (!wanted.has(supervisor.component)) {
         supervisor.noteHealthy()
         continue
       }
-      const reason = aggregate.degradedFamilies.join('+')
       if (supervisor.delegated) {
         const attempts =
           supervisor.component === 'obs-connection'
@@ -592,6 +679,8 @@ export class Supervisor {
         supervisor.observeExternalAttempts(attempts, reason)
         continue
       }
+      // An exhausted component whose work has been handed on stays exhausted:
+      // `request()` answers `exhausted` and the target above does the acting.
       supervisor.request(reason)
     }
   }
@@ -615,6 +704,10 @@ export class Supervisor {
     })
 
     if (state === 'safe_stopped') {
+      // Every scheduled restart is cancelled *before* anything else: one that is
+      // waiting out its backoff would otherwise start an encoder the safe-stop
+      // handler is about to stop (review round 1, B1; spec §9.1, §9.2).
+      this.registry.stopAll()
       // Stop pushing the dead-man heartbeat: a stopped broadcast needs a human,
       // and the external monitor is how one is reached when nobody is watching
       // this process's logs ([S23], §11 관측성).

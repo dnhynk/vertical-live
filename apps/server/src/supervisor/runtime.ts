@@ -2,6 +2,7 @@ import type { EngineHealth } from '../engine/engine.js'
 import { silentLogger, type Logger } from '../secrets/redaction.js'
 import type { SecretName, SecretProvider } from '../secrets/types.js'
 import type { SupervisorConfig } from './config.js'
+import { classifyStoreFailure } from './db-integrity.js'
 import { PREFLIGHT_OK, type PreflightOutcome, type PreflightProbes } from './preflight.js'
 import type { StartupSteps } from './startup.js'
 
@@ -49,6 +50,8 @@ export interface ObsPort {
 
 export interface ChatPort {
   start(): void
+  /** True once a real source object exists and has been started. */
+  started(): boolean
 }
 
 export interface RuntimeDeps {
@@ -123,6 +126,15 @@ export function buildStartupSteps(deps: RuntimeDeps): StartupSteps {
         return
       }
       deps.chat.start()
+      // A step that "succeeded" without a source running is what let a
+      // configured chat disappear silently (review round 1, B2): the port
+      // reports whether the listener really exists, and a `false` here fails the
+      // sequence instead of letting the run go live without an input path.
+      if (!deps.chat.started()) {
+        throw new Error(
+          'chat source did not start; the configured input path (spec §9.4(3)) is not running',
+        )
+      }
     },
     publish: async () => {
       if (deps.broadcast === null) {
@@ -174,7 +186,23 @@ export function buildPreflightProbes(deps: PreflightDeps): PreflightProbes {
         ? PREFLIGHT_OK
         : { passed: false, reason: `missing:${missing.join('+')}` }
     },
-    state: () => (deps.engine.ready ? PREFLIGHT_OK : { passed: false, reason: 'engine_not_ready' }),
+    state: () => {
+      // The store is asked first, and its failure is *classified*: a damaged
+      // file or an unverifiable migration history is §11's data-integrity stop,
+      // not something to retry `starting` over (review round 1, M3). Everything
+      // else — a busy lock, a full disk — stays a plain retryable failure.
+      try {
+        deps.openStore()
+      } catch (error) {
+        const failure = classifyStoreFailure(error)
+        return {
+          passed: false,
+          reason: `store:${failure.reason}`,
+          ...(failure.integrity ? { safeStop: 'data_integrity' as const } : {}),
+        }
+      }
+      return deps.engine.ready ? PREFLIGHT_OK : { passed: false, reason: 'engine_not_ready' }
+    },
     api: () => {
       if (deps.broadcast === null) return notConfigured('broadcast')
       return deps.broadcast.bound() ? PREFLIGHT_OK : { passed: false, reason: 'not_bound' }

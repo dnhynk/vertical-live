@@ -1,4 +1,4 @@
-import type { Clock } from '../clock.js'
+import type { Clock, TimerHandle } from '../clock.js'
 import { silentLogger, type Logger } from '../secrets/redaction.js'
 import type { BackoffPolicy } from '../youtube/quota/backoff.js'
 import { SUPERVISED_COMPONENTS, type ComponentHealth, type SupervisedComponent } from './types.js'
@@ -30,6 +30,8 @@ export type RestartRequestOutcome =
   | 'in_flight'
   /** The attempt budget is gone; the caller escalates or stops (spec §9.2). */
   | 'exhausted'
+  /** The run has stopped for good; nothing restarts any more (spec §9.1, §9.2). */
+  | 'stopped'
 
 export interface RestartSupervisorOptions {
   readonly component: SupervisedComponent
@@ -52,6 +54,15 @@ export interface RestartSupervisorOptions {
   readonly logger?: Logger
   readonly onAttempt?: (event: RestartAttemptEvent) => void
   readonly onExhausted?: (event: RestartExhaustedEvent) => void
+  /**
+   * Checked again in the moment before the scheduled action runs. `stop()`
+   * already cancels the timer, but a restart is an *outward* action — it starts
+   * an encoder — so it also asks, immediately before acting, whether restarting
+   * is still allowed. Belt and braces: review round 1 (B1) found a restart that
+   * had been scheduled before a `rights_or_policy` stop still running after it,
+   * which is exactly the automatic restart spec §9.1/§9.2 prohibit.
+   */
+  readonly canRestart?: () => boolean
 }
 
 export interface RestartAttemptEvent {
@@ -93,6 +104,8 @@ export class RestartSupervisor {
   #attempts = 0
   #inFlight = false
   #exhausted = false
+  #stopped = false
+  #timer: TimerHandle | undefined
   #lastAttemptAt: string | null = null
   #lastError: string | null = null
 
@@ -124,6 +137,31 @@ export class RestartSupervisor {
     return this.#exhausted
   }
 
+  /** True once `stop()` has been called; nothing restarts after that. */
+  get stopped(): boolean {
+    return this.#stopped
+  }
+
+  /**
+   * Cancels the scheduled attempt, if any, and refuses every later one. The
+   * supervisor calls this on entering `safe_stopped`: a run that stopped for a
+   * rights, policy or integrity reason must not restart a component afterwards
+   * (spec §9.1, §9.2), and a restart already waiting out its backoff is exactly
+   * such a restart.
+   */
+  stop(): void {
+    this.#stopped = true
+    this.#cancelPending()
+  }
+
+  #cancelPending(): void {
+    if (this.#timer !== undefined) {
+      this.#clock.clearTimeout(this.#timer)
+      this.#timer = undefined
+    }
+    this.#inFlight = false
+  }
+
   health(): ComponentHealth {
     return {
       component: this.component,
@@ -143,7 +181,7 @@ export class RestartSupervisor {
    * restart is exactly the case §9.2 wants to end in `safe_stopped`.
    */
   noteHealthy(): void {
-    if (this.#inFlight) return
+    if (this.#inFlight || this.#stopped) return
     this.#attempts = 0
     this.#exhausted = false
     this.#lastError = null
@@ -154,6 +192,7 @@ export class RestartSupervisor {
     if (this.delegated) {
       throw new DelegatedRestartError(this.component, this.owner)
     }
+    if (this.#stopped) return 'stopped'
     if (this.#exhausted) return 'exhausted'
     if (this.#inFlight) return 'in_flight'
 
@@ -177,7 +216,8 @@ export class RestartSupervisor {
       at,
     })
 
-    this.#clock.setTimeout(() => {
+    this.#timer = this.#clock.setTimeout(() => {
+      this.#timer = undefined
       void this.#run(reason)
     }, delayMs)
     return 'scheduled'
@@ -192,6 +232,7 @@ export class RestartSupervisor {
     if (!this.delegated) {
       throw new Error(`${this.component}: observeExternalAttempts is for delegated entries only`)
     }
+    if (this.#stopped) return 'stopped'
     if (this.#exhausted) return 'exhausted'
     this.#attempts = attempts
     this.#lastAttemptAt = this.#clock.nowUtcIso()
@@ -205,6 +246,18 @@ export class RestartSupervisor {
   async #run(reason: string): Promise<void> {
     const restart = this.#options.restart
     if (restart === undefined) return
+    // Last gate before an outward action. `stop()` normally cancels the timer
+    // first; this covers the attempt that was already inside the timer callback
+    // when the run stopped (review round 1, B1).
+    if (this.#stopped || this.#options.canRestart?.() === false) {
+      this.#inFlight = false
+      this.#logger.warn('supervisor restart skipped: the run has stopped', {
+        component: this.component,
+        attempt: this.#attempts,
+        reason,
+      })
+      return
+    }
     try {
       await restart()
       this.#lastError = null
@@ -280,6 +333,14 @@ export class SupervisorRegistry {
 
   all(): readonly RestartSupervisor[] {
     return [...this.#byComponent.values()]
+  }
+
+  /**
+   * Cancels every scheduled restart and refuses further ones. Called once, on
+   * entering `safe_stopped` (spec §9.1, §9.2).
+   */
+  stopAll(): void {
+    for (const supervisor of this.#byComponent.values()) supervisor.stop()
   }
 
   /** Every supervised component is covered; used at start-up and by the tests. */

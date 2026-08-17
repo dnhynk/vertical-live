@@ -33,26 +33,41 @@ function verdict(
   }
 }
 
-function aggregate(degraded: Partial<Record<HealthFamily, string>> = {}): HealthAggregate {
+/**
+ * `degraded` names families the aggregate reports as degraded; `unconfirmed`
+ * names required families that are merely unobserved (review round 1, B2 — a
+ * producer that reports nothing is not evidence of health).
+ */
+function aggregate(
+  degraded: Partial<Record<HealthFamily, string>> = {},
+  unconfirmed: readonly HealthFamily[] = [],
+): HealthAggregate {
   const families = {} as Record<HealthFamily, FamilyVerdict>
   const degradedFamilies: HealthFamily[] = []
+  const unknownFamilies: HealthFamily[] = []
   for (const family of HEALTH_FAMILIES) {
     const reason = degraded[family]
-    if (reason === undefined) {
-      families[family] = verdict(family, 'ok')
+    if (reason !== undefined) {
+      families[family] = verdict(family, 'degraded', reason)
+      degradedFamilies.push(family)
       continue
     }
-    families[family] = verdict(family, 'degraded', reason)
-    degradedFamilies.push(family)
+    if (unconfirmed.includes(family)) {
+      families[family] = verdict(family, 'unknown', 'no_observation')
+      unknownFamilies.push(family)
+      continue
+    }
+    families[family] = verdict(family, 'ok')
   }
   return {
     atUtc: '2026-01-01T00:00:00.000Z',
     atMonotonicMs: 0,
     families,
     degradedFamilies,
-    unknownFamilies: [],
+    unknownFamilies,
+    requiredNotOk: [...degradedFamilies, ...unconfirmed],
     unmappedSignals: [],
-    inputHealthy: degraded.chat_transport === undefined,
+    inputHealthy: families.chat_transport.status === 'ok',
   }
 }
 

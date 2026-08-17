@@ -31,6 +31,7 @@ function secretsWith(present: readonly SecretName[]): SecretProvider {
 function deps(overrides: Partial<RuntimeDeps> = {}): RuntimeDeps & { readonly calls: string[] } {
   const calls: string[] = []
   const engineState = { ready: false }
+  const chatState = { started: false }
   return {
     calls,
     config: loadSupervisorConfig(),
@@ -78,7 +79,9 @@ function deps(overrides: Partial<RuntimeDeps> = {}): RuntimeDeps & { readonly ca
     chat: {
       start: () => {
         calls.push('chat.start')
+        chatState.started = true
       },
+      started: () => chatState.started,
     },
     ...overrides,
   }
@@ -138,6 +141,28 @@ describe('buildStartupSteps', () => {
     expect(runtime.calls).not.toContain('broadcast.publish')
   })
 
+  it('fails the chat step when the configured source is not running (review round 1, B2)', async () => {
+    // A step that succeeded while no listener existed is what let the run go
+    // live without an input path.
+    const runtime = deps({
+      chat: {
+        start: () => {
+          /* a source that silently is not there */
+        },
+        started: () => false,
+      },
+    })
+
+    const result = await runStartupSequence({
+      steps: buildStartupSteps(runtime),
+      clock: new FakeClock(),
+    })
+
+    expect(result.completed).toBe(false)
+    expect(result.failedStep).toBe('chatSource')
+    expect(result.error).toContain('chat source did not start')
+  })
+
   it('skips an integration this deployment has not configured', async () => {
     const runtime = deps({ obs: null, broadcast: null, chat: null, retention: null })
 
@@ -185,6 +210,46 @@ describe('buildPreflightProbes', () => {
     expect(secrets?.passed).toBe(false)
     expect(secrets?.reason).toContain('server.adminToken')
     expect(secrets?.reason).not.toContain('synthetic-')
+  })
+
+  it('turns a damaged database into a data-integrity safe stop (review round 1, M3)', async () => {
+    const corrupt = new Error('database disk image is malformed')
+    ;(corrupt as Error & { code: string }).code = 'SQLITE_CORRUPT'
+    const runtime = deps({
+      openStore: () => {
+        throw corrupt
+      },
+    })
+    runtime.engine.start()
+
+    const result = await runPreflight(
+      buildPreflightProbes({ ...runtime, secrets: secretsWith(allSecrets) }),
+      new FakeClock(),
+    )
+
+    const state = result.checks.find((check) => check.check === 'state')
+    expect(state?.passed).toBe(false)
+    expect(state?.reason).toBe('store:sqlite_sqlite_corrupt')
+    expect(result.safeStop?.kind).toBe('data_integrity')
+  })
+
+  it('keeps an operational database failure retryable (spec §9.1)', async () => {
+    const busy = new Error('database is locked')
+    ;(busy as Error & { code: string }).code = 'SQLITE_BUSY'
+    const runtime = deps({
+      openStore: () => {
+        throw busy
+      },
+    })
+    runtime.engine.start()
+
+    const result = await runPreflight(
+      buildPreflightProbes({ ...runtime, secrets: secretsWith(allSecrets) }),
+      new FakeClock(),
+    )
+
+    expect(result.failed).toEqual(['state'])
+    expect(result.safeStop).toBeNull()
   })
 
   it('fails the encoder check while OBS is not connected', async () => {

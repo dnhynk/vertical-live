@@ -171,6 +171,77 @@ describe('RestartSupervisor', () => {
     })
   })
 
+  describe('stopping (review round 1, B1)', () => {
+    it('cancels an attempt that was already waiting out its backoff', async () => {
+      const clock = new FakeClock()
+      const restart = vi.fn(() => Promise.resolve())
+      const supervisor = new RestartSupervisor({
+        component: 'obs-stream',
+        clock,
+        backoff: backoff(3),
+        restart,
+      })
+
+      supervisor.request('output_inactive')
+      supervisor.stop()
+      await clock.advance(60_000)
+
+      expect(restart).not.toHaveBeenCalled()
+      expect(supervisor.stopped).toBe(true)
+      expect(supervisor.inFlight).toBe(false)
+    })
+
+    it('refuses every later request', () => {
+      const supervisor = new RestartSupervisor({
+        component: 'engine',
+        clock: new FakeClock(),
+        backoff: backoff(3),
+        restart: () => Promise.resolve(),
+      })
+
+      supervisor.stop()
+
+      expect(supervisor.request('writer_failing')).toBe('stopped')
+    })
+
+    it('asks again in the moment before it acts', async () => {
+      // The timer callback can already be running when the run stops, so the
+      // action is gated a second time rather than only by the cancellation.
+      const clock = new FakeClock()
+      const restart = vi.fn(() => Promise.resolve())
+      let allowed = true
+      const supervisor = new RestartSupervisor({
+        component: 'obs-stream',
+        clock,
+        backoff: backoff(3),
+        restart,
+        canRestart: () => allowed,
+      })
+
+      supervisor.request('output_inactive')
+      allowed = false
+      await clock.advance(1000)
+
+      expect(restart).not.toHaveBeenCalled()
+      expect(supervisor.inFlight).toBe(false)
+    })
+
+    it('does not hand the budget back to a stopped component', () => {
+      const supervisor = new RestartSupervisor({
+        component: 'engine',
+        clock: new FakeClock(),
+        backoff: backoff(3),
+        restart: () => Promise.resolve(),
+      })
+
+      supervisor.request('writer_failing')
+      supervisor.stop()
+      supervisor.noteHealthy()
+
+      expect(supervisor.attempts).toBe(1)
+    })
+  })
+
   it('refuses to build a supervisor-owned entry with nothing to restart', () => {
     expect(
       () =>
@@ -212,5 +283,14 @@ describe('SupervisorRegistry', () => {
 
     expect(() => registry.assertComplete()).not.toThrow()
     expect(registry.all()).toHaveLength(SUPERVISED_COMPONENTS.length)
+  })
+
+  it('stops every component at once (spec §9.1, §9.2)', () => {
+    const registry = new SupervisorRegistry()
+    for (const component of SUPERVISED_COMPONENTS) registry.register(entry(component))
+
+    registry.stopAll()
+
+    expect(registry.all().every((supervisor) => supervisor.stopped)).toBe(true)
   })
 })

@@ -1,7 +1,7 @@
 # TASK-T12-supervisor
 
 - Task: T12 supervisor 상태기계·건강 집계·kill switch·알림·dead-man (`docs/tasks/TASK_SPECS.md` §T12)
-- Branch: `dnhynk/t12-supervisor` · PR: #<n>
+- Branch: `dnhynk/t12-supervisor` · PR: [#16](https://github.com/dnhynk/vertical-live/pull/16)
 - Orca: task `task_560530cfb813` · dispatch `ctx_58b4803e072e`
 - Spec sections read: §2.9, §9.1, §9.2, §9.4, §10.2, §11, §12.3, §12.4, [S23]
 - BOARD decisions/assumptions relied on: D-2(Windows 1차 호스트), D-3(Discord webhook = `AlertSink` 첫 구현), A-4(broadcast 전략 `single`), A-14(공용 규격 `/health`·`/admin/kill`), A-15(합격선 숫자는 provisional config), A-16(stream key는 vault → `setStreamServiceFromVault()` 후 `startStream()`), A-18(attempt 마커 제거 후에만 `publish()`)
@@ -58,13 +58,15 @@
 
 | # | 기준 | 상태 | 근거 |
 |---|---|---|---|
-| 1 | 신호 조합별 전이 테이블 테스트(입력 불건전→degraded+CTA off, 복구→live, 정책 오류→safe_stopped 후 자동 재시작 없음) | **met** | `apps/server/src/supervisor/transitions.test.ts`(15행 전이표 + safe_stopped 터미널 + 복구 계획 6건), `supervisor.test.ts`("turns the CTA off when the input path is unhealthy and back on when it recovers", "stops when the grant is revoked and never restarts by itself" — 정지 후 3회 평가에서 재시작 0건), `signals.test.ts`(8 family 집계·침묵≠고장·unobservable escalation) |
+| 1 | 신호 조합별 전이 테이블 테스트(입력 불건전→degraded+CTA off, 복구→live, 정책 오류→safe_stopped 후 자동 재시작 없음) | **met**(round 1에서 unmet → B1·B2 수정 후) | `apps/server/src/supervisor/transitions.test.ts`(전이표 + safe_stopped 터미널 + 복구 계획), `supervisor.test.ts`("turns the CTA off when the input path is unhealthy and back on when it recovers", "stops when the grant is revoked and never restarts by itself", **"cancels a restart that was already scheduled (B1)"**, **"will not go live while the chat producer is absent (B2)"**), `signals.test.ts`(8 family 집계·침묵≠고장·producer 부재≠침묵) |
 | 2 | kill switch 3경로 테스트, alert 전송 mock 테스트, dead-man push mock 테스트 | **met** | `kill-switch.test.ts`(HTTP loopback+token 4건 / 파일 플래그 3건 / CLI 6건), `server.test.ts` "supervisor routes"(라우트 5건), `alerts.test.ts`(억제·Discord mock·전달 실패 로그에 URL 없음 10건), `deadman.test.ts`(push·주기·실패 카운트·URL 비노출 7건) |
-| 3 | 각 컴포넌트에 supervisor가 정확히 하나임을 구조 테스트로 고정 | **met** | `restart.test.ts`(중복 등록 throw, 누락 시 `assertComplete()` throw, 위임 컴포넌트 `request()` throw), `supervisor.test.ts` "registers exactly one restart supervisor per component" / "never dials OBS itself: the connection loop stays ObsClient's" |
+| 3 | 각 컴포넌트에 supervisor가 정확히 하나임을 구조 테스트로 고정 | **met**(escalation 동작은 B3 수정 후) | `restart.test.ts`(중복 등록 throw, 누락 시 `assertComplete()` throw, 위임 컴포넌트 `request()` throw, `stopAll()`), `supervisor.test.ts` "registers exactly one restart supervisor per component" / "never dials OBS itself: the connection loop stays ObsClient's" / **"lets the escalation target spend its whole budget and then stops (B3)"** |
 | 추가 | 시작 순서 고정(§7.3(3)·§9.1) | **met** | `startup.test.ts`(주입 객체 순서를 뒤집어도 실행 순서 불변, 실패 이후 skip), `runtime.test.ts`(포트 호출 순서 9단계) |
 | 추가 | `/health`에 상태기계·신호 요약 | **met** | `server.test.ts` "reports the state machine and the family summary under /health", "lets the supervisor, not the engine, decide the status line" |
 | 추가 | screenshot은 freeze 판정이 아님(§9.4) | **met** | `screenshot.test.ts` "never feeds a freeze verdict"(구조 검사: health 계약·집계기 import 없음, hash 없음) |
-| 추가 | 모더레이션 호출표는 자리만(§12.3 Gate 0) | **met** | `config.test.ts` "ships unapproved and empty" / "refuses to report itself approved, and names what is missing" |
+| 추가 | 모더레이션 호출표는 자리만(§12.3 Gate 0)이되, 보고된 조건은 소비된다 | **met**(M2 수정 후) | `config.test.ts` "ships unapproved and empty" / "refuses to report itself approved, and names what is missing", `supervisor.test.ts` "turns the CTA off when the moderation control is unhealthy"(warning alert 포함) / "stops the run when a reported condition is on the approved call table" |
+| 추가 | 사전 점검 실패의 자동 복구(§9.1) | **met**(M1 수정 후) | `supervisor.test.ts` "re-reads a failing pre-check and leaves starting when it passes" |
+| 추가 | DB 무결성 오류 → `data_integrity` safe stop(§11) | **met**(M3 수정 후) | `db-integrity.test.ts`(손상·마이그레이션 이력 vs 잠금·디스크), `runtime.test.ts` "turns a damaged database into a data-integrity safe stop" / "keeps an operational database failure retryable" |
 
 **실행 검증되지 않은 것(정직 표기)**: 실제 OBS·YouTube 계정·Discord webhook·Uptime Kuma 인스턴스에 붙여 본 적이 없다. 모든 테스트는 fake·mock이며, `integrations.obs`/`integrations.broadcast`를 켠 `main.ts` 조립 자체는 실행하지 않았다(실계정·실 OBS 필요 — E-2·E-3, Gate 2, T15 soak 대상).
 
@@ -95,7 +97,7 @@ gh api repos/dnhynk/vertical-live/check-runs/<job>/annotations
 ## Not done / out of scope
 
 - **실계정 스모크**: 실제 OBS(E-3)·YouTube 방송·Discord·Uptime Kuma 검증. Gate 2와 T15 soak에서.
-- **OBS 프로세스 실행기**: `obs-process` 컴포넌트의 자리·escalation·예산은 있으나 실제 실행 명령은 T17(Windows 자동시작)이 주입한다. 주입 전에는 escalation이 정직하게 실패하고 `safe_stopped`로 간다.
+- **OBS 프로세스 실행기**: `obs-process` 컴포넌트의 자리·escalation·예산은 있으나 실제 실행 명령은 T17(Windows 자동시작)이 주입한다. 주입 전에는 escalation 대상이 자기 예산(2회)을 다 쓰고 실패한 뒤 `safe_stopped`로 간다(round 1 B3 수정 후 테스트로 고정: "lets the escalation target spend its whole budget and then stops").
 - **`metrics_daily` → retention.json `planned`→`present` 갱신**: 해당 테이블이 아직 없어(마이그레이션 001–005에 없음) 상태를 바꿀 근거가 없다. T15와 함께.
 - **렌더러 URL·토큰의 OBS Browser Source 주입 함수**: T17과 분담 항목. `ObsControl.refreshBrowserSource()`(T2)는 `renderer-source` 컴포넌트 복구 동작으로 쓰고 있고, `SetInputSettings`로 URL을 주입하는 함수는 T17이 소유하는 편이 맞다고 판단해 넣지 않았다(현재 URL·토큰 주입 절차는 `docs/ops/obs-setup.md`).
 - **시작 순서의 부분 재개**: 재시도는 전체 재실행이다(각 step은 멱등).
