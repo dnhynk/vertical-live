@@ -104,6 +104,32 @@ gh api repos/dnhynk/vertical-live/check-runs/<job>/annotations
 
 ## Follow-ups
 
-- T15: fault matrix 각 행의 예상 상태(`retry`/`degraded`/`safe_stopped`)를 이 상태기계에 대고 검증. `supervisor.*` provisional 값을 승인값으로 교체.
+- T15: fault matrix 각 행의 예상 상태(`retry`/`degraded`/`safe_stopped`)를 이 상태기계에 대고 검증. `supervisor.*` provisional 값을 승인값으로 교체. 특히 `chat_transport`가 required가 되면서 chat 없이도 `live`가 되던 경로가 사라졌으므로, soak 시나리오는 chat producer를 반드시 띄운다.
 - T16: `docs/ops/supervisor.md`를 Gate 체크리스트에 연결하고, 모더레이션 호출표(§12.3) 승인 절차를 Gate 0 항목으로 명시.
 - T17: `obs-process` 실행기 주입(`ComponentActions.obsProcess`), 렌더러 URL·토큰 주입, kill 플래그 파일 위치의 ACL.
+
+## Review round 1
+
+리뷰: PR #16, verdict `request_changes`(blocker 3 + major 3). 게이트는 리뷰어가 직접 실행해 5개 모두 pass. 모든 지적을 수용했고 반박은 없다. 수정은 한 커밋(`00a45ad`)이며 finding마다 재현 테스트를 붙였다.
+
+| finding | 처리(고침 SHA / 반박 근거) |
+|---|---|
+| [blocker] `restart.ts:180` — safe_stopped 진입 후에도 예약된 restart 타이머가 실행돼 인코더를 다시 켠다(§9.1·§9.2 자동 재시작 금지) | **고침 `00a45ad`.** `RestartSupervisor`에 `stop()`(예약 타이머 취소 + 이후 요청 `'stopped'` 반환 + `noteHealthy()` 무력화)과 실행 직전 `canRestart` 가드를 추가하고, `SupervisorRegistry.stopAll()`을 `#onEnter('safe_stopped')` **가장 앞**에서 호출한다. supervisor는 `canRestart: () => safeStop===null && state!=='safe_stopped' && !stopped`를 주입한다. 테스트: `supervisor.test.ts` "cancels a restart that was already scheduled (review round 1, B1)"(리뷰어 재현 그대로 — obs-stream 예약 → rights 정지 → `maxDelayMs*2` 전진 → `restarts === []`), `restart.test.ts` 4건(취소·거부·직전 가드·예산 미반환) |
+| [blocker] `main.ts:438` + `config/default.json:84` + `signals.ts:157` + `transitions.ts:100` — chat producer 부재가 `live` + CTA on으로 판정 | **고침 `00a45ad`.** 네 곳 모두: (1) `requiredFamilies`에 `chat_transport` 추가 → 관측 불가가 grace 후 degraded, (2) `inputHealthy`는 `chat_transport === 'ok'`를 요구(=`degraded`가 아님으로는 부족), (3) 집계가 `requiredNotOk`를 내보내고 `healthyDecision`이 required 전부 `ok`일 때만 `live`(그 외 `unconfirmed:<family>` 이유로 degraded), (4) `main.ts`는 `chat.enabled=false`면 `chat: null`(문서화된 not_configured), 켜져 있으면 source 부재 시 step이 **실패**하고 `ChatPort.started()`로 실제 기동을 확인한다. §9.4(3) "무수신=ok"는 그대로 유지된다 — 구분 근거를 코드 주석·문서·테스트에 남겼다. 테스트: `supervisor.test.ts` "will not go live while the chat producer is absent (B2)", `signals.test.ts` 2건(부재→degraded / 조용한 chat→ok), `runtime.test.ts` "fails the chat step when the configured source is not running" |
+| [blocker] `supervisor.ts:425` — obs-connection 소진 시 obs-process 승격이 1회뿐, 이후 `noteHealthy()`가 예산을 되돌려 `safe_stopped`에 도달 못 함 | **고침 `00a45ad`.** `#driveRecovery`가 소진된 컴포넌트의 escalation 대상을 wanted 집합에 넣어 평가마다 계속 구동하고, 그 대상은 "직접 지목되지 않음"을 이유로 `noteHealthy()`를 받지 않는다. 대상이 자기 예산(2)을 다 쓰고 실패하면 `escalatesTo === null`이므로 규칙대로 `safe_stopped`. 테스트: `supervisor.test.ts` "lets the escalation target spend its whole budget and then stops (B3)"(obs-process 시도 2회·`exhausted` 확인·`safe_stopped` 도달) |
+| [major] `supervisor.ts:183` — preflight 실패가 캐시돼 정상화돼도 `starting` 고착 | **고침 `00a45ad`.** `#maybeRetryPreflight()`를 평가 루프 앞단에 두고, `starting` + 실패 + safe-stop 아님일 때 `supervisor.preflightRetryIntervalMs`(신설, provisional 15s)마다 재실행한다. vault를 읽는 `secrets` 점검 때문에 매 tick 재실행은 하지 않는다. 테스트: `supervisor.test.ts` "re-reads a failing pre-check and leaves starting when it passes (M1)"(간격 전에는 변화 없음 → 간격 후 `live`) |
+| [major] `supervisor.ts:215` — 모더레이션 degraded가 CTA만 끄고 alert·safe-stop 없음, `safeStopConditions` 미소비 | **고침 `00a45ad`.** `reportModerationHealth()`가 (1) 상태가 바뀔 때 `moderation.unhealthy` warning alert를 보내고(`safeStopConditionMatched=false`로 왜 안 멈췄는지 명시), (2) 보고된 사유가 `moderation.safeStopConditions`에 있으면 `moderation_unhealthy` → `safe_stopped`. 어떤 사유가 정지 조건인지는 Gate 0 승인 사항이라 코드가 채우지 않는다(§12.3). 테스트: `supervisor.test.ts` 2건(빈 목록=CTA off+alert / 승인 목록 일치=safe_stopped) |
+| [major] `main.ts:87` — DB open이 supervisor·alert 생성 전이라 corruption이 `data_integrity` 대신 프로세스 종료 | **고침 `00a45ad`.** `supervisor/db-integrity.ts` 신설(`SQLITE_CORRUPT*`·`SQLITE_NOTADB`·`MigrationError` = 무결성, 잠금·디스크 가득·I/O = 아님, T4 `classifySqliteError` 재사용). `runtime.ts`의 `state` 사전 점검이 store를 실제로 확인하고 무결성 오류에 `safeStop:'data_integrity'`를 붙인다 → supervisor가 `safe_stopped` + critical alert. `main.ts`는 alert sink를 store보다 **먼저** 만들고 open을 try/catch로 감싸, supervisor가 존재하기 전의 실패도 critical alert 후 종료로 기록한다(자동 재시작 없음). 테스트: `db-integrity.test.ts` 4건, `runtime.test.ts` 2건 |
+| [minor] 티켓 `## Result`의 `PR: #<n>` placeholder, "T17 placeholder → safe_stopped" 및 "safe_stopped 후 재시작 없음" 주장이 사실과 달랐음 | **고침 `00a45ad`.** PR 번호를 #16으로 채우고, 두 주장은 위 B1·B3 수정으로 **사실이 된 뒤** 근거 테스트 이름을 함께 적었다(Not done 절도 갱신). |
+
+### Gates (round 1 fix, 로컬)
+
+```text
+npm run format:check -> All matched files use Prettier code style!
+npm run lint         -> eslint 통과, check-no-legacy-imports: ok (0), check-install-scripts: ok (4 reviewed)
+npm run typecheck    -> tsc --build 통과(오류 0)
+npm run test         -> Test Files 123 passed, Tests 1708 passed | 1 skipped (1709)   (round 1 대비 +19)
+npm run build        -> 전 워크스페이스 통과
+```
+
+CI는 이번에도 돌릴 수 없다 — BOARD **E-5**(계정 결제·지출 한도로 GitHub Actions job 미시작, `main` 포함 전 브랜치 동일). 위 게이트는 CI와 같은 명령을 로컬에서 실행한 결과다.
