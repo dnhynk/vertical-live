@@ -233,6 +233,23 @@ export class PersistenceStore {
     return this.#worldId
   }
 
+  /**
+   * Proof that the handle still answers and that the schema this build expects
+   * is on disk. It is the `db` step of T12's start-up sequence (spec §7.3(3)):
+   * the store is opened and migrated at construction, so what a start-up needs
+   * to establish is that the same handle is still usable — a closed or replaced
+   * database file has to fail *here*, before the engine recovers from it.
+   */
+  assertReady(): number {
+    const row = this.#db.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get() as {
+      count: number
+    }
+    if (row.count === 0) {
+      throw new PersistenceInvariantError('no migrations are applied to the open database')
+    }
+    return row.count
+  }
+
   // ---------------------------------------------------------------- ingest
 
   /**

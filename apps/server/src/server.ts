@@ -11,6 +11,8 @@ import { isLoopbackAddress } from './engine/ingest.js'
 import type { EngineMetricsSnapshot } from './engine/metrics.js'
 import type { RendererHealthReport } from './engine/publisher.js'
 import type { HealthSignal } from './health/types.js'
+import type { AdminKillEndpoint } from './supervisor/kill-switch.js'
+import type { SupervisorHealthSummary } from './supervisor/types.js'
 
 /** Loopback only: the server is never bound to a routable interface (spec §10.2). */
 export const DEFAULT_HOST = '127.0.0.1'
@@ -55,6 +57,36 @@ export interface ServerOptions {
    * quiet chat is not a fault.
    */
   readonly sourceHealth?: () => readonly HealthSignal[]
+  /**
+   * T12's state machine and its §9.4 family summary. Absent in the bare health
+   * server and in the unit tests of routing; present in `main.ts`.
+   */
+  readonly supervisorHealth?: () => SupervisorHealthSummary | null
+  /** `POST /admin/kill` (loopback + `server.adminToken`, spec §10.2). */
+  readonly adminKill?: AdminKillEndpoint
+}
+
+/**
+ * Top-level `/health` status line.
+ *
+ * Without a supervisor it is the engine's own verdict, as it was before T12.
+ * With one, the supervisor is the authority (spec §9.2): a run that is stopped
+ * for a rights or policy reason must not answer `ok` because the writer inside
+ * it happens to be fine.
+ */
+function statusLine(engine: EngineHealth, supervisor: SupervisorHealthSummary | null): string {
+  if (supervisor === null) return engine.degraded ? 'degraded' : 'ok'
+  switch (supervisor.state) {
+    case 'safe_stopped':
+      return 'safe_stopped'
+    case 'offline':
+    case 'starting':
+      return supervisor.state
+    case 'live':
+      return engine.degraded ? 'degraded' : 'ok'
+    default:
+      return 'degraded'
+  }
 }
 
 function sendJson(
@@ -140,11 +172,13 @@ export function handleRequest(
       return
     }
     const health = options.engine.health()
+    const supervisor = options.supervisorHealth?.() ?? null
     sendJson(res, 200, {
-      status: health.degraded ? 'degraded' : 'ok',
+      status: statusLine(health, supervisor),
       engine: health,
       renderer: options.rendererHealth?.() ?? null,
       sources: options.sourceHealth?.() ?? [],
+      supervisor,
     })
     return
   }
@@ -159,6 +193,46 @@ export function handleRequest(
       return
     }
     sendJson(res, 200, options.engine.metrics())
+    return
+  }
+
+  if (pathname === '/admin/kill') {
+    const adminKill = options.adminKill
+    // Unlike the simulator endpoint, the kill switch is not a feature flag: it
+    // is absent only when nothing in this process can be stopped (the bare
+    // health server), so a missing collaborator is a plain 404.
+    if (adminKill === undefined) {
+      sendJson(res, 404, { error: 'not_found' })
+      return
+    }
+    if (method !== 'POST') {
+      sendJson(res, 405, { error: 'method_not_allowed' })
+      return
+    }
+    void readJsonBody(req).then(
+      (body) => {
+        if (body === BODY_TOO_LARGE) {
+          sendJson(res, 413, { error: 'body_too_large' })
+          return
+        }
+        // A kill switch must work with an empty body: the reason is optional and
+        // an operator with a wedged broadcast should not have to get JSON right.
+        const result = adminKill.handle({
+          authorization: headerValue(req, 'authorization'),
+          remoteAddress: req.socket.remoteAddress ?? null,
+          body: body === BODY_UNPARSEABLE ? null : body,
+        })
+        sendJson(res, result.status, result.body)
+      },
+      () => {
+        const result = adminKill.handle({
+          authorization: headerValue(req, 'authorization'),
+          remoteAddress: req.socket.remoteAddress ?? null,
+          body: null,
+        })
+        sendJson(res, result.status, result.body)
+      },
+    )
     return
   }
 

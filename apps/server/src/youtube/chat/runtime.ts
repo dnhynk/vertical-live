@@ -7,12 +7,14 @@ import { createCommandParserPort, parserLimits, type InputConfig } from '../../i
 import { SecretRedactor, silentLogger, type Logger } from '../../secrets/redaction.js'
 import { resolveSecretVault } from '../../secrets/resolve.js'
 import { loadOAuthClientCredentials, loadYouTubeAuthConfig } from '../auth/config.js'
+import type { AuthEventSink } from '../auth/events.js'
 import { OAuthClient } from '../auth/oauth-client.js'
 import { TokenManager } from '../auth/token-manager.js'
 import { QuotaTracker } from '../quota/tracker.js'
 import { loadQuotaConfig } from '../quota/config.js'
 import { ChatSource, type LiveChatTargetResolver } from './chat-source.js'
 import { loadChatConfig, type ChatConfig } from './config.js'
+import type { ChatAccessTokens } from './retry.js'
 
 /**
  * Assembles the chat source the way the server process needs it: T3's OAuth
@@ -39,6 +41,21 @@ export interface ChatRuntimeDeps {
   readonly resolveTarget?: LiveChatTargetResolver
   readonly logger?: Logger
   readonly config?: ChatConfig
+  /**
+   * Where the `TokenManager` this factory builds sends its auth events. T12
+   * needs it for `auth_revoked` → `safe_stopped` (spec §9.1) and T13 for the
+   * deletion that revocation triggers (§12.4); neither can reach the manager
+   * otherwise, because it is constructed in here. Ignored when `auth` is given —
+   * the caller's manager already has its own sink.
+   */
+  readonly authEvents?: AuthEventSink
+  /**
+   * An access-token source the process already owns. `main.ts` passes the same
+   * `TokenManager` the broadcast lifecycle uses: two managers on one grant would
+   * both refresh and rotate the same refresh token (spec §10.2 asks for rotation
+   * to be *tested*, not raced).
+   */
+  readonly auth?: ChatAccessTokens
 }
 
 export async function createChatSource(deps: ChatRuntimeDeps): Promise<ChatSource | null> {
@@ -46,23 +63,9 @@ export async function createChatSource(deps: ChatRuntimeDeps): Promise<ChatSourc
   if (!config.enabled) return null
 
   const logger = deps.logger ?? silentLogger
-  const authConfig = loadYouTubeAuthConfig()
-  const credentials = loadOAuthClientCredentials()
-  const redactor = new SecretRedactor()
-  redactor.register(credentials.clientSecret)
-  const vault = await resolveSecretVault({ service: authConfig.credentialService, logger })
-  const tokens = new TokenManager({
-    client: new OAuthClient({
-      clientId: credentials.clientId,
-      ...(credentials.clientSecret === undefined ? {} : { clientSecret: credentials.clientSecret }),
-      clock: deps.clock,
-    }),
-    vault,
-    clock: deps.clock,
-    refreshSkewMs: authConfig.accessTokenRefreshSkewMs,
-    logger,
-    redactor,
-  })
+  // An injected source is used as-is, and then no credential is touched here at
+  // all: the caller's `TokenManager` already owns the grant (see `auth` above).
+  const tokens = deps.auth ?? (await buildTokenManager(deps, logger))
 
   const quotaConfig = loadQuotaConfig()
   const quota = new QuotaTracker({
@@ -84,6 +87,27 @@ export async function createChatSource(deps: ChatRuntimeDeps): Promise<ChatSourc
     logger,
     ...(deps.onIngested === undefined ? {} : { onIngested: deps.onIngested }),
     ...(deps.resolveTarget === undefined ? {} : { resolveTarget: deps.resolveTarget }),
+  })
+}
+
+async function buildTokenManager(deps: ChatRuntimeDeps, logger: Logger): Promise<ChatAccessTokens> {
+  const authConfig = loadYouTubeAuthConfig()
+  const credentials = loadOAuthClientCredentials()
+  const redactor = new SecretRedactor()
+  redactor.register(credentials.clientSecret)
+  const vault = await resolveSecretVault({ service: authConfig.credentialService, logger })
+  return new TokenManager({
+    client: new OAuthClient({
+      clientId: credentials.clientId,
+      ...(credentials.clientSecret === undefined ? {} : { clientSecret: credentials.clientSecret }),
+      clock: deps.clock,
+    }),
+    vault,
+    clock: deps.clock,
+    refreshSkewMs: authConfig.accessTokenRefreshSkewMs,
+    logger,
+    redactor,
+    ...(deps.authEvents === undefined ? {} : { events: deps.authEvents }),
   })
 }
 

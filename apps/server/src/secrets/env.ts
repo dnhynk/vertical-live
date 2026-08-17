@@ -18,6 +18,8 @@ export const SECRET_ENV_VARS: Readonly<Record<SecretName, string>> = {
   'server.adminToken': 'VL_ADMIN_TOKEN',
   'server.simulatorToken': 'VL_SIMULATOR_TOKEN',
   'server.rendererToken': 'VL_RENDERER_TOKEN',
+  'alerts.discordWebhookUrl': 'VL_DISCORD_WEBHOOK_URL',
+  'monitoring.deadManPushUrl': 'VL_DEAD_MAN_PUSH_URL',
 }
 
 export class EnvSecretProvider implements SecretProvider {
