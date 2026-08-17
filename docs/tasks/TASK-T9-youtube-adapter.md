@@ -115,15 +115,15 @@ check-no-legacy-imports: ok (0 legacy imports)
 check-install-scripts: ok (4 reviewed, better-sqlite3 binding loads)
 tsc --build tsconfig.json                     (no output = pass)
 Test Files  96 passed (96)
-     Tests  1354 passed | 1 skipped (1355)
+     Tests  1360 passed | 1 skipped (1361)
 schema up to date (6 files)
 copied 4 migration(s) to dist/db/migrations
 docs/ops/data-map.md up to date
-exit=0                                        (2026-08-17, this Windows 11 host, Node 24)
+exit=0                                        (round 2, 2026-08-17, this Windows 11 host, Node 24)
 
 $ npx vitest run apps/server/src/youtube/chat
 Test Files  8 passed (8)
-     Tests  62 passed (62)
+     Tests  68 passed (68)
 
 $ node -e "import('./apps/server/dist/youtube/chat/transport.js') …"
 proto path from dist: …\apps\server\proto\stream_list.proto
@@ -160,3 +160,18 @@ client loaded from dist build: true          (빌드 산출물에서도 proto �
 - T15 fault matrix: 이 소스가 만드는 상태(`retry`/`degraded`/`stopped`)를 행으로 넣고, inbox commit과
   token checkpoint 사이의 crash window는 이미 하나의 트랜잭션이라 해당 없음을 기록한다.
 - T16: 위 "실계정" 5개 항목을 `docs/ops/gate2-experiments.md`로 옮긴다.
+
+## Review round 1
+
+리뷰: https://github.com/dnhynk/vertical-live/pull/14#pullrequestreview-4951917704 (verdict
+`request_changes`, major 3 + minor 1). 네 건 모두 타당했고 반박한 것은 없다. 수정 커밋 `82de8e0`.
+
+| finding | 처리 |
+|---|---|
+| [major] `rest-source.ts:212` — `pollDelayMs`가 서버 `pollingIntervalMillis`를 provisional 상한으로 **절단**(3,600,000→60,000). 서버가 요청한 것보다 빨리 폴링하는 것이 [S3]가 말하는 `rateLimitExceeded`의 원인이며 §4·§T9는 준수를 요구 | **고침(82de8e0).** 상한 절단 제거 — 이제 로컬 값은 대기를 **늘리기만** 한다(하한, 그리고 서버가 값을 주지 않거나 하한 미만일 때만). 설정 키 `rest.maxPollIntervalMs`는 "빨리 폴링하라"는 지시밖에 될 수 없으므로 삭제했다(config·문서·티켓 동기화). 긴 간격은 `/health`의 `msSinceLastResponse`로 보이고 판정은 T12. 회귀 테스트 `rest-source.test.ts > never waits less than the interval the server asked for`(3,600,000→3,600,000, `MAX_SAFE_INTEGER` 그대로, 하한은 늘리기만) |
+| [major] `config.ts:196` — `readParts`가 `id`/`snippet`의 임의 **부분집합·중복**을 허용(`['snippet']` 통과). §7.2·§T9는 `id,snippet`을 요구하고, `id`가 빠지면 dedupe 키와 최소 envelope의 messageId가 사라진다(§7.3(1)(4)) | **고침(82de8e0).** `readParts`가 정확히 `{id, snippet}`만 통과시킨다(누락·중복·개수 불일치 모두 거부, `authorDetails`는 기존의 전용 메시지 유지). 테스트 `config.test.ts > refuses any parts list that is not exactly id,snippet`(`['snippet']`·`['id']`·`[]`·중복 4종 거부, 순서만 다른 정상값은 통과) |
+| [major] `state.ts:88` + `rest-source.ts:115` — 재연결 계측이 **추론값**. 시도마다 count 증가(REST는 폴마다), `disconnectedAtMonotonicMs`가 초기화되지 않아 gap 누적, 응답 전에 `estimatedLostMessages=0` 설정. §9.4(3)·§11은 측정값을 요구 | **고침(82de8e0).** 재연결의 정의를 "수신 중이던 경로가 끊겼고 **응답이 실제로 다시 도착**했다"로 바꿨다. `connectAttempt`는 이제 시도의 token 사용 여부만 기억하고 아무것도 세지 않는다. outage는 `recordDisconnect`에서 **한 번만** 시작하고(이미 수신한 적이 있는 경로에 한해) 복구 응답에서 끝나며, 그때 count·gapMs·resumedWithToken·estimatedLostMessages·중복 카운터가 함께 확정된다. REST 폴 실패도 `recordDisconnect`를 부르게 해 폴러 복구가 실제 gap을 보고한다. 첫 재연결 전에는 네 값 모두 `null`(count 0). 테스트 `health.test.ts`: 시도만으로는 0 · outage 1회에 재시도 3회여도 gap 400ms/count 1 · cold start 3회 실패는 미집계 · **gRPC 끊김 1회 + REST 폴 2회 → count 1** · token 없는 복구는 loss `null` · 중복 추정치는 복구 응답에서 리셋 |
+| [minor] `stream_list.proto:6` — provenance 헤더의 `Last updated 2025-10-31 UTC`가 [S4] 페이지 현재 값(`2026-06-25 UTC`)과 다름 | **고침(82de8e0).** 원인은 같은 세션에서 함께 읽은 `liveChatMessages.list` 페이지의 footer를 옮겨 적은 것(그 페이지가 실제로 `2025-10-31 UTC`). 두 페이지의 footer를 다시 받아 대조하고 `2026-06-25 UTC`로 정정했다 |
+
+라운드 1에서 지적된 티켓 `## Result`의 과장(서버 간격 준수·`id,snippet` 불변·재연결 측정)은 위
+수정으로 사실이 되었고, 해당 문장들도 실제 동작에 맞게 다시 썼다.
