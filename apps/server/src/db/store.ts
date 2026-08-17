@@ -160,6 +160,7 @@ interface BroadcastAttemptColumns {
   readonly broadcast_id: string | null
   readonly live_chat_id: string | null
   readonly scheduled_start_time: string
+  readonly attempt_marker: string
   readonly auto_start: number | null
   readonly last_error_reason: string | null
   readonly created_at: string
@@ -1008,14 +1009,24 @@ export class PersistenceStore {
     assertNonEmptyString(input.attemptId, 'attemptId')
     assertNonEmptyString(input.streamTitle, 'streamTitle')
     assertNonEmptyString(input.scheduledStartTime, 'scheduledStartTime')
+    assertNonEmptyString(input.attemptMarker, 'attemptMarker')
     const now = this.#clock.nowUtcIso()
     this.#db
       .prepare(
         `INSERT INTO broadcast_resources
-           (attempt_id, strategy, stage, stream_title, scheduled_start_time, created_at, updated_at)
-         VALUES (?, ?, 'planned', ?, ?, ?, ?)`,
+           (attempt_id, strategy, stage, stream_title, scheduled_start_time, attempt_marker,
+            created_at, updated_at)
+         VALUES (?, ?, 'planned', ?, ?, ?, ?, ?)`,
       )
-      .run(input.attemptId, input.strategy, input.streamTitle, input.scheduledStartTime, now, now)
+      .run(
+        input.attemptId,
+        input.strategy,
+        input.streamTitle,
+        input.scheduledStartTime,
+        input.attemptMarker,
+        now,
+        now,
+      )
     return this.#requireBroadcastAttempt(input.attemptId)
   }
 
@@ -1205,7 +1216,7 @@ const EFFECT_COLUMNS = `SELECT effect_id, cause_kind, caused_by_event_key, cause
 const DEADLINE_COLUMNS = `SELECT id, kind, due_at, policy, payload_json, status FROM deadlines`
 
 const BROADCAST_COLUMNS = `SELECT attempt_id, strategy, stage, pending_call, pending_transition, pending_since,
-         stream_id, stream_title, broadcast_id, live_chat_id, scheduled_start_time,
+         stream_id, stream_title, broadcast_id, live_chat_id, scheduled_start_time, attempt_marker,
          auto_start, last_error_reason, created_at, updated_at, closed_at
     FROM broadcast_resources`
 
@@ -1222,6 +1233,7 @@ function toBroadcastAttempt(row: BroadcastAttemptColumns): BroadcastAttemptRecor
     broadcastId: row.broadcast_id,
     liveChatId: row.live_chat_id,
     scheduledStartTime: row.scheduled_start_time,
+    attemptMarker: row.attempt_marker,
     autoStart: row.auto_start === null ? null : row.auto_start === 1,
     lastErrorReason: row.last_error_reason,
     createdAt: row.created_at,

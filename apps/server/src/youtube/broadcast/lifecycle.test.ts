@@ -108,6 +108,13 @@ describe('normal path', () => {
     const scheduled = (insert?.body as { snippet: { scheduledStartTime: string } }).snippet
       .scheduledStartTime
     expect(Date.parse(scheduled)).toBeGreaterThan(Date.now())
+    // The attempt marker travels in the description, and it is the persisted one
+    // (review round 2, B1).
+    const attempt = h.temp.store.listBroadcastAttempts()[0]
+    expect(attempt?.attemptMarker).toBe(`vl-attempt:${String(attempt?.attemptId)}`)
+    expect((insert?.body as { snippet: { description: string } }).snippet.description).toBe(
+      attempt?.attemptMarker,
+    )
 
     const streamInsert = h.server.requestsFor('liveStreams.insert')[0]
     expect(streamInsert?.body).toMatchObject({
@@ -214,14 +221,130 @@ describe('uncertain results are reconciled, never retried blindly', () => {
     // Exactly one insert, and exactly one broadcast carrying this attempt's key.
     expect(h.server.requestsFor('liveBroadcasts.insert')).toHaveLength(1)
     const attempt = h.temp.store.findOpenBroadcastAttempt()
-    const sameKey = [...h.server.broadcasts.values()].filter(
-      (broadcast) => broadcast.scheduledStartTime === attempt?.scheduledStartTime,
+    const sameKey = [...h.server.broadcasts.values()].filter((broadcast) =>
+      (broadcast.description ?? '').includes(attempt?.attemptMarker ?? 'no-marker'),
     )
     expect(sameKey).toHaveLength(1)
     // The uncertainty is still on the row, so the next resume asks again.
     expect(attempt?.pendingCall).toBe('liveBroadcasts.insert')
     expect(attempt?.lastErrorReason).toBe('reconcile_inconclusive:broadcast_list_truncated')
     expect(h.logger.dump()).toContain('list truncated at the page bound')
+  })
+
+  it('never adopts an unrelated broadcast that merely shares the scheduled time', async () => {
+    // Review round 2 (B1) reproduction. The decoy is scheduled for the attempt's exact
+    // instant and listed first; the insert that actually landed is the one carrying
+    // this attempt's marker. Matching on the time alone bound the decoy and orphaned
+    // the real resource.
+    const clock = new FakeClock()
+    const h = await setUp({ clock })
+    const lifecycle = h.lifecycle()
+    // The attempt's scheduled time is now + lead, and the FakeClock does not move.
+    const scheduledStartTime = new Date(
+      Date.parse(clock.nowUtcIso()) + h.config.scheduledStartLeadMs,
+    ).toISOString()
+    const decoy = h.server.seedBroadcast({
+      title: 'synthetic-unrelated-same-time',
+      lifeCycleStatus: 'ready',
+      scheduledStartTime,
+    })
+
+    const target = await withAppliedButUnknown(h, clock, 'liveBroadcasts.insert', () =>
+      lifecycle.ensureLive(),
+    )
+
+    const attempt = h.temp.store.getBroadcastAttempt(target.attemptId)
+    expect(attempt?.scheduledStartTime).toBe(scheduledStartTime)
+    // Two broadcasts share the instant; only one carries the marker.
+    const sameTime = [...h.server.broadcasts.values()].filter(
+      (broadcast) => broadcast.scheduledStartTime === scheduledStartTime,
+    )
+    expect(sameTime).toHaveLength(2)
+    expect(target.broadcastId).not.toBe(decoy.id)
+    expect(h.server.broadcasts.get(target.broadcastId)?.description).toContain(
+      attempt?.attemptMarker,
+    )
+    // Still exactly one insert, and the decoy was left alone.
+    expect(h.server.requestsFor('liveBroadcasts.insert')).toHaveLength(1)
+    expect(h.server.broadcasts.get(decoy.id)?.boundStreamId).toBeNull()
+    expect(h.server.broadcasts.get(decoy.id)?.lifeCycleStatus).toBe('ready')
+  })
+
+  it('does not adopt a same-time broadcast when the insert never landed', async () => {
+    const h = await setUp({ maxAttempts: 1 })
+    const lifecycle = h.lifecycle()
+    // Reject the insert outright (nothing created), with a decoy already sitting at
+    // the time this attempt will ask for.
+    h.server.queueFailure('liveBroadcasts.insert', { status: 503, reason: 'serviceUnavailable' })
+    h.server.onRequest = (request) => {
+      if (request.method === 'liveBroadcasts.insert') {
+        const snippet = (request.body as { snippet: { scheduledStartTime: string } }).snippet
+        h.server.seedBroadcast({
+          title: 'synthetic-unrelated-same-time',
+          lifeCycleStatus: 'ready',
+          scheduledStartTime: snippet.scheduledStartTime,
+        })
+      }
+    }
+
+    await expect(lifecycle.ensureBound()).rejects.toThrow(BroadcastReconcileFailedError)
+
+    const attempt = h.temp.store.findOpenBroadcastAttempt()
+    expect(attempt?.broadcastId).toBeNull()
+    expect(attempt?.lastErrorReason).toBe('reconciled_not_applied')
+  })
+
+  it('stays inconclusive when two broadcasts carry the same attempt marker', async () => {
+    const h = await setUp({ maxAttempts: 1 })
+    const lifecycle = h.lifecycle()
+    h.server.queueFailure('liveBroadcasts.insert', { status: 503, reason: 'serviceUnavailable' })
+    // Two inserts landed for one attempt (a duplicate this very rule exists to stop).
+    // Adopting either would orphan the other, so the row must stay pending.
+    h.server.onRequest = (request) => {
+      if (request.method === 'liveBroadcasts.insert') {
+        const body = request.body as {
+          snippet: { scheduledStartTime: string; description: string }
+        }
+        for (const index of [1, 2]) {
+          h.server.seedBroadcast({
+            title: `synthetic-duplicate-${String(index)}`,
+            lifeCycleStatus: 'ready',
+            scheduledStartTime: body.snippet.scheduledStartTime,
+            description: body.snippet.description,
+          })
+        }
+      }
+    }
+
+    const error = await lifecycle.ensureBound().catch((caught: unknown) => caught)
+
+    expect(error).toBeInstanceOf(BroadcastReconcileInconclusiveError)
+    expect((error as BroadcastReconcileInconclusiveError).detail).toBe('marker_ambiguous')
+    const attempt = h.temp.store.findOpenBroadcastAttempt()
+    expect(attempt?.pendingCall).toBe('liveBroadcasts.insert')
+    expect(attempt?.broadcastId).toBeNull()
+    expect(h.server.requestsFor('liveBroadcasts.insert')).toHaveLength(1)
+  })
+
+  it('stays inconclusive when the marker matches but the scheduled time does not', async () => {
+    const h = await setUp({ maxAttempts: 1 })
+    const lifecycle = h.lifecycle()
+    h.server.queueFailure('liveBroadcasts.insert', { status: 503, reason: 'serviceUnavailable' })
+    h.server.onRequest = (request) => {
+      if (request.method === 'liveBroadcasts.insert') {
+        const body = request.body as { snippet: { description: string } }
+        h.server.seedBroadcast({
+          lifeCycleStatus: 'ready',
+          scheduledStartTime: '2029-12-31T23:59:00.000Z',
+          description: body.snippet.description,
+        })
+      }
+    }
+
+    const error = await lifecycle.ensureBound().catch((caught: unknown) => caught)
+
+    expect((error as BroadcastReconcileInconclusiveError).detail).toBe('marker_time_mismatch')
+    expect(h.temp.store.findOpenBroadcastAttempt()?.pendingCall).toBe('liveBroadcasts.insert')
   })
 
   it('resumes an inconclusive reconcile and adopts the broadcast once the list covers it', async () => {
@@ -314,7 +437,7 @@ describe('restart', () => {
     const h = await setUp()
     const first = h.lifecycle()
     // Take the attempt as far as the stream, then fake a crashed insert whose
-    // broadcast exists at YouTube under the persisted scheduledStartTime.
+    // broadcast exists at YouTube carrying this attempt's marker.
     h.server.queueFailure('liveBroadcasts.insert', { status: 503, reason: 'serviceUnavailable' })
     h.server.queueFailure('liveBroadcasts.insert', { status: 503, reason: 'serviceUnavailable' })
     await expect(first.ensureBound()).rejects.toThrow()
@@ -324,6 +447,7 @@ describe('restart', () => {
     h.temp.store.markBroadcastCallPending(attempt?.attemptId ?? '', 'liveBroadcasts.insert')
     const landed = h.server.seedBroadcast({
       scheduledStartTime: attempt?.scheduledStartTime ?? '',
+      description: attempt?.attemptMarker ?? '',
       lifeCycleStatus: 'created',
     })
 

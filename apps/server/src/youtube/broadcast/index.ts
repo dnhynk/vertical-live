@@ -29,6 +29,14 @@ export type {
 } from './api.js'
 
 export {
+  ATTEMPT_MARKER_PREFIX,
+  BROADCAST_DESCRIPTION_MAX_LENGTH,
+  attemptMarkerOf,
+  carriesAttemptMarker,
+  describeWithMarker,
+} from './attempt-marker.js'
+
+export {
   RecordingBroadcastAlertSink,
   nullBroadcastAlertSink,
   nullSafeStopRequestSink,

@@ -233,8 +233,14 @@ export interface BroadcastAttemptInput {
   readonly strategy: BroadcastStrategy
   /** Reuse/reconcile key of the ingestion stream. */
   readonly streamTitle: string
-  /** Reconcile key of the broadcast; chosen before `insert` is called. */
+  /** Corroborating reconcile key of the broadcast; chosen before `insert` is called. */
   readonly scheduledStartTime: string
+  /**
+   * The product-owned identity of this attempt, carried in the broadcast's
+   * description and written here before `insert` is called. It is what a reconcile
+   * matches on: a scheduled time alone is not an identity (review round 2, B1).
+   */
+  readonly attemptMarker: string
 }
 
 /** One persisted broadcast attempt (`broadcast_resources`). */

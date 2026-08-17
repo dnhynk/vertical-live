@@ -158,4 +158,4 @@ round 1 수정 후 재실행(base `44fefaa`로 rebase): 위 5개 게이트 모�
 - **T3 `quota/classify.ts`**: 공용 표에 `sharedIngestionBroadcastsExceedLimit`가 없어 403 → `forbidden`(safe_stopped)으로 분류된다. T10은 자기 `classifyBroadcastLimit`에서 먼저 잡으므로 이 task의 동작에는 영향이 없다. 공용 표에 한 줄 추가하는 것은 T3 소유 파일 변경이라 하지 않았다.
 - **Gate 2에서 확정할 것**: 일일 생성 한도의 실제 reason 문자열(있다면), auto-start와 monitorStream 조합의 실제 수용 여부, `scheduledStartLeadMs` 최소값, `liveStreams.status` 폴링 간격, provisional quota 비용.
 - `enableDvr`/`recordFromStart`는 config 기본값(false / API 기본)을 그대로 둔다. 12시간 초과 방송의 archive 부재(§4)는 전략 선택 문제이므로 Gate 2 실험에서 결정한다.
-- `stopBroadcast()`가 `transition(complete)` 실패 후에도 attempt를 닫는다. 그 경우 YouTube에는 방송이 남을 수 있고 `last_error_reason=complete_failed:*`로 기록된다. 다음 `ensureLive()`의 한도 복구 경로가 그 방송을 찾아 채택한다.
+- ~~`stopBroadcast()`가 `transition(complete)` 실패 후에도 attempt를 닫는다~~ → **정정(round 1 B4로 폐기, round 2 m1 지적)**: 현재 `stopBroadcast()`는 다른 mutating 호출과 같은 reconcile 래퍼를 통과하고, 결과가 불확실하면 attempt를 **닫지 않는다**(`list`로 `complete`를 확인해야만 닫는다). 확정 거부(예: `redundantTransition`)는 성공으로 취급한다. 닫히지 않은 attempt는 다음 `resume()`이 `pending_transition='complete'`로 다시 reconcile한다.

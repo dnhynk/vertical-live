@@ -190,6 +190,12 @@ export interface LiveStreamSummary {
 export interface LiveBroadcastSummary {
   readonly id: string
   readonly title: string | null
+  /**
+   * `snippet.description`, which carries this product's attempt marker. Read back so
+   * a reconcile can recognise the resource its own insert created (review round 2,
+   * B1). Never logged: the operator's text travels in it.
+   */
+  readonly description: string | null
   readonly scheduledStartTime: string | null
   readonly actualStartTime: string | null
   readonly liveChatId: string | null
@@ -743,6 +749,8 @@ function toLiveBroadcast(item: Record<string, unknown>): LiveBroadcastSummary {
   return {
     id: requireString(item, 'id', 'liveBroadcast.id'),
     title: snippet === undefined ? null : (readOptionalString(snippet, 'title') ?? null),
+    description:
+      snippet === undefined ? null : (readOptionalString(snippet, 'description') ?? null),
     scheduledStartTime:
       snippet === undefined ? null : (readOptionalString(snippet, 'scheduledStartTime') ?? null),
     actualStartTime:

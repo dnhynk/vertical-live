@@ -18,9 +18,12 @@ DROP TABLE broadcast_resources;
 --
 -- `attempt_id` is generated locally: `liveBroadcasts.insert` has no idempotency
 -- key, so the durable identity of an attempt has to be ours. What makes the
--- attempt findable at YouTube is `scheduled_start_time` (unique per attempt,
--- chosen and persisted *before* insert) for the broadcast and `stream_title` for
--- the reusable ingestion stream.
+-- attempt findable at YouTube is `attempt_marker` — a product-owned string carried in
+-- the broadcast's description and written before insert is called — corroborated by
+-- `scheduled_start_time`; `stream_title` plays the same role for the reusable
+-- ingestion stream. A timestamp alone is not an identity: an unrelated broadcast
+-- scheduled for the same instant would be adopted and the real one orphaned
+-- (review round 2, B1).
 CREATE TABLE broadcast_resources (
   attempt_id           TEXT    PRIMARY KEY,
   -- spec §9.3 / BOARD A-4: `single` is production, `rolling-experiment` is a
@@ -53,6 +56,10 @@ CREATE TABLE broadcast_resources (
   broadcast_id         TEXT,
   live_chat_id         TEXT,
   scheduled_start_time TEXT    NOT NULL,
+  -- The exact string sent in `snippet.description`, not a value recomputed later: a
+  -- resumed reconcile has to compare against what this attempt actually wrote, even
+  -- if the marker format changes in a later build (review round 2, B1).
+  attempt_marker       TEXT    NOT NULL,
   -- NULL = not yet attempted, 1 = insert accepted `enableAutoStart`,
   -- 0 = YouTube answered `invalidAutoStart`, so the transition path is used (§4).
   auto_start           INTEGER CHECK (auto_start IS NULL OR auto_start IN (0, 1)),

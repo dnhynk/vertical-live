@@ -19,6 +19,7 @@ import {
   type BroadcastAlertSink,
   type SafeStopRequestSink,
 } from './alerts.js'
+import { attemptMarkerOf, carriesAttemptMarker, describeWithMarker } from './attempt-marker.js'
 import type { BroadcastConfig } from './config.js'
 import type { StreamKeyCustodian } from './stream-key.js'
 import {
@@ -288,11 +289,13 @@ export class BroadcastLifecycle {
 
   #beginAttempt(): BroadcastAttemptRecord {
     this.#adopted = false
+    const attemptId = this.#newAttemptId()
     return this.#store.beginBroadcastAttempt({
-      attemptId: this.#newAttemptId(),
+      attemptId,
       strategy: this.#config.strategy,
       streamTitle: this.#config.stream.title,
       scheduledStartTime: this.#nextScheduledStartTime(),
+      attemptMarker: attemptMarkerOf(attemptId),
     })
   }
 
@@ -354,7 +357,9 @@ export class BroadcastLifecycle {
         const created = await this.#runCall(current, 'liveBroadcasts.insert', () =>
           this.#api.insertBroadcast({
             title: this.#config.title,
-            ...(this.#config.description === '' ? {} : { description: this.#config.description }),
+            // The marker is the only thing that will identify this call's result in a
+            // `list` response (review round 2, B1), so it always travels.
+            description: describeWithMarker(this.#config.description, current.attemptMarker),
             scheduledStartTime: current.scheduledStartTime,
             privacyStatus: this.#config.privacyStatus,
             selfDeclaredMadeForKids: this.#config.selfDeclaredMadeForKids,
@@ -658,11 +663,15 @@ export class BroadcastLifecycle {
         })
       }
       case 'liveBroadcasts.insert': {
-        const search = await this.#findBroadcastByScheduledStart(attempt.scheduledStartTime)
+        const search = await this.#findInsertedBroadcast(attempt)
         this.#alertReconcile(call, search.found !== null, {
           attemptId: attempt.attemptId,
           listComplete: search.complete,
+          markerMatches: search.markerMatches,
         })
+        // More than one broadcast carrying this attempt's marker means two inserts
+        // landed. Picking either would orphan the other, so a human decides.
+        this.#assertConclusive(attempt, call, search.markerMatches <= 1, 'marker_ambiguous')
         if (search.found !== null) {
           const found = search.found
           return this.#store.recordBroadcastCallResult(attempt.attemptId, {
@@ -672,6 +681,9 @@ export class BroadcastLifecycle {
             ...(found.enableAutoStart === null ? {} : { autoStart: found.enableAutoStart }),
           })
         }
+        // A marker match whose scheduled time disagrees is not something to reason
+        // about: this attempt's own record and YouTube's copy of it differ.
+        this.#assertConclusive(attempt, call, search.markerMatches === 0, 'marker_time_mismatch')
         // Absent from a *truncated* list is not absent (review round 1, B2). Another
         // insert here is how a channel ends up with two broadcasts for one attempt.
         this.#assertConclusive(attempt, call, search.complete, 'broadcast_list_truncated')
@@ -964,11 +976,15 @@ export class BroadcastLifecycle {
         attempt.streamId !== resolvedStreamId)
     ) {
       this.#store.closeBroadcastAttempt(attempt.attemptId, 'abandoned', 'adopted_other_binding')
+      const replacementId = this.#newAttemptId()
       target = this.#store.beginBroadcastAttempt({
-        attemptId: this.#newAttemptId(),
+        attemptId: replacementId,
         strategy: this.#config.strategy,
         streamTitle: attempt.streamTitle,
         scheduledStartTime: candidate.scheduledStartTime ?? attempt.scheduledStartTime,
+        // A replacement row adopts an existing broadcast and never inserts one, so its
+        // marker is only ever the identity of a call it did not make.
+        attemptMarker: attemptMarkerOf(replacementId),
       })
     }
     this.#adopted = true
@@ -1038,30 +1054,44 @@ export class BroadcastLifecycle {
     return { streamId, complete: page.complete }
   }
 
-  async #findBroadcastByScheduledStart(scheduledStartTime: string): Promise<{
+  /**
+   * Looks for the broadcast *this attempt's* insert created (review round 2, B1).
+   *
+   * The attempt marker is the identity; `scheduledStartTime` only corroborates it.
+   * Matching on the time alone adopted whatever unrelated broadcast happened to be
+   * scheduled for the same instant and left the real resource orphaned, which is not
+   * a reconcile (spec §9.1). Both statuses are always scanned so `markerMatches`
+   * counts every copy, not just the first.
+   */
+  async #findInsertedBroadcast(attempt: BroadcastAttemptRecord): Promise<{
     readonly found: LiveBroadcastSummary | null
     readonly complete: boolean
+    readonly markerMatches: number
   }> {
-    const target = Date.parse(scheduledStartTime)
+    const target = Date.parse(attempt.scheduledStartTime)
     let complete = true
+    const marked: LiveBroadcastSummary[] = []
     for (const broadcastStatus of ['upcoming', 'active'] as const) {
       const page = await this.#api.listBroadcasts(
         { broadcastStatus },
         { maxPages: this.#config.reconcileMaxPages },
       )
       complete = complete && page.complete
-      // Compared as instants: YouTube echoes the time it stored, which may be the
-      // same instant written with a different number of fractional digits.
-      const found = page.items.find(
-        (candidate) =>
-          candidate.scheduledStartTime !== null &&
-          Date.parse(candidate.scheduledStartTime) === target,
-      )
-      if (found !== undefined) {
-        return { found, complete }
+      for (const candidate of page.items) {
+        if (carriesAttemptMarker(candidate.description, attempt.attemptMarker)) {
+          marked.push(candidate)
+        }
       }
     }
-    return { found: null, complete }
+    // Compared as instants: YouTube echoes the time it stored, which may be the same
+    // instant written with a different number of fractional digits.
+    const found =
+      marked.length === 1 &&
+      marked[0]?.scheduledStartTime != null &&
+      Date.parse(marked[0].scheduledStartTime) === target
+        ? (marked[0] ?? null)
+        : null
+    return { found, complete, markerMatches: marked.length }
   }
 
   async #readBroadcast(broadcastId: string): Promise<LiveBroadcastSummary | null> {

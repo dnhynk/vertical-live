@@ -6,10 +6,10 @@ import { createTempStore, TEST_BUSY_TIMEOUT_MS, type TempStore } from './testing
 import type { BroadcastAttemptInput } from './types.js'
 
 /**
- * `broadcast_resources` (migration 002) is the durable answer to "what did this
- * host already do at YouTube?" (spec §9.1). These tests pin the three properties
- * the lifecycle relies on: a call is recorded before it is made, a stage never
- * moves backwards, and an external id is write-once.
+ * `broadcast_resources` (migration 003) is the durable answer to "what did this host
+ * already do at YouTube?" (spec §9.1). These tests pin the properties the lifecycle
+ * relies on: a call is recorded before it is made, its attempt marker is recorded
+ * with it, a stage never moves backwards, and an external id is write-once.
  */
 
 const ATTEMPT: BroadcastAttemptInput = {
@@ -17,6 +17,7 @@ const ATTEMPT: BroadcastAttemptInput = {
   strategy: 'single',
   streamTitle: 'vertical-live ingest (synthetic test)',
   scheduledStartTime: '2026-01-01T00:02:00.000Z',
+  attemptMarker: 'vl-attempt:attempt-0001',
 }
 
 let temp: TempStore
@@ -37,6 +38,9 @@ describe('broadcast attempts', () => {
       attemptId: ATTEMPT.attemptId,
       strategy: 'single',
       stage: 'planned',
+      // Written before any call: it is what identifies the insert's result later
+      // (review round 2, B1).
+      attemptMarker: ATTEMPT.attemptMarker,
       pendingCall: null,
       pendingSince: null,
       streamId: null,
@@ -186,6 +190,16 @@ describe('broadcast attempts', () => {
     expect(() =>
       temp.store.markBroadcastCallPending(ATTEMPT.attemptId, 'liveBroadcasts.transition'),
     ).toThrow(/is closed/)
+  })
+
+  it('requires an attempt marker', () => {
+    expect(() =>
+      temp.store.beginBroadcastAttempt({
+        ...ATTEMPT,
+        attemptId: 'attempt-nomarker',
+        attemptMarker: '',
+      }),
+    ).toThrow(/attemptMarker must be a non-empty string/)
   })
 
   it('rejects an unknown attempt id', () => {
