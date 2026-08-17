@@ -111,7 +111,7 @@ AssertionError: expected [ …(1) ] to have a length of +0 but got 1
 
 가설이 그대로 확인됐다: (1) `markEffectAcked`의 `UPDATE`가 실제 `SQLITE_FULL`("database or disk is full")로 실패하고, (2) 그 예외가 `StateEngine.onAckEffect`(engine.ts:406)에서 그대로 올라가며, (3) 실제 `/ws/renderer` 소켓으로 보냈을 때 `uncaughtException`이 **1건** 잡혔다 — 테스트가 리스너를 달지 않았다면 그 자리에서 프로세스가 끝난다. 반증(예외 0건·다른 위치에서 처리)은 관측되지 않았다.
 
-수정 후 같은 파일: `Test Files 1 passed (1) / Tests 4 passed (4)`(허브 백스톱 테스트 1건 추가). review round 1에서 2건이 더 붙어 지금은 6건이다.
+수정 후 같은 파일: `Test Files 1 passed (1) / Tests 4 passed (4)`(허브 백스톱 테스트 1건 추가). review round 1에서 2건, round 2에서 3건이 더 붙어 지금은 9건이다.
 
 ### 재현 방법에 대한 메모 (왜 200건인가)
 
@@ -124,8 +124,8 @@ AssertionError: expected [ …(1) ] to have a length of +0 but got 1
 | 1 | 재현 테스트가 수정 전 실패, 수정 후 통과 | met | 위 "재현 관측"(수정 전 2건 실패) / 수정 후 `Tests 4 passed (4)` |
 | 2 | (a) store 실패로 프로세스가 죽지 않는다 | met | `ack-store-failure.test.ts` "survives an ack_effect frame the store cannot record": 실제 WS로 201건 ACK 전송, `process.on('uncaughtException')` 수집 0건, 이후 `GET /health`가 응답. 허브 백스톱은 "renderer hub, when a handler throws" |
 | 3 | (b) 실패가 엔진 건강으로 표면화되고 T12가 degraded 판정에 쓸 수 있다 | met (round 1 수정 후) | 실제 `HealthAggregator`로 검증한다 — `health()` 필드가 움직였다는 것과 supervisor 판정이 움직였다는 것은 다른 주장이고, round 1이 그 틈을 찾아냈다. `ack-store-failure.test.ts` "stays degraded across successful writer passes and clears when the ACK lands": ACK 실패 → 공간 확보 → **성공한 pass 16회**(250ms 간격, T12 평가 주기 2회분) 이후에도 `families.coordinator = {status:'degraded', reason:'writer_failing'}`이고 `consecutiveFailures === 거부 건수`, 재ACK 성공 후 `ok`. 같은 파일의 disk-full 테스트가 `lastFailure.error =~ /database or disk is full/`, `/metrics` `ack_effect_store_failed`, 로그 `engine.ack_store_failed`(kind·code)를 함께 단언한다 |
-| 4 | (c) 해당 ACK는 재시도 대상으로 남는다 | met | 거부된 effect는 `acked_at` NULL이고 `openEffectCount == 거부 건수`, `listUnackedEffects()`에 그대로 있다. 공간 확보 후 §7.3(7) 재전송 → 렌더러 재ACK → `listUnackedEffects()` 0건(엔진 API·실제 WS 두 경로 모두 단언) |
-| 5 | 기존 T8/T11/T15 테스트 회귀 없음 | met | `npm run test` → 137 files, 1875 passed, 1 skipped (skip은 기존 것) |
+| 4 | (c) 해당 ACK는 재시도 대상으로 남는다 | met (round 2 수정 후) | 거부된 effect는 `acked_at` NULL이고 `openEffectCount == 거부 건수`, `listUnackedEffects()`에 그대로 있다. 공간 확보 후 §7.3(7) 재전송 → 렌더러 재ACK → `listUnackedEffects()` 0건(엔진 API·실제 WS 두 경로 모두 단언). **round 2**: 만료 경로에도 같은 보장이 필요했다 — expiry store 실패 시에도 effect가 열린 채 남고 row가 기록될 때까지 degraded가 유지되는 것을 "the §7.3(7) expiry the store refused"가 단언한다(`## Review round 2` B1) |
+| 5 | 기존 T8/T11/T15 테스트 회귀 없음 | met | `npm run test` → 137 files, 1880 passed, 1 skipped (skip은 기존 것; round 2에서 3건 추가) |
 | 6 | 게이트 5개 로컬 통과 | met | 아래 Gates. CI는 BOARD **E-5**(GitHub Actions 결제 차단)로 실행 불가 |
 
 ### Gates (executed)
@@ -149,12 +149,14 @@ CI: **실행하지 않았음 — BOARD E-5**(GitHub Actions 결제 차단으로 
 - T15의 `tools/soak/src/injection/renderer.ts`(`pauseEffectAcks`)는 건드리지 않았다(명세 지시).
 - `apps/server/src/supervisor/*`는 고치지 않았다(위 "설계 판단" 참조). 새 degraded 토큰도 새 `EngineHealth` 필드도 만들지 않고 기존 `consecutiveFailures`에 합산했으므로, T12는 round 1 수정 뒤에도 한 줄도 바뀌지 않았다. supervisor가 실제로 그렇게 판정하는지는 `HealthAggregator`를 직접 돌려 단언한다(합격 기준 3).
 - 테스트의 `fillDisk`/`freeDisk`는 T15 `tools/soak/src/injection/storage.ts`와 같은 방법이지만 재사용하지 않고 6줄을 다시 썼다: `tools/soak`가 `@vl/server`에 의존하므로 반대 방향 의존은 순환이 된다. 출처(같은 SQLite 문서)는 주석에 적었다.
-- `markEffectExpired`(`#sweepEffects`)·`markEffectPublished`도 같은 store 예외를 낼 수 있지만 그 둘은 이미 writer pass 안에서 돌아 `pump()`가 잡는다 — 범위 밖이고 결함도 아니다.
+- ~~`markEffectExpired`(`#sweepEffects`)·`markEffectPublished`도 같은 store 예외를 낼 수 있지만 그 둘은 이미 writer pass 안에서 돌아 `pump()`가 잡는다 — 범위 밖이고 결함도 아니다.~~ → **round 2 B1에서 정정·수정했다.** "`pump()`가 잡으니 안전"은 틀렸다: `pump()`가 잡는 것은 *예외*이지 *일관성*이 아니다. `#sweepEffects`는 in-memory 삭제를 먼저 하고 `markEffectExpired`를 나중에 했으므로, 그 쓰기가 거부되면 row는 `acked_at`·`expired_at`이 둘 다 NULL인데 `#openEffects`·`#unrecordedAcks`에서는 이미 사라져 재전송도 재시도도 보고도 남지 않았다(§7.3(7)·기준 4 위반). `d161b2f`에서 expiry도 store-first로 뒤집었다 — 자세한 내용은 `## Review round 2`.
+- **`markEffectPublished`는 아직 고치지 않았고, 안전하다고 주장하지 않는다.** 확인한 사실(`engine.ts:989` `#publish`는 `commitTransition`이 반환한 **뒤에** 별도 트랜잭션으로 돈다, `engine.ts:1127`): 그 쓰기가 거부되면 effect row는 `published_at` NULL로 커밋돼 있는데 `#openEffects.set`은 그 다음 줄이라 실행되지 않는다 → 재전송 대상도 아니고 렌더러에 나가지도 않은 채 재시작 전까지 남는다(재시작하면 `#adoptRecoveredEffect`가 주워 간다). 즉 **B1과 같은 모양의 결함이 하나 더 있다.** 이번 라운드에서 고치지 않은 이유는 (a) 지시받은 범위가 B1(expiry)·M1이고, (b) 올바른 동작이 자명하지 않기 때문이다 — 마크 없이 전송하면 그 effect의 ACK는 `EffectNotPublishedError`로 거부되므로(§7.3(7) 계약) "발행은 하되 기록은 나중에"가 곧바로 정답이 아니다. 코디네이터 판단을 받기 위해 `## Follow-ups`와 worker_done에 올린다.
 
 ## Follow-ups
 
 - T15 F-12 drill에서 `pauseEffectAcks()`를 빼고(이제 gap이 닫혔다) disk-full 중에도 ACK가 흐르는 상태로 drill을 돌릴 수 있는지 재검토 — `tools/soak/src/injection/renderer.ts`의 주석이 이 티켓을 가리킨다(T15 소유).
-- ~~disk-full이 지속되는 동안 `#reconcileInteraction`이 커밋을 시도했다 실패하며 `consecutiveFailures`가 0↔1을 오가는 진동은 T8 때부터 있던 동작이다(idle pass가 카운터를 0으로 되돌린다). ACK 실패도 같은 필드를 쓰므로 같은 진동을 공유한다. 표면을 sticky하게 바꾸는 것은 T8/T12 공동 결정이 필요해 이 티켓에서 하지 않았다.~~ → **round 1 B1에서 고쳤다.** ACK-store 실패 절반은 더 이상 진동하지 않는다(`#unrecordedAcks`). **writer pass 실패 절반의 진동은 그대로 남아 있다** — pass 실패는 다음 pass가 성공하면 사라지는 것이 정의이고, 이를 sticky하게 바꾸는 것은 여전히 T8/T12 공동 결정이다. 이 티켓의 범위는 ACK 경로다.
+- ~~disk-full이 지속되는 동안 `#reconcileInteraction`이 커밋을 시도했다 실패하며 `consecutiveFailures`가 0↔1을 오가는 진동은 T8 때부터 있던 동작이다(idle pass가 카운터를 0으로 되돌린다). ACK 실패도 같은 필드를 쓰므로 같은 진동을 공유한다. 표면을 sticky하게 바꾸는 것은 T8/T12 공동 결정이 필요해 이 티켓에서 하지 않았다.~~ → **round 1 B1에서 고쳤다.** ACK-store 실패 절반은 더 이상 진동하지 않는다(`#unrecordedAcks`). **writer pass 실패 절반의 진동은 그대로 남아 있다** — pass 실패는 다음 pass가 성공하면 사라지는 것이 정의이고, 이를 sticky하게 바꾸는 것은 여전히 T8/T12 공동 결정이다. 이 티켓의 범위는 ACK 경로다. (round 2 주: `#unrecordedAcks`는 만료 실패까지 담게 되어 `#unrecordedEffects`로 이름이 바뀌었다.)
+- **`#publish`의 `markEffectPublished` 실패** — `## Not done / out of scope` 마지막 항목. B1과 같은 모양(커밋된 outbox row가 in-memory 어디에도 없고 재시작 전까지 발행되지 않음)이지만 올바른 동작이 자명하지 않아 이번 라운드에서 손대지 않았다. 코디네이터가 별도 티켓으로 낼지 판단해 주기 바란다.
 
 ## Review round 1
 
@@ -195,6 +197,68 @@ npm run lint         -> eslint 0 problems; check-no-legacy-imports: ok (0 legacy
                         check-install-scripts: ok (4 reviewed, better-sqlite3 binding loads)
 npm run typecheck    -> tsc --build tsconfig.json (오류 없음)
 npm run test         -> Test Files 137 passed (137) / Tests 1877 passed | 1 skipped (1878)
+npm run build        -> contract·renderer·server·simulator·soak 빌드 성공,
+                        copied 5 migration(s) to dist/db/migrations, docs/ops/data-map.md up to date
+```
+
+CI: **실행하지 않았음 — BOARD E-5**(GitHub Actions 결제 차단). 위 로컬 결과가 근거다.
+
+## Review round 2
+
+리뷰: PR #21 `reviews/4954289203`, verdict `request_changes`(blocker 1 + major 1). 게이트 5개와 합격 기준 1·2·3·5·6은 리뷰어가 직접 실행해 통과 확인했고, 기준 4가 미충족이었다. blocker는 정확하며 반박하지 않는다 — 이 티켓이 `## Not done / out of scope`에 "`pump()`가 잡으니 `markEffectExpired`는 안전"이라고 써 둔 것이 바로 그 결함을 못 보게 만든 문장이었다. 수정은 한 커밋(`d161b2f`).
+
+- Orca: task `task_a07886fc75cd` · dispatch `ctx_e3ad681cfc62`
+
+| finding | 처리(고침 SHA / 반박 근거) |
+|---|---|
+| [blocker] `engine.ts:1134` — `#sweepEffects()`가 `markEffectExpired()`가 durable하게 성공하기 전에 `#openEffects`·`#unrecordedAcks`를 지운다. 리뷰어 관측: expiry store 거부 직후 대상 row는 `ackedAt:null, expiredAt:null`, 무관한 성공 pass 1회 뒤 `consecutiveFailures:0`·`degraded:false`·`openEffectCount:0`. 새 latch가 "ACK 기록 또는 §7.3(7) 만료 기록"에 동기화돼 있지 않고 *만료 시도*만으로 지워지므로 재전송·만료 작업이 재시작 전까지 유실된다(§7.3(7)·기준 4 위반) | **고침 `d161b2f`.** expiry도 `onAckEffect()`와 같은 **store-first**로 뒤집었다: `markEffectExpired()`가 성공한 **뒤에만** `#openEffects`·latch에서 지운다. 거부되면 effect는 열린 채 남고(다음 pass가 같은 자리에서 다시 만료를 시도하므로 재시도용 별도 상태가 필요 없다) `#recordExpiryFailure()`가 ACK 실패와 **같은 latch**에 싣는다 — 그래서 T12가 읽는 값은 여전히 한 필드이고 `supervisor/*`는 이번에도 한 줄도 바뀌지 않았다. latch가 두 종류(ACK·만료)의 미기록 쓰기를 담게 되어 이름만 `#unrecordedAcks` → `#unrecordedEffects`로 바꿨다(private 필드, 외부 계약 변화 없음). `markEffectExpired`가 `UnknownEffectError`를 던지는 경우(= 지울 row 자체가 없음)는 갚을 쓰기가 없으므로 latch에 넣지 않고 드롭·카운트한다 — 넣으면 어떤 쓰기로도 풀 수 없는 영구 degraded가 된다. `/metrics` `effect_expiry_store_failed`·`effect_expiry_unknown`, 로그 `engine.expiry_store_failed`(kind·code)로 원인을 구분해 남긴다. |
+| ↳ 요구된 회귀 테스트 | **추가 `d161b2f`.** `ack-store-failure.test.ts` "the §7.3(7) expiry the store refused": ACK 94건 실제 `SQLITE_FULL` 거부 → 창이 닫힌 뒤 같은 가득 찬 파일에서 만료 쓰기도 거부 → **그 뒤 무관한 성공 pass**(`runPending()`이라 실패하면 테스트가 실패한다)에도 row는 `ackedAt:null, expiredAt:null`, `consecutiveFailures === 거부 건수`, `openEffectCount === 거부 건수`, `listUnackedEffects()`에 그대로, 실제 `HealthAggregator` 판정 `{degraded, writer_failing}` → 공간 확보 후 다음 sweep이 `expired_at`을 기록하면 `consecutiveFailures 0`·`openEffectCount 0`·coordinator `ok`. |
+| [major] `engine.ts:517` — 합산 값이 coordinator `writer_failing` → `transitions.ts`가 engine restart supervisor로 라우팅 → 예산 3회 → `safe_stopped(restart_budget_exhausted)`. `main.ts:537`의 `engine.stop(); engine.start()`는 거부된 store 쓰기를 고치지 못한다. 별도 취급을 하거나, 승인된 정책과 e2e 테스트를 대라 | **정책 확인 + 테스트 추가 `d161b2f`. 반박하지 않되 코드 분기는 만들지 않는다.** 코디네이터 결정 **A-19**(BOARD §3): ACK-store 실패는 writer pass 실패와 같은 store 실패 부류(같은 연결·같은 `classifyStoreFailure`)이고, fault-matrix **F-12**(disk-full = degraded) → 예산 초과 시 **F-18**(`safe_stopped`)은 T12·T15가 이미 고정한 정책이므로 별도 비재시작 family를 만들지 않는다(= supervisor 코드 변경 0 유지, 새 family는 T12 계약 변경). **이 동작은 의도된 것이다**: 24시간 무인 운영에서 디스크가 계속 차 있으면 재시작으로 고쳐지지 않고, §9.2가 요구하는 종착점은 "조용한 고장"이 아니라 critical alert와 함께 멈추는 `safe_stopped`다. |
+| ↳ 요구된 e2e 테스트 | **추가 `d161b2f`.** 실제 `Supervisor`(T12 프로덕션 전이 규칙·재시작 예산·safe-stop 경로 그대로, **backoff 지연만** `restartDelayMs`로 단축)를 T12 테스트 하네스 `supervisor/testing/harness.ts`로 세우고, 엔진은 실제 `StateEngine` + 실제 SQLite + 실제 `SQLITE_FULL`, 재시작 액션은 `main.ts:537`과 같은 `engine.stop(); engine.start()`. (i) "spends the engine restart budget and then safe-stops (F-12 → F-18)": 렌더러가 매 평가마다 재전송에 ACK로 답하고 가득 찬 파일이 매번 거부 → 각 평가 시점의 degraded family가 **`['coordinator']` 하나뿐**(다른 가족이 끼어들지 않았다는 증거) → engine restart **3회** → `safe_stopped` · `safeStop.kind === 'restart_budget_exhausted'` · reason에 `engine` · `critical` `supervisor.safe_stopped` alert. (ii) "goes back to live when space and the ACK arrive before the budget is spent": 예산 소진 전에 공간 확보 + 렌더러 재ACK → 남은 거부 0건 → `live` 복귀 · `safeStop === null` · engine 컴포넌트 `attempts === 0`·`exhausted === false`(예산 반환) · 이후 4회 평가 동안 degraded family 0개·추가 재시작 0회(false-degraded 잔류 없음). T12 프로덕션 코드는 건드리지 않았다. |
+| [minor 성격] 티켓 `## Not done` 서술 정정 | **고침 `d161b2f`(문서).** "`pump()`가 잡으니 `markEffectExpired`는 안전"을 취소선으로 남기고, `pump()`가 잡는 것은 *예외*이지 *일관성*이 아니라는 점과 무엇이 유실됐는지를 적었다. 같은 문장에 묶여 있던 `markEffectPublished`는 **안전하다고 주장하지 않는다** — 확인 결과 같은 모양의 결함이 하나 더 있으며(아래 관측), 범위 밖이라 고치지 않고 `## Follow-ups`에 올렸다. |
+
+### 반증 실행 (수정이 실제로 그 결함을 고치는가)
+
+```text
+$ git stash push -- apps/server/src/engine/engine.ts   # 수정 전 engine.ts로 되돌림
+$ npx vitest run apps/server/src/engine/ack-store-failure.test.ts
+ ❯ apps/server/src/engine/ack-store-failure.test.ts (9 tests | 1 failed)
+     × keeps the effect open and the fault reported until the row is written
+SqliteError: database or disk is full
+ ❯ PersistenceStore.markEffectExpired apps/server/src/db/store.ts:862:17
+ ❯ StateEngine.#sweepEffects apps/server/src/engine/engine.ts:1138:21
+ ❯ StateEngine.#runPending apps/server/src/engine/engine.ts:585:10
+$ git stash pop
+$ npx vitest run apps/server/src/engine/ack-store-failure.test.ts
+ Test Files  1 passed (1) / Tests  9 passed (9)
+```
+
+수정 전에는 만료 쓰기가 sweep 밖으로 튀어나오고(한 pass가 effect 하나를 메모리에서 지운 뒤 throw), 리뷰어가 본 거짓 정상화가 그 뒤에 온다. 그 상태를 직접 찍어 보려고 **수정 전 코드에서** 같은 픽스처에 pass를 150회 더 돌린 임시 사본을 실행했다(커밋하지 않음):
+
+```text
+PREFIX-HEALTH {
+  consecutiveFailures: 2, degraded: true, degradedReasons: [ 'writer_failing' ],
+  openEffectCount: 0,
+  rowsNeitherAckedNorExpired: 71
+}
+```
+
+`openEffectCount: 0`인데 `acked_at`·`expired_at`이 둘 다 NULL인 row가 **71건** — 리뷰어가 지적한 그 유실이다. (남아 있는 `consecutiveFailures: 2`는 이 결함이 아니라 `## Follow-ups`에 적힌 별개의 진동이다: 가득 찬 파일에서 `#reconcileInteraction`이 CTA 플래그를 커밋하려다 실패하는 왕복. 수정 후에는 row가 갚아질 때까지 `writer_failing`이 유지되므로 그 왕복 자체가 생기지 않는다.) 수정 후 같은 지점의 값은 `consecutiveFailures === openEffectCount === 거부 건수`이고, 공간 확보 후 0으로 떨어진다.
+
+### 관측 — `markEffectPublished`(고치지 않음)
+
+`#publish`(`engine.ts:989`)는 `commitTransition`이 반환한 뒤 **별도 트랜잭션**으로 `markEffectPublished`를 부르고, `#openEffects.set`은 그 다음 줄이다(`engine.ts:1127`). 따라서 그 쓰기가 거부되면 effect row는 `published_at` NULL로 커밋된 채 in-memory 어디에도 없고, 재시작이 `#adoptRecoveredEffect`로 주워 갈 때까지 렌더러에 나가지 않는다. B1과 같은 모양이지만 "마크 없이 발행"은 그 effect의 ACK가 `EffectNotPublishedError`로 거부되게 만들어 곧바로 정답이 아니므로, 지시받은 범위(B1·M1) 밖으로 두고 코디네이터 판단을 요청한다.
+
+### Gates (round 2 fix, 로컬)
+
+`git fetch origin && git rebase origin/main`(5beb9f1 = A-19 BOARD 커밋 포함) 후 실행:
+
+```text
+npm run format:check -> All matched files use Prettier code style!
+npm run lint         -> eslint 0 problems; check-no-legacy-imports: ok (0 legacy imports);
+                        check-install-scripts: ok (4 reviewed, better-sqlite3 binding loads)
+npm run typecheck    -> tsc --build tsconfig.json (오류 없음)
+npm run test         -> Test Files 137 passed (137) / Tests 1880 passed | 1 skipped (1881)
 npm run build        -> contract·renderer·server·simulator·soak 빌드 성공,
                         copied 5 migration(s) to dist/db/migrations, docs/ops/data-map.md up to date
 ```
