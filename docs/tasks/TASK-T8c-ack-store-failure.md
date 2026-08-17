@@ -83,26 +83,73 @@ try {
 
 ## Result
 
-### 재현 관측
+### 재현 관측 (수정 전, 2026-08-18)
 
-<수정 전 실행 명령과 출력>
+`apps/server/src/engine/ack-store-failure.test.ts`를 먼저 쓰고 **수정 전** 코드에서 실행했다.
+
+```text
+$ npx vitest run apps/server/src/engine/ack-store-failure.test.ts
+ ❯ apps/server/src/engine/ack-store-failure.test.ts (3 tests | 2 failed)
+     × records the failure, keeps the effect open and re-acks once space is free
+     × survives an ack_effect frame the store cannot record
+
+ FAIL  … > records the failure, keeps the effect open and re-acks once space is free
+SqliteError: database or disk is full
+ ❯ sqliteTransaction.<anonymous> apps/server/src/db/store.ts:841:10
+    839|       this.#db
+    840|         .prepare('UPDATE effect_outbox SET acked_at = ? WHERE effect_i…
+    841|         .run(at, effectId)
+ ❯ PersistenceStore.markEffectAcked apps/server/src/db/store.ts:844:17
+ ❯ StateEngine.onAckEffect apps/server/src/engine/engine.ts:406:19
+
+ FAIL  … > survives an ack_effect frame the store cannot record
+AssertionError: expected [ …(1) ] to have a length of +0 but got 1
+ ❯ apps/server/src/engine/ack-store-failure.test.ts:346:22   // expect(uncaught).toHaveLength(0)
+```
+
+가설이 그대로 확인됐다: (1) `markEffectAcked`의 `UPDATE`가 실제 `SQLITE_FULL`("database or disk is full")로 실패하고, (2) 그 예외가 `StateEngine.onAckEffect`(engine.ts:406)에서 그대로 올라가며, (3) 실제 `/ws/renderer` 소켓으로 보냈을 때 `uncaughtException`이 **1건** 잡혔다 — 테스트가 리스너를 달지 않았다면 그 자리에서 프로세스가 끝난다. 반증(예외 0건·다른 위치에서 처리)은 관측되지 않았다.
+
+수정 후 같은 파일: `Test Files 1 passed (1) / Tests 4 passed (4)`(허브 백스톱 테스트 1건 추가).
+
+### 재현 방법에 대한 메모 (왜 200건인가)
+
+가득 찬 파일이 **모든** 쓰기를 거부하지는 않는다. b-tree 페이지에 남은 여유 바이트 안에 들어가는 `UPDATE`는 그대로 커밋된다. 이 스키마에서 실측(`dbstat`, 4 KiB 페이지): `VACUUM` 직후 `effect_outbox` 리프 하나가 약 20행을 담고 약 180바이트를 남기며, `acked_at` 기록은 행을 약 24바이트 늘린다. 리프가 2~4개뿐인 작은 픽스처는 ACK를 전부 흡수해버려 아무것도 증명하지 못했다(측정: 71건 open effect → 71건 모두 성공). 유료 이벤트 200건(= open effect 201건)에서는 여유 바이트가 대부분의 행에서 닿지 않는 곳에 있어 **201건 중 94건이 실제 `SQLITE_FULL`로 거부**됐고 첫 거부는 두 번째 ACK에서 났다. 테스트는 "거부가 1건 이상"과 "기록이 1건 이상"을 모두 단언해 픽스처가 실제로 결함을 만들었는지 자체 검증한다.
 
 ### Acceptance criteria
 
-| # | 기준 | 상태(met/unmet/unverifiable) | 근거(테스트 파일·명령·출력) |
+| # | 기준 | 상태 | 근거 |
 |---|---|---|---|
+| 1 | 재현 테스트가 수정 전 실패, 수정 후 통과 | met | 위 "재현 관측"(수정 전 2건 실패) / 수정 후 `Tests 4 passed (4)` |
+| 2 | (a) store 실패로 프로세스가 죽지 않는다 | met | `ack-store-failure.test.ts` "survives an ack_effect frame the store cannot record": 실제 WS로 201건 ACK 전송, `process.on('uncaughtException')` 수집 0건, 이후 `GET /health`가 응답. 허브 백스톱은 "renderer hub, when a handler throws" |
+| 3 | (b) 실패가 엔진 건강으로 표면화되고 T12가 degraded 판정에 쓸 수 있다 | met | 같은 파일: `health.consecutiveFailures > 0`, `lastFailure.error =~ /database or disk is full/`, `degradedReasons`에 `writer_failing`. 이 두 필드가 T12 `supervisor/signals.ts:309` coordinator signal의 입력이다(`degraded`, reason `writer_failing`). `/metrics`에 `ack_effect_store_failed` 카운터, 로그 `engine.ack_store_failed`(kind·code) |
+| 4 | (c) 해당 ACK는 재시도 대상으로 남는다 | met | 거부된 effect는 `acked_at` NULL이고 `openEffectCount == 거부 건수`, `listUnackedEffects()`에 그대로 있다. 공간 확보 후 §7.3(7) 재전송 → 렌더러 재ACK → `listUnackedEffects()` 0건(엔진 API·실제 WS 두 경로 모두 단언) |
+| 5 | 기존 T8/T11/T15 테스트 회귀 없음 | met | `npm run test` → 137 files, 1875 passed, 1 skipped (skip은 기존 것) |
+| 6 | 게이트 5개 로컬 통과 | met | 아래 Gates. CI는 BOARD **E-5**(GitHub Actions 결제 차단)로 실행 불가 |
 
 ### Gates (executed)
 
+`git fetch origin && git rebase origin/main`(40ee4bb 기준) 후 실행:
+
 ```text
-<명령과 출력 요약>
+npm run format:check -> All matched files use Prettier code style!
+npm run lint         -> eslint 0 problems; check-no-legacy-imports: ok (0 legacy imports);
+                        check-install-scripts: ok (4 reviewed, better-sqlite3 binding loads)
+npm run typecheck    -> tsc --build tsconfig.json (오류 없음)
+npm run test         -> Test Files 137 passed (137) / Tests 1875 passed | 1 skipped (1876)
+npm run build        -> contract·renderer·server·simulator·soak 빌드 성공,
+                        copied 5 migration(s) to dist/db/migrations, docs/ops/data-map.md up to date
 ```
+
+CI: **실행하지 않았음 — BOARD E-5**(GitHub Actions 결제 차단으로 모든 run이 2초 만에 실패). 위 로컬 결과가 근거다.
 
 ## Not done / out of scope
 
-- T15의 `tools/soak/src/injection/renderer.ts`(ACK 일시 중단 도구)는 건드리지 않았다 — PR #18에서 리뷰 중이고, 이 저장소 브랜치에는 아직 존재하지 않는다.
-- `apps/server/src/supervisor/*`는 고치지 않았다(위 "설계 판단" 참조).
+- T15의 `tools/soak/src/injection/renderer.ts`(`pauseEffectAcks`)는 건드리지 않았다(명세 지시).
+- `apps/server/src/supervisor/*`는 고치지 않았다(위 "설계 판단" 참조). 새 degraded 토큰을 만들지 않았으므로 T12는 수정 없이 같은 tick에 판정한다.
+- 테스트의 `fillDisk`/`freeDisk`는 T15 `tools/soak/src/injection/storage.ts`와 같은 방법이지만 재사용하지 않고 6줄을 다시 썼다: `tools/soak`가 `@vl/server`에 의존하므로 반대 방향 의존은 순환이 된다. 출처(같은 SQLite 문서)는 주석에 적었다.
+- `markEffectExpired`(`#sweepEffects`)·`markEffectPublished`도 같은 store 예외를 낼 수 있지만 그 둘은 이미 writer pass 안에서 돌아 `pump()`가 잡는다 — 범위 밖이고 결함도 아니다.
 
 ## Follow-ups
 
-- PR #18(T15) 머지 후, F-12 drill에서 `pauseEffectAcks()`를 빼고 disk-full 중에도 ACK가 흐르는 상태로 drill을 돌릴 수 있는지 재검토(T15 소유).
+- T15 F-12 drill에서 `pauseEffectAcks()`를 빼고(이제 gap이 닫혔다) disk-full 중에도 ACK가 흐르는 상태로 drill을 돌릴 수 있는지 재검토 — `tools/soak/src/injection/renderer.ts`의 주석이 이 티켓을 가리킨다(T15 소유).
+- disk-full이 지속되는 동안 `#reconcileInteraction`이 커밋을 시도했다 실패하며 `consecutiveFailures`가 0↔1을 오가는 진동은 T8 때부터 있던 동작이다(idle pass가 카운터를 0으로 되돌린다). ACK 실패도 같은 필드를 쓰므로 같은 진동을 공유한다. 표면을 sticky하게 바꾸는 것은 T8/T12 공동 결정이 필요해 이 티켓에서 하지 않았다.
