@@ -71,6 +71,7 @@
 | E-1 | 호스트 BSOD 0x00000050 2회(2026-08-16 14:47 UTC, 2026-08-17 03:24 UTC; minidump `081626-14718-01.dmp`, `081726-14937-01.dmp`) | 사용자가 minidump 분석(WinDbg `!analyze -v`)·메모리 진단·드라이버 갱신을 수행할지, 동시 에이전트 상한을 D-4(2+1)에서 낮출지 | 런북 2.8 |
 | E-2 | OBS 32.0.2 / obs-websocket 5.6.3을 고정 버전으로 승인 | 승인 시 docs/ops/obs-setup.md의 '후보' 표기 제거 | T2, T17 |
 | E-3 | 실제 OBS 스모크(`npm run obs:probe`) — 사용자가 OBS WebSocket 서버(loopback·비밀번호)를 켠 뒤 실행 | Gate 2 호스트 검증 항목 | T2 |
+| E-4 | **보고(비차단)**: PR #11(T10 broadcast lifecycle) 리뷰가 round 4까지 request_changes(각 round의 지적은 해소, 리뷰어가 reconcile·update 경로의 인접 갭을 계속 발견 — 절단 목록 무판정, 마커 생명주기(A-18), update 본문 정확성). 코디네이터는 수렴 중으로 판단해 F-T10-4 진행. 사용자가 중단·재설계를 원하면 지시 | 런북 2.5(4) | T10 |
 
 ## 5. 이력
 
@@ -143,3 +144,4 @@
 | 2026-08-17 22:05 | R-T10-3 verdict request_changes(blocker: 절단 목록+가시 마커 채택; major: 마커 공개 description 잔존; minor stale 서술). 코디네이터 판단: 각 round의 지적은 해소됐고 리뷰어가 인접 갭을 더 찾은 것이므로 **A-18 마커 생명주기 결정** 후 F-T10-3 `task_f60ae9ddfa44` → T10 터미널 1회 더 진행. round 4에도 미승인이면 2.5(4) 에스컬레이션 |
 | 2026-08-17 22:40 | F-T8-2 완료(wsUrl/wsToken 구조 분리, migration 005 argument_rejected). R-T8-3 verdict **approve** → 최종 게이트(.gitignore /data/, 렌더러 config 토큰 분리 확인) → **PR #12 squash merge**(main d6e6edd). T8 worker release·worktree 제거. T9 `ctx_054a70617198`·T11 `ctx_67eddda5be64` 디스패치. 진행: F-T10-3. 마이그레이션 현황: 001·002·004·005 main, 003(T10) 대기 |
 | 2026-08-17 23:05 | F-T10-3 완료(절단 목록 무판정, A-18 private 삽입·update로 마커 제거·publish 게이트, liveBroadcasts.update quota 추가; 1399 tests). R-T10-4 `task_5b75f1bb9801` → `ctx_3cfb36dc9eda`(review). 진행: T9, T11 |
+| 2026-08-17 23:35 | R-T10-4 verdict request_changes(blocker: 절단 liveStreams reconcile이 decoy 키를 vault에 선기록; major 2: update 본문의 scheduledEndTime 미보존·title 재전송 불필요, selfDeclaredMadeForKids는 update 불가) → F-T10-4 `task_4cc98e9a8711` → T10 터미널. **E-4 보고 항목 등록**(round 4 도달). 진행: T9, T11 |
