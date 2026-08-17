@@ -119,7 +119,7 @@ orca orchestration dispatch --task <review_task_id> --to <handle> --inject --jso
    - `approve` → 2.6 최종 게이트
    - `request_changes` → findings를 그대로 worker에게 fix task로 재디스패치(같은 터미널, `worker-start --task <fix_task> --terminal <handle>`), 다음 round는 새 리뷰어. **round 3에 도달하면**(fix 2회 실패) 사용자 에스컬레이션.
    - `escalate` → 리뷰어가 스펙 모순·정책 위험을 발견한 경우. 코디네이터가 스펙으로 판단하거나 2.5로 올린다.
-5. 리뷰어 터미널: `worker-release --dispatch <id>`; release가 pre-existing terminal이라 거부되면 `orca terminal close --terminal <handle> --json`.
+5. 리뷰어 터미널: `worker-release --dispatch <id>`; release가 pre-existing terminal이라 거부되면 `orca terminal close --terminal <handle> --json`. `close`가 `tab_not_found`로 실패하는 잔여 터미널이 누적되면(2026-08-17: review worktree에 18개) 리뷰가 돌고 있지 않을 때 `orca terminal stop --worktree path:<review worktree> --json`으로 일괄 정리한다(진행 중 리뷰가 있는 worktree에는 쓰지 않는다).
 
 ### 2.5 에스컬레이션 — 사용자에게 묻는 것
 
