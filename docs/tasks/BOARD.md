@@ -165,3 +165,4 @@
 | 2026-08-17 15:53 | R-T12-2 verdict request_changes(잔존 blocker 1: chat 4신호 단일 가족 any-ok 집계로 idle transport unknown이 ok로 덮임, started()가 객체 존재 판단) → F-T12-2 `task_b6fcee937b5c` → T12 터미널 |
 | 2026-08-17 16:05 | F-T12-2 완료(readiness 신호 개념·started() 실기동 판정, 1715 tests). R-T12-3 `task_09f9c22548e8` → `ctx_8ec17a69bd89`(review) |
 | 2026-08-17 16:17 | R-T12-3 verdict request_changes(round 2 해소; 신규 blocker 2: safe_stopped 후 시작 시퀀스 계속 진행, 실행 중 restart 액션의 post-await 효과; minor 티켓 근거) → F-T12-3 `task_1e3ea51a4140` → T12 터미널. round 4에도 미승인이면 E-6 보고 |
+| 2026-08-17 16:31 | F-T12-3 완료(취소 술어·AbortSignal, 1722 tests). R-T12-4 `task_b4fb3f0376e1` → `ctx_09674c39f7c0`(review) |
