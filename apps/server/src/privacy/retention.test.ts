@@ -2,7 +2,12 @@ import { afterEach, describe, expect, it } from 'vitest'
 
 import { openDatabase } from '../db/index.js'
 import { RetentionConfigError, type RetentionConfig } from './config.js'
-import { RetentionSweeper, minusDays, type Reverifier } from './retention.js'
+import {
+  RetentionLedgerUnavailableError,
+  RetentionSweeper,
+  minusDays,
+  type Reverifier,
+} from './retention.js'
 import {
   DAY_MS,
   createRetentionHarness,
@@ -236,6 +241,131 @@ describe('scheduled retention sweep', () => {
     expect(second.truncated).toEqual([])
     expect(second.clean).toBe(true)
     expect(active.store.countRows('ingest_inbox')).toBe(0)
+  })
+
+  it('does not claim remaining work when the last full batch emptied the table', async () => {
+    // Review round 1, m1: exhausting the budget on a full batch was assumed to
+    // mean more victims remain. With one expired row and a budget of one batch of
+    // one, the table is clean and the sweep must say so.
+    const active = open()
+    seedInbox(active.store, 1, T0)
+    await active.clock.advance(30 * DAY_MS + 1)
+
+    const tiny: RetentionConfig = {
+      ...active.config,
+      sweep: { ...active.config.sweep, batchLimit: 1, maxBatchesPerEntry: 1 },
+    }
+    const result = new RetentionSweeper({
+      store: active.store,
+      clock: active.clock,
+      config: tiny,
+    }).run()
+
+    expect(active.store.countRows('ingest_inbox')).toBe(0)
+    expect(result.entries.find((entry) => entry.table === 'ingest_inbox')?.truncated).toBe(false)
+    expect(result.truncated).toEqual([])
+    expect(result.clean).toBe(true)
+  })
+})
+
+describe('deletion and its audit row are atomic (spec §12.4 삭제 실행을 기록한다)', () => {
+  /** Makes every `retention_ledger` insert fail, as the reviewer's probe did. */
+  function blockLedgerInserts(file: string): void {
+    const database = openDatabase({ file, busyTimeoutMs: 1000 })
+    try {
+      database.exec(
+        `CREATE TRIGGER retention_ledger_block BEFORE INSERT ON retention_ledger
+         BEGIN SELECT RAISE(ABORT, 'ledger unavailable'); END`,
+      )
+    } finally {
+      database.close()
+    }
+  }
+
+  it('keeps the data when the audit row cannot be written', async () => {
+    // Review round 1, B1: the deletion used to commit in its own transaction and
+    // the audit row afterwards, so a failing ledger left data deleted with no
+    // record. Now the batch rolls back with its evidence.
+    const active = open()
+    seedInbox(active.store, 3, T0)
+    await active.clock.advance(30 * DAY_MS + 1)
+    blockLedgerInserts(active.temp.file)
+
+    expect(() => sweeper(active).run()).toThrow(RetentionLedgerUnavailableError)
+    expect(() => sweeper(active).run()).toThrow(/ledger unavailable/)
+    // The rows are still there, which is what makes the missing evidence
+    // recoverable: the next sweep deletes them and records it.
+    expect(active.store.countRows('ingest_inbox')).toBe(3)
+    expect(active.store.countRows('retention_ledger')).toBe(0)
+  })
+
+  it('records one audit row per batch, each committed with its own deletion', async () => {
+    const active = open()
+    seedInbox(active.store, 3, T0)
+    await active.clock.advance(30 * DAY_MS + 1)
+
+    const oneAtATime: RetentionConfig = {
+      ...active.config,
+      sweep: { ...active.config.sweep, batchLimit: 1, maxBatchesPerEntry: 10 },
+    }
+    const result = new RetentionSweeper({
+      store: active.store,
+      clock: active.clock,
+      config: oneAtATime,
+    }).run()
+
+    const inbox = result.entries.find((entry) => entry.table === 'ingest_inbox')
+    expect(inbox?.rowsDeleted).toBe(3)
+    expect(inbox?.ledgerEntryIds).toHaveLength(3)
+    const rows = active.store.listRetentionLedger({ fieldKey: 'ingest_inbox.envelope' })
+    expect(rows.map((row) => row.rowsDeleted)).toEqual([1, 1, 1])
+    expect(rows.map((row) => row.entryId)).toEqual([...(inbox?.ledgerEntryIds ?? [])])
+    for (const row of rows) {
+      expect(row.outcome).toBe('deleted')
+      expect(row.deletedAt).not.toBeNull()
+    }
+    expect(active.store.countRows('ingest_inbox')).toBe(0)
+  })
+
+  it('refuses a batched deletion that was given no audit factory', () => {
+    // The db layer will not delete without evidence even if a future caller forgets.
+    const active = open()
+    seedInbox(active.store, 1, T0)
+    expect(() =>
+      active.store.deleteExpiredByColumn({
+        table: 'ingest_inbox',
+        column: 'received_at',
+        cutoffAt: '2099-01-01T00:00:00.000Z',
+        batchLimit: 10,
+        maxBatches: 1,
+        audit: undefined as never,
+      }),
+    ).toThrow(/audit factory/)
+    expect(active.store.countRows('ingest_inbox')).toBe(1)
+  })
+})
+
+describe('storedColumns must match the live schema (review round 1, M1)', () => {
+  it('refuses to run when a table gained an undeclared column', () => {
+    const active = open()
+    const database = openDatabase({ file: active.temp.file, busyTimeoutMs: 1000 })
+    try {
+      database.exec('ALTER TABLE ingest_inbox ADD COLUMN operator_note TEXT')
+    } finally {
+      database.close()
+    }
+
+    expect(() => sweeper(active)).toThrow(RetentionConfigError)
+    expect(() => sweeper(active)).toThrow(/undeclared column\(s\): operator_note/)
+  })
+
+  it('declares the inbox primary key the schema really has', () => {
+    const active = open()
+    const inbox = active.config.fields.find((field) => field.key === 'ingest_inbox.envelope')
+    expect(inbox?.storedColumns).toContain('ingest_seq')
+    expect([...(inbox?.storedColumns ?? [])].sort()).toEqual(
+      active.store.listColumns('ingest_inbox').sort(),
+    )
   })
 })
 

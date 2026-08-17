@@ -18,6 +18,7 @@ export {
   assertSchemaCoverage,
   loadRetentionConfig,
   parseRetentionConfig,
+  type LiveSchema,
   type LoadRetentionConfigOptions,
   type RetentionConfig,
   type RetentionDataClass,
@@ -57,6 +58,7 @@ export {
   type IdentitySchemaTextHit,
 } from './identity-columns.js'
 export {
+  RetentionLedgerUnavailableError,
   RetentionSweeper,
   allowedPeriodDaysOf,
   minusDays,
@@ -73,8 +75,14 @@ export {
   vaultGrantRevoker,
   type GrantRevokeOutcome,
   type GrantRevoker,
+  type RevocationAuthEventSinkOptions,
   type RevocationEntryResult,
+  type RevocationFailure,
   type RevocationHandlerOptions,
   type RevocationResult,
 } from './revocation.js'
-export { RetentionScheduler, type RetentionSchedulerOptions } from './scheduler.js'
+export {
+  RetentionScheduler,
+  type RetentionSchedulerOptions,
+  type RetentionSweepFailure,
+} from './scheduler.js'

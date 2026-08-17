@@ -6,6 +6,7 @@ import {
   DAY_MS,
   createRetentionHarness,
   seedInbox,
+  seedState,
   type RetentionHarness,
 } from './testing/harness.js'
 
@@ -36,6 +37,11 @@ function sweeperFor(active: RetentionHarness): RetentionSweeper {
   return new RetentionSweeper({ store: active.store, clock: active.clock, config: active.config })
 }
 
+/** Both sinks are required, so tests that do not care still have to pass them. */
+function noop(): void {
+  // intentionally empty
+}
+
 describe('RetentionScheduler', () => {
   it('sweeps immediately and then on the configured interval', async () => {
     const active = open()
@@ -45,6 +51,7 @@ describe('RetentionScheduler', () => {
       clock: active.clock,
       intervalMs: 60 * 60 * 1000,
       onResult: (result) => results.push(result),
+      onError: noop,
     })
 
     scheduler.start()
@@ -70,6 +77,8 @@ describe('RetentionScheduler', () => {
       sweeper: sweeperFor(active),
       clock: active.clock,
       intervalMs: DAY_MS,
+      onResult: noop,
+      onError: noop,
     })
 
     scheduler.start()
@@ -99,11 +108,15 @@ describe('RetentionScheduler', () => {
       sweeper: failing,
       clock: active.clock,
       intervalMs: 1000,
+      onResult: noop,
       onError: (error) => errors.push(error),
     })
     scheduler.start()
 
     expect(errors).toHaveLength(1)
+    // Also kept in state, so a caller whose sink itself throws still sees it.
+    expect(scheduler.failures).toHaveLength(1)
+    expect(scheduler.unhealthy).toBe(true)
     // A retention job that stopped after one bad run is exactly the silent
     // failure this task exists to prevent.
     await active.clock.advance(2000)
@@ -113,7 +126,12 @@ describe('RetentionScheduler', () => {
 
   it('defaults the interval to the config and rejects a bad one', () => {
     const active = open()
-    scheduler = new RetentionScheduler({ sweeper: sweeperFor(active), clock: active.clock })
+    scheduler = new RetentionScheduler({
+      sweeper: sweeperFor(active),
+      clock: active.clock,
+      onResult: noop,
+      onError: noop,
+    })
     expect(scheduler.intervalMs).toBe(active.config.sweep.intervalMs)
     expect(
       () =>
@@ -121,7 +139,50 @@ describe('RetentionScheduler', () => {
           sweeper: sweeperFor(active),
           clock: active.clock,
           intervalMs: 0,
+          onResult: noop,
+          onError: noop,
         }),
     ).toThrow(/positive integer/)
+  })
+
+  it('refuses to be constructed without a result or error sink', () => {
+    // Review round 1, B2: with optional sinks a missed T12 wire turned a failed
+    // §12.4 deletion into silence. Both are required, and a plain-JS caller that
+    // omits one is refused at construction rather than at the first failure.
+    const active = open()
+    const base = { sweeper: sweeperFor(active), clock: active.clock, intervalMs: 1000 }
+    expect(() => new RetentionScheduler({ ...base, onError: noop } as never)).toThrow(
+      /onResult is required/,
+    )
+    expect(() => new RetentionScheduler({ ...base, onResult: noop } as never)).toThrow(
+      /onError is required/,
+    )
+    expect(
+      () => new RetentionScheduler({ ...base, onResult: noop, onError: 'nope' } as never),
+    ).toThrow(TypeError)
+  })
+
+  it('reports an unmet obligation through the result sink and its own state', async () => {
+    const active = open()
+    // A world snapshot untouched for longer than its re-verification period leaves
+    // the sweep non-clean; that must reach the sink, not just the log.
+    seedState(active.store, { at: T0, revision: 1, processedSeq: 0 })
+    await active.clock.advance(31 * DAY_MS)
+
+    const results: RetentionSweepResult[] = []
+    scheduler = new RetentionScheduler({
+      sweeper: sweeperFor(active),
+      clock: active.clock,
+      intervalMs: DAY_MS,
+      onResult: (result) => results.push(result),
+      onError: noop,
+    })
+    scheduler.start()
+
+    expect(results[0]?.clean).toBe(false)
+    expect(results[0]?.reverificationDue).toEqual(['world_snapshot.snapshot'])
+    expect(scheduler.lastResult?.clean).toBe(false)
+    expect(scheduler.unhealthy).toBe(true)
+    expect(scheduler.failures).toEqual([])
   })
 })

@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -30,8 +30,21 @@ const SKIPPED_DIRECTORIES = new Set(['node_modules', 'dist', '.git', 'legacy', '
 
 const SCANNED_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.json', '.sql']
 
-/** The two files that are allowed to name the gated metrics. */
-const REGISTRY_FILES = ['derived-metrics.ts', 'derived-metrics.test.ts']
+/**
+ * The only two files allowed to name the gated metrics, as **exact repository
+ * paths**. Excluding by basename (review round 1, M2) would also exempt any future
+ * production file called `derived-metrics.ts` anywhere under the scanned roots —
+ * which is precisely the filename the code this guard must reject would have.
+ */
+const REGISTRY_PATHS = [
+  'apps/server/src/privacy/derived-metrics.ts',
+  'apps/server/src/privacy/derived-metrics.test.ts',
+]
+
+/** Repository-relative, `/`-separated path of an absolute file path. */
+function repoPath(absolute: string): string {
+  return absolute.slice(REPO_ROOT.length).replaceAll('\\', '/')
+}
 
 function sourceFiles(directory: string): string[] {
   let entries
@@ -45,7 +58,7 @@ function sourceFiles(directory: string): string[] {
     if (entry.isDirectory()) {
       return SKIPPED_DIRECTORIES.has(entry.name) ? [] : sourceFiles(path)
     }
-    if (REGISTRY_FILES.includes(entry.name)) return []
+    if (REGISTRY_PATHS.includes(repoPath(path))) return []
     return SCANNED_EXTENSIONS.some((extension) => entry.name.endsWith(extension)) ? [path] : []
   })
 }
@@ -90,10 +103,21 @@ describe('approval-gated derived metrics', () => {
     expect(FILES.some((file) => file.endsWith('001_initial.sql'))).toBe(true)
   })
 
+  it('exempts exactly the two registry paths and nothing else', () => {
+    // The exclusion is by exact repository path, so a production file named
+    // `derived-metrics.ts` elsewhere is still scanned (review round 1, M2).
+    for (const path of REGISTRY_PATHS) {
+      expect(existsSync(join(REPO_ROOT, path)), `${path} exists`).toBe(true)
+      expect(FILES.map(repoPath)).not.toContain(path)
+    }
+    // A same-named file under another path is not exempted.
+    expect(REGISTRY_PATHS).not.toContain('apps/renderer/src/derived-metrics.ts')
+  })
+
   it('no workspace source computes or stores one of them', () => {
     const offenders = FILES.flatMap((file) => {
       const hits = findForbiddenMetricTokens(readFileSync(file, 'utf8'))
-      return hits.map((hit) => `${file.slice(REPO_ROOT.length)}: ${hit.token} (${hit.metricId})`)
+      return hits.map((hit) => `${repoPath(file)}: ${hit.token} (${hit.metricId})`)
     })
     expect(offenders).toEqual([])
   })

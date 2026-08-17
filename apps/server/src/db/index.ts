@@ -43,6 +43,7 @@ export {
 } from './migrate.js'
 export {
   assertSqlIdentifier,
+  type BatchAuditFactory,
   type DeleteAllOptions,
   type DeleteExpiredOptions,
   type DeleteSweepResult,

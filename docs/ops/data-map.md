@@ -15,8 +15,11 @@
    가역/안정 hash를 담을 **컬럼 자체가 없다**(§7.4, §12.4, BOARD A-1). 계약 수준은
    `packages/contract/src/privacy.test.ts`, DB 스키마 수준은 `apps/server/src/privacy/schema-identity.test.ts`가
    테스트로 고정한다. 따라서 모든 field의 `personalIdentifiers`는 `none`이다.
-2. **모든 삭제·재확인은 append-only로 기록된다.** 아무것도 만료되지 않은 실행도 기록된다 — 조용히 멈춘 job과
-   깨끗한 DB를 구별할 수 있어야 한다.
+2. **모든 삭제·재확인은 append-only로 기록되고, 삭제와 그 증거는 원자적이다.** 배치의 `DELETE`와 그 배치의
+   `retention_ledger` 행은 **같은 트랜잭션**에서 커밋된다(리뷰 round 1, B1). 원장 쓰기가 실패하면 그 배치의 삭제도
+   롤백되므로 "삭제됐는데 기록이 없는" 상태는 만들어질 수 없고, 다음 sweep이 다시 삭제하며 기록한다. 원장을 아예 쓸 수
+   없으면 sweep은 `RetentionLedgerUnavailableError`로 중단해 error sink에 도달한다. 아무것도 만료되지 않은 실행도
+   기록된다 — 조용히 멈춘 job과 깨끗한 DB를 구별할 수 있어야 한다.
 3. **결제 금액·tier·Jewels도 API 데이터다**(§8.6). 30일 안에 삭제되고, 장기 수익 정본은 AdSense 정산,
    장기 KPI는 개인 식별자가 없는 집계다(§12.4 마지막 단락).
 
@@ -34,7 +37,12 @@ T13은 모듈과 계약만 제공한다. 프로세스 수명주기(DB 열기·su
 ```ts
 const config = loadRetentionConfig()
 const sweeper = new RetentionSweeper({ store, clock, config, logger })
-const scheduler = new RetentionScheduler({ sweeper, clock, onResult: alertOnUnmetObligations })
+const scheduler = new RetentionScheduler({
+  sweeper,
+  clock,
+  onResult: alertOnUnmetObligations, // 필수
+  onError: alert, // 필수
+})
 scheduler.start() // 즉시 1회 + sweep.intervalMs마다
 
 // 철회: TokenManager의 이벤트 sink에 연결
@@ -44,9 +52,16 @@ const revocation = new RevocationHandler({
   config,
   grantRevoker: vaultGrantRevoker(vault),
 })
-const authEvents = new RevocationAuthEventSink({ handler: revocation, onError: alert })
+const authEvents = new RevocationAuthEventSink({
+  handler: revocation,
+  onResult: alertIfNotWithinDeadline, // 필수
+  onError: alert, // 필수
+})
 ```
 
+`onResult`·`onError`는 **필수**다(리뷰 round 1, B2). 예전에는 optional이었고 기본값이 무음 함수여서, T12 배선을
+빠뜨리면 실패한 §12.4 삭제가 resolve된 Promise로 사라졌다. 지금은 생성 시점에 거부되고, 실패는 sink 호출과 별도로
+`scheduler.failures`/`unhealthy`, `authEvents.failures`/`failed` 상태에도 남는다(알림 sink 자체가 throw해도 관측 가능).
 `onResult`는 `clean === false`(=`reverificationDue`·`truncated`·`failed`가 비어 있지 않음)를 알림 대상으로 삼는다.
 
 `delete` 정책은 만료 행을 배치로 삭제한다. `refresh` 정책은 **삭제하지 않는다** — 허용 기간 안에 다시 쓰였는지
@@ -92,6 +107,14 @@ const authEvents = new RevocationAuthEventSink({ handler: revocation, onError: a
 | `recorded_at` | 이 감사 행을 쓴 시각 |
 
 CHECK 제약으로 `deleted`만이 행수·삭제시각을 주장할 수 있고, 주기 실행은 `cutoff_at`만, 철회·요청은 `deadline_at`만 갖는다.
+
+행 하나는 **배치 하나**의 증거다. 배치 크기(`sweep.batchLimit`)를 넘는 삭제는 배치마다 `deleted` 행을 남기므로
+한 field가 한 실행에서 여러 행을 만들 수 있다. 삭제가 없었던 실행은 `nothing_expired`·`reverified`·
+`reverification_due`·`table_absent`·`failed` 행 하나를 남긴다(잃을 증거가 없으므로 트랜잭션 결합이 필요 없다).
+
+`config/retention.json`의 `storedColumns`는 실제 스키마 컬럼 집합과 **정확히 일치**해야 한다. 어긋나면
+`RetentionSweeper` 생성이 `RetentionConfigError`로 실패한다(리뷰 round 1, M1 — 테이블 이름만 확인하던 검사로는
+`ingest_inbox.ingest_seq` 누락을 잡을 수 없었다). 새 컬럼을 추가하는 마이그레이션은 이 파일도 함께 고쳐야 한다.
 
 ## 6. 승인 전 계산·저장 금지 지표 (§14.1, [S42])
 

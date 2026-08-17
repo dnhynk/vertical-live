@@ -447,25 +447,33 @@ function parseSchemaOnlyTable(value: unknown, label: string): SchemaOnlyTable {
   })
 }
 
+/** `table -> its column names`, as `PersistenceStore.describeSchema()` returns. */
+export type LiveSchema = ReadonlyMap<string, readonly string[]>
+
 /**
- * Every table of a live schema must be covered exactly once: by a retention
- * field or by an explicit `schemaOnlyTables` entry with a reason. Without this a
- * new table added by a later task would silently have no retention policy.
+ * Checks the config against a live schema at two levels (review round 1, M1):
+ *
+ * 1. every table is covered exactly once — by a retention field or by an explicit
+ *    `schemaOnlyTables` entry with a reason, so a table added by a later task
+ *    cannot end up with no policy;
+ * 2. every `present` field's `storedColumns` equals that table's real columns.
+ *    Checking table names only would let the field-level map — the thing
+ *    `docs/ops/data-map.md` publishes as "what we store" — drift away from what
+ *    the database actually holds while the tests stayed green.
  */
-export function assertSchemaCoverage(config: RetentionConfig, tables: readonly string[]): void {
+export function assertSchemaCoverage(config: RetentionConfig, schema: LiveSchema): void {
   const covered = new Set<string>([
     ...config.fields.map((field) => field.table),
     ...config.schemaOnlyTables.map((entry) => entry.table),
   ])
-  const uncovered = tables.filter((table) => !covered.has(table)).sort()
+  const uncovered = [...schema.keys()].filter((table) => !covered.has(table)).sort()
   if (uncovered.length > 0) {
     throw new RetentionConfigError(
       `these tables have no retention policy: ${uncovered.join(', ')}; add them to config/retention.json fields[] or schemaOnlyTables[] (spec §12.4)`,
     )
   }
-  const present = new Set(tables)
   const missing = config.fields
-    .filter((field) => field.status === 'present' && !present.has(field.table))
+    .filter((field) => field.status === 'present' && !schema.has(field.table))
     .map((field) => field.table)
     .sort()
   if (missing.length > 0) {
@@ -474,12 +482,32 @@ export function assertSchemaCoverage(config: RetentionConfig, tables: readonly s
     )
   }
   const planned = config.fields
-    .filter((field) => field.status === 'planned' && present.has(field.table))
+    .filter((field) => field.status === 'planned' && schema.has(field.table))
     .map((field) => field.table)
     .sort()
   if (planned.length > 0) {
     throw new RetentionConfigError(
       `${planned.join(', ')} now exists; change its status from "planned" to "present" in config/retention.json`,
+    )
+  }
+
+  const drifted: string[] = []
+  for (const field of config.fields) {
+    if (field.status !== 'present') continue
+    const live = [...(schema.get(field.table) ?? [])].sort()
+    const declared = [...field.storedColumns].sort()
+    const undeclared = live.filter((column) => !declared.includes(column))
+    const stale = declared.filter((column) => !live.includes(column))
+    if (undeclared.length > 0) {
+      drifted.push(`${field.table} stores undeclared column(s): ${undeclared.join(', ')}`)
+    }
+    if (stale.length > 0) {
+      drifted.push(`${field.table} declares column(s) it does not have: ${stale.join(', ')}`)
+    }
+  }
+  if (drifted.length > 0) {
+    throw new RetentionConfigError(
+      `storedColumns does not match the live schema — ${drifted.join('; ')}; update config/retention.json and re-run \`npm run data-map:generate -w @vl/server\` (spec §12.4 각 field의 source, 목적, 허용 기간)`,
     )
   }
 }

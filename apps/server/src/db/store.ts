@@ -865,6 +865,17 @@ export class PersistenceStore {
     return listColumnNames(this.#db, table)
   }
 
+  /**
+   * The whole schema as `table -> columns`. `config/retention.json` is checked
+   * against this, so a field map that no longer matches the tables it describes
+   * is a startup error rather than a silent drift (review round 1, M1).
+   */
+  describeSchema(): Map<string, readonly string[]> {
+    return new Map(
+      listTableNames(this.#db).map((table) => [table, listColumnNames(this.#db, table)]),
+    )
+  }
+
   hasTable(table: string): boolean {
     return tableExists(this.#db, table)
   }
@@ -891,11 +902,18 @@ export class PersistenceStore {
     return deleteAllRows(this.#db, options)
   }
 
-  deleteOrphanedGiftCombos(options: { batchLimit: number; maxBatches: number }): DeleteSweepResult {
+  deleteOrphanedGiftCombos(options: Omit<DeleteAllOptions, 'table'>): DeleteSweepResult {
     return deleteOrphanedGiftCombos(this.#db, options)
   }
 
-  /** Appends one retention audit row and returns its `entry_id`. */
+  /**
+   * Appends one retention audit row and returns its `entry_id`.
+   *
+   * Only for outcomes that deleted nothing (`nothing_expired`, `reverified`,
+   * `table_absent`, `no_stored_identifiers`, `failed`). Evidence for an actual
+   * deletion is written inside the deleting transaction by the methods above, so
+   * it cannot be lost on its own (review round 1, B1).
+   */
   recordRetention(entry: RetentionLedgerEntry): number {
     return insertRetentionLedger(this.#db, entry)
   }

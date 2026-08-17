@@ -10,6 +10,7 @@ import {
   POLICY_MAX_PROVIDER_SIDE_DELETION_DAYS,
   RETENTION_CONFIG_ENV,
   RetentionConfigError,
+  assertSchemaCoverage,
   loadRetentionConfig,
   parseRetentionConfig,
 } from './config.js'
@@ -108,6 +109,84 @@ describe('the shipped retention config', () => {
     expect(() =>
       loadRetentionConfig({ env: { [RETENTION_CONFIG_ENV]: 'no/such/retention.json' } }),
     ).toThrow(RetentionConfigError)
+  })
+})
+
+describe('assertSchemaCoverage (review round 1, M1)', () => {
+  const config = loadRetentionConfig()
+
+  /** A live schema built from the config itself, then mutated by the caller. */
+  function liveSchema(
+    mutate: (schema: Map<string, readonly string[]>) => void = () => undefined,
+  ): Map<string, readonly string[]> {
+    const schema = new Map<string, readonly string[]>()
+    for (const field of config.fields) {
+      if (field.status === 'present') schema.set(field.table, [...field.storedColumns])
+    }
+    for (const entry of config.schemaOnlyTables) schema.set(entry.table, ['id'])
+    mutate(schema)
+    return schema
+  }
+
+  it('accepts a schema whose columns match the declared field map', () => {
+    expect(() => assertSchemaCoverage(config, liveSchema())).not.toThrow()
+  })
+
+  it('refuses a column the config does not declare', () => {
+    // The mismatch the reviewer found: `ingest_inbox.ingest_seq` was real but
+    // undeclared, and a table-name-only check could not see it.
+    expect(() =>
+      assertSchemaCoverage(
+        config,
+        liveSchema((schema) => {
+          schema.set('ingest_inbox', [...(schema.get('ingest_inbox') ?? []), 'secret_note'])
+        }),
+      ),
+    ).toThrow(/undeclared column\(s\): secret_note/)
+  })
+
+  it('refuses a declared column the table does not have', () => {
+    expect(() =>
+      assertSchemaCoverage(
+        config,
+        liveSchema((schema) => {
+          schema.set(
+            'paid_ledger',
+            (schema.get('paid_ledger') ?? []).filter((column) => column !== 'currency'),
+          )
+        }),
+      ),
+    ).toThrow(/declares column\(s\) it does not have: currency/)
+  })
+
+  it('refuses a table with no policy at all', () => {
+    expect(() =>
+      assertSchemaCoverage(
+        config,
+        liveSchema((schema) => {
+          schema.set('viewer_notes', ['id'])
+        }),
+      ),
+    ).toThrow(/have no retention policy: viewer_notes/)
+  })
+
+  it('refuses a present field whose table is gone, and a planned one that exists', () => {
+    expect(() =>
+      assertSchemaCoverage(
+        config,
+        liveSchema((schema) => {
+          schema.delete('paid_ledger')
+        }),
+      ),
+    ).toThrow(/declares paid_ledger as present/)
+    expect(() =>
+      assertSchemaCoverage(
+        config,
+        liveSchema((schema) => {
+          schema.set('metrics_daily', ['updated_at'])
+        }),
+      ),
+    ).toThrow(/metrics_daily now exists/)
   })
 })
 

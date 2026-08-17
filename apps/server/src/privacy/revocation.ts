@@ -1,5 +1,11 @@
 import type { Clock } from '../clock.js'
-import type { PersistenceStore, RetentionOutcome, RetentionReason } from '../db/index.js'
+import type {
+  DeleteSweepResult,
+  PersistenceStore,
+  RetentionLedgerEntry,
+  RetentionOutcome,
+  RetentionReason,
+} from '../db/index.js'
 import { silentLogger, type Logger } from '../secrets/redaction.js'
 import type { SecretVault } from '../secrets/vault.js'
 import type { AuthEvent, AuthEventSink, AuthRevokedEvent } from '../youtube/auth/events.js'
@@ -73,7 +79,8 @@ export interface RevocationEntryResult {
   readonly rowsDeleted: number
   readonly rowsUnprocessed: number
   readonly truncated: boolean
-  readonly ledgerEntryId: number
+  /** Audit rows this field wrote: one per deleting batch, or one for a no-op. */
+  readonly ledgerEntryIds: readonly number[]
   readonly error?: string
 }
 
@@ -162,19 +169,26 @@ export class RevocationHandler {
     return result
   }
 
-  #deleteField(
-    field: RetentionField,
-    context: { reason: RetentionReason; allowedPeriodDays: number; deadlineAt: string },
-  ): RevocationEntryResult {
+  #deleteField(field: RetentionField, context: RevocationContext): RevocationEntryResult {
     // The whole table goes, not just the expired part: the consent that allowed
     // this data is gone, so its age no longer matters (spec §12.4).
-    let swept: { rowsDeleted: number; rowsUnprocessed: number; truncated: boolean }
+    //
+    // The audit row for each batch is committed inside that batch's transaction
+    // (review round 1, B1), so a revocation cannot end with data gone and no
+    // record of the deletion that removed it.
+    let swept: DeleteSweepResult
     try {
       swept = this.#store.deleteAllRows({
         table: field.table,
         batchLimit: this.#config.sweep.batchLimit,
         maxBatches: this.#config.sweep.maxBatchesPerEntry,
         unfinishedColumn: field.unfinishedColumn,
+        audit: (counts) =>
+          this.#entry(field, context, {
+            outcome: 'deleted',
+            rowsDeleted: counts.rowsDeleted,
+            rowsUnprocessed: counts.rowsUnprocessed,
+          }),
       })
     } catch (error) {
       const message = (error as Error).message
@@ -186,37 +200,57 @@ export class RevocationHandler {
         rowsDeleted: 0,
         rowsUnprocessed: 0,
         truncated: false,
-        ledgerEntryId: this.#record(field, context, {
-          outcome: 'failed',
-          rowsDeleted: 0,
-          rowsUnprocessed: 0,
-        }),
+        // If this insert also fails the whole revocation rejects, which the
+        // required error sink reports (review round 1, B2).
+        ledgerEntryIds: [
+          this.#store.recordRetention(
+            this.#entry(field, context, {
+              outcome: 'failed',
+              rowsDeleted: 0,
+              rowsUnprocessed: 0,
+            }),
+          ),
+        ],
         error: message,
       }
     }
 
-    const outcome: RetentionOutcome = swept.rowsDeleted > 0 ? 'deleted' : 'nothing_expired'
+    if (swept.rowsDeleted === 0) {
+      return {
+        fieldKey: field.key,
+        table: field.table,
+        outcome: 'nothing_expired',
+        rowsDeleted: 0,
+        rowsUnprocessed: 0,
+        truncated: swept.truncated,
+        ledgerEntryIds: [
+          this.#store.recordRetention(
+            this.#entry(field, context, {
+              outcome: 'nothing_expired',
+              rowsDeleted: 0,
+              rowsUnprocessed: 0,
+            }),
+          ),
+        ],
+      }
+    }
     return {
       fieldKey: field.key,
       table: field.table,
-      outcome,
+      outcome: 'deleted',
       rowsDeleted: swept.rowsDeleted,
       rowsUnprocessed: swept.rowsUnprocessed,
       truncated: swept.truncated,
-      ledgerEntryId: this.#record(field, context, {
-        outcome,
-        rowsDeleted: swept.rowsDeleted,
-        rowsUnprocessed: swept.rowsUnprocessed,
-      }),
+      ledgerEntryIds: swept.ledgerEntryIds,
     }
   }
 
-  #record(
+  #entry(
     field: RetentionField,
-    context: { reason: RetentionReason; allowedPeriodDays: number; deadlineAt: string },
+    context: RevocationContext,
     swept: { outcome: RetentionOutcome; rowsDeleted: number; rowsUnprocessed: number },
-  ): number {
-    return this.#store.recordRetention({
+  ): RetentionLedgerEntry {
+    return {
       fieldKey: field.key,
       source: field.source,
       purpose: field.purpose,
@@ -230,37 +264,58 @@ export class RevocationHandler {
       rowsUnprocessed: swept.rowsUnprocessed,
       deletedAt: swept.rowsDeleted > 0 ? this.#clock.nowUtcIso() : null,
       recordedAt: this.#clock.nowUtcIso(),
-    })
+    }
   }
+}
+
+interface RevocationContext {
+  readonly reason: RetentionReason
+  readonly allowedPeriodDays: number
+  readonly deadlineAt: string
+}
+
+export interface RevocationAuthEventSinkOptions {
+  readonly handler: RevocationHandler
+  /** Required: where a finished revocation goes (T12 alerts on `withinDeadline`). */
+  readonly onResult: (result: RevocationResult) => void
+  /** Required: where a failed revocation goes. There is no silent default. */
+  readonly onError: (error: unknown) => void
+  readonly logger?: Logger
+}
+
+/** One recorded failure of the sink, kept so a lost callback cannot hide it. */
+export interface RevocationFailure {
+  readonly reason: AuthRevokedEvent['reason']
+  readonly at: string
+  readonly error: unknown
 }
 
 /**
  * Adapts the async handler to T3's synchronous `AuthEventSink`, so T12 can wire
  * revocation-driven deletion by handing this sink to the `TokenManager`.
  *
- * `emit` cannot await, so the run is tracked on `pending`: tests await it, and
- * production code hands `onError` to the alert sink. A rejected deletion is never
- * dropped on the floor — that would leave a §12.4 obligation unrecorded.
+ * `emit` cannot await, so the run is tracked on `pending`. Both callbacks are
+ * **required** and validated at construction (review round 1, B2): the earlier
+ * optional `onError` meant a missed T12 wire turned a failed privacy deletion into
+ * a resolved promise and nothing else. Belt and braces, every failure is also kept
+ * in `failures` and logged at error level, so an `onError` that itself throws still
+ * leaves the failure observable in process state.
  */
 export class RevocationAuthEventSink implements AuthEventSink {
   readonly #handler: RevocationHandler
-  readonly #onResult: ((result: RevocationResult) => void) | undefined
+  readonly #onResult: (result: RevocationResult) => void
   readonly #onError: (error: unknown) => void
+  readonly #logger: Logger
+  readonly #failures: RevocationFailure[] = []
   #pending: Promise<void> = Promise.resolve()
 
-  constructor(options: {
-    handler: RevocationHandler
-    onResult?: (result: RevocationResult) => void
-    onError?: (error: unknown) => void
-  }) {
+  constructor(options: RevocationAuthEventSinkOptions) {
+    requireSink(options.onResult, 'onResult')
+    requireSink(options.onError, 'onError')
     this.#handler = options.handler
     this.#onResult = options.onResult
-    this.#onError =
-      options.onError ??
-      (() => {
-        // Default: swallow nothing silently — the handler already logs, and a
-        // caller that wants alerts passes `onError`.
-      })
+    this.#onError = options.onError
+    this.#logger = options.logger ?? silentLogger
   }
 
   /** Resolves when every revocation started so far has finished. */
@@ -268,15 +323,39 @@ export class RevocationAuthEventSink implements AuthEventSink {
     return this.#pending
   }
 
+  /** Every failed revocation this sink has seen, oldest first. */
+  get failures(): readonly RevocationFailure[] {
+    return this.#failures
+  }
+
+  /** True when any revocation failed. T12's health aggregation can read this. */
+  get failed(): boolean {
+    return this.#failures.length > 0
+  }
+
   emit(event: AuthEvent): void {
     if (event.type !== 'auth_revoked') return
     this.#pending = this.#pending.then(async () => {
       try {
         const result = await this.#handler.handle(event)
-        this.#onResult?.(result)
+        this.#onResult(result)
       } catch (error) {
+        this.#failures.push({ reason: event.reason, at: event.at, error })
+        this.#logger.error('revocation deletion failed', {
+          reason: event.reason,
+          message: error instanceof Error ? error.message : String(error),
+        })
         this.#onError(error)
       }
     })
+  }
+}
+
+/** Refuses a missing or non-callable sink, including from a plain-JS caller. */
+function requireSink(value: unknown, name: string): void {
+  if (typeof value !== 'function') {
+    throw new TypeError(
+      `${name} is required: a §12.4 deletion result must not be able to disappear because a callback was not wired`,
+    )
   }
 }

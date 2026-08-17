@@ -21,21 +21,31 @@ export interface RetentionSchedulerOptions {
   readonly clock: Clock
   /** Defaults to `sweep.intervalMs` of the sweeper's config. */
   readonly intervalMs?: number
-  readonly onResult?: (result: RetentionSweepResult) => void
-  readonly onError?: (error: unknown) => void
+  /** Required: where each sweep result goes (T12 alerts on `clean === false`). */
+  readonly onResult: (result: RetentionSweepResult) => void
+  /** Required: where a failed sweep goes. There is no silent default. */
+  readonly onError: (error: unknown) => void
   readonly logger?: Logger
+}
+
+/** One recorded failure of a scheduled sweep. */
+export interface RetentionSweepFailure {
+  readonly at: string
+  readonly error: unknown
 }
 
 export class RetentionScheduler {
   readonly #sweeper: RetentionSweeper
   readonly #clock: Clock
   readonly #intervalMs: number
-  readonly #onResult: ((result: RetentionSweepResult) => void) | undefined
-  readonly #onError: ((error: unknown) => void) | undefined
+  readonly #onResult: (result: RetentionSweepResult) => void
+  readonly #onError: (error: unknown) => void
   readonly #logger: Logger
+  readonly #failures: RetentionSweepFailure[] = []
 
   #timer: TimerHandle | undefined
   #runCount = 0
+  #lastResult: RetentionSweepResult | undefined
 
   constructor(options: RetentionSchedulerOptions) {
     const intervalMs = options.intervalMs ?? options.sweeper.config.sweep.intervalMs
@@ -44,6 +54,11 @@ export class RetentionScheduler {
         `retention sweep intervalMs must be a positive integer, got ${String(intervalMs)}`,
       )
     }
+    // Both sinks are required and validated here (review round 1, B2): the earlier
+    // optional versions let a missed T12 wire turn a failed retention sweep — or an
+    // unmet §12.4 obligation in a result — into silence.
+    requireSink(options.onResult, 'onResult')
+    requireSink(options.onError, 'onError')
     this.#sweeper = options.sweeper
     this.#clock = options.clock
     this.#intervalMs = intervalMs
@@ -58,6 +73,21 @@ export class RetentionScheduler {
 
   get runCount(): number {
     return this.#runCount
+  }
+
+  /** Every failed sweep, oldest first. Readable by T12's health aggregation. */
+  get failures(): readonly RetentionSweepFailure[] {
+    return this.#failures
+  }
+
+  /** The most recent completed sweep, or `undefined` before the first one. */
+  get lastResult(): RetentionSweepResult | undefined {
+    return this.#lastResult
+  }
+
+  /** True when the last run failed or left an unmet §12.4 obligation. */
+  get unhealthy(): boolean {
+    return this.#failures.length > 0 || this.#lastResult?.clean === false
   }
 
   get intervalMs(): number {
@@ -79,20 +109,43 @@ export class RetentionScheduler {
   /** One sweep, outside the schedule. Errors propagate to the caller. */
   runNow(): RetentionSweepResult {
     this.#runCount += 1
-    return this.#sweeper.run()
+    const result = this.#sweeper.run()
+    this.#lastResult = result
+    return result
   }
 
   #tick(): void {
     try {
       const result = this.runNow()
-      this.#onResult?.(result)
+      if (!result.clean) {
+        this.#logger.warn('retention sweep left an unmet obligation', {
+          reverificationDue: result.reverificationDue.length,
+          truncated: result.truncated.length,
+          failed: result.failed.length,
+        })
+      }
+      this.#onResult(result)
     } catch (error) {
-      this.#logger.error('retention sweep failed', { message: (error as Error).message })
-      this.#onError?.(error)
+      // Recorded in state as well as reported, so an `onResult`/`onError` that
+      // itself throws cannot erase the fact that a sweep failed.
+      this.#failures.push({ at: this.#clock.nowUtcIso(), error })
+      this.#logger.error('retention sweep failed', {
+        message: error instanceof Error ? error.message : String(error),
+      })
+      this.#onError(error)
     }
     // Scheduled last and unconditionally: see the class comment.
     this.#timer = this.#clock.setTimeout(() => {
       this.#tick()
     }, this.#intervalMs)
+  }
+}
+
+/** Refuses a missing or non-callable sink, including from a plain-JS caller. */
+function requireSink(value: unknown, name: string): void {
+  if (typeof value !== 'function') {
+    throw new TypeError(
+      `${name} is required: a §12.4 retention result must not be able to disappear because a callback was not wired`,
+    )
   }
 }

@@ -95,28 +95,40 @@ export interface DeleteSweepResult {
    */
   readonly rowsUnprocessed: number
   readonly batches: number
-  /** True when the batch budget ran out before the table was clean. */
+  /** True when the batch budget ran out with victims still left in the table. */
   readonly truncated: boolean
+  /** `entry_id` of the audit row committed with each batch, in batch order. */
+  readonly ledgerEntryIds: readonly number[]
 }
 
-export interface DeleteExpiredOptions {
+/**
+ * Builds the audit row that is committed **in the same transaction** as the batch
+ * it describes. Called once per batch that actually removed rows, with that
+ * batch's own counts (spec §12.4: 삭제 실행을 기록한다 — evidence and deletion must
+ * not be able to come apart).
+ */
+export type BatchAuditFactory = (counts: {
+  readonly rowsDeleted: number
+  readonly rowsUnprocessed: number
+}) => RetentionLedgerEntry
+
+interface BatchedDeleteOptions {
   readonly table: string
-  /** Column holding the instant the allowed period is measured from. */
-  readonly column: string
-  /** Rows strictly older than this instant are deleted. */
-  readonly cutoffAt: string
   readonly batchLimit: number
   readonly maxBatches: number
   /** A row whose column is NULL had not finished when it was deleted. */
   readonly unfinishedColumn?: string | undefined
+  readonly audit: BatchAuditFactory
 }
 
-export interface DeleteAllOptions {
-  readonly table: string
-  readonly batchLimit: number
-  readonly maxBatches: number
-  readonly unfinishedColumn?: string | undefined
+export interface DeleteExpiredOptions extends BatchedDeleteOptions {
+  /** Column holding the instant the allowed period is measured from. */
+  readonly column: string
+  /** Rows strictly older than this instant are deleted. */
+  readonly cutoffAt: string
 }
+
+export type DeleteAllOptions = BatchedDeleteOptions
 
 const SQL_IDENTIFIER = /^[a-z][a-z0-9_]*$/
 
@@ -198,8 +210,9 @@ export function latestInstant(
  * Deletes every row whose `column` is strictly older than `cutoffAt`, in batches.
  *
  * Each batch is one `IMMEDIATE` transaction that counts the unfinished rows of
- * exactly the set it then deletes. The `ORDER BY column, rowid` is what makes
- * "count this set" and "delete this set" the same set even when instants tie.
+ * exactly the set it then deletes **and appends the audit row for that batch**.
+ * The `ORDER BY column, rowid` is what makes "count this set" and "delete this
+ * set" the same set even when instants tie.
  */
 export function deleteExpiredByColumn(
   database: Database.Database,
@@ -240,7 +253,7 @@ export function deleteAllRows(
  */
 export function deleteOrphanedGiftCombos(
   database: Database.Database,
-  options: { batchLimit: number; maxBatches: number },
+  options: Omit<DeleteAllOptions, 'table'>,
 ): DeleteSweepResult {
   assertColumnPresent(database, 'gift_combo', 'base_key')
   const victims = `SELECT rowid FROM gift_combo
@@ -252,21 +265,31 @@ export function deleteOrphanedGiftCombos(
   return runBatched(database, { ...options, table: 'gift_combo' }, victims, [])
 }
 
-interface BatchOptions {
-  readonly table: string
-  readonly batchLimit: number
-  readonly maxBatches: number
-  readonly unfinishedColumn?: string | undefined
-}
-
+/**
+ * The batching core. Every batch is one `IMMEDIATE` transaction that does three
+ * things together: count the unfinished rows of the victim set, delete that set,
+ * and append the audit row describing what it just deleted.
+ *
+ * Atomicity is the point (review round 1, B1). If the audit insert fails — a
+ * constraint, a trigger, a full disk — the `DELETE` of that batch rolls back with
+ * it, so the data is still there and the missing evidence is recoverable by
+ * running the sweep again. Deleted rows without a `retention_ledger` row are not
+ * a state this function can produce, which is what spec §12.4's "삭제 실행을
+ * 기록한다" requires of a crash as well as of a clean run.
+ */
 function runBatched(
   database: Database.Database,
-  options: BatchOptions,
+  options: BatchedDeleteOptions,
   victimsSql: string,
   victimParams: readonly string[],
 ): DeleteSweepResult {
   assertPositiveInt(options.batchLimit, 'batchLimit')
   assertPositiveInt(options.maxBatches, 'maxBatches')
+  if (typeof options.audit !== 'function') {
+    throw new PersistenceInvariantError(
+      `a batched deletion of ${options.table} must be given an audit factory: deleting without committing the evidence is not allowed (spec §12.4)`,
+    )
+  }
 
   const countUnfinished =
     options.unfinishedColumn === undefined
@@ -278,8 +301,11 @@ function runBatched(
   const deleteBatch = database.prepare<unknown[]>(
     `DELETE FROM "${options.table}" WHERE rowid IN (${victimsSql})`,
   )
+  const probeRemaining = database.prepare<unknown[], { rowid: number }>(victimsSql)
   const params = [...victimParams, options.batchLimit]
+  const probeParams = [...victimParams, 1]
 
+  const ledgerEntryIds: number[] = []
   let rowsDeleted = 0
   let rowsUnprocessed = 0
   let batches = 0
@@ -287,22 +313,31 @@ function runBatched(
     const batch = database.transaction(() => {
       const unfinished = countUnfinished?.get(...params)?.count ?? 0
       const changes = deleteBatch.run(...params).changes
-      return { changes, unfinished }
+      if (changes === 0) return { changes, unfinished, entryId: null }
+      // Same transaction as the delete: the evidence cannot be lost separately.
+      const entryId = insertRetentionLedger(
+        database,
+        options.audit({ rowsDeleted: changes, rowsUnprocessed: unfinished }),
+      )
+      return { changes, unfinished, entryId }
     })
-    const { changes, unfinished } = batch.immediate()
+    const { changes, unfinished, entryId } = batch.immediate()
     if (changes === 0) {
-      return { rowsDeleted, rowsUnprocessed, batches, truncated: false }
+      return { rowsDeleted, rowsUnprocessed, batches, truncated: false, ledgerEntryIds }
     }
     batches += 1
     rowsDeleted += changes
     rowsUnprocessed += unfinished
+    if (entryId !== null) ledgerEntryIds.push(entryId)
     if (changes < options.batchLimit) {
-      return { rowsDeleted, rowsUnprocessed, batches, truncated: false }
+      return { rowsDeleted, rowsUnprocessed, batches, truncated: false, ledgerEntryIds }
     }
   }
-  // The budget ran out with a full batch still coming: the caller reports it so a
-  // table that never finishes draining cannot look like a completed sweep.
-  return { rowsDeleted, rowsUnprocessed, batches, truncated: true }
+  // The budget ran out on a full batch. That does *not* prove work remains: the
+  // last batch may have taken the final victims exactly (review round 1, m1), so
+  // probe for one more instead of assuming.
+  const remaining = probeRemaining.get(...probeParams) !== undefined
+  return { rowsDeleted, rowsUnprocessed, batches, truncated: remaining, ledgerEntryIds }
 }
 
 /** Appends one audit row and returns its `entry_id`. */

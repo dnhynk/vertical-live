@@ -1,5 +1,6 @@
 import type { Clock } from '../clock.js'
 import type {
+  BatchAuditFactory,
   DeleteSweepResult,
   PersistenceStore,
   RetentionOutcome,
@@ -17,10 +18,15 @@ import {
  * The scheduled retention job (spec §12.4: "각 field의 source, 목적, 허용 기간,
  * 삭제 시각을 기록하고 자동 삭제·철회 test를 Gate 2에 포함한다").
  *
- * One run walks every field of `config/retention.json` and writes exactly one
+ * One run walks every field of `config/retention.json` and leaves at least one
  * `retention_ledger` row per field, whatever the outcome — including "nothing was
  * expired". A sweep that deleted nothing still has to be provable, otherwise a
  * job that silently stopped running looks the same as a clean database.
+ *
+ * Deletions record themselves: the audit row for a batch is committed **inside the
+ * transaction that deletes that batch** (review round 1, B1), so a crash or a
+ * failed ledger write can leave data undeleted but never deleted-without-evidence.
+ * A multi-batch field therefore produces one audit row per batch.
  *
  * `delete` fields lose every row older than their allowed period. `refresh`
  * fields are not deleted; they are checked for having been rewritten or
@@ -30,6 +36,29 @@ import {
  */
 
 const MILLIS_PER_DAY = 24 * 60 * 60 * 1000
+
+/**
+ * The `retention_ledger` could not be written at all, so this field's failure has
+ * nowhere to be recorded. Aborts the sweep instead of being folded into a result.
+ */
+export class RetentionLedgerUnavailableError extends Error {
+  readonly fieldKey: string
+  readonly recordCause: unknown
+
+  constructor(fieldKey: string, cause: unknown, recordCause: unknown) {
+    super(
+      `retention for ${fieldKey} failed (${describe(cause)}) and the failure could not be recorded in retention_ledger (${describe(recordCause)}); the sweep is aborted because it has nowhere to leave evidence (spec §12.4)`,
+    )
+    this.name = 'RetentionLedgerUnavailableError'
+    this.fieldKey = fieldKey
+    this.recordCause = recordCause
+    this.cause = cause
+  }
+}
+
+function describe(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
 
 /** Verdict for a `refresh` field whose period elapsed without a rewrite. */
 export type ReverifyVerdict =
@@ -61,10 +90,11 @@ export interface RetentionEntryResult {
   readonly rowsDeleted: number
   /** Deleted rows the single writer had not recorded a result for (spec §9.2). */
   readonly rowsUnprocessed: number
-  /** True when the batch budget ran out before the field was clean. */
+  /** True when the batch budget ran out with rows still expired. */
   readonly truncated: boolean
   readonly cutoffAt: string
-  readonly ledgerEntryId: number
+  /** Audit rows this field wrote: one per deleting batch, or one for a no-op. */
+  readonly ledgerEntryIds: readonly number[]
   /** Present when the field's obligation could not be completed. */
   readonly error?: string
 }
@@ -97,9 +127,10 @@ export class RetentionSweeper {
     this.#config = options.config
     this.#reverify = options.reverify
     this.#logger = options.logger ?? silentLogger
-    // A table with no declared policy is a policy hole, so it is refused at
-    // construction rather than skipped at run time.
-    assertSchemaCoverage(options.config, options.store.listTables())
+    // A table with no declared policy — or a field whose declared columns no
+    // longer match the table — is a policy hole, so it is refused at construction
+    // rather than skipped at run time (review round 1, M1).
+    assertSchemaCoverage(options.config, options.store.describeSchema())
   }
 
   get config(): RetentionConfig {
@@ -165,13 +196,21 @@ export class RetentionSweeper {
     } catch (error) {
       const message = (error as Error).message
       this.#logger.error('retention field failed', { fieldKey: field.key, message })
-      return this.#record(field, {
-        outcome: 'failed',
-        cutoffAt,
-        periodDays,
-        recordedAt: this.#clock.nowUtcIso(),
-        error: message,
-      })
+      try {
+        return this.#record(field, {
+          outcome: 'failed',
+          cutoffAt,
+          periodDays,
+          recordedAt: this.#clock.nowUtcIso(),
+          error: message,
+        })
+      } catch (recordError) {
+        // The ledger itself is unwritable, so this field's failure cannot be
+        // recorded either. That must not be swallowed into a result object: it is
+        // the one condition under which the sweep has nowhere to leave evidence,
+        // so it aborts the run and reaches the scheduler's error sink.
+        throw new RetentionLedgerUnavailableError(field.key, error, recordError)
+      }
     }
   }
 
@@ -181,9 +220,28 @@ export class RetentionSweeper {
     periodDays: number,
     now: string,
   ): RetentionEntryResult {
+    // The audit row for each batch is built here and committed *inside* that
+    // batch's transaction (review round 1, B1): rows can never leave the database
+    // without the `retention_ledger` row that records their deletion.
+    const audit: BatchAuditFactory = (counts) => ({
+      fieldKey: field.key,
+      source: field.source,
+      purpose: field.purpose,
+      policy: field.policy,
+      reason: 'scheduled',
+      allowedPeriodDays: periodDays,
+      cutoffAt,
+      deadlineAt: null,
+      outcome: 'deleted',
+      rowsDeleted: counts.rowsDeleted,
+      rowsUnprocessed: counts.rowsUnprocessed,
+      deletedAt: this.#clock.nowUtcIso(),
+      recordedAt: this.#clock.nowUtcIso(),
+    })
     const budget = {
       batchLimit: this.#config.sweep.batchLimit,
       maxBatches: this.#config.sweep.maxBatchesPerEntry,
+      audit,
     }
     const swept: DeleteSweepResult =
       field.expiry.kind === 'orphan'
@@ -196,23 +254,34 @@ export class RetentionSweeper {
             ...budget,
           })
 
-    const deletedAt = swept.rowsDeleted > 0 ? this.#clock.nowUtcIso() : null
     if (swept.rowsUnprocessed > 0) {
       this.#logger.warn('retention deleted rows the writer had not processed', {
         fieldKey: field.key,
         rowsUnprocessed: swept.rowsUnprocessed,
       })
     }
-    return this.#record(field, {
-      outcome: swept.rowsDeleted > 0 ? 'deleted' : 'nothing_expired',
-      cutoffAt,
-      periodDays,
-      recordedAt: now,
+    if (swept.rowsDeleted === 0) {
+      // Nothing was deleted, so there is no evidence at risk: this row is the
+      // proof that the obligation ran at all.
+      return this.#record(field, {
+        outcome: 'nothing_expired',
+        cutoffAt,
+        periodDays,
+        recordedAt: now,
+        truncated: swept.truncated,
+      })
+    }
+    return {
+      fieldKey: field.key,
+      table: field.table,
+      policy: field.policy,
+      outcome: 'deleted',
       rowsDeleted: swept.rowsDeleted,
       rowsUnprocessed: swept.rowsUnprocessed,
       truncated: swept.truncated,
-      ...(deletedAt === null ? {} : { deletedAt }),
-    })
+      cutoffAt,
+      ledgerEntryIds: swept.ledgerEntryIds,
+    }
   }
 
   /**
@@ -222,7 +291,7 @@ export class RetentionSweeper {
    */
   #sweepOrphans(
     field: RetentionField,
-    budget: { batchLimit: number; maxBatches: number },
+    budget: { batchLimit: number; maxBatches: number; audit: BatchAuditFactory },
   ): DeleteSweepResult {
     if (field.table !== 'gift_combo') {
       throw new Error(
@@ -265,17 +334,43 @@ export class RetentionSweeper {
         batchLimit: this.#config.sweep.batchLimit,
         maxBatches: this.#config.sweep.maxBatchesPerEntry,
         unfinishedColumn: field.unfinishedColumn,
+        // Same atomicity rule as `#sweepDelete`: evidence inside the transaction.
+        audit: (counts) => ({
+          fieldKey: field.key,
+          source: field.source,
+          purpose: field.purpose,
+          policy: field.policy,
+          reason: 'scheduled',
+          allowedPeriodDays: periodDays,
+          cutoffAt,
+          deadlineAt: null,
+          outcome: 'deleted',
+          rowsDeleted: counts.rowsDeleted,
+          rowsUnprocessed: counts.rowsUnprocessed,
+          deletedAt: this.#clock.nowUtcIso(),
+          recordedAt: this.#clock.nowUtcIso(),
+        }),
       })
-      return this.#record(field, {
-        outcome: swept.rowsDeleted > 0 ? 'deleted' : 'nothing_expired',
-        cutoffAt,
-        periodDays,
-        recordedAt: now,
+      if (swept.rowsDeleted === 0) {
+        return this.#record(field, {
+          outcome: 'nothing_expired',
+          cutoffAt,
+          periodDays,
+          recordedAt: now,
+          truncated: swept.truncated,
+        })
+      }
+      return {
+        fieldKey: field.key,
+        table: field.table,
+        policy: field.policy,
+        outcome: 'deleted',
         rowsDeleted: swept.rowsDeleted,
         rowsUnprocessed: swept.rowsUnprocessed,
         truncated: swept.truncated,
-        ...(swept.rowsDeleted > 0 ? { deletedAt: this.#clock.nowUtcIso() } : {}),
-      })
+        cutoffAt,
+        ledgerEntryIds: swept.ledgerEntryIds,
+      }
     }
     // No verifier wired: record the obligation instead of assuming an answer.
     this.#logger.warn('retention field is due for re-verification', {
@@ -291,17 +386,18 @@ export class RetentionSweeper {
     })
   }
 
+  /**
+   * Records an outcome that deleted nothing. Deletions record themselves inside
+   * their own transaction (`#sweepDelete`), so this path never claims rows.
+   */
   #record(
     field: RetentionField,
     outcome: {
-      outcome: RetentionOutcome
+      outcome: Exclude<RetentionOutcome, 'deleted'>
       cutoffAt: string
       periodDays: number
       recordedAt: string
-      rowsDeleted?: number
-      rowsUnprocessed?: number
       truncated?: boolean
-      deletedAt?: string
       error?: string
     },
   ): RetentionEntryResult {
@@ -315,9 +411,9 @@ export class RetentionSweeper {
       cutoffAt: outcome.cutoffAt,
       deadlineAt: null,
       outcome: outcome.outcome,
-      rowsDeleted: outcome.rowsDeleted ?? 0,
-      rowsUnprocessed: outcome.rowsUnprocessed ?? 0,
-      deletedAt: outcome.deletedAt ?? null,
+      rowsDeleted: 0,
+      rowsUnprocessed: 0,
+      deletedAt: null,
       recordedAt: outcome.recordedAt,
     })
     return {
@@ -325,11 +421,11 @@ export class RetentionSweeper {
       table: field.table,
       policy: field.policy,
       outcome: outcome.outcome,
-      rowsDeleted: outcome.rowsDeleted ?? 0,
-      rowsUnprocessed: outcome.rowsUnprocessed ?? 0,
+      rowsDeleted: 0,
+      rowsUnprocessed: 0,
       truncated: outcome.truncated ?? false,
       cutoffAt: outcome.cutoffAt,
-      ledgerEntryId,
+      ledgerEntryIds: [ledgerEntryId],
       ...(outcome.error === undefined ? {} : { error: outcome.error }),
     }
   }

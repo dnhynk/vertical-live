@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 
+import { openDatabase } from '../db/index.js'
 import { InMemorySecretVault } from '../secrets/memory.js'
 import { REFRESH_TOKEN_SECRET } from '../youtube/auth/token-manager.js'
 import type { AuthRevokedEvent, AuthRevokedReason } from '../youtube/auth/events.js'
@@ -42,6 +43,11 @@ afterEach(() => {
 function open(): RetentionHarness {
   harness = createRetentionHarness()
   return harness
+}
+
+/** Both sink callbacks are required, so tests that ignore one still pass it. */
+function noop(): void {
+  // intentionally empty
 }
 
 /** Records that it ran; the vault-backed revoker is covered separately. */
@@ -205,6 +211,59 @@ describe('revocation observed at the provider (30 days)', () => {
   })
 })
 
+describe('revocation deletion and its audit row are atomic', () => {
+  it('keeps the authorized data when the audit row cannot be written', async () => {
+    // Review round 1, B1, on the revocation path: a 7-day deletion obligation
+    // whose evidence cannot be written must not delete the data either.
+    const active = open()
+    seedAuthorizedData(active)
+    const database = openDatabase({ file: active.temp.file, busyTimeoutMs: 1000 })
+    try {
+      database.exec(
+        `CREATE TRIGGER retention_ledger_block BEFORE INSERT ON retention_ledger
+         BEGIN SELECT RAISE(ABORT, 'ledger unavailable'); END`,
+      )
+    } finally {
+      database.close()
+    }
+
+    await expect(
+      handlerFor(active, fakeRevoker()).handle(revokedEvent('operator_revoked')),
+    ).rejects.toThrow(/ledger unavailable/)
+    for (const table of AUTHORIZED_TABLES) {
+      expect(active.store.countRows(table), `${table} kept`).toBeGreaterThan(0)
+    }
+    expect(active.store.countRows('retention_ledger')).toBe(0)
+  })
+
+  it('records one audit row per batch of a multi-batch revocation', async () => {
+    const active = open()
+    seedInbox(active.store, 3, T0)
+    const oneAtATime = {
+      ...active.config,
+      sweep: { ...active.config.sweep, batchLimit: 1, maxBatchesPerEntry: 10 },
+    }
+    const result = await new RevocationHandler({
+      store: active.store,
+      clock: active.clock,
+      config: oneAtATime,
+      grantRevoker: fakeRevoker(),
+    }).handle(revokedEvent('operator_revoked'))
+
+    const inbox = result.entries.find((entry) => entry.table === 'ingest_inbox')
+    expect(inbox?.rowsDeleted).toBe(3)
+    expect(inbox?.ledgerEntryIds).toHaveLength(3)
+    const rows = active.store.listRetentionLedger({ fieldKey: 'ingest_inbox.envelope' })
+    expect(rows.map((row) => row.rowsDeleted)).toEqual([1, 1, 1])
+    for (const row of rows) {
+      expect(row.reason).toBe('consent_revoked')
+      expect(row.deadlineAt).toBe(plusDays(T0, 7))
+      expect(row.deletedAt).not.toBeNull()
+    }
+    expect(active.store.countRows('ingest_inbox')).toBe(0)
+  })
+})
+
 describe('vaultGrantRevoker', () => {
   it('removes the stored refresh token and reports what it found', async () => {
     const vault = new InMemorySecretVault()
@@ -226,6 +285,7 @@ describe('RevocationAuthEventSink', () => {
     const sink = new RevocationAuthEventSink({
       handler: handlerFor(active, fakeRevoker()),
       onResult: (result) => results.push(result.revocationClass),
+      onError: noop,
     })
 
     sink.emit({ type: 'auth_token_refreshed', at: T0, accessTokenExpiresAt: T0 })
@@ -237,6 +297,7 @@ describe('RevocationAuthEventSink', () => {
     await sink.pending
     expect(results).toEqual(['client_side'])
     expect(active.store.countRows('ingest_inbox')).toBe(0)
+    expect(sink.failed).toBe(false)
   })
 
   it('reports a failing deletion instead of dropping the obligation', async () => {
@@ -246,6 +307,7 @@ describe('RevocationAuthEventSink', () => {
       handler: handlerFor(active, {
         revoke: () => Promise.reject(new Error('vault unavailable')),
       }),
+      onResult: noop,
       onError: (error) => errors.push(error),
     })
 
@@ -253,5 +315,43 @@ describe('RevocationAuthEventSink', () => {
     await sink.pending
     expect(errors).toHaveLength(1)
     expect((errors[0] as Error).message).toBe('vault unavailable')
+    // Also observable in state, so a caller whose own sink throws cannot erase it.
+    expect(sink.failed).toBe(true)
+    expect(sink.failures).toHaveLength(1)
+    expect(sink.failures[0]?.reason).toBe('operator_revoked')
+  })
+
+  it('refuses to be constructed without a result or error sink', () => {
+    // Review round 1, B2: the previous optional `onError` defaulted to an empty
+    // function, so a rejected revocation resolved `pending` and vanished.
+    const active = open()
+    const handler = handlerFor(active, fakeRevoker())
+    expect(() => new RevocationAuthEventSink({ handler, onResult: noop } as never)).toThrow(
+      /onError is required/,
+    )
+    expect(() => new RevocationAuthEventSink({ handler, onError: noop } as never)).toThrow(
+      /onResult is required/,
+    )
+    expect(
+      () => new RevocationAuthEventSink({ handler, onResult: noop, onError: null } as never),
+    ).toThrow(TypeError)
+  })
+
+  it('keeps recording failures when the error sink itself throws', async () => {
+    const active = open()
+    const sink = new RevocationAuthEventSink({
+      handler: handlerFor(active, {
+        revoke: () => Promise.reject(new Error('vault unavailable')),
+      }),
+      onResult: noop,
+      onError: () => {
+        throw new Error('alerting is broken too')
+      },
+    })
+
+    sink.emit(revokedEvent('operator_revoked'))
+    await sink.pending.catch(() => undefined)
+    expect(sink.failed).toBe(true)
+    expect((sink.failures[0]?.error as Error).message).toBe('vault unavailable')
   })
 })
