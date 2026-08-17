@@ -22,7 +22,9 @@
     "obs:probe": "tsc --build && node dist/obs/probe.js",
     "auth:login": "npm run build && node dist/bin/auth-login.js",
     "secrets": "npm run build && node dist/bin/secrets.js",
-    "kill": "npm run build && node dist/bin/kill.js"
+    "kill": "npm run build && node dist/bin/kill.js",
+    "archive": "npm run build && node dist/bin/archive.js",
+    "serve:renderer": "npm run build && node dist/bin/serve-renderer.js"
   },
   "dependencies": {
     "@grpc/grpc-js": "1.14.4",

@@ -1,4 +1,31 @@
 {
+  "archive": {
+    "enabled": true,
+    "retentionDays": 7,
+    "maxTotalBytes": 214748364800,
+    "minFreeBytes": 53687091200,
+    "activeFileGraceMs": 600000,
+    "roots": [
+      {
+        "name": "recordings",
+        "path": "data/archive/recordings",
+        "extensions": [".mkv", ".mp4", ".flv", ".ts", ".mov"]
+      },
+      {
+        "name": "diagnostics",
+        "path": "data/diagnostics/screenshots",
+        "extensions": [".jpg", ".jpeg", ".png"]
+      },
+      { "name": "ops-logs", "path": "data/ops/logs", "extensions": [".log"] }
+    ],
+    "provisional": [
+      "retentionDays",
+      "maxTotalBytes",
+      "minFreeBytes",
+      "activeFileGraceMs",
+      "roots"
+    ]
+  },
   "db": {
     "file": "data/vertical-live.db",
     "busyTimeoutMs": 5000,
