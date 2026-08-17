@@ -73,15 +73,22 @@ export async function runLatencySuite(options: RunReportOptions = {}): Promise<L
   }
 }
 
-/** Reports `/metrics` of a server that is already running (no injection). */
+/**
+ * Reports `/metrics` of a server that is already running (no injection).
+ *
+ * `clock` is the caller's, not a guess: an external server runs on the system
+ * clock, but the CLI also prints this report after an in-process virtual-clock
+ * run, and those durations are scenario time. Labelling them wrongly would put a
+ * number that is not a latency under a heading that says it is (spec §7.5).
+ */
 export async function reportRunningServer(
   baseUrl: string,
-  options: { readonly now?: () => string } = {},
+  options: { readonly now?: () => string; readonly clock?: 'virtual' | 'system' } = {},
 ): Promise<LatencyReport> {
   const metrics = await fetchMetrics(baseUrl)
   return buildLatencyReport({
     generatedAt: (options.now ?? (() => new Date().toISOString()))(),
-    clock: 'system',
+    clock: options.clock ?? 'system',
     target: baseUrl,
     scenarios: [],
     metrics,

@@ -136,7 +136,7 @@ async function runCommand(argv: readonly string[]): Promise<CliResult> {
     const summary = json
       ? JSON.stringify({ ...result, health: session.harness.engine.health() }, null, 2)
       : `${format(result, false)}\n\n${formatLatencyReport(
-          await reportRunningServer(session.harness.baseUrl),
+          await reportRunningServer(session.harness.baseUrl, { clock }),
         )}`
     return { exitCode: result.refusals.length === 0 ? 0 : 1, output: summary }
   } finally {
