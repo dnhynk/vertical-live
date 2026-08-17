@@ -24,7 +24,7 @@
 | T11 | 로컬 시뮬레이터·replay·지연 계측 | T5, T8 | — | pending | t11-simulator-replay | | `task_9470df5be9b8` |
 | T12 | supervisor 상태기계·건강 집계·kill switch·알림·dead-man | T2, T8, T9, T10 | — | pending | t12-supervisor | | `task_560530cfb813` |
 | T13 | 데이터 보존·삭제·철회 자동화 | T3, T4 | — | changes_requested | t13-data-policy | #10 | `task_15cd2ae24e82` |
-| T14 | 렌더러 화면 완성(5초 무음·감사 연출·i18n) | T5, T7 | — | in_review | t14-renderer-screen | #13 | `task_82f32652b3cf` |
+| T14 | 렌더러 화면 완성(5초 무음·감사 연출·i18n) | T5, T7 | — | changes_requested | t14-renderer-screen | #13 | `task_82f32652b3cf` |
 | T15 | fault matrix·72h soak harness | T11, T12, T13 | — | pending | t15-fault-soak | | `task_f32603eaee51` |
 | T16 | 문서 정합화·운영 런북·Gate 체크리스트 | T12 | — | pending | t16-docs-alignment | | `task_60d68899d24c` |
 | T17 | Windows 운영 스크립트(자동시작·OBS·아카이브) | T2, T12 | — | pending | t17-windows-ops | | `task_e2466b978ebe` |
@@ -132,3 +132,4 @@
 | 2026-08-17 17:40 | F-T13-1 완료 → R-T13-2 `task_4cc9acc6512a` → `ctx_e1cf0c076958`(review2). T14 worker_done(succeeded, PR #13: 4슬롯 JP+아이콘+EN, 모드 배지, CTA·무료 문구, 익명 유료 감사, 변주, 원본 아이콘·크리처, 스크린샷 8장, 1083 tests; CTA 구성은 §T14가 고정하므로 T5의 우선순위 답 대체 — 정보 유실 없음). 리뷰 대기열: R-T8-1(review)·R-T13-2(review2) 진행 → R-T14-1 → R-T10-2 |
 | 2026-08-17 18:30 | F-T10-1 완료(8건, 003 재번호, copy-migrations prune 버그도 수정). 발견: R-T8-1·R-T13-2 리뷰어가 30분간 미시작(프롬프트가 composer 잔류; 'esc to interrupt' 오탐) → Enter 재전송으로 복구, 스크립트·런북 수정(037513c). R-T13-2 verdict request_changes(신규 major 2: throw sink가 스케줄 중단·revocation 큐 오염) → F-T13-2 `task_f477b7ed3e01` → `ctx_a4d34d19bcdf`. R-T14-1 `task_b516a7ce0df5` → `ctx_926661492455`(review2). 대기열: R-T10-2 |
 | 2026-08-17 19:00 | R-T8-1 verdict **request_changes**(blocker 4: 창 마감 시 처리 기록 순서 위반으로 writer wedge, 유료 ACK↔fallback 해제 비원자(2회 감사), /ws/renderer 무인증(§10.2), 어휘 밖 argument 'applied'+원문 저장; major 2: simulator가 프로덕션 checkpoint 덮어씀, lockfile ws 분류) → F-T8-1 `task_38cdad7ca3b2` → T8 터미널 `ctx_360c7f676409`(렌더러 connection 토큰 전달 최소 수정 승인). R-T10-2 `task_c0fb438d4e34` → `ctx_84210b4b2171`(review). 진행: R-T14-1(review2) |
+| 2026-08-17 19:30 | F-T13-2 완료. R-T14-1 verdict request_changes(major 1: 챕터 변주가 배경·조명 미반영; minor FPS 문서) → F-T14-1 `task_5a5a9fc62e47` → T14 터미널 `ctx_cdfd5b721a25`. R-T13-3 `task_545e7bfa8730` → `ctx_bbe76f99104a`(review2). 진행: R-T10-2(review), F-T8-1, F-T14-1 |
