@@ -76,9 +76,12 @@ Official reference (not re-verified in T16):
 
 ### Step 4: Request / Unlock Advanced Features
 
-Advanced features require phone verification first, then either channel history or ID/video verification. The
-channel needs them for live streaming and for the API usage this product depends on; advanced-features status is one
-of the items recorded in the Gate 0 audit (spec §8.1).
+The channel needs advanced features for live streaming and for the API usage this product depends on;
+advanced-features status is one of the items recorded in the Gate 0 audit (spec §8.1).
+
+The unlock path itself — phone verification first, then either channel history or ID/video verification — is
+**확인 필요(출처 없음)**: it was carried over from the pre-spec version of this document and has no spec source. Read the
+current requirement from Studio during the Gate 0 audit.
 
 ### Step 5: Enable Live Streaming
 

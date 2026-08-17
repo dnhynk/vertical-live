@@ -212,6 +212,8 @@ npm run start -w @vl/server
 2. kill switch 플래그가 남아 있는지 먼저 본다(3장).
 3. `GET /health`로 `live`까지 올라가는지 확인한다.
 4. 자동 로그온·sleep 비활성·GPU reset 등 호스트 쪽 설정은 T17의 체크리스트다.
+5. **비정상 종료 뒤 OBS가 safe-mode 프롬프트를 띄우면 자동 기동이 그 자리에서 멈춘다.** 대응 방법은 사용자 결정
+   대기 중이다(BOARD E-7, T17 발견). 그때까지는 재부팅 후 OBS 창을 눈으로 확인한다.
 
 ---
 

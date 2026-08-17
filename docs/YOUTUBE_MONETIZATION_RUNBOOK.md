@@ -160,7 +160,8 @@ To keep fan-funding features available on individual live streams:
 - The stream must not be Made for Kids. A Made for Kids classification removes Live Chat, Super Chat, Gifts and
   memberships, and **a declaration alone does not settle the classification** (§12.2, [S15] [S29] [S32]).
 - Gifts are for eligible **vertical** live streams [S32].
-- Live chat/comments must stay enabled.
+- Live chat/comments must stay enabled (reference, not re-verified in T16:
+  https://support.google.com/youtube/answer/9277801).
 - The stream must not be age-restricted, unlisted/private, or attached to a fundraiser —
   **확인 필요(출처 없음)**: these three items were carried over from the pre-spec version and have no spec source; verify
   them in Studio during the Gate 0 audit. Reference (not re-verified in T16):
