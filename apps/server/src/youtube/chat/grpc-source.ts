@@ -5,6 +5,7 @@ import { silentLogger, type Logger } from '../../secrets/redaction.js'
 import { AuthRevokedError } from '../auth/token-manager.js'
 import { decideRetry, type BackoffPolicy } from '../quota/backoff.js'
 import { classifyYouTubeApiError } from '../quota/classify.js'
+import type { QuotaTracker } from '../quota/tracker.js'
 import type { ChatConfig } from './config.js'
 import {
   CancellableDelay,
@@ -52,6 +53,8 @@ export interface GrpcChatSourceOptions {
   readonly config: ChatConfig
   readonly auth: ChatAccessTokens
   readonly liveChatId: string
+  /** T3's day-unit accounting; one connection is one `streamList` call. */
+  readonly quota?: QuotaTracker
   readonly logger?: Logger
   /** Injected in tests so backoff delays are reproducible (CLAUDE.md §4). */
   readonly random?: () => number
@@ -155,6 +158,7 @@ export class GrpcChatSource {
       ...(pageToken === null ? {} : { page_token: pageToken }),
     }
     this.#commitError = undefined
+    this.#options.quota?.record('liveChatMessages.streamList')
 
     return new Promise<ConnectionEnd>((resolve) => {
       let responses = 0

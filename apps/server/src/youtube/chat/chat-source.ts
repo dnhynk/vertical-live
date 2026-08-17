@@ -195,6 +195,7 @@ export class ChatSource {
       auth: this.#options.auth,
       liveChatId: target.liveChatId,
       logger: this.#logger,
+      ...(this.#options.quota === undefined ? {} : { quota: this.#options.quota }),
       ...(this.#options.random === undefined ? {} : { random: this.#options.random }),
     })
     this.#grpc = grpc

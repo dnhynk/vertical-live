@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createServer, DEFAULT_PORT, resolvePort, type ServerOptions } from './server.js'
 import type { EngineHealth } from './engine/engine.js'
 import type { EngineMetricsSnapshot } from './engine/metrics.js'
+import type { HealthSignal } from './health/types.js'
 
 describe('resolvePort', () => {
   it('falls back to the shared default', () => {
@@ -112,10 +113,13 @@ describe('engine-backed routes', () => {
       metrics: () => metrics,
     },
     rendererHealth: () => null,
+    sourceHealth: () => sourceSignals,
   }
+  let sourceSignals: HealthSignal[] = []
 
   beforeEach(async () => {
     degraded = false
+    sourceSignals = []
     server = createServer(options)
     await new Promise<void>((resolve) => {
       server.listen(0, '127.0.0.1', resolve)
@@ -139,6 +143,30 @@ describe('engine-backed routes', () => {
     expect(body.status).toBe('ok')
     expect(body.engine).toEqual(health)
     expect(body.renderer).toBeNull()
+  })
+
+  it('reports source signals without letting them decide the status line', async () => {
+    // A chat transport that is merely reconnecting is `unknown`, and §9.4(3)
+    // leaves the verdict to T12's supervisor — `/health` reports, it does not
+    // judge.
+    sourceSignals = [
+      {
+        component: 'youtube-chat',
+        name: 'youtube.chat.transport',
+        status: 'degraded',
+        observedAtUtc: '2026-08-17T00:00:00.000Z',
+        observedAtMonotonicMs: 1,
+        reason: 'retry_budget_exhausted',
+        detail: { mode: 'grpc', connected: false },
+      },
+    ]
+    const body = (await (await fetch(`${baseUrl}/health`)).json()) as {
+      status: string
+      sources: HealthSignal[]
+    }
+
+    expect(body.status).toBe('ok')
+    expect(body.sources).toEqual(sourceSignals)
   })
 
   it('reports degraded in the status line, not only in the detail', async () => {
