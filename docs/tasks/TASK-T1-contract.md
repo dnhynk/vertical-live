@@ -1,8 +1,8 @@
 # TASK-T1-contract
 
 - Task: T1 정규 이벤트·snapshot·effect 계약과 fixture (`docs/tasks/TASK_SPECS.md` §T1) `[contract]`
-- Branch: `dnhynk/t1-contract` · PR: #<n>
-- Orca: task `task_1acc78f93775` · dispatch `ctx_80a5d1bd2228`
+- Branch: `dnhynk/t1-contract` · PR: #2
+- Orca: task `task_1acc78f93775` · dispatch `ctx_80a5d1bd2228`(2026-08-16 호스트 BSOD로 소실) → `ctx_7a375bf27a44`(2026-08-17 복구 디스패치)
 - Spec sections read: §2, §5.2, §5.3, §6.3, §6.4, §7.1, §7.2, §7.3, §7.4, §7.5, §8.4, §8.5, §9.2, §9.4, §10.2, §12.3, §12.4, §18([S3][S4])
 - BOARD decisions/assumptions relied on: D-1, A-1, A-2, A-7, A-8, A-14
 
@@ -56,18 +56,49 @@
 
 ## Result
 
-(구현 후 채움)
+Plan 1~10을 모두 구현했다. `packages/contract`에 zod 4.4.3 정본 스키마 8개 모듈, 두 source adapter, gRPC/REST fixture 19케이스 × 2 shape, JSON Schema 6개 생성물, 테스트 6개 파일이 있다.
+
+계획 대비 바뀐 점 2가지:
+
+1. **`COMMAND_ALIASES`의 VOTE 아이콘 별칭 제거**(`8907379`). 스펙 §7.1은 투표에 대해 선택 창의 `A`/`B`/`C`만 적고 아이콘 예시를 주지 않는데 초안에 `🅰️`/`🅱️`/`🇨`가 들어가 있었다. 스펙에 없는 입력 어휘를 만들지 않는다(CLAUDE.md §4)는 규칙에 따라 `ja: []`, `icons: []`, `en: ['A'|'B'|'C']`로 되돌렸다. 원어민 검수를 거친 별칭 추가는 T6/T14.
+2. **범위 밖 파일 2개를 최소 수정**했다. 근거는 아래.
+   - `.prettierignore`에 `packages/contract/schema` 추가: 생성물은 `**/dist`와 같은 취급이다. 포매터가 아니라 `registry.test.ts`가 byte-for-byte 최신성을 강제한다.
+   - `eslint.config.js`의 Node 도구 블록 glob에 `{packages,apps,tools}/*/scripts/**/*.mjs` 추가: 기존 `scripts/**/*.mjs`는 저장소 루트만 매치해서 `packages/contract/scripts/generate-schema.mjs`가 **어떤 config에도 걸리지 않아 사실상 lint 대상이 아니었다**(`eslint --print-config` 결과 `globals: 0`, 모든 rule off). 수정 후 `globals: 82`, `no-undef: error`로 실제 검사된다.
+
+### 실행 확인 (부정 대조)
+
+스키마 최신성 검사가 실제로 실패하는지 확인했다. `packages/contract/schema/effect.schema.json` 끝에 개행 1개를 추가한 뒤:
+
+```text
+× 'effect.schema.json' is byte-for-byte up to date 11ms
+AssertionError: effect.schema.json is stale — run `npm run schema:generate -w @vl/contract` and commit the result
+   Tests  1 failed | 13 passed (14)
+```
+
+파일 복원 후 `node packages/contract/scripts/generate-schema.mjs --check` → `schema up to date (6 files)`.
 
 ### Acceptance criteria
 
 | # | 기준 | 상태(met/unmet/unverifiable) | 근거(테스트 파일·명령·출력) |
 |---|---|---|---|
+| 1 | 모든 fixture가 스키마 테스트를 통과하고 `unsupported`/`invalid` fixture도 최소 envelope를 만든다(§7.3(1)) | met | `packages/contract/src/adapters/adapters.test.ts`. shape별로 19 fixture 전수: `%s produces a schema-valid envelope`(`IngestEnvelopeSchema.safeParse`), `%s matches its expectation row exactly`가 valid는 12키(`VALID_KEYS`), unsupported/invalid는 9키(`REJECTED_KEYS`)와 정확히 일치하는지 `Object.keys().sort()`로 검사한다. `covers every fixture with an expectation row`가 fixture 디렉터리와 기대표를 대조하므로 fixture를 추가하고 분류를 빼면 실패한다. `npm run test` → 251 passed |
+| 2 | Gift fixture 시퀀스로 `eventKey`·`effectiveCount`가 §7.4 규칙대로 나온다 | met | `packages/contract/src/event.test.ts` → `%s gift fixtures 0/1/3/5 collapse to the effective-count keys 1/1/3/5`. combo 0/1/3/5(같은 `msg_test_gift_0001`)이 `:gift:1`, `:gift:1`, `:gift:3`, `:gift:5`가 되고 서로 다른 키는 3개다. `effectiveGiftCount` 단위 테스트가 0→1, 음수·NaN·null→1을 고정하고, `EventKeySchema`는 `:gift:0`을 거부한다. delta·storedMax는 T8 |
+| 3 | 5개 타입의 JSON Schema가 `packages/contract/schema/*.json`으로 생성되고 CI에서 최신인지 검사한다 | met | 생성: `npm run schema:generate -w @vl/contract` → 6개 파일(`ingest-envelope`, `canonical-event`, `effect`, `world-snapshot`, `ws-server-message`, `ws-renderer-message`). 검사: `packages/contract/src/schema/registry.test.ts`가 `serializeSchemaDocument()`와 커밋된 파일을 byte-for-byte 비교하고 이름이 바뀐 고아 파일도 잡는다 → `npm run test`(=CI)에 포함. `npm run build`도 `generate-schema.mjs --check`를 돌려 두 번째 게이트로 막는다. 부정 대조는 위 "실행 확인" 참조 |
+| 4 | 타입 어디에도 author/표시명/channelId 필드가 없다(테스트로 키 목록 검사) | met | `packages/contract/src/privacy.test.ts`가 생성된 JSON Schema 6개를 재귀 순회해 모든 `properties`/`patternProperties`/`required` 이름을 모으고(41개 이상, 워커 자체를 검증하는 assertion 포함) `author`·`channelid`·`displayname`·`profileimage`·`messagetext`·`usercomment`·`nickname`·`avatar`·`email` 등 22개 금칙 substring과 대조한다 → 0건. 추가로 모든 object가 `additionalProperties: false`임을 확인해 런타임 주입도 막고, `actor`가 `{"type":"null"}`임을 확인한다. 값 수준은 `adapters.test.ts`의 `no identity or raw text survives normalization`이 fixture의 합성 채널 ID·표시명·원문 텍스트 15개가 어떤 envelope에도 나타나지 않음을 shape별 전수로 검사한다 |
 
 ### Gates (executed)
 
+`git fetch origin && git rebase origin/main`(origin/main = `789be11`) 뒤 실행:
+
 ```text
-(구현 후 채움)
+npm run format:check  -> All matched files use Prettier code style!
+npm run lint          -> eslint 0 problems; check-no-legacy-imports: ok (0 legacy imports)
+npm run typecheck     -> tsc --build tsconfig.json (no output, exit 0)
+npm run test          -> Test Files 9 passed (9) / Tests 251 passed (251)
+npm run build         -> @vl/contract: schema up to date (6 files); @vl/renderer ✓ built in 27.37s; @vl/server, @vl/simulator tsc --build ok
 ```
+
+실행하지 않은 게이트: 없음.
 
 ## Not done / out of scope
 
