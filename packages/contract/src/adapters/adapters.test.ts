@@ -264,6 +264,16 @@ const EXPECTED: Readonly<Record<string, Expectation>> = {
     restField: 'snippet.superChatDetails.amountMicros',
     sourceMessageType: { grpc: 'SUPER_CHAT_EVENT', rest: 'superChatEvent' },
   },
+  // A date without a time is not an instant; accepting it would silently pin the
+  // event to midnight UTC (spec §10.2).
+  'invalid-date-only-published-at': {
+    status: 'invalid',
+    messageId: 'msg_test_0017',
+    code: 'MALFORMED_PUBLISHED_AT',
+    field: 'snippet.published_at',
+    restField: 'snippet.publishedAt',
+    sourceMessageType: { grpc: 'TEXT_MESSAGE_EVENT', rest: 'textMessageEvent' },
+  },
   'invalid-live-chat-id-mismatch': {
     status: 'invalid',
     messageId: 'msg_test_0013',
@@ -639,6 +649,26 @@ describe('malformed source numbers and ids stay envelopes (spec §7.3(1))', () =
         expect(JSON.stringify(envelope)).not.toContain(id)
       },
     )
+
+    it.each([
+      '2026-08-17',
+      '0',
+      '08/17/2026',
+      '2026-08-16T00:00:00',
+      '2026-02-30T00:00:00Z',
+      1_755_302_400_000,
+    ])('rejects the non-ISO publish time %s', (publishedAt) => {
+      const key = shape === 'grpc' ? 'published_at' : 'publishedAt'
+      const item = superChatItem(shape, {}) as { snippet: Record<string, unknown> }
+      const envelope = ADAPTERS[shape](
+        { ...item, snippet: { ...item.snippet, [key]: publishedAt } },
+        context(),
+      )
+      expect(envelope).toMatchObject({
+        validationStatus: 'invalid',
+        validationError: { code: 'MALFORMED_PUBLISHED_AT', field: `snippet.${key}` },
+      })
+    })
 
     it('accepts a message id at the length limit', () => {
       const id = 'a'.repeat(128)
