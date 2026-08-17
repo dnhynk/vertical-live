@@ -12,7 +12,7 @@
 | T0 | 모노레포 스캐폴드·CI | — | — | merged | t0-scaffold | #1 | `task_658a82e9f356` |
 | T1 | 정규 이벤트·snapshot·effect 계약과 fixture | T0 | ✔ | changes_requested | t1-contract | #2 | `task_1acc78f93775` |
 | T2 | obs-websocket 5 감시·제어 + OBS 프로파일 | T0 | — | changes_requested | t2-obs-monitor | #3 | `task_6e0c43d6b74c` |
-| T3 | OAuth·비밀정보 vault·quota | T0 | — | dispatched | t3-auth-vault | | `task_62829ec3ab8b` |
+| T3 | OAuth·비밀정보 vault·quota | T0 | — | in_review | t3-auth-vault | #4 | `task_62829ec3ab8b` |
 | T4 | SQLite 영속층(inbox·checkpoint·snapshot·outbox·deadline) | T1 | — | pending | t4-persistence | | `task_6bb9ff9f79c8` |
 | T5 | 렌더러 read model(snapshot 복구·effect 멱등·ACK·건강) | T1 | — | pending | t5-renderer-readmodel | | `task_6ba022bb6151` |
 | T6 | 명령 파서·모더레이션·입력 arbiter | T1 | — | pending | t6-command-parser | | `task_a0f96dd7e038` |
@@ -87,3 +87,6 @@
 | 2026-08-17 03:58 | R-T1-1(재시도) verdict **request_changes**: blocker 1(형식 오류 숫자에서 ZodError throw → 최소 envelope 위반 §7.3(1)), major 3(Date.parse 비-ISO 수용, CanonicalEvent eventKey 관계 미강제 §7.4, NormalizedItemFacts.commandText raw-text TS 타입 노출). 리뷰 https://github.com/dnhynk/vertical-live/pull/2#pullrequestreview-4948249749. F-T1-1 `task_df3f5c1e4034` → 새 worker `ctx_457f6a165433`(t1-contract worktree, 원 터미널은 크래시로 소실) |
 | 2026-08-17 04:05 | R-T2-1 `task_58284055fd87` → `ctx_100e479d4623`(잔여 유휴 codex 터미널 재사용). 활성 에이전트 3(T3, F-T1-1, 리뷰어) = D-4 상한 |
 | 2026-08-17 04:40 | R-T2-1 verdict **request_changes**: blocker 2(allowUnauthenticated 인증 우회; obs-setup.md가 stream key를 OBS UI에 입력하라고 안내 → OBS가 service.json에 평문 저장), major 3(connect timeout ghost 소켓, reconnectCount 증가 전 connected 신호, OUTPUT_RECONNECTING을 ok로 보고). 리뷰 https://github.com/dnhynk/vertical-live/pull/3#pullrequestreview-4948338037. **코디네이터 결정(A-16)**: stream key는 vault가 정본, 서버가 obs-websocket `SetStreamServiceSettings`로 런타임 주입, 운영자 UI 입력 금지, OBS 프로파일 디렉터리 캐시는 사실대로 문서화하고 정지 시 제거·ACL은 T17 후속. F-T2-1 `task_b718432af852` → 같은 T2 터미널 `ctx_064407a13ffb`. 활성 에이전트 3(T3, F-T1-1, F-T2-1) |
+| 2026-08-17 05:20 | F-T1-1 완료(4건 수정 + MALFORMED_MESSAGE_ID 추가, 375 tests). R-T1-2 verdict **request_changes**(blocker 0, major 2: GIFT comboCount null/absent 시 접미사 미검증, EVENT_KEY_PATTERN 9자리 상한이 helper 출력 거부). F-T1-2 `task_adbc0c24547d` → 같은 터미널 `ctx_c54f829f9723`. 다음 리뷰(R-T1-3)도 request_changes면 런북 2.5(4) 에스컬레이션 |
+| 2026-08-17 05:20 | T3 worker_done(succeeded, PR #4: OAuth PKCE loopback, Credential Manager vault @napi-rs/keyring 1.3.0, quota 표 — Live Streaming 메서드별 공식 비용 없음을 documented:false로 표기). PR #4는 PR #3과 5개 파일 중복(clock.ts, secrets/*, fake-clock.ts, config/default.json) → #3 머지 후 rebase 필요. 리뷰 대기열: R-T2-2(진행) → R-T3-1 |
+| 2026-08-17 05:25 | F-T2-1 완료(5건 수정, 109 tests, setStreamServiceFromVault 추가; T12가 startStream 전에 호출해야 함 — T12 명세 반영 예정). R-T2-2 `task_e2c585a03d88` → `ctx_a815b8dd9c16` |
