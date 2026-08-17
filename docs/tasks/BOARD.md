@@ -17,7 +17,7 @@
 | T4 | SQLite 영속층(inbox·checkpoint·snapshot·outbox·deadline) | T1 | — | in_review | t4-persistence | #5 | `task_6bb9ff9f79c8` |
 | T5 | 렌더러 read model(snapshot 복구·effect 멱등·ACK·건강) | T1 | — | ready | t5-renderer-readmodel | | `task_6ba022bb6151` |
 | T6 | 명령 파서·모더레이션·입력 arbiter | T1 | — | ready | t6-command-parser | | `task_a0f96dd7e038` |
-| T7 | 콘텐츠 디렉터·크리처 상태 모델(순수 도메인) | T1 | — | dispatched | t7-content-director | | `task_e1e7531798ad` |
+| T7 | 콘텐츠 디렉터·크리처 상태 모델(순수 도메인) | T1 | — | in_review | t7-content-director | #6 | `task_e1e7531798ad` |
 | T8 | 상태 엔진(단일 writer·outbox·WS·ACK·유료 멱등) | T1b, T4, T6, T7 | — | pending | t8-state-engine | | `task_0aadf1c96dcf` |
 | T9 | YouTube source adapter(gRPC streamList + REST fallback) | T3, T4, T8 | — | pending | t9-youtube-adapter | | `task_ec3d66a159bd` |
 | T10 | broadcast lifecycle·reconcile·한도 | T3, T4 | — | pending | t10-broadcast-lifecycle | | `task_41769f69d4b7` |
@@ -104,3 +104,4 @@
 | 2026-08-17 07:20 | F-T3-0 rebase 완료(PR #4 CLEAN, 551 tests). R-T3-1 `task_cba4ef036404` → `ctx_1e16e3c930eb` |
 | 2026-08-17 07:35 | T4 worker_done(succeeded, PR #5: SQLite WAL+synchronous=FULL, 마이그레이션 러너, 두 트랜잭션 경계, crash-window·SIGKILL 테스트, 562 tests). 후속: T1b 머지 후 effect_outbox.caused_by_event_key nullable 마이그레이션 002 필요(T8 또는 T1b 후속). T1b 디스패치 `ctx_6219c7a4e46f`. 리뷰 대기열: R-T3-1(진행) → R-T4-1 |
 | 2026-08-17 07:55 | R-T3-1 verdict **request_changes**(blocker 3: T2 호출자가 여전히 EnvSecretProvider 기본, 8자 미만 secret 오류 노출, streamList scope 미확인·force-ssl 유일성 미입증; major 3: google-auth-library 미선언 직접 import, in-memory fallback 프로덕션 도달, revoke 후 vault 삭제 실패 시 auth_revoked 누락; minor 2). 리뷰 https://github.com/dnhynk/vertical-live/pull/4#pullrequestreview-4948810479. F-T3-1 `task_8524b9e6eabb` → T3 터미널 `ctx_3a1bde95e0c7`. R-T4-1 `task_f8fcd1f7c232` → `ctx_43914df6be16` |
+| 2026-08-17 08:10 | T7 worker_done(succeeded, PR #6: 순수 reducer, §6.2 4단 콘텐츠·일일 챕터, A-9 양 경로, 유료 무영향 타입+속성 테스트, 592 tests). 리뷰 대기열: R-T4-1(진행) → R-T7-1 → R-T3-2. T6은 슬롯 대기(활성 F-T3-1·T1b·리뷰어) |
