@@ -88,6 +88,8 @@ describe('engine-backed routes', () => {
     lastAckedStateRevision: 12,
     inputMode: 'direct',
     broadcastLifecycle: 'live',
+    lastFailure: null,
+    consecutiveFailures: 0,
   }
   const metrics: EngineMetricsSnapshot = {
     latencyMs: {

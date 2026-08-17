@@ -2,8 +2,7 @@ import { timingSafeEqual } from 'node:crypto'
 
 import { IngestEnvelopeSchema, type IngestEnvelope } from '@vl/contract'
 
-import type { PersistenceStore } from '../db/store.js'
-import type { SourceCheckpointInput } from '../db/types.js'
+import type { IngestBatchResult, SourceCheckpointInput } from '../db/types.js'
 
 /**
  * `POST /ingest/simulator` (TASK_SPECS 공통 규약, §T8, §T11).
@@ -20,14 +19,26 @@ import type { SourceCheckpointInput } from '../db/types.js'
  *    reach the inbox, and the response says which index failed and why in
  *    contract vocabulary only — never an echo of the body (spec §12.3).
  *
- * Accepted envelopes go through the same `commitIngestBatch` as the YouTube
- * adapter: one transaction for the rows and the checkpoint (spec §7.3(2)). The
- * source label stays `simulator`, which is what keeps synthetic participation
- * distinguishable from real participation (spec §2.6).
+ * Accepted envelopes go through the engine's `ingest()`, i.e. the same
+ * `commitIngestBatch` transaction the YouTube adapter will use: rows and
+ * checkpoint together (spec §7.3(2)). The source label stays `simulator`, which
+ * is what keeps synthetic participation distinguishable from real participation
+ * (spec §2.6).
+ *
+ * The checkpoint is **derived, never accepted**. An authenticated caller could
+ * otherwise name any `sourceKey` and overwrite the live YouTube reconnect token
+ * with a synthetic one, which would lose real messages on the next reconnect
+ * (R-T8-1 major 1). The key is `simulator:{liveChatId}` of the batch itself, and a
+ * batch that mixes chats is refused rather than silently attributed to one.
  */
 
+/** The inbox write path (`StateEngine.ingest`), injected so this stays testable. */
+export interface InboxWriter {
+  ingest(envelopes: readonly IngestEnvelope[], checkpoint: SourceCheckpointInput): IngestBatchResult
+}
+
 export interface SimulatorIngestOptions {
-  readonly store: PersistenceStore
+  readonly inbox: InboxWriter
   /** `simulator.enabled` from `config/default.json`. */
   readonly enabled: boolean
   /** `server.simulatorToken` from the vault; `null` when it is not configured. */
@@ -70,7 +81,7 @@ export class SimulatorIngestEndpoint {
     const parsed = parseBody(request.body)
     if ('error' in parsed) return { status: 400, body: parsed }
 
-    const result = this.#options.store.commitIngestBatch(parsed.envelopes, parsed.checkpoint)
+    const result = this.#options.inbox.ingest(parsed.envelopes, parsed.checkpoint)
     this.#options.onIngested?.(result.insertedCount)
     return {
       status: 202,
@@ -136,34 +147,49 @@ function parseBody(body: unknown): ParsedBody | BodyError {
   }
 
   const first = envelopes[0] as IngestEnvelope
-  const rawCheckpoint = record['checkpoint']
-  if (rawCheckpoint === undefined) {
-    return {
-      envelopes,
-      checkpoint: {
-        sourceKey: `simulator:${first.liveChatId}`,
-        liveChatId: first.liveChatId,
-        nextPageToken: null,
-      },
-    }
+  // One batch, one chat: the checkpoint it advances has to be the checkpoint of
+  // the messages it carries, and a mixed batch has no single answer.
+  if (envelopes.some((envelope) => envelope.liveChatId !== first.liveChatId)) {
+    return { error: 'batch_must_share_one_live_chat_id' }
   }
+
+  const derived: SourceCheckpointInput = {
+    sourceKey: simulatorSourceKey(first.liveChatId),
+    liveChatId: first.liveChatId,
+    nextPageToken: null,
+  }
+
+  const rawCheckpoint = record['checkpoint']
+  if (rawCheckpoint === undefined) return { envelopes, checkpoint: derived }
   if (typeof rawCheckpoint !== 'object' || rawCheckpoint === null || Array.isArray(rawCheckpoint)) {
     return { error: 'checkpoint_must_be_an_object' }
   }
   const checkpoint = rawCheckpoint as Record<string, unknown>
-  const sourceKey = checkpoint['sourceKey']
-  const liveChatId = checkpoint['liveChatId'] ?? first.liveChatId
+  const sourceKey = checkpoint['sourceKey'] ?? derived.sourceKey
+  const liveChatId = checkpoint['liveChatId'] ?? derived.liveChatId
   const nextPageToken = checkpoint['nextPageToken'] ?? null
-  if (typeof sourceKey !== 'string' || sourceKey === '') {
-    return { error: 'checkpoint_sourceKey_must_be_a_string' }
-  }
-  if (typeof liveChatId !== 'string' || liveChatId === '') {
-    return { error: 'checkpoint_liveChatId_must_be_a_string' }
-  }
-  if (nextPageToken !== null && typeof nextPageToken !== 'string') {
+  if (typeof nextPageToken !== 'string' && nextPageToken !== null) {
     return { error: 'checkpoint_nextPageToken_must_be_a_string_or_null' }
   }
-  return { envelopes, checkpoint: { sourceKey, liveChatId, nextPageToken } }
+  // The caller may repeat what the batch already says; it may not name anything
+  // else. Refusing is better than silently rewriting: a simulator run that meant
+  // to advance a real checkpoint should fail loudly (spec §2.6, §7.3(2)).
+  if (liveChatId !== derived.liveChatId) {
+    return { error: 'checkpoint_live_chat_id_must_match_the_batch' }
+  }
+  if (sourceKey !== derived.sourceKey) {
+    return { error: 'checkpoint_source_key_must_be_the_simulator_namespace' }
+  }
+  return { envelopes, checkpoint: { ...derived, nextPageToken } }
+}
+
+/**
+ * The only checkpoint key a simulator batch can ever touch. The `simulator:`
+ * prefix is what keeps it disjoint from the `youtube:{liveChatId}` keys the real
+ * source owns (TASK_SPECS §T4 `SourceCheckpointInput`).
+ */
+export function simulatorSourceKey(liveChatId: string): string {
+  return `simulator:${liveChatId}`
 }
 
 export function isLoopbackAddress(address: string | null): boolean {

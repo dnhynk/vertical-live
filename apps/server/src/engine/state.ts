@@ -25,6 +25,19 @@ export interface PersistedEngineState {
    * running aggregate window is not silently dropped back to `direct` (§6.4).
    */
   readonly inputMode: InputMode
+  /**
+   * `eventKey → effectId` of every paid thanks whose substitute acknowledgement
+   * is still owed (spec §9.2).
+   *
+   * This is what makes the durable `effect_outbox.acked_at` the authority on
+   * whether the original staging reached a frame: the fallback timer resolves the
+   * effect id here and asks the outbox, instead of trusting an in-memory queue
+   * that a restart or an early-firing deadline could outrun (R-T8-1 blocker 2).
+   *
+   * Absent in states written before that fix; an absent entry means "cannot prove
+   * it played", and spec §9.2 then wants the substitute to run.
+   */
+  readonly paidThanksEffects: Readonly<Record<string, string>>
 }
 
 export class EngineStateError extends Error {
@@ -37,8 +50,14 @@ export class EngineStateError extends Error {
 export function serializeEngineState(
   world: WorldState,
   inputMode: InputMode,
+  paidThanksEffects: ReadonlyMap<string, string> = new Map(),
 ): PersistedEngineState {
-  return { version: ENGINE_STATE_VERSION, world, inputMode }
+  return {
+    version: ENGINE_STATE_VERSION,
+    world,
+    inputMode,
+    paidThanksEffects: Object.fromEntries(paidThanksEffects),
+  }
 }
 
 /**
@@ -87,7 +106,26 @@ export function parseEngineState(value: unknown): PersistedEngineState {
     version: ENGINE_STATE_VERSION,
     world: world as unknown as WorldState,
     inputMode: inputMode.data,
+    paidThanksEffects: readStringMap(value['paidThanksEffects']),
   }
+}
+
+/**
+ * An additive field, so a state written before it existed reads as empty rather
+ * than as a version mismatch: the only consequence is that a substitute thanks
+ * cannot be proven unnecessary, and §9.2 prefers running it to skipping it.
+ */
+function readStringMap(value: unknown): Record<string, string> {
+  if (value === undefined || value === null) return {}
+  if (!isRecord(value)) throw new EngineStateError('paidThanksEffects is not an object')
+  const entries: Record<string, string> = {}
+  for (const [key, entry] of Object.entries(value)) {
+    if (typeof entry !== 'string') {
+      throw new EngineStateError(`paidThanksEffects.${key} is not an effect id`)
+    }
+    entries[key] = entry
+  }
+  return entries
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

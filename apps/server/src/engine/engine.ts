@@ -9,6 +9,7 @@ import {
   type Effect,
   type InputMode,
   type PaidEventKind,
+  type IngestEnvelope,
   type ValidIngestEnvelope,
   type WorldSnapshot,
 } from '@vl/contract'
@@ -19,8 +20,10 @@ import type { PersistenceStore } from '../db/store.js'
 import type {
   InboxProcessingRecord,
   InboxRow,
+  IngestBatchResult,
   PaidLedgerRecord,
   PersistedEffect,
+  SourceCheckpointInput,
 } from '../db/types.js'
 import { InputArbiter } from '../input/arbiter.js'
 import { loadInputConfig, type InputConfig } from '../input/config.js'
@@ -41,6 +44,7 @@ import type {
   WorldState,
   WorldTransition,
 } from '../world/types.js'
+import { sanitizeEnvelopeArguments } from './argument.js'
 import { loadEngineConfig, type EngineRuntimeConfig } from './config.js'
 import { deadlineRowIdOf, deadlineTableDiff } from './deadlines.js'
 import { assembleEffect } from './effects.js'
@@ -77,6 +81,21 @@ import { parseEngineState, serializeEngineState } from './state.js'
  * whole day of the current content produces a few thousand steps.
  */
 const MAX_STEPS_PER_PASS = 100_000
+
+/**
+ * Processing results that carry both outcomes: the command applied, and the
+ * argument it arrived with was outside the open window's vocabulary.
+ */
+const APPLIED_ARGUMENT_REJECTED = 'applied:argument_rejected'
+const AGGREGATED_ARGUMENT_REJECTED = 'aggregated:argument_rejected'
+
+/** A writer invariant broke. It names the invariant so a wedge is diagnosable. */
+export class EngineInvariantError extends Error {
+  constructor(message: string) {
+    super(`engine invariant violated: ${message}`)
+    this.name = 'EngineInvariantError'
+  }
+}
 
 export type InputHealth = 'ok' | 'degraded' | 'unknown'
 
@@ -123,6 +142,13 @@ export interface EngineHealth {
   readonly lastAckedStateRevision: number
   readonly inputMode: InputMode
   readonly broadcastLifecycle: BroadcastLifecycle
+  /**
+   * Why the last writer pass failed, if it did. A wedged single writer is the
+   * worst failure this component has — the world stops — so the reason is on
+   * `/health` and not only in a log line (spec §9.4(2), R-T8-1 blocker 1).
+   */
+  readonly lastFailure: { readonly at: string; readonly error: string } | null
+  readonly consecutiveFailures: number
 }
 
 interface PreparedStep {
@@ -177,10 +203,14 @@ export class StateEngine {
   #openEffects = new Map<string, OpenEffect>()
   /** Paid events the renderer confirmed; the next commit clears the obligation. */
   #thanksToClear: string[] = []
+  /** `eventKey → effectId` of the outstanding paid thanks (persisted, spec §9.2). */
+  #paidThanksEffects = new Map<string, string>()
   #lastAckedRevision = 0
   #lastPublishAt: string | null = null
   #inputHealth: InputHealth = 'ok'
   #interactionEnabled = false
+  #lastFailure: { at: string; error: string } | null = null
+  #consecutiveFailures = 0
   #timer: TimerHandle | null = null
   readonly #autoTick: boolean
 
@@ -238,6 +268,7 @@ export class StateEngine {
       const restored = parseEngineState(recovery.engineState)
       this.#world = restored.world
       this.#inputMode = restored.inputMode
+      this.#paidThanksEffects = new Map(Object.entries(restored.paidThanksEffects))
     }
     this.#arbiter = new InputArbiter({
       clock: this.#clock,
@@ -277,11 +308,61 @@ export class StateEngine {
   }
 
   /**
+   * The only way into the inbox (spec §7.3(2)): every envelope of one response
+   * plus the reconnect checkpoint, in one transaction.
+   *
+   * Routing it through the engine rather than letting each caller reach the store
+   * puts the storage-boundary sanitizer in exactly one place, so an argument
+   * outside the content's choice vocabulary cannot be persisted by *any* source —
+   * this endpoint today, T9's adapter tomorrow (R-T8-1 blocker 4).
+   */
+  ingest(
+    envelopes: readonly IngestEnvelope[],
+    checkpoint: SourceCheckpointInput,
+  ): IngestBatchResult {
+    const sanitized = sanitizeEnvelopeArguments(envelopes)
+    if (sanitized.droppedCount > 0) {
+      this.#metrics.count('ingest_argument_dropped', sanitized.droppedCount)
+    }
+    const result = this.#store.commitIngestBatch(sanitized.envelopes, checkpoint)
+    this.notifyIngest()
+    return result
+  }
+
+  /**
    * Processes everything that is due now and returns the number of commits.
-   * The timer calls it; tests call it directly so nothing depends on real time.
+   * Throws whatever the pass threw, so a test sees the real failure.
    */
   runPending(): number {
-    return this.#runPending()
+    const commits = this.#runPending()
+    this.#consecutiveFailures = 0
+    return commits
+  }
+
+  /**
+   * `runPending()` for callers that must not fail with it: the timer and the
+   * ingest endpoint. The failure is recorded, counted and surfaced on `/health`
+   * instead of propagating into an HTTP response or an unhandled rejection.
+   */
+  pump(): number {
+    try {
+      return this.runPending()
+    } catch (error) {
+      this.#recordFailure(error)
+      return 0
+    }
+  }
+
+  #recordFailure(error: unknown): void {
+    const message = error instanceof Error ? error.message : String(error)
+    this.#lastFailure = { at: this.#clock.nowUtcIso(), error: message }
+    this.#consecutiveFailures += 1
+    this.#metrics.count('writer_pass_failed')
+    this.#logger.error('engine.pass_failed', {
+      error: message,
+      consecutiveFailures: this.#consecutiveFailures,
+      revision: this.#revision,
+    })
   }
 
   // ----------------------------------------------------------- renderer I/O
@@ -310,9 +391,11 @@ export class StateEngine {
   onAckEffect(effectId: string, appliedAt: string): void {
     const open = this.#openEffects.get(effectId)
     if (open?.effect.paid === true && open.effect.causedByEventKey !== null) {
-      // The original thanks reached a frame, so the substitute of spec §9.2 is
-      // no longer owed. The world owns that bookkeeping; the next commit applies
-      // it, because the audit state may only change inside a transaction.
+      // The original thanks reached a frame, so the substitute of spec §9.2 is no
+      // longer owed. The world owns that bookkeeping and audit state may only
+      // change inside a transaction, so the next commit applies it — and until it
+      // does, `#settleAcknowledgedFallback()` reads `acked_at` back out of the
+      // outbox, so a restart or an early timer cannot stage a second thanks.
       this.#thanksToClear.push(open.effect.causedByEventKey)
     }
     this.#openEffects.delete(effectId)
@@ -358,6 +441,8 @@ export class StateEngine {
       lastAckedStateRevision: this.#lastAckedRevision,
       inputMode: this.#arbiter.mode,
       broadcastLifecycle: this.#lifecycle(now),
+      lastFailure: this.#lastFailure,
+      consecutiveFailures: this.#consecutiveFailures,
     }
   }
 
@@ -415,6 +500,11 @@ export class StateEngine {
       deadline !== null &&
       (row === null || toMillis(deadline.dueAt) < toMillis(row.receivedAt))
     ) {
+      if (this.#settleAcknowledgedFallback(deadline)) {
+        // The obligation is gone, so the timer is no longer pending and the pass
+        // makes progress instead of seeing the same due deadline again.
+        return this.#applySteps([], now, true) ? 'committed' : 'consumed'
+      }
       return this.#applySteps([this.#prepareDeadline(deadline)], now) ? 'committed' : 'consumed'
     }
     const prepared = this.#prepareEvent(row as InboxRow, now)
@@ -426,11 +516,7 @@ export class StateEngine {
     if (!this.#started || !this.#autoTick) return
     this.#timer = this.#clock.setTimeout(() => {
       this.#timer = null
-      try {
-        this.#runPending()
-      } catch (error) {
-        this.#logger.error('engine.tick_failed', { error: (error as Error).message })
-      }
+      this.pump()
       this.#scheduleTick()
     }, this.#config.engine.tickIntervalMs)
   }
@@ -445,6 +531,30 @@ export class StateEngine {
       }
     }
     return earliest
+  }
+
+  /**
+   * Whether a due substitute-thanks timer is already settled by a durable ACK
+   * (spec §9.2 "대체 감사 연출 **한 번**", §11 유료 무결성).
+   *
+   * `effect_outbox.acked_at` is the authority, not the in-memory queue: an ACK
+   * writes that row immediately, while clearing the world's obligation needs a
+   * transaction, and between the two a restart or a deadline that comes due
+   * before the next commit would otherwise stage a second acknowledgement
+   * (R-T8-1 blocker 2). Queueing the clear here makes the next commit — which the
+   * caller forces — remove the obligation for good.
+   *
+   * An unknown effect id means the engine cannot prove the original played, and
+   * spec §9.2 then wants the substitute to run.
+   */
+  #settleAcknowledgedFallback(deadline: ScheduledDeadline): boolean {
+    if (deadline.kind !== 'paid_thanks_fallback' || deadline.key === null) return false
+    const effectId = this.#paidThanksEffects.get(deadline.key)
+    if (effectId === undefined) return false
+    if (this.#store.getEffect(effectId)?.ackedAt == null) return false
+    this.#thanksToClear.push(deadline.key)
+    this.#metrics.count('paid_fallback_settled_by_ack')
+    return true
   }
 
   #prepareDeadline(deadline: ScheduledDeadline): PreparedStep {
@@ -541,10 +651,14 @@ export class StateEngine {
       return null
     }
 
-    this.#resolve(row.ingestSeq, 'applied')
+    const sanitized = this.#sanitizeArgument(event)
+    // Both facts belong in the §7.3(3) audit trail: the command was applied, and
+    // its argument was refused. Recording only `applied` hid the rejection
+    // (R-T8-1 blocker 4).
+    this.#resolve(row.ingestSeq, sanitized.rejected ? APPLIED_ARGUMENT_REJECTED : 'applied')
     this.#metrics.count('command_direct')
     return {
-      input: { kind: 'event', event: this.#sanitizeArgument(event), contributions: 1 },
+      input: { kind: 'event', event: sanitized.event, contributions: 1 },
       now: this.#advanceTo(event.receivedAt),
       event,
     }
@@ -583,17 +697,23 @@ export class StateEngine {
   }
 
   /**
-   * TASK_SPECS §T8: an argument only reaches the world when the open choice
-   * window expects that vocabulary. Anything else is dropped with a reason code
-   * and never stored — the rejected token itself is not logged (spec §12.3).
+   * TASK_SPECS §T8: an argument only reaches the world when the **currently open**
+   * choice window expects that vocabulary.
+   *
+   * This is the dynamic half of the rule. The static half runs at the storage
+   * boundary (`ingest()`), where an argument outside the content's whole choice
+   * vocabulary is dropped before the envelope is written, so no arbitrary token is
+   * ever persisted (R-T8-1 blocker 4). Here the window may simply not be open
+   * yet, which is not a policy violation and not a reason to refuse the command —
+   * the argument is dropped and the drop is recorded.
    */
-  #sanitizeArgument(event: CanonicalEvent): CanonicalEvent {
+  #sanitizeArgument(event: CanonicalEvent): { event: CanonicalEvent; rejected: boolean } {
     const command = event.command
-    if (command === null || command.argument === null) return event
+    if (command === null || command.argument === null) return { event, rejected: false }
     const expected = this.#world.world.choice?.options.map((option) => option.choiceId) ?? []
-    if (expected.includes(command.argument)) return event
+    if (expected.includes(command.argument)) return { event, rejected: false }
     this.#metrics.count('command_argument_rejected')
-    return { ...event, command: { name: command.name, argument: null } }
+    return { event: { ...event, command: { name: command.name, argument: null } }, rejected: true }
   }
 
   // ------------------------------------------------------- aggregate windows
@@ -627,14 +747,17 @@ export class StateEngine {
         steps.push({
           input: {
             kind: 'event',
-            event: this.#sanitizeArgument(representative.event),
+            event: this.#sanitizeArgument(representative.event).event,
             contributions: tally.aggregatedOnly,
           },
           now: this.#advanceTo(maxInstant(window.endedAtUtc, now)),
           event: representative.event,
         })
       }
-      for (const entry of held) this.#resolve(entry.ingestSeq, 'aggregated')
+      for (const entry of held) {
+        const rejected = this.#sanitizeArgument(entry.event).rejected
+        this.#resolve(entry.ingestSeq, rejected ? AGGREGATED_ARGUMENT_REJECTED : 'aggregated')
+      }
       this.#metrics.count('aggregate_window_closed')
       if (this.#applySteps(steps, now)) commits += 1
     }
@@ -691,6 +814,7 @@ export class StateEngine {
     )
     const paidLedger = this.#paidLedgerFor(effects, eventsByKey, now)
     const giftCombo = this.#giftComboFor(effects, eventsByKey)
+    const paidThanksEffects = this.#paidThanksEffectsFor(effects, state)
     const nextPending = pendingDeadlines(state)
     const deadlines = deadlineTableDiff({ previous: previousPending, next: nextPending, fired })
 
@@ -714,7 +838,7 @@ export class StateEngine {
       effects,
       paidLedger,
       giftCombo,
-      engineState: serializeEngineState(state, this.#inputMode),
+      engineState: serializeEngineState(state, this.#inputMode, paidThanksEffects),
     })
 
     this.#world = state
@@ -722,6 +846,7 @@ export class StateEngine {
     this.#processedSeq = plan.processedSeq
     this.#resolved = this.#resolved.slice(plan.records.length)
     this.#thanksToClear = this.#thanksToClear.slice(clearedThanks.length)
+    this.#paidThanksEffects = paidThanksEffects
     const committedAt = this.#clock.nowUtcIso()
     this.#lastCommittedAt = committedAt
     const receivedAt = steps.find((it) => it.event !== undefined)?.event?.receivedAt ?? null
@@ -738,6 +863,12 @@ export class StateEngine {
    * Never past a held row: `commitStateTransition` rejects a cursor that would
    * pass an inbox row with no processing record, and that rejection is the
    * point — a row left below the cursor would never be drained again (§7.3(3)).
+   *
+   * `#resolved` is kept in `ingestSeq` order by `#resolve()`, so the eligible set
+   * is a prefix and the commit receives ascending records. The assertion below is
+   * a second line rather than a comment: T4 rejects an out-of-order batch, and
+   * the writer would then retry the same in-memory order forever (R-T8-1
+   * blocker 1).
    */
   #cursorPlan(): { records: InboxProcessingRecord[]; processedSeq: number } {
     const firstHeld = this.#held.reduce(
@@ -747,14 +878,36 @@ export class StateEngine {
     const records: InboxProcessingRecord[] = []
     for (const record of this.#resolved) {
       if (record.ingestSeq >= firstHeld) break
+      const previous = records.at(-1)
+      if (previous !== undefined && record.ingestSeq <= previous.ingestSeq) {
+        throw new EngineInvariantError(
+          `processing records are not ascending: ${String(previous.ingestSeq)} then ${String(record.ingestSeq)}`,
+        )
+      }
       records.push(record)
     }
     const last = records.at(-1)
     return { records, processedSeq: last?.ingestSeq ?? this.#processedSeq }
   }
 
+  /**
+   * Records that an inbox row is done, keeping `#resolved` sorted by `ingestSeq`.
+   *
+   * Arrival order is *not* sequence order: a tally window releases its held rows
+   * when it closes, which is after later rows — an invalid envelope, a paid
+   * event — have already been resolved (spec §6.4). Sorting on insert is what
+   * keeps the commit's records ascending as `commitStateTransition` requires.
+   */
   #resolve(ingestSeq: number, result: string): void {
-    this.#resolved.push({ ingestSeq, result, at: this.#clock.nowUtcIso() })
+    const record: InboxProcessingRecord = { ingestSeq, result, at: this.#clock.nowUtcIso() }
+    let index = this.#resolved.length
+    while (
+      index > 0 &&
+      (this.#resolved[index - 1] as InboxProcessingRecord).ingestSeq > ingestSeq
+    ) {
+      index -= 1
+    }
+    this.#resolved.splice(index, 0, record)
   }
 
   /**
@@ -788,6 +941,29 @@ export class StateEngine {
       })
     }
     return records
+  }
+
+  /**
+   * The `eventKey → effectId` table of outstanding paid acknowledgements, after
+   * this commit.
+   *
+   * It is derived from the committed state rather than mutated alongside it: the
+   * entries are exactly the events the world still owes a substitute staging
+   * for, so the table cannot outlive the obligation and cannot grow without
+   * bound (spec §9.2).
+   */
+  #paidThanksEffectsFor(effects: readonly Effect[], state: WorldState): Map<string, string> {
+    const owed = new Set(state.audit.pendingThanks.map((pending) => pending.eventKey))
+    const next = new Map<string, string>()
+    for (const [eventKey, effectId] of this.#paidThanksEffects) {
+      if (owed.has(eventKey)) next.set(eventKey, effectId)
+    }
+    for (const effect of effects) {
+      if (!effect.paid || effect.causedByEventKey === null) continue
+      if (!owed.has(effect.causedByEventKey)) continue
+      next.set(effect.causedByEventKey, effect.effectId)
+    }
+    return next
   }
 
   #giftComboFor(
@@ -871,6 +1047,9 @@ export class StateEngine {
    */
   #degradedReasons(now: string): string[] {
     const reasons: string[] = []
+    // A writer that cannot finish a pass is not producing state at all, which is
+    // the strongest degraded condition this component can report (spec §9.2).
+    if (this.#consecutiveFailures > 0) reasons.push('writer_failing')
     if (this.#inputHealth !== 'ok') reasons.push(`input_${this.#inputHealth}`)
     if (this.#publisher.rendererCount === 0) reasons.push('no_renderer')
     else if (
@@ -955,7 +1134,7 @@ export class StateEngine {
           next: pendingDeadlines(this.#world),
           expired: plan.expired,
         }),
-        engineState: serializeEngineState(this.#world, this.#inputMode),
+        engineState: serializeEngineState(this.#world, this.#inputMode, this.#paidThanksEffects),
       })
       this.#revision = revision
       this.#lastCommittedAt = this.#clock.nowUtcIso()

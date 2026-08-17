@@ -75,12 +75,33 @@ function readMode(params: URLSearchParams, log: RendererLog): RendererMode {
   return 'broadcast'
 }
 
+/**
+ * The `/ws/renderer` URL, with the renderer token carried over from the page
+ * query string.
+ *
+ * The server authenticates the upgrade (spec §10.2), and an OBS Browser Source
+ * can only pass values through its URL, so the token arrives as `?token=` on the
+ * page and is forwarded to the socket URL. It is never logged and never stored:
+ * `config_token_missing` records the absence, not the value, and the renderer
+ * keeps nothing across a reload (spec §10.2, §12.4).
+ */
 function readWsUrl(params: URLSearchParams, log: RendererLog): string {
   const raw = params.get('ws')
-  if (raw === null) return DEFAULT_WS_URL
-  if (isLoopbackWebSocketUrl(raw)) return raw
-  log.warn('config_ws_rejected')
-  return DEFAULT_WS_URL
+  let base = DEFAULT_WS_URL
+  if (raw !== null) {
+    if (isLoopbackWebSocketUrl(raw)) base = raw
+    else log.warn('config_ws_rejected')
+  }
+  const token = params.get('token')
+  if (token === null || token === '') {
+    // Left as-is: the server refuses the upgrade with 4401 and the connection
+    // log says why. Inventing a token here would only hide the misconfiguration.
+    log.warn('config_token_missing')
+    return base
+  }
+  const url = new URL(base)
+  url.searchParams.set('token', token)
+  return url.toString()
 }
 
 function readRendererId(

@@ -6,6 +6,7 @@ import { SimulatorIngestEndpoint } from './engine/ingest.js'
 import { RendererHub } from './engine/publisher.js'
 import { loadInputConfig } from './input/config.js'
 import { defaultSecretProvider } from './secrets/resolve.js'
+import { requireSecret } from './secrets/types.js'
 import { createServer, DEFAULT_HOST, resolvePort } from './server.js'
 
 /**
@@ -25,19 +26,33 @@ const inputConfig = loadInputConfig()
 const port = resolvePort()
 const store = PersistenceStore.fromConfig({ clock: systemClock })
 
+const secrets = defaultSecretProvider()
+
+// The renderer API is loopback *and* authenticated (spec §10.2), so the token is
+// required to start: a server that silently accepted no renderer would look
+// healthy while the broadcast showed nothing.
+const rendererToken = await requireSecret(
+  secrets,
+  'server.rendererToken',
+  'set it with `npm run secrets -w @vl/server -- set server.rendererToken` and inject it into the OBS Browser Source URL (docs/ops/obs-setup.md)',
+)
+
 // The simulator token is only read when the endpoint is enabled: a production
 // broadcast never touches that credential (spec §10.2).
 const simulatorToken = config.simulator.enabled
-  ? ((await defaultSecretProvider().get('server.simulatorToken')) ?? null)
+  ? ((await secrets.get('server.simulatorToken')) ?? null)
   : null
 
 const ingest = new SimulatorIngestEndpoint({
-  store,
+  // Through the engine, not the store: that is where the storage-boundary
+  // sanitizer and the inbox notification live.
+  inbox: { ingest: (envelopes, checkpoint) => engine.ingest(envelopes, checkpoint) },
   enabled: config.simulator.enabled,
   token: simulatorToken,
   onIngested: () => {
-    engine.notifyIngest()
-    engine.runPending()
+    // `pump()` records a failed pass on `/health` instead of turning it into an
+    // unhandled rejection in the HTTP handler.
+    engine.pump()
   },
 })
 
@@ -53,6 +68,7 @@ const httpServer = createServer({
 const hub = new RendererHub({
   server: httpServer,
   clock: systemClock,
+  token: rendererToken,
   events: {
     onHello: (lastAppliedStateRevision) => {
       engine.onRendererHello(lastAppliedStateRevision)

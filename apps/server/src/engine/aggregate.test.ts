@@ -9,6 +9,7 @@ import {
   ingest,
   resetMessageIds,
   restartEngine,
+  superChatEnvelope,
   testInputConfig,
   type EngineHarness,
 } from './testing/harness.js'
@@ -52,7 +53,7 @@ describe('aggregate windows', () => {
   it('holds the overflow of a window and applies it once the window closes', async () => {
     harness.engine.start()
     const overflow = 5
-    ingest(harness.store, floodEnvelopes(window.maxDirectPerWindow + overflow))
+    ingest(harness.engine, floodEnvelopes(window.maxDirectPerWindow + overflow))
     await harness.clock.advance(1_000)
 
     harness.engine.runPending()
@@ -81,7 +82,7 @@ describe('aggregate windows', () => {
 
   it('switches the next window to aggregate mode and shows it on screen', async () => {
     harness.engine.start()
-    ingest(harness.store, floodEnvelopes(window.enterAggregateAtCommands))
+    ingest(harness.engine, floodEnvelopes(window.enterAggregateAtCommands))
     await harness.clock.advance(1_000)
     harness.engine.runPending()
 
@@ -89,7 +90,7 @@ describe('aggregate windows', () => {
     harness.engine.runPending()
 
     expect(harness.engine.health().inputMode).toBe('aggregate')
-    ingest(harness.store, floodEnvelopes(2, 'PLAY'))
+    ingest(harness.engine, floodEnvelopes(2, 'PLAY'))
     await harness.clock.advance(100)
     harness.engine.runPending()
 
@@ -103,7 +104,7 @@ describe('aggregate windows', () => {
   it('re-drains held commands after a restart instead of losing them', async () => {
     harness.engine.start()
     const overflow = 3
-    ingest(harness.store, floodEnvelopes(window.maxDirectPerWindow + overflow))
+    ingest(harness.engine, floodEnvelopes(window.maxDirectPerWindow + overflow))
     await harness.clock.advance(1_000)
     harness.engine.runPending()
     expect(harness.store.drainUnprocessed(0, 100)).toHaveLength(overflow)
@@ -118,10 +119,69 @@ describe('aggregate windows', () => {
     restarted.engine.stop()
   })
 
+  it('closes a window whose held rows sit below an already-resolved later row', async () => {
+    // The R-T8-1 blocker 1 reproduction: direct rows fill the window, two rows are
+    // held, and a paid event *after* them resolves first. The processing records
+    // must still reach the commit in ascending `ingestSeq` order, or T4 rejects
+    // the batch and the single writer retries the same order forever.
+    harness.engine.start()
+    const overflow = 2
+    ingest(harness.engine, floodEnvelopes(window.maxDirectPerWindow + overflow))
+    await harness.clock.advance(1_000)
+    harness.engine.runPending()
+    expect(harness.store.drainUnprocessed(0, 100)).toHaveLength(overflow)
+
+    ingest(harness.engine, [
+      superChatEnvelope({ messageId: 'msg_test_after_held', receivedAt: at(2_000) }),
+    ])
+    await harness.clock.advance(100)
+    harness.engine.runPending()
+
+    // The paid row is resolved but cannot advance the cursor past the held rows.
+    expect(harness.engine.health().processedIngestSeq).toBe(window.maxDirectPerWindow)
+    expect(harness.publisher.effects.some((effect) => effect.paid)).toBe(true)
+
+    await harness.clock.advance(window.windowMs + 1_000)
+    harness.engine.runPending()
+
+    expect(harness.engine.health().lastFailure).toBeNull()
+    expect(harness.engine.health().consecutiveFailures).toBe(0)
+    expect(harness.store.drainUnprocessed(0, 100)).toHaveLength(0)
+    expect(harness.engine.health().processedIngestSeq).toBe(
+      window.maxDirectPerWindow + overflow + 1,
+    )
+
+    // Not wedged: the next pass still makes progress.
+    await harness.clock.advance(60_000)
+    expect(harness.engine.runPending()).toBeGreaterThan(0)
+  })
+
+  it('reports a failed pass on /health instead of retrying it silently', async () => {
+    harness.engine.start()
+    // A publisher that throws stands in for any pass-level failure; the point is
+    // that `pump()` surfaces the reason rather than swallowing it (blocker 1).
+    harness.publisher.failNextPublish = true
+    ingest(harness.engine, floodEnvelopes(1))
+    await harness.clock.advance(1_000)
+
+    expect(harness.engine.pump()).toBe(0)
+
+    const health = harness.engine.health()
+    expect(health.consecutiveFailures).toBe(1)
+    expect(health.lastFailure?.error).toMatch(/publish failed/)
+    expect(health.degradedReasons).toContain('writer_failing')
+    expect(harness.engine.metrics().counters['writer_pass_failed']).toBe(1)
+
+    // And it clears once a pass completes, so the signal means "now", not "ever".
+    harness.publisher.failNextPublish = false
+    harness.engine.runPending()
+    expect(harness.engine.health().consecutiveFailures).toBe(0)
+  })
+
   it('preserves every contribution across the direct/aggregated split', async () => {
     harness.engine.start()
     const total = window.maxDirectPerWindow + 4
-    ingest(harness.store, floodEnvelopes(total))
+    ingest(harness.engine, floodEnvelopes(total))
     await harness.clock.advance(1_000)
     harness.engine.runPending()
     await harness.clock.advance(window.windowMs + 1_000)

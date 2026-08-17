@@ -1,11 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
+import type { Effect } from '@vl/contract'
+
 import {
   at,
   commandEnvelope,
   createEngineHarness,
   ingest,
   resetMessageIds,
+  restartEngine,
   superChatEnvelope,
   type EngineHarness,
 } from './testing/harness.js'
@@ -22,6 +25,11 @@ import {
  *    substitute acknowledgement, and none at all if the renderer confirmed the
  *    original.
  */
+
+/** The substitute acknowledgements among published effects (spec §9.2). */
+function fallbackStagings(effects: readonly Effect[]): Effect[] {
+  return effects.filter((effect) => effect.kind === 'PAID_THANKS' && effect.payload.fallback)
+}
 
 describe('degraded window', () => {
   let harness: EngineHarness
@@ -66,7 +74,7 @@ describe('degraded window', () => {
     await harness.clock.advance(1_000)
     harness.engine.runPending()
 
-    ingest(harness.store, [
+    ingest(harness.engine, [
       commandEnvelope({ messageId: 'msg_test_deg', command: 'FEED', receivedAt: at(2_000) }),
     ])
     await harness.clock.advance(1_000)
@@ -91,7 +99,7 @@ describe('degraded window', () => {
     await harness.clock.advance(1_000)
     harness.engine.runPending()
 
-    ingest(harness.store, [
+    ingest(harness.engine, [
       commandEnvelope({ messageId: 'msg_test_stale', command: 'PLAY', receivedAt: at(2_000) }),
     ])
     await harness.clock.advance(harness.config.engine.degraded.eventValidityMs + 60_000)
@@ -111,7 +119,7 @@ describe('degraded window', () => {
     await harness.clock.advance(1_000)
     harness.engine.runPending()
 
-    ingest(harness.store, [
+    ingest(harness.engine, [
       superChatEnvelope({ messageId: 'msg_test_paid_deg', receivedAt: at(2_000) }),
     ])
     // Longer than the original staging window, shorter than the free-command
@@ -129,9 +137,63 @@ describe('degraded window', () => {
     expect(harness.store.drainUnprocessed(0, 10)).toHaveLength(0)
   })
 
+  it('does not stage a substitute after a restart between the ACK and the commit', async () => {
+    // The R-T8-1 blocker 2 reproduction: `acked_at` is written immediately but the
+    // world's obligation is cleared by the next commit, and the process dies in
+    // between. The durable ACK — not the in-memory queue — has to decide.
+    harness.engine.start()
+    ingest(harness.engine, [
+      superChatEnvelope({ messageId: 'msg_test_ack_crash', receivedAt: at(1_000) }),
+    ])
+    await harness.clock.advance(1_000)
+    harness.engine.runPending()
+    const original = harness.publisher.effects.find((effect) => effect.paid)
+    expect(original?.payload).toMatchObject({ fallback: false })
+
+    harness.engine.onAckEffect(original?.effectId as string, at(1_100))
+    // No pass runs: the obligation is still in the persisted state.
+    const restarted = restartEngine(harness)
+    restarted.engine.start()
+    await restarted.clock.advance(restarted.config.tuning.paid.originalStagingWindowMs + 60_000)
+    restarted.engine.runPending()
+
+    expect(fallbackStagings(restarted.publisher.effects)).toHaveLength(0)
+    expect(restarted.engine.metrics().counters['paid_fallback_settled_by_ack']).toBe(1)
+    // The obligation is gone for good, so a later pass cannot revive it either.
+    await restarted.clock.advance(60_000)
+    restarted.engine.runPending()
+    expect(fallbackStagings(restarted.publisher.effects)).toHaveLength(0)
+    restarted.engine.stop()
+  })
+
+  it('closes the substitute obligation when the ACK precedes the window', async () => {
+    harness.engine.start()
+    ingest(harness.engine, [
+      superChatEnvelope({ messageId: 'msg_test_ack_race', receivedAt: at(1_000) }),
+    ])
+    await harness.clock.advance(1_000)
+    harness.engine.runPending()
+    const original = harness.publisher.effects.find((effect) => effect.paid)
+    expect(
+      harness.store.listPendingDeadlines().some((row) => row.kind === 'paid_thanks_fallback'),
+    ).toBe(true)
+
+    // ACK, then jump straight past the substitute window without a pass between.
+    harness.engine.onAckEffect(original?.effectId as string, at(1_100))
+    await harness.clock.advance(harness.config.tuning.paid.originalStagingWindowMs + 60_000)
+    harness.engine.runPending()
+
+    expect(fallbackStagings(harness.publisher.effects)).toHaveLength(0)
+    // The obligation is closed in the store as well as in memory, whichever of
+    // the two paths got there first (the queued clear, or the durable ACK check).
+    expect(
+      harness.store.listPendingDeadlines().some((row) => row.kind === 'paid_thanks_fallback'),
+    ).toBe(false)
+  })
+
   it('does not stage a substitute once the renderer confirmed the original', async () => {
     harness.engine.start()
-    ingest(harness.store, [
+    ingest(harness.engine, [
       superChatEnvelope({ messageId: 'msg_test_paid_ok', receivedAt: at(1_000) }),
     ])
     await harness.clock.advance(1_000)

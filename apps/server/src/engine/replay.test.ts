@@ -47,7 +47,7 @@ interface RunResult {
 
 async function runScenario(harness: EngineHarness): Promise<RunResult> {
   harness.engine.start()
-  ingest(harness.store, scenarioEnvelopes())
+  ingest(harness.engine, scenarioEnvelopes())
   // A fixed schedule: the same steps in the same order in both runs.
   for (const stepMs of [1_000, 1_000, 1_000, 1_000, 5 * 60_000, 10 * 60_000]) {
     await harness.clock.advance(stepMs)

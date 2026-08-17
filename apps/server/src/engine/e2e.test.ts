@@ -10,7 +10,7 @@ import { createTempStore, type TempStore } from '../db/testing/temp-store.js'
 import { createServer } from '../server.js'
 import { StateEngine } from './engine.js'
 import { SimulatorIngestEndpoint } from './ingest.js'
-import { RendererHub } from './publisher.js'
+import { RENDERER_UNAUTHORIZED_CLOSE_CODE, RendererHub } from './publisher.js'
 import {
   TEST_BROADCAST_ID,
   TEST_LIVE_CHAT_ID,
@@ -31,6 +31,7 @@ import {
  */
 
 const SIMULATOR_TOKEN = 'test_simulator_token_0001'
+const RENDERER_TOKEN = 'test_renderer_token_0001'
 const EVENT_COUNT = 20
 
 describe('engine end to end', () => {
@@ -44,12 +45,11 @@ describe('engine end to end', () => {
     temp = createTempStore({ clock: systemClock })
     const config = testEngineConfig()
     const ingest = new SimulatorIngestEndpoint({
-      store: temp.store,
+      inbox: { ingest: (envelopes, checkpoint) => engine.ingest(envelopes, checkpoint) },
       enabled: true,
       token: SIMULATOR_TOKEN,
       onIngested: () => {
-        engine.notifyIngest()
-        engine.runPending()
+        engine.pump()
       },
     })
     server = createServer({
@@ -60,6 +60,7 @@ describe('engine end to end', () => {
     hub = new RendererHub({
       server,
       clock: systemClock,
+      token: RENDERER_TOKEN,
       events: {
         onHello: (revision) => {
           engine.onRendererHello(revision)
@@ -100,7 +101,7 @@ describe('engine end to end', () => {
   })
 
   it('carries a simulator batch to the renderer and measures every leg', async () => {
-    const socket = new WebSocket(`${baseUrl.replace('http', 'ws')}/ws/renderer`)
+    const socket = new WebSocket(rendererUrl(baseUrl, RENDERER_TOKEN))
     const ackedEffects = new Set<string>()
     let ackedRevisions = 0
 
@@ -197,9 +198,53 @@ describe('engine end to end', () => {
     socket.close()
   }, 30_000)
 
+  it('refuses a renderer that presents no token or the wrong one (spec §10.2)', async () => {
+    engine.start()
+
+    for (const token of [null, 'wrong_token_0001', `${RENDERER_TOKEN}x`]) {
+      const socket = new WebSocket(rendererUrl(baseUrl, token))
+      const closeCode = await new Promise<number>((resolve, reject) => {
+        socket.once('close', resolve)
+        socket.once('error', reject)
+      })
+
+      expect(closeCode).toBe(RENDERER_UNAUTHORIZED_CLOSE_CODE)
+      // It never became a renderer, so it received nothing and cannot influence
+      // the degraded decision.
+      expect(hub.rendererCount).toBe(0)
+    }
+    expect(engine.health().rendererCount).toBe(0)
+  }, 15_000)
+
+  it('accepts the renderer that presents the vault token', async () => {
+    engine.start()
+    const socket = new WebSocket(rendererUrl(baseUrl, RENDERER_TOKEN))
+    const frames: string[] = []
+    socket.on('message', (data) => {
+      frames.push(String(data))
+    })
+    await new Promise<void>((resolve, reject) => {
+      socket.once('open', resolve)
+      socket.once('error', reject)
+    })
+    socket.send(
+      JSON.stringify({
+        schemaVersion: CONTRACT_VERSION,
+        type: 'hello',
+        rendererId: 'renderer_test_auth',
+        lastAppliedStateRevision: null,
+      }),
+    )
+    await waitFor(() => frames.length > 0)
+
+    expect(hub.rendererCount).toBe(1)
+    expect(frames.some((frame) => frame.includes('"type":"snapshot"'))).toBe(true)
+    socket.close()
+  }, 15_000)
+
   it('rejects a renderer frame that is not in the contract', async () => {
     engine.start()
-    const socket = new WebSocket(`${baseUrl.replace('http', 'ws')}/ws/renderer`)
+    const socket = new WebSocket(rendererUrl(baseUrl, RENDERER_TOKEN))
     await new Promise<void>((resolve, reject) => {
       socket.once('open', resolve)
       socket.once('error', reject)
@@ -215,6 +260,11 @@ describe('engine end to end', () => {
     socket.close()
   }, 15_000)
 })
+
+function rendererUrl(baseUrl: string, token: string | null): string {
+  const base = `${baseUrl.replace('http', 'ws')}/ws/renderer`
+  return token === null ? base : `${base}?token=${encodeURIComponent(token)}`
+}
 
 function commandBatchEnvelope(index: number): IngestEnvelope {
   return {

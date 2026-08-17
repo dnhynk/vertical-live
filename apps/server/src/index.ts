@@ -13,6 +13,8 @@ export * from './engine/index.js'
 export {
   SimulatorIngestEndpoint,
   isLoopbackAddress,
+  simulatorSourceKey,
+  type InboxWriter,
   type SimulatorIngestOptions,
   type SimulatorIngestRequest,
   type SimulatorIngestResponse,

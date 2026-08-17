@@ -12,6 +12,10 @@ export const SECRET_NAMES = [
   'youtube.streamKey',
   'server.adminToken',
   'server.simulatorToken',
+  // The renderer API is a loopback surface that spec §10.2 also requires to be
+  // *authenticated*: the OBS Browser Source presents this token on the
+  // `/ws/renderer` upgrade (T8, R-T8-1 blocker 3).
+  'server.rendererToken',
 ] as const
 
 export type SecretName = (typeof SECRET_NAMES)[number]

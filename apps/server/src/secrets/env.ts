@@ -17,6 +17,7 @@ export const SECRET_ENV_VARS: Readonly<Record<SecretName, string>> = {
   'youtube.streamKey': 'VL_YOUTUBE_STREAM_KEY',
   'server.adminToken': 'VL_ADMIN_TOKEN',
   'server.simulatorToken': 'VL_SIMULATOR_TOKEN',
+  'server.rendererToken': 'VL_RENDERER_TOKEN',
 }
 
 export class EnvSecretProvider implements SecretProvider {

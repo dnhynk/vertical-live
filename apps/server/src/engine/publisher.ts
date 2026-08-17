@@ -1,3 +1,4 @@
+import { timingSafeEqual } from 'node:crypto'
 import type { IncomingMessage, Server } from 'node:http'
 
 import {
@@ -20,11 +21,31 @@ import type { EnginePublisher } from './engine.js'
  * on, because the renderer is a read model that must recover from a server
  * snapshot alone (spec §10.2).
  *
- * The upgrade is loopback-only, like every other surface of this server
- * (spec §10.2): the renderer runs in OBS on the same host.
+ * The upgrade is loopback-only **and authenticated**, which spec §10.2 requires
+ * of both renderer and obs-websocket surfaces. Loopback alone is not access
+ * control on a desktop host: any other local process could otherwise subscribe
+ * to snapshots and send contract-valid ACK and health frames, which would let it
+ * drive the server's degraded decision (R-T8-1 blocker 3).
+ *
+ * The token travels in the query string because that is the only channel an OBS
+ * Browser Source has — it cannot set a header. The vault is authoritative for
+ * the value and the server injects it into the Browser Source URL at runtime
+ * (`SetInputSettings`, T12/T17), the same custody rule the stream key follows
+ * (BOARD A-16); `docs/ops/obs-setup.md` records that the URL is cached in the
+ * OBS scene collection on disk.
  */
 
 export const RENDERER_WS_PATH = '/ws/renderer'
+
+/** Query parameter carrying the renderer token on the upgrade request. */
+export const RENDERER_TOKEN_PARAM = 'token'
+
+/**
+ * Application close code for a refused renderer. 4000–4999 is the range
+ * RFC 6455 §7.4.2 reserves for private use, and a distinct code is what lets the
+ * renderer log "unauthorized" instead of retrying against a transport error.
+ */
+export const RENDERER_UNAUTHORIZED_CLOSE_CODE = 4401
 
 /** What the hub reports back to the engine (spec §7.3(7), §9.4(4)). */
 export interface RendererEvents {
@@ -44,6 +65,11 @@ export interface RendererHubOptions {
   readonly server: Server
   readonly clock: Clock
   readonly events: RendererEvents
+  /**
+   * `server.rendererToken` from the vault (T3). Required: an unset token closes
+   * the door rather than opening it, exactly like the simulator endpoint.
+   */
+  readonly token: string
   readonly logger?: Logger
   /** Liveness probe interval; the renderer answers with `renderer_health`. */
   readonly pingIntervalMs?: number
@@ -54,6 +80,7 @@ export class RendererHub implements EnginePublisher {
   readonly #clock: Clock
   readonly #events: RendererEvents
   readonly #logger: Logger
+  readonly #token: string
   readonly #sockets = new Set<WebSocket>()
   #lastHealth: RendererHealthReport | null = null
 
@@ -61,11 +88,12 @@ export class RendererHub implements EnginePublisher {
     this.#clock = options.clock
     this.#events = options.events
     this.#logger = options.logger ?? silentLogger
+    this.#token = options.token
     this.#wss = new WebSocketServer({ noServer: true })
 
     options.server.on('upgrade', (request, socket, head) => {
-      const { pathname } = new URL(request.url ?? '/', 'http://127.0.0.1')
-      if (pathname !== RENDERER_WS_PATH) {
+      const url = new URL(request.url ?? '/', 'http://127.0.0.1')
+      if (url.pathname !== RENDERER_WS_PATH) {
         socket.destroy()
         return
       }
@@ -75,10 +103,28 @@ export class RendererHub implements EnginePublisher {
         socket.destroy()
         return
       }
+      const authorized = this.#authorized(url.searchParams.get(RENDERER_TOKEN_PARAM))
       this.#wss.handleUpgrade(request, socket, head, (ws) => {
+        if (!authorized) {
+          // Closed before it is registered: it never counts as a renderer, never
+          // receives a snapshot, and none of its frames are read.
+          this.#logger.warn('renderer.unauthorized')
+          ws.close(RENDERER_UNAUTHORIZED_CLOSE_CODE, 'unauthorized')
+          return
+        }
         this.#attach(ws)
       })
     })
+  }
+
+  /** Constant-time comparison; an unconfigured token refuses every connection. */
+  #authorized(presented: string | null): boolean {
+    if (this.#token === '') return false
+    if (presented === null) return false
+    const offered = Buffer.from(presented)
+    const secret = Buffer.from(this.#token)
+    if (offered.length !== secret.length) return false
+    return timingSafeEqual(offered, secret)
   }
 
   get rendererCount(): number {

@@ -76,6 +76,8 @@ npm run secrets -w @vl/server -- list   # 이름과 설정 여부만 출력, 값
 
 Browser Source는 `shutdown=false`, `restart_when_active=false`로 두어 24시간 세션에서 스스로 페이지를 내리거나 재시작하지 않는다. 새로고침은 서버가 `PressInputPropertiesButton{propertyName:"refreshnocache"}`로 명시적으로 건다. `webpage_control_level=0`(None)이라 페이지가 OBS 내부에 접근하지 못한다.
 
+**렌더러 토큰(T8)**: `/ws/renderer`는 loopback 확인만으로는 부족해 인증을 요구한다(스펙 §10.2). Browser Source URL에 `&token=<server.rendererToken>`을 붙여야 연결이 유지되고, 없거나 틀리면 서버가 4401로 닫는다. 운영자가 URL에 손으로 값을 넣지 않는다 — 정본은 vault(`npm run secrets -w @vl/server -- set server.rendererToken`)이고, 서버가 기동 시 obs-websocket `SetInputSettings`로 URL에 주입한다(A-16의 stream key와 같은 custody 규칙, 주입 구현은 T12/T17). OBS가 씬 컬렉션 JSON에 그 URL을 캐시하는 것은 사실이므로 정지 시 제거·디렉터리 ACL도 stream key와 같이 T17에서 다룬다.
+
 > 렌더러 URL은 T5가 dev 서버(`:5173`)에서 빌드 서빙 주소로 바꿀 수 있다. 바뀌면 이 파일과 `ops/obs/scenes/vertical-live.json`을 같이 고친다.
 
 ### 스트림 키 — 운영자는 OBS UI에 입력하지 않는다

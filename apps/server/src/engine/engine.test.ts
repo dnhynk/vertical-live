@@ -47,7 +47,7 @@ describe('StateEngine', () => {
 
   it('applies a free command and advances the recovery cursor', async () => {
     harness.engine.start()
-    ingest(harness.store, [commandEnvelope({ command: 'FEED', receivedAt: at(1_000) })])
+    ingest(harness.engine, [commandEnvelope({ command: 'FEED', receivedAt: at(1_000) })])
     await harness.clock.advance(1_000)
 
     harness.engine.runPending()
@@ -64,7 +64,7 @@ describe('StateEngine', () => {
 
   it('advances invalid and unsupported envelopes with a reason (spec §7.3(3))', async () => {
     harness.engine.start()
-    ingest(harness.store, [
+    ingest(harness.engine, [
       invalidEnvelope({ receivedAt: at(1_000) }),
       unsupportedEnvelope({ receivedAt: at(1_100) }),
       commandEnvelope({ command: 'PET', receivedAt: at(1_200) }),
@@ -87,7 +87,7 @@ describe('StateEngine', () => {
       ...commandEnvelope({ command: 'FEED', receivedAt: at(1_000) }),
       command: null,
     }
-    ingest(harness.store, [envelope])
+    ingest(harness.engine, [envelope])
     await harness.clock.advance(1_000)
 
     harness.engine.runPending()
@@ -96,19 +96,19 @@ describe('StateEngine', () => {
     expect(harness.store.drainUnprocessed(0, 10)).toHaveLength(0)
   })
 
-  it('drops an argument the open choice window does not expect', async () => {
+  it('drops an argument outside the content vocabulary before it is stored', async () => {
     harness.engine.start()
-    ingest(harness.store, [
+    ingest(harness.engine, [
       commandEnvelope({ command: 'FEED', receivedAt: at(1_000), argument: 'not_a_choice' }),
     ])
     await harness.clock.advance(1_000)
 
     harness.engine.runPending()
 
-    expect(harness.engine.metrics().counters['command_argument_rejected']).toBe(1)
-    // The token is dropped, never stored: no committed effect payload carries it.
-    const payloads = JSON.stringify(harness.publisher.effects)
-    expect(payloads).not.toContain('not_a_choice')
+    // Dropped at the storage boundary, so the writer never sees it at all
+    // (`argument.test.ts` observes the row itself).
+    expect(harness.engine.metrics().counters['ingest_argument_dropped']).toBe(1)
+    expect(JSON.stringify(harness.publisher.effects)).not.toContain('not_a_choice')
   })
 
   it('keeps the world moving with no input at all (spec §2.1)', async () => {

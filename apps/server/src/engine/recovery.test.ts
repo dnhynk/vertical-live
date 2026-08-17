@@ -55,7 +55,7 @@ describe('restart recovery', () => {
     harness.engine.start()
 
     publisher.crash = true
-    ingest(harness.store, [
+    ingest(harness.engine, [
       superChatEnvelope({ messageId: 'msg_test_crash', receivedAt: at(1_000) }),
     ])
     await harness.clock.advance(1_000)
@@ -89,7 +89,7 @@ describe('restart recovery', () => {
   it('replays every open effect to a renderer that says hello', async () => {
     harness = createEngineHarness()
     harness.engine.start()
-    ingest(harness.store, [
+    ingest(harness.engine, [
       superChatEnvelope({ messageId: 'msg_test_hello', receivedAt: at(1_000) }),
     ])
     await harness.clock.advance(1_000)
@@ -109,7 +109,9 @@ describe('restart recovery', () => {
   it('records an effect whose window passed without an ACK as expired', async () => {
     harness = createEngineHarness()
     harness.engine.start()
-    ingest(harness.store, [superChatEnvelope({ messageId: 'msg_test_exp', receivedAt: at(1_000) })])
+    ingest(harness.engine, [
+      superChatEnvelope({ messageId: 'msg_test_exp', receivedAt: at(1_000) }),
+    ])
     await harness.clock.advance(1_000)
     harness.engine.runPending()
     const effect = harness.publisher.effects.find((it) => it.paid)

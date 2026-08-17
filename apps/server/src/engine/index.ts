@@ -6,6 +6,7 @@
  * in the server writes to `world_snapshot`, the effect outbox or the paid ledger.
  */
 export {
+  EngineInvariantError,
   StateEngine,
   giftBaseKey,
   nullPublisher,
@@ -15,6 +16,12 @@ export {
   type InputHealth,
   type StateEngineOptions,
 } from './engine.js'
+export {
+  STORABLE_COMMAND_ARGUMENTS,
+  sanitizeEnvelopeArgument,
+  sanitizeEnvelopeArguments,
+  type SanitizedEnvelope,
+} from './argument.js'
 export {
   EngineConfigError,
   loadEngineConfig,
@@ -41,6 +48,8 @@ export {
   type LatencySummary,
 } from './metrics.js'
 export {
+  RENDERER_TOKEN_PARAM,
+  RENDERER_UNAUTHORIZED_CLOSE_CODE,
   RENDERER_WS_PATH,
   RendererHub,
   type RendererEvents,

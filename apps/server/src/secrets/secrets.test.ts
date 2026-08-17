@@ -13,6 +13,7 @@ describe('EnvSecretProvider', () => {
       VL_YOUTUBE_STREAM_KEY: 'test-stream-key',
       VL_ADMIN_TOKEN: 'test-admin-token',
       VL_SIMULATOR_TOKEN: 'test-simulator-token',
+      VL_RENDERER_TOKEN: 'test-renderer-token',
     })
 
     for (const name of SECRET_NAMES) {

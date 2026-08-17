@@ -40,8 +40,8 @@ describe('paid integrity', () => {
   it('applies the same Super Chat once however often it is delivered', async () => {
     harness.engine.start()
     const envelope = superChatEnvelope({ messageId: 'msg_test_sc_dup', receivedAt: at(1_000) })
-    ingest(harness.store, [envelope])
-    ingest(harness.store, [envelope])
+    ingest(harness.engine, [envelope])
+    ingest(harness.engine, [envelope])
     await harness.clock.advance(1_000)
 
     harness.engine.runPending()
@@ -83,7 +83,7 @@ describe('paid integrity', () => {
       ],
     })
     harness.engine.start()
-    ingest(harness.store, [
+    ingest(harness.engine, [
       superChatEnvelope({ messageId: 'msg_test_sc_seeded', receivedAt: at(1_000) }),
     ])
     await harness.clock.advance(1_000)
@@ -99,7 +99,7 @@ describe('paid integrity', () => {
     harness.engine.start()
     const messageId = 'msg_test_gift_combo'
     for (const [index, comboCount] of [0, 1, 3, 5, 3].entries()) {
-      ingest(harness.store, [
+      ingest(harness.engine, [
         giftEnvelope({ messageId, comboCount, receivedAt: at(1_000 + index * 100) }),
       ])
     }
@@ -124,10 +124,10 @@ describe('paid integrity', () => {
   it('stages nothing for a combo step that arrives below the stored maximum', async () => {
     harness.engine.start()
     const messageId = 'msg_test_gift_late'
-    ingest(harness.store, [giftEnvelope({ messageId, comboCount: 5, receivedAt: at(1_000) })])
+    ingest(harness.engine, [giftEnvelope({ messageId, comboCount: 5, receivedAt: at(1_000) })])
     await harness.clock.advance(1_000)
     harness.engine.runPending()
-    ingest(harness.store, [giftEnvelope({ messageId, comboCount: 3, receivedAt: at(1_500) })])
+    ingest(harness.engine, [giftEnvelope({ messageId, comboCount: 3, receivedAt: at(1_500) })])
     await harness.clock.advance(1_000)
 
     harness.engine.runPending()
@@ -139,7 +139,7 @@ describe('paid integrity', () => {
 
   it('republishes a paid effect without writing a second outbox row', async () => {
     harness.engine.start()
-    ingest(harness.store, [
+    ingest(harness.engine, [
       superChatEnvelope({ messageId: 'msg_test_sc_restart', receivedAt: at(1_000) }),
     ])
     await harness.clock.advance(1_000)
@@ -162,7 +162,7 @@ describe('paid integrity', () => {
 
   it('acknowledges a paid effect once the renderer played it', async () => {
     harness.engine.start()
-    ingest(harness.store, [
+    ingest(harness.engine, [
       superChatEnvelope({ messageId: 'msg_test_sc_ack', receivedAt: at(1_000) }),
     ])
     await harness.clock.advance(1_000)

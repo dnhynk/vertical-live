@@ -13,6 +13,7 @@ import { loadInputConfig, type InputConfig } from '../../input/config.js'
 import { FakeClock } from '../../testing/fake-clock.js'
 import { loadEngineConfig, type EngineRuntimeConfig } from '../config.js'
 import { StateEngine, type EnginePublisher } from '../engine.js'
+import type { InboxWriter } from '../ingest.js'
 
 /**
  * Test harness for the state engine.
@@ -32,6 +33,8 @@ export const TEST_EPOCH_MS = Date.UTC(2026, 7, 16, 0, 0, 0)
 /** Records what the engine published and reports a settable renderer count. */
 export class RecordingPublisher implements EnginePublisher {
   rendererCount: number
+  /** Makes the next publish throw, standing in for a pass-level failure. */
+  failNextPublish = false
   readonly snapshots: WorldSnapshot[] = []
   readonly effects: Effect[] = []
 
@@ -40,10 +43,12 @@ export class RecordingPublisher implements EnginePublisher {
   }
 
   publishSnapshot(snapshot: WorldSnapshot): void {
+    if (this.failNextPublish) throw new Error('publish failed')
     this.snapshots.push(snapshot)
   }
 
   publishEffect(effect: Effect): void {
+    if (this.failNextPublish) throw new Error('publish failed')
     this.effects.push(effect)
   }
 
@@ -258,9 +263,13 @@ export const TEST_CHECKPOINT = {
   nextPageToken: null,
 }
 
-/** Commits envelopes the way a source adapter would (spec §7.3(2)). */
-export function ingest(store: PersistenceStore, envelopes: readonly IngestEnvelope[]): void {
-  store.commitIngestBatch(envelopes, TEST_CHECKPOINT)
+/**
+ * Commits envelopes the way a source adapter will (spec §7.3(2)) — through the
+ * engine, so every test goes past the storage-boundary argument sanitizer rather
+ * than around it (R-T8-1 blocker 4).
+ */
+export function ingest(inbox: InboxWriter, envelopes: readonly IngestEnvelope[]): void {
+  inbox.ingest(envelopes, TEST_CHECKPOINT)
 }
 
 /** ISO instant `millis` after the harness epoch. */
