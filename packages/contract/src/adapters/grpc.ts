@@ -1,3 +1,4 @@
+import type { CommandRef } from '../commands.js'
 import type { EventKind } from '../enums.js'
 import type { IngestEnvelope, PaymentDetails, ValidationErrorCode } from '../ingest.js'
 import { EXTERNAL_ID_PATTERN, toIsoUtcInstant } from '../primitives.js'
@@ -132,13 +133,15 @@ export function fromGrpcStreamListItem(item: unknown, ctx: IngestAdapterContext)
     return reject('MISSING_EVENT_DETAILS', `snippet.${binding.detailsField}`, messageId, typeToken)
   }
 
-  let commandText: string | null = null
+  let command: CommandRef | null = null
   let payment: PaymentDetails | null = null
 
   switch (binding.kind) {
     case 'CHAT_COMMAND': {
-      // Only free chat text reaches the parser; it is dropped right after.
-      commandText = readString(details, 'message_text')
+      // Free chat text is read, parsed and dropped inside this block: it is
+      // never carried further, not even in a TypeScript-only assembly field.
+      const text = readString(details, 'message_text')
+      command = text === null ? null : ctx.parseCommand(text)
       break
     }
     case 'SUPER_CHAT':
@@ -213,7 +216,7 @@ export function fromGrpcStreamListItem(item: unknown, ctx: IngestAdapterContext)
   }
 
   return buildValidEnvelope(
-    { messageId, kind: binding.kind, occurredAt, commandText, payment },
+    { messageId, kind: binding.kind, occurredAt, command, payment },
     ctx,
     'grpc',
   )

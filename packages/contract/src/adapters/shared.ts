@@ -1,4 +1,4 @@
-import type { CommandParser } from '../commands.js'
+import type { CommandParser, CommandRef } from '../commands.js'
 import type { EventKind, SourceShape } from '../enums.js'
 import {
   IngestEnvelopeSchema,
@@ -13,9 +13,10 @@ import { CONTRACT_VERSION } from '../version.js'
  *
  * Field *names* live in the shape-specific readers ([S4] proto snake_case in
  * `grpc.ts`, [S3] REST camelCase in `rest.ts`) and are never mixed. This module
- * only owns the policy that is identical for both: what an envelope may contain,
- * and that raw text is handed to the command parser instead of being stored
- * (spec §7.3(1)).
+ * only owns the policy that is identical for both: what an envelope may contain
+ * and how a source value is validated before it gets in. Raw chat text never
+ * reaches this module — each reader parses it and forwards only the resulting
+ * command (spec §7.3(1)).
  */
 
 export interface IngestAdapterContext {
@@ -33,14 +34,22 @@ export interface IngestAdapterContext {
   readonly parseCommand: CommandParser
 }
 
-/** Everything a reader must extract before an envelope can be assembled. */
+/**
+ * Everything a reader must extract before an envelope can be assembled.
+ *
+ * Every member is already normalized. In particular the reader parses free chat
+ * text inside its own shape reader and passes only the resulting command on, so
+ * no type in this package — including the TypeScript-only assembly types and
+ * the `.d.ts` files published from them — has a field that could carry raw chat
+ * (spec §7.3(1), §12.3).
+ */
 export interface NormalizedItemFacts {
   readonly messageId: string
   readonly kind: EventKind
   /** Canonical UTC instant derived from the platform publish time. */
   readonly occurredAt: string
-  /** Raw text of a free chat message, offered to the parser and then dropped. */
-  readonly commandText: string | null
+  /** Result of the injected parser, or `null` when nothing matched. */
+  readonly command: CommandRef | null
   readonly payment: PaymentDetails | null
 }
 
@@ -130,7 +139,6 @@ export function buildValidEnvelope(
   ctx: IngestAdapterContext,
   sourceShape: SourceShape,
 ): IngestEnvelope {
-  const command = facts.commandText === null ? null : ctx.parseCommand(facts.commandText)
   return IngestEnvelopeSchema.parse({
     schemaVersion: CONTRACT_VERSION,
     messageId: facts.messageId,
@@ -142,7 +150,7 @@ export function buildValidEnvelope(
     validationStatus: 'valid',
     kind: facts.kind,
     occurredAt: facts.occurredAt,
-    command,
+    command: facts.command,
     payment: facts.payment,
   })
 }

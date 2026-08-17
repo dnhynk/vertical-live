@@ -1,15 +1,20 @@
+import { readdirSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+
+import * as ts from 'typescript'
 import { describe, expect, it } from 'vitest'
 
 import { SCHEMA_DOCUMENTS } from './schema/registry.js'
 
 /**
  * TASK_SPECS §T1 acceptance 4: no type anywhere in the contract has an author,
- * display-name or channel-id field.
+ * display-name, channel-id or raw-text field.
  *
- * The check runs over the generated JSON Schema documents rather than over a
- * hand-written list of types, so it sees every nested object of every schema —
- * including anything a later change adds — and it fails on the property name
- * itself, before any value could ever be produced.
+ * Two surfaces are checked, because a value can travel through either. The
+ * generated JSON Schema documents cover everything that is validated or
+ * persisted at runtime, and the emitted TypeScript declarations cover the types
+ * consumers compile against — including the assembly types that never appear in
+ * a JSON Schema at all.
  */
 
 /**
@@ -38,6 +43,8 @@ const FORBIDDEN_NAME_PARTS = [
   'rawtext',
   'raw_text',
   'chattext',
+  'commandtext',
+  'command_text',
   'handle',
   'avatar',
   'email',
@@ -72,6 +79,74 @@ const PROPERTY_NAMES = new Map(
   SCHEMA_DOCUMENTS.map((doc) => [doc.fileName, collectPropertyNames(doc.document, new Set())]),
 )
 
+const SRC_DIR = fileURLToPath(new URL('.', import.meta.url))
+
+/** Every `.ts` of the package except the tests, which ship to nobody. */
+function sourceFiles(dir: string): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const path = `${dir}${entry.name}`
+    if (entry.isDirectory()) return sourceFiles(`${path}/`)
+    return entry.name.endsWith('.ts') && !entry.name.endsWith('.test.ts') ? [path] : []
+  })
+}
+
+/** Declaration forms whose name is part of the published type surface. */
+function isNamedTypeSurface(node: ts.Node): node is ts.NamedDeclaration {
+  return (
+    ts.isPropertySignature(node) ||
+    ts.isPropertyDeclaration(node) ||
+    ts.isMethodSignature(node) ||
+    ts.isMethodDeclaration(node) ||
+    ts.isGetAccessorDeclaration(node) ||
+    ts.isEnumMember(node) ||
+    ts.isInterfaceDeclaration(node) ||
+    ts.isTypeAliasDeclaration(node) ||
+    ts.isClassDeclaration(node) ||
+    ts.isFunctionDeclaration(node) ||
+    ts.isVariableDeclaration(node)
+  )
+}
+
+/**
+ * Emits the package's `.d.ts` in memory and returns every declared member and
+ * type name in them.
+ *
+ * Function *parameters* are deliberately not collected: `CommandParser` takes
+ * the chat line the T6 parser normalizes, which is the one place text is handed
+ * in rather than carried. Everything that can hold a value is collected.
+ */
+function collectDeclaredNames(): Set<string> {
+  const program = ts.createProgram(sourceFiles(SRC_DIR), {
+    target: ts.ScriptTarget.ES2023,
+    module: ts.ModuleKind.NodeNext,
+    moduleResolution: ts.ModuleResolutionKind.NodeNext,
+    strict: true,
+    skipLibCheck: true,
+    declaration: true,
+    emitDeclarationOnly: true,
+    noEmitOnError: false,
+  })
+
+  const found = new Set<string>()
+  const emitted: string[] = []
+  program.emit(undefined, (fileName, text) => {
+    if (!fileName.endsWith('.d.ts')) return
+    emitted.push(fileName)
+    const declaration = ts.createSourceFile(fileName, text, ts.ScriptTarget.ES2023, true)
+    const visit = (node: ts.Node): void => {
+      if (isNamedTypeSurface(node) && node.name !== undefined) {
+        found.add(node.name.getText(declaration).replaceAll(/['"]/g, ''))
+      }
+      ts.forEachChild(node, visit)
+    }
+    visit(declaration)
+  })
+  if (emitted.length === 0) throw new Error('no declaration files were emitted')
+  return found
+}
+
+const DECLARED_NAMES = collectDeclaredNames()
+
 describe('no identity field exists anywhere in the contract', () => {
   it('walks a non-trivial number of property names', () => {
     // Guards the walker itself: a bug that returned nothing would make every
@@ -94,6 +169,26 @@ describe('no identity field exists anywhere in the contract', () => {
     const document = SCHEMA_DOCUMENTS.find((doc) => doc.fileName === 'canonical-event.schema.json')
       ?.document as { properties?: Record<string, unknown> } | undefined
     expect(document?.properties?.actor).toEqual({ type: 'null' })
+  })
+
+  it('has no raw-text field in the emitted TypeScript declarations either', () => {
+    // The JSON Schema walker above cannot see a TypeScript-only type: an
+    // adapter assembly interface is compiled into `dist/**/*.d.ts` and shipped
+    // to every consumer without ever reaching a schema. So the declarations are
+    // emitted here — from source, so the check does not depend on a prior
+    // build — and every member and declaration name in them is checked.
+    const names = DECLARED_NAMES
+
+    // Guards the collector: an empty result would make the assertion vacuous.
+    expect(names.size).toBeGreaterThan(80)
+    for (const expected of ['NormalizedItemFacts', 'occurredAt', 'payment', 'parseCommand']) {
+      expect(names).toContain(expected)
+    }
+
+    const offenders = [...names].filter((name) =>
+      FORBIDDEN_NAME_PARTS.some((part) => name.toLowerCase().includes(part)),
+    )
+    expect(offenders).toEqual([])
   })
 
   it('closes every object so an identity field cannot be smuggled in', () => {
