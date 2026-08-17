@@ -24,7 +24,7 @@
 | T11 | 로컬 시뮬레이터·replay·지연 계측 | T5, T8 | — | pending | t11-simulator-replay | | `task_9470df5be9b8` |
 | T12 | supervisor 상태기계·건강 집계·kill switch·알림·dead-man | T2, T8, T9, T10 | — | pending | t12-supervisor | | `task_560530cfb813` |
 | T13 | 데이터 보존·삭제·철회 자동화 | T3, T4 | — | changes_requested | t13-data-policy | #10 | `task_15cd2ae24e82` |
-| T14 | 렌더러 화면 완성(5초 무음·감사 연출·i18n) | T5, T7 | — | dispatched | t14-renderer-screen | | `task_82f32652b3cf` |
+| T14 | 렌더러 화면 완성(5초 무음·감사 연출·i18n) | T5, T7 | — | in_review | t14-renderer-screen | #13 | `task_82f32652b3cf` |
 | T15 | fault matrix·72h soak harness | T11, T12, T13 | — | pending | t15-fault-soak | | `task_f32603eaee51` |
 | T16 | 문서 정합화·운영 런북·Gate 체크리스트 | T12 | — | pending | t16-docs-alignment | | `task_60d68899d24c` |
 | T17 | Windows 운영 스크립트(자동시작·OBS·아카이브) | T2, T12 | — | pending | t17-windows-ops | | `task_e2466b978ebe` |
@@ -129,3 +129,4 @@
 | 2026-08-17 16:20 | R-T13-1 verdict **request_changes**(blocker 2: 삭제 배치와 ledger 감사가 비원자, 무음 기본 sink; major 2: retention.json ingest_seq 누락·커버리지 검사 약함, derived-metric 가드 제외 범위; minor 1) → F-T13-1 `task_e016470f4c9f` → T13 터미널 `ctx_e9f2bb405ea1`. R-T10-1 진행 중(review2). 활성: T8·T14·F-T13-1 + 리뷰어 1 |
 | 2026-08-17 16:45 | R-T10-1 verdict **request_changes**(blocker 4: liveStreams.list 미지원 part(contentDetails), 부분 목록으로 insert 재시도, 한도 복구 시 stream/vault 불일치, stopBroadcast의 비-reconcile complete; major 2: health poll이 cdn 키 보관, 타임아웃 테스트 flaky; minor 2 incl. 003 재번호) → F-T10-1 `task_5c16b67e5fb2` → T10 터미널 `ctx_26bc18cc3661`. 활성: T8·T14·F-T13-1·F-T10-1(4 worker — fix 2건 포함, 리뷰어 0) |
 | 2026-08-17 17:05 | T8 worker_done(succeeded, PR #12: 단일 writer 엔진·WS hub·ACK 추적·degraded·지연 히스토그램·/ingest/simulator, 004 마이그레이션(engine_state), 1124 tests, 로컬 p95 41–67ms). R-T8-1 `task_f82d1e2b0327` → `ctx_e52848851ed0`(review). T9·T11은 PR #12 머지 후 디스패치 |
+| 2026-08-17 17:40 | F-T13-1 완료 → R-T13-2 `task_4cc9acc6512a` → `ctx_e1cf0c076958`(review2). T14 worker_done(succeeded, PR #13: 4슬롯 JP+아이콘+EN, 모드 배지, CTA·무료 문구, 익명 유료 감사, 변주, 원본 아이콘·크리처, 스크린샷 8장, 1083 tests; CTA 구성은 §T14가 고정하므로 T5의 우선순위 답 대체 — 정보 유실 없음). 리뷰 대기열: R-T8-1(review)·R-T13-2(review2) 진행 → R-T14-1 → R-T10-2 |
