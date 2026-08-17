@@ -1,0 +1,9 @@
+{
+  "bitrate": 6000,
+  "rate_control": "CBR",
+  "use_bufsize": false,
+  "keyint_sec": 0,
+  "preset": "veryfast",
+  "profile": "",
+  "tune": ""
+}
