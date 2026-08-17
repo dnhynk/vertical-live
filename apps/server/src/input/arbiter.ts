@@ -70,7 +70,11 @@ export interface AggregateWindowResult {
 export interface InputArbiterOptions {
   readonly clock: Clock
   readonly config: InputWindowConfig
-  /** Starting mode; `direct` per BOARD A-3. */
+  /**
+   * Starting mode; `direct` per BOARD A-3. T8 passes the recovered
+   * `WorldSnapshot.inputMode` here so a restart does not silently drop a
+   * running aggregate window back to direct (spec §10.2).
+   */
   readonly initialMode?: InputMode
 }
 
@@ -143,7 +147,8 @@ export class InputArbiter {
     this.#counts[command.name] += 1
     this.#accepted += 1
 
-    const applyDirectly = this.#mode === 'direct' && this.#directApplied < this.#config.maxDirectPerWindow
+    const applyDirectly =
+      this.#mode === 'direct' && this.#directApplied < this.#config.maxDirectPerWindow
     if (applyDirectly) {
       this.#directApplied += 1
     } else {
@@ -155,11 +160,6 @@ export class InputArbiter {
       command,
       windowSequence: this.#windowIndex,
     }
-  }
-
-  /** Closes any window that has come due without admitting anything. */
-  poll(): void {
-    this.#sync()
   }
 
   /**

@@ -59,9 +59,9 @@ describe('loadInputConfig', () => {
 
 describe('rejected configuration', () => {
   it('reports a missing file', () => {
-    expect(() => loadInputConfig({ configPath: join(tmpdir(), 'vl-missing.json'), env: {} })).toThrow(
-      InputConfigError,
-    )
+    expect(() =>
+      loadInputConfig({ configPath: join(tmpdir(), 'vl-missing.json'), env: {} }),
+    ).toThrow(InputConfigError)
   })
 
   it('reports a missing input section', () => {
@@ -74,7 +74,9 @@ describe('rejected configuration', () => {
     const path = writeConfig({
       input: { ...VALID.input, window: { ...VALID.input.window, windowMs: 'soon' } },
     })
-    expect(() => loadInputConfig({ configPath: path, env: {} })).toThrow(/windowMs must be an integer/)
+    expect(() => loadInputConfig({ configPath: path, env: {} })).toThrow(
+      /windowMs must be an integer/,
+    )
   })
 
   it('reports thresholds that cannot produce hysteresis', () => {

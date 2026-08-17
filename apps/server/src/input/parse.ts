@@ -1,4 +1,4 @@
-import { CommandRefSchema, type CommandName, type CommandRef } from '@vl/contract'
+import { CommandRefSchema, type CommandName } from '@vl/contract'
 
 import { matchAlias } from './aliases.js'
 import { moderate } from './moderation.js'
@@ -86,5 +86,5 @@ export function parseMessage(
     return reject('vote_disabled', true)
   }
 
-  return { status: 'accepted', command: command.data satisfies CommandRef, commandLike: true }
+  return { status: 'accepted', command: command.data, commandLike: true }
 }

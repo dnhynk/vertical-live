@@ -60,7 +60,10 @@ export function loadInputConfig(options: LoadInputConfigOptions = {}): InputConf
       'input.maxRawLength',
     ),
     window: Object.freeze({
-      windowMs: readPositiveInt(env['VL_INPUT_WINDOW_MS'] ?? window['windowMs'], 'input.window.windowMs'),
+      windowMs: readPositiveInt(
+        env['VL_INPUT_WINDOW_MS'] ?? window['windowMs'],
+        'input.window.windowMs',
+      ),
       enterAggregateAtCommands: readPositiveInt(
         env['VL_INPUT_ENTER_AGGREGATE_AT'] ?? window['enterAggregateAtCommands'],
         'input.window.enterAggregateAtCommands',

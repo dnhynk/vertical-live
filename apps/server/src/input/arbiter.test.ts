@@ -44,6 +44,16 @@ describe('direct mode', () => {
     expect(arbiter.mode).toBe('direct')
   })
 
+  it('resumes in the recovered mode when one is supplied', () => {
+    const arbiter = new InputArbiter({
+      clock: new FakeClock(),
+      config: CONFIG,
+      initialMode: 'aggregate',
+    })
+    expect(arbiter.mode).toBe('aggregate')
+    expect(arbiter.admit(command()).disposition).toBe('aggregated')
+  })
+
   it('applies commands in order up to the flood-control cap', () => {
     const { arbiter } = makeArbiter()
     const dispositions = Array.from({ length: 9 }, () => arbiter.admit(command()).disposition)

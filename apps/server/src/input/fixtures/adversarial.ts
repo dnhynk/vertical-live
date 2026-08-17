@@ -74,7 +74,11 @@ export const REJECTED_VECTORS: readonly RejectedVector[] = [
   { name: 'ads japanese', text: '無料配布 feed', reason: 'banned_ads_scam' },
   { name: 'ads separated', text: 'feed s-u-b-4-s-u-b', reason: 'banned_ads_scam' },
   // Shape: the allowlist is a command and at most one short token.
-  { name: 'command plus sentence', text: 'feed the creature now please', reason: 'extraneous_text' },
+  {
+    name: 'command plus sentence',
+    text: 'feed the creature now please',
+    reason: 'extraneous_text',
+  },
   { name: 'two commands', text: 'feed play', reason: 'extraneous_text' },
   { name: 'argument too long', text: `feed ${'a'.repeat(33)}`, reason: 'invalid_argument' },
   { name: 'argument with japanese', text: 'ごはん りんご', reason: 'invalid_argument' },
