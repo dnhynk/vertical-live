@@ -4,7 +4,9 @@ Prints the terminal handle and dispatch id.
 """
 import json, subprocess, sys, time, re
 ORCA = r"C:\Users\dongh\AppData\Local\Programs\orca\resources\bin\orca.exe"
-WT = "id:f5dd030a-828b-4bcc-b1b8-dc22b95053bf::C:/Users/dongh/orca/workspaces/vertical-live/review"
+REPO_ID = "f5dd030a-828b-4bcc-b1b8-dc22b95053bf"
+WT_NAME = sys.argv[3] if len(sys.argv) > 3 else "review"
+WT = f"id:{REPO_ID}::C:/Users/dongh/orca/workspaces/vertical-live/{WT_NAME}"
 CMD = 'codex -c model="gpt-5.6-sol" -c model_reasoning_effort="xhigh" -c service_tier="fast" --dangerously-bypass-approvals-and-sandbox'
 task_id, pr = sys.argv[1], sys.argv[2]
 
@@ -39,7 +41,7 @@ else:
     handle = None
     time.sleep(5)
     lst = run(["terminal", "list"])
-    cands = [t for t in lst.get("result", {}).get("terminals", []) if "vertical-live/review" in (t.get("worktreePath") or "")]
+    cands = [t for t in lst.get("result", {}).get("terminals", []) if f"vertical-live/{WT_NAME}" in (t.get("worktreePath") or "")]
     for t in cands:
         pv = t.get("preview") or ""
         if ("OpenAI Codex" in pv or "YOLO" in pv or "gpt-5.6-sol" in pv) and "dispatched worker" not in pv and "worker_done" not in pv and "Ran" not in pv:
