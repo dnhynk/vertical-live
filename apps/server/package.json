@@ -13,7 +13,8 @@
   },
   "scripts": {
     "build": "tsc --build",
-    "start": "node dist/main.js"
+    "start": "node dist/main.js",
+    "obs:probe": "tsc --build && node dist/obs/probe.js"
   },
   "dependencies": {
     "obs-websocket-js": "5.0.8"

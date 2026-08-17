@@ -76,6 +76,18 @@ export interface FakeObsState {
    * `GetStreamStatus` reads. 0 flips immediately.
    */
   startStreamLatencySamples: number
+  /**
+   * How much an active output accumulates between `GetStreamStatus` reads. All
+   * zero (the default) models a frozen output.
+   */
+  streamProgressPerSample: StreamProgressPerSample
+}
+
+export interface StreamProgressPerSample {
+  bytes: number
+  durationMs: number
+  totalFrames: number
+  skippedFrames: number
 }
 
 export interface ButtonPress {
@@ -160,6 +172,7 @@ function defaultState(): FakeObsState {
     obsWebSocketVersion: '5.6.3',
     platform: 'windows',
     startStreamLatencySamples: 0,
+    streamProgressPerSample: { bytes: 0, durationMs: 0, totalFrames: 0, skippedFrames: 0 },
   }
 }
 
@@ -377,14 +390,23 @@ export class FakeObsServer {
       case 'GetStats':
         return ok({ ...state.stats })
 
-      case 'GetStreamStatus':
+      case 'GetStreamStatus': {
         if (this.#pendingStartSamples > 0) {
           this.#pendingStartSamples -= 1
           if (this.#pendingStartSamples === 0) {
             state.streamStatus.outputActive = true
           }
         }
-        return ok({ ...state.streamStatus })
+        const before = { ...state.streamStatus }
+        if (state.streamStatus.outputActive) {
+          const step = state.streamProgressPerSample
+          state.streamStatus.outputBytes += step.bytes
+          state.streamStatus.outputDuration += step.durationMs
+          state.streamStatus.outputTotalFrames += step.totalFrames
+          state.streamStatus.outputSkippedFrames += step.skippedFrames
+        }
+        return ok(before)
+      }
 
       case 'GetVideoSettings':
         return ok({ ...state.videoSettings })
