@@ -30,5 +30,28 @@
       "reconnect",
       "thresholds"
     ]
+  },
+  "youtube": {
+    "auth": {
+      "credentialService": "vertical-live",
+      "loopbackHost": "127.0.0.1",
+      "loginTimeoutMs": 300000,
+      "accessTokenRefreshSkewMs": 120000,
+      "scopes": ["https://www.googleapis.com/auth/youtube.force-ssl"],
+      "provisional": ["loginTimeoutMs", "accessTokenRefreshSkewMs"]
+    },
+    "quota": {
+      "dailyUnits": 10000,
+      "resetTimeZone": "America/Los_Angeles",
+      "reserveUnits": 500,
+      "backoff": {
+        "initialDelayMs": 1000,
+        "maxDelayMs": 300000,
+        "factor": 2,
+        "jitterRatio": 0.2,
+        "maxAttempts": 8
+      },
+      "provisional": ["reserveUnits", "backoff"]
+    }
   }
 }
