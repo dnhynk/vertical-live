@@ -79,7 +79,7 @@ Gate 0/2 승인 전이므로 `provisional` config로 두고 잠기지 않은 값
 
 | # | 기준 | 상태 | 근거(테스트 파일·명령·출력) |
 |---|---|---|---|
-| 1 | matrix 모든 행이 자동 테스트로 존재하고 예상 상태와 일치 | met | 18행 전부: F-01~F-13·F-18은 `tools/soak/src/matrix/matrix.test.ts`(실제 supervisor·engine·store에 주입), F-14~F-17은 `tools/soak/src/matrix/crash-windows.test.ts`. 커버리지 자체를 `matrix.test.ts`의 `coverage > every fault matrix row has a drill`이 강제한다. `npx vitest run tools/soak` → **7 files, 44 tests passed** |
+| 1 | matrix 모든 행이 자동 테스트로 존재하고 예상 상태와 일치 | met | 18행 전부가 한 파일(`tools/soak/src/matrix/matrix.test.ts`)에서 실제 supervisor·engine·store에 주입되고, 행마다 `expectedState`를 관측한다. crash 행 5개(F-10, F-14~F-17)는 프로덕션 엔진을 띄운 자식 프로세스를 지정 경계에서 실제 `SIGKILL`한 뒤 그 파일 위에 supervisor를 다시 띄워 관측한다. 커버리지는 실행된 drill에서 도출한다(하드코딩 목록 없음). `npx vitest run tools/soak` → **6 files, 44 tests passed** |
 | 2 | 가속 soak가 CI에서 통과하고 리포트 산출 | met(로컬) / CI 미실행 | `npm run soak:ci` → 72.00h 시나리오를 53.6s에 완주, `verdict: PASS`, 리포트 인쇄 + `data/diagnostics/soak/accelerated.json`. `.github/workflows/ci.yml`에 `npm run soak:ci` 단계 추가. **CI에서는 실행하지 않았음: BOARD E-5(GitHub Actions 결제 차단)로 이 저장소의 모든 CI run이 2초 만에 실패한다.** 결제 복구 후 재확인 필요 |
 | 3 | 실시간 72h는 절차만 문서화 | met | `docs/ops/soak.md` §4(사용자 실행 절차·사전 호스트 시험·리포트 첨부·"24/7 검증 완료"라 쓰지 않기). 실행하지 않았음: §T15가 이 PR의 합격 조건에서 제외 |
 
@@ -145,8 +145,50 @@ CI(.github/workflows/ci.yml)                      → 실행하지 않았음: BO
   프로덕션 수정(예: 503 응답)은 T8/T11 소유라 이 PR에서 하지 않았다. `simulator.enabled`가
   기본 false라 프로덕션 노출은 없지만, Node의 기본 동작상 unhandled rejection은 프로세스를
   종료시킨다.
+- **[발견, T8 후속] 렌더러 ACK 경로도 store 실패를 가드하지 않는다.** `RendererHub`의 WS
+  메시지 핸들러가 `onAckEffect` → `markEffectAcked`를 부르는데(`publisher.ts`), 디스크가 꽉
+  찬 동안 그 쓰기가 `SQLITE_FULL`로 throw하면 잡는 곳이 없다. F-12 드릴에서 실제로
+  관측했고(round 1 수정 중), 드릴은 `SoakRenderer.pauseEffectAcks()`로 그 창 동안 ACK를
+  멈춰 writer pass 경로에 집중한다. 위의 `/ingest/simulator` 건과 같은 부류다.
 - Gate 0/2 승인 후 `config/default.json`의 `soak.thresholds` 7개를 잠근다. 코드 변경은 필요 없다.
 - T17이 OBS 재기동 액션을 배선하면 fault matrix F-09(재기동 미배선 → `safe_stopped`)를
   갱신한다. F-08/F-09 두 행이 그 전환을 이미 문서화한다.
 - 가속 모드의 지연 수치는 시나리오 시간이라 p95가 0으로 나온다. Gate 2 calibration 때
   실시간 모드로 다시 측정한다(§7.5).
+
+## Review round 1
+
+리뷰: PR #18 `## Verdict: request_changes` (blocker 2 · major 1 · minor 1). 수정 커밋
+`2948ce8` "test(ops): real process-boundary crashes, real disk-full, honest fault counting".
+
+| finding | 처리(고침 SHA / 반박 근거) |
+|---|---|
+| [blocker] `system.ts:454` — F-10 `crashHost()`가 실제 renderer/engine/store를 정상 종료한 뒤 engine을 쓰지 않는 raw-SQLite child만 `SIGKILL`한다. 복구 assertion이 정상 재시작만으로도 통과한다 | **고침 `2948ce8`.** crash child를 프로덕션 `PersistenceStore`+`StateEngine`을 그대로 띄우는 프로그램으로 교체했다(`injection/crash-child.ts`). `host-crash` 모드는 이벤트 3건을 처리해 상태를 commit하고 §6.4 창이 닫히길 기다린 뒤, 이어 받은 2건을 inbox에만 commit한 채(드레인 전) `Atomics.wait`로 스레드를 멈춘다. 부모가 그 상태로 `SIGKILL`한다. 그 뒤 (a) 디스크에 남은 것을 store로 직접 읽어 `processedIngestSeq=3`·미드레인 2건·마지막 commit 상태·engine state·checkpoint `token_undrained`를 확인하고 (b) **그 파일 위에** supervisor 포함 시스템을 새로 띄워 `expectedState=live` 관측 + 커서 아래 2건 재드레인(`processedIngestSeq=5`) + deadline 복원으로 세계가 계속 진행함을 확인한다(§11 상태 복구). child가 경계에 닿기 전에 스스로 종료하면 `crashChild()`가 reject하므로 crash 없이 통과할 수 없다 |
+| [blocker] `crash-windows.test.ts:29` — F-14~F-17이 예외/미ACK 대체 + 정상 `close()`, expected는 자기선언 확인, coverage 하드코딩 | **고침 `2948ce8`.** 네 경계 모두 같은 child가 **실제 `SIGKILL`**로 처리한다: `inbox-commit`은 `commitIngestBatch` 트랜잭션 안(행 삽입 뒤 checkpoint 시각 읽기 지점), `state-commit`은 ingest COMMIT 직후 writer pass 전, `effect-publish`는 상태 전이 COMMIT 직후 `publishSnapshot` 진입, `effect-ack`는 `markEffectPublished` commit 직후 `publishEffect` 진입. 각 드릴이 crash 후 디스크 상태를 검사한 뒤 그 파일 위에 시스템을 띄워 `row.expectedState`를 **관측**한다(`expect(system.supervisor.state).toBe(row.expectedState)`). `crash-windows.test.ts`는 삭제하고 18행을 `matrix.test.ts` 한 파일로 합쳐, coverage를 실행된 drill 집합에서 도출한다(`elsewhere` 하드코딩 제거) |
+| [major] `injection/storage.ts:119` — F-12가 throwaway DB의 `SQLITE_FULL`을 Proxy로 재던져 실제 store 트랜잭션이 돌지 않는다 | **고침 `2948ce8`.** Proxy와 `captureDiskFullError`를 삭제했다. `max_page_count`가 연결별이고 파일에 저장되지 않음을 측정으로 확인한 뒤(`conn A cap 5` → `conn B cap 4294967294`), `openDatabase`를 감싸 **프로덕션 store가 연 그 연결**을 포착하고 `VACUUM` 후 `max_page_count`를 현재 페이지 수로 낮춘다. 드릴은 미처리 200건을 inbox에 남긴 상태에서 채우므로 (a) 실제 writer pass가 `database or disk is full`로 실패하고 (b) 실제 `store.commitIngestBatch(64건)`가 SQLite가 낸 `SQLITE_FULL`로 실패한다. 원자성은 그 배치의 행 0건·checkpoint 토큰 무변경으로, 데이터 보존은 디스크 revision == 엔진 revision으로 확인한다. `freeDisk()` 후 `live` 복구까지 관측한다 |
+| [minor] `soak/run.ts:273` — 종료 경계에서 fault를 주입·카운트하고 관측이 없다 | **고침 `2948ce8`.** 남은 slice가 `holdSlices + 1` 미만이면 주입하지 않고 `faultsSkipped`에 기록한 뒤 그 run에서는 더 시도하지 않는다. 리포트에 `faults skipped (no room)` 줄이 생겼다. 이번 72h run에서 정확히 72h에 걸리던 F-08이 injected 24 → injected 23 + skipped 1로 정직해졌다 |
+| [scope] ticket `## Result` 정직성 — 18/18 drill·SIGKILL·system `SQLITE_FULL` 근거가 구현과 불일치 | **고침 `2948ce8`.** 위 세 건이 구현으로 참이 됐고, 합격 기준 1의 근거 문장을 실제 구성(한 파일 18행, 실제 `SIGKILL`, 실행에서 도출한 coverage)으로 다시 썼다 |
+
+### Round 1 후 게이트 (로컬)
+
+```text
+git fetch origin && git rebase origin/main  -> Successfully rebased (5 commits)
+npm run format:check                        -> All matched files use Prettier code style!
+npm run lint                                -> eslint ok; no-legacy-imports 0; install-scripts 4
+npm run typecheck                           -> tsc --build, 오류 없음
+npm run test                                -> 136 files, 1871 passed | 1 skipped (1872), 45.36s
+npm run build                               -> 전 workspace 성공
+npm run soak:ci                             -> 72.00h in 1.0m, verdict PASS, exit 0
+                                               faults injected 23 + skipped 1 (no room)
+npx vitest run tools/soak                   -> 6 files, 44 tests passed
+CI(.github/workflows/ci.yml)                -> 실행하지 않았음: BOARD E-5 결제 차단
+```
+
+### Round 1에서 새로 확인한 사실
+
+- Node 24는 TypeScript type stripping이 기본이라, 작은 resolve hook(workspace 이름→`src/`
+  진입점, `./x.js`→`./x.ts`)만 있으면 자식 프로세스가 **빌드 없이** 프로덕션 엔진을 그대로
+  띄울 수 있다. CI가 `npm run test`를 `npm run build`보다 먼저 돌리므로 이 점이 crash 행을
+  진짜 process-boundary crash로 만들 수 있게 한 조건이다.
+- `PRAGMA max_page_count`는 연결별이며 파일에 저장되지 않는다(측정 확인). 그래서 store가
+  연 연결을 포착하는 것 말고는 프로덕션 트랜잭션을 진짜 disk-full로 실패시킬 방법이 없다.

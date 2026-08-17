@@ -41,6 +41,17 @@ F-06 DNS 단절, F-13 WebGL context loss, F-04 API 429, F-11 DB lock, F-08 OBS p
 crash). soak이 재는 것은 무인 지속성이므로 `safe_stopped` 행을 넣으면 설계대로 운전이
 끝나 버립니다. 그 행들은 `tools/soak/src/matrix/matrix.test.ts`가 따로 확인합니다.
 
+남은 시나리오 시간이 고장을 붙잡고(`holdSlices`) **관측까지** 하기에 모자라면 그 고장은
+주입하지 않고 리포트의 `faults skipped (no room)`에 적습니다. 마지막 slice에 넣고 관측
+없이 끝내면 `faults injected`가 실제 drill보다 많아 보이기 때문입니다.
+
+crash 행(F-10, F-14~F-17)은 soak 스케줄이 아니라 matrix 드릴에서 돕니다. 자식 프로세스가
+프로덕션 `PersistenceStore`·`StateEngine`을 그대로 띄워 지정한 commit 경계에서 스레드를
+멈추고 부모가 `SIGKILL`합니다. 그 자식은 Node 24의 TypeScript type stripping과
+`tools/soak/src/injection/child-resolve.mjs`(workspace 이름→`src/` 진입점, `./x.js`→`./x.ts`)
+로 **빌드 없이** 소스를 불러옵니다 — CI가 `npm run test`를 `npm run build`보다 먼저 돌리기
+때문에 `dist/`에 기댈 수 없습니다.
+
 ## 3. 설정 (`config/default.json`의 `soak` 절)
 
 ```jsonc
