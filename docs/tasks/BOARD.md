@@ -24,7 +24,7 @@
 | T11 | 로컬 시뮬레이터·replay·지연 계측 | T5, T8 | — | pending | t11-simulator-replay | | `task_9470df5be9b8` |
 | T12 | supervisor 상태기계·건강 집계·kill switch·알림·dead-man | T2, T8, T9, T10 | — | pending | t12-supervisor | | `task_560530cfb813` |
 | T13 | 데이터 보존·삭제·철회 자동화 | T3, T4 | — | merged | t13-data-policy | #10 | `task_15cd2ae24e82` |
-| T14 | 렌더러 화면 완성(5초 무음·감사 연출·i18n) | T5, T7 | — | changes_requested | t14-renderer-screen | #13 | `task_82f32652b3cf` |
+| T14 | 렌더러 화면 완성(5초 무음·감사 연출·i18n) | T5, T7 | — | merged | t14-renderer-screen | #13 | `task_82f32652b3cf` |
 | T15 | fault matrix·72h soak harness | T11, T12, T13 | — | pending | t15-fault-soak | | `task_f32603eaee51` |
 | T16 | 문서 정합화·운영 런북·Gate 체크리스트 | T12 | — | pending | t16-docs-alignment | | `task_60d68899d24c` |
 | T17 | Windows 운영 스크립트(자동시작·OBS·아카이브) | T2, T12 | — | pending | t17-windows-ops | | `task_e2466b978ebe` |
@@ -136,3 +136,4 @@
 | 2026-08-17 19:55 | R-T10-2 verdict request_changes(round 1 8건 해소 확인, 신규 blocker 1: scheduledStartTime만으로 reconcile 채택 → 충돌 저항 attempt 마커 필요; minor 2 문서) → F-T10-2 `task_f5b33d1e0cb2` → T10 터미널. 진행: R-T13-3(review2), F-T8-1, F-T14-1, F-T10-2 |
 | 2026-08-17 20:15 | R-T13-3 verdict **approve** → 최종 게이트 → **PR #10 squash merge**(main afc7018; 마이그레이션 002 확정). T13 worker release·worktree 제거. F-T14-1 완료 → R-T14-2 `task_7100bf58dfb6` → `ctx_7c1b153d8fbe`(review). 진행: F-T8-1, F-T10-2 |
 | 2026-08-17 20:45 | F-T8-1 완료(6건: 커서 정렬+writer 실패 표면화, ACK 기반 fallback 판정, /ws/renderer 토큰 인증(server.rendererToken vault)+렌더러 URL 토큰, argument 저장 전 제거, simulator 네임스페이스, lockfile; 1237 tests). R-T8-2 `task_6520ad3218be` → `ctx_04aa60c68e6c`(review2). 진행: R-T14-2(review), F-T10-2 |
+| 2026-08-17 21:00 | R-T14-2 verdict **approve** → 최종 게이트(ASSETS.md만 렌더러 밖, 금지 패턴 0, ja.json pending) → **PR #13 squash merge**(main a5cb885). T14 worker release·worktree 제거. 남은 open PR: #11(T10, F-T10-2 진행), #12(T8, R-T8-2 진행). 머지 후 대기: T9·T11(T8), T12(T2✓·T8·T9·T10), T15, T16, T17 |
