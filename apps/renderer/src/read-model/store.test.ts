@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest'
 
 import { FakeClock } from '../testing/fakes'
-import { sampleActionEffect, samplePaidThanksEffect, sampleSnapshot } from '../testing/fixtures'
+import {
+  sampleActionEffect,
+  sampleDeadlineEffect,
+  samplePaidThanksEffect,
+  sampleSnapshot,
+} from '../testing/fixtures'
 import { RendererLog } from './log'
 import { ReadModel, type AckSink } from './store'
 
@@ -113,6 +118,20 @@ describe('ReadModel effects (spec §7.3(7), §9.2)', () => {
     expect(harness.model.receiveEffect(paid)).toBe('repeat')
     expect(harness.model.effectStartCount).toBe(1)
     expect(harness.model.snapshot).toBeNull()
+  })
+
+  it('treats a timer-caused effect like any other (T1b, BOARD A-17)', () => {
+    const harness = createHarness()
+    const deadlineEffect = sampleDeadlineEffect()
+    expect(deadlineEffect.causedByEventKey).toBeNull()
+
+    expect(harness.model.receiveEffect(deadlineEffect)).toBe('started')
+    harness.model.markCommitted()
+    harness.model.markFramePresented()
+
+    expect(harness.effectAcks.map((ack) => ack.effectId)).toEqual(['sample-effect-ambience-1'])
+    expect(harness.model.receiveEffect(deadlineEffect)).toBe('repeat')
+    expect(harness.model.effectStartCount).toBe(1)
   })
 
   it('does not play or ack an effect whose window already closed', () => {

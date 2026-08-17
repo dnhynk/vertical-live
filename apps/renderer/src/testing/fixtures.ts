@@ -70,6 +70,7 @@ export function sampleActionEffect(overrides: Record<string, unknown> = {}): Eff
   return EffectSchema.parse({
     schemaVersion: CONTRACT_VERSION,
     effectId: 'sample-effect-action-1',
+    cause: { kind: 'event', eventKey: SAMPLE_EVENT_KEY },
     causedByEventKey: SAMPLE_EVENT_KEY,
     stateRevision: 1,
     startsAt: '2026-08-17T00:00:00.000Z',
@@ -85,6 +86,7 @@ export function samplePaidThanksEffect(overrides: Record<string, unknown> = {}):
   return EffectSchema.parse({
     schemaVersion: CONTRACT_VERSION,
     effectId: 'sample-effect-paid-1',
+    cause: { kind: 'event', eventKey: SAMPLE_EVENT_KEY },
     causedByEventKey: SAMPLE_EVENT_KEY,
     stateRevision: 1,
     startsAt: '2026-08-17T00:00:00.000Z',
@@ -97,6 +99,27 @@ export function samplePaidThanksEffect(overrides: Record<string, unknown> = {}):
       tier: 2,
       fallback: false,
     },
+    ...overrides,
+  })
+}
+
+/**
+ * Timer-caused staging: `cause.kind === 'deadline'` and no event key (T1b,
+ * BOARD A-17). Content keeps moving with zero viewers (spec §2.1, §6.2), so the
+ * renderer must treat this exactly like any other effect.
+ */
+export function sampleDeadlineEffect(overrides: Record<string, unknown> = {}): Effect {
+  return EffectSchema.parse({
+    schemaVersion: CONTRACT_VERSION,
+    effectId: 'sample-effect-ambience-1',
+    cause: { kind: 'deadline', deadlineKind: 'sample-weather-turn' },
+    causedByEventKey: null,
+    stateRevision: 1,
+    startsAt: '2026-08-17T00:00:00.000Z',
+    endsAt: '2026-08-17T00:00:04.000Z',
+    paid: false,
+    kind: 'AMBIENCE',
+    payload: { ambienceId: 'sample-ambience' },
     ...overrides,
   })
 }
