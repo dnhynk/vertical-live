@@ -28,7 +28,7 @@
 | T15 | fault matrix·72h soak harness | T11, T12, T13 | — | changes_requested | t15-fault-soak | #18 | `task_f32603eaee51` |
 | T16 | 문서 정합화·운영 런북·Gate 체크리스트 | T12 | — | changes_requested | t16-docs-alignment | #19 | `task_60d68899d24c` |
 | T17 | Windows 운영 스크립트(자동시작·OBS·아카이브) | T2, T12 | — | changes_requested | t17-windows-ops | #17 | `task_e2466b978ebe` |
-| T8b | 엔진 버그픽스: /ingest/simulator inbox write 예외 시 hang(T15 발견) | T8 | — | dispatched | t8b-ingest-hang | | `task_f1aeb51337bf` |
+| T8b | 엔진 버그픽스: /ingest/simulator inbox write 예외 시 hang(T15 발견) | T8 | — | in_review | t8b-ingest-hang | #20 | `task_f1aeb51337bf` |
 
 디스패치 순서 원칙: `ready` 중 T-ID 낮은 것부터, 동시 2, `[contract]`는 하나만. 리뷰 Task는 `R-<T-ID>-<round>`로 별도 등록하고 아래 이력에만 남긴다.
 
@@ -178,3 +178,4 @@
 | 2026-08-17 18:25 | T16 worker_done(succeeded, PR #19: README·ROADMAP 재작성, 런북 상충 10건 정정, ops 문서 4종 신설, CLAUDE.md/AGENTS.md 2줄; .md만). 발견: `review` worktree에 잔여 codex 터미널 18개(close가 tab_not_found로 실패해 온 누적) → `orca terminal stop --worktree` 로 정리, 런북에 기록 예정. R-T16-1 첫 터미널 exited → 재생성 `task_e5c9cf0c8737` → `ctx_1c043e9d3647`(review). **T8b 디스패치** `ctx_8691c39fdcf8`. 진행: R-T15-1(review2), F-T17-1 |
 | 2026-08-17 18:34 | F-T17-1 완료(realpath 판정·REFUSED·TOCTOU 재검사, 런처가 서버 로더 결과 사용, 준비 판정 /health·200·PID 검사; 1818 tests). R-T15-1 verdict request_changes(blocker 2: F-10이 실제 엔진을 죽이지 않음, F-14~17 SIGKILL 미주입·expectedState 미관측; major: F-12 disk-full이 Proxy 재던짐; minor 종료 경계 카운트) → F-T15-1 `task_dcc4a35d7178` → T15 터미널. R-T17-2 `task_600cbbe2cd5c` → `ctx_12a3de9ea53b`(review2). 진행: R-T16-1(review), T8b |
 | 2026-08-17 18:37 | R-T16-1 verdict request_changes(blocker 3: 무출처 플랫폼 주장, README dev bind 불일치, Gate 2 지연 계측 설명 오류; major 2: kill 명령 오기, Gate 0 '양쪽 구현' 과장; minor 도구 마커 9파일) → F-T16-1 `task_3ad89ea6c5d9` → T16 터미널. 진행: R-T17-2(review2), F-T15-1, T8b |
+| 2026-08-17 18:41 | T8b worker_done(succeeded, PR #20: ingest 실패 분류→503/500, server.ts fail-closed net, 재현 테스트; 1732 tests). R-T8b-1 `task_4a21ac8e6e03` → `ctx_8831ae1c5c06`(review). 진행: R-T17-2(review2), F-T15-1, F-T16-1 |
