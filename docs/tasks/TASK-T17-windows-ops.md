@@ -65,7 +65,7 @@
 
 | # | 기준 | 상태 | 근거 |
 |---|---|---|---|
-| 1 | 스크립트 dry-run 모드와 단위 테스트(경로·용량 계산·삭제 대상 선정) | **met** | dry run: `Register/Unregister/Start-VerticalLive.ps1 -WhatIf` 3종 실행(아래 Result 1), `node apps/server/dist/bin/archive.js`(기본이 dry run) 실행(Result 2), `obs-launch.js --dry-run` 실행(Result 2). 단위 테스트: 경로 `sweep.test.ts`("resolves relative roots…", "rejects paths outside the root…", "drops a listed path that is not inside its root", "matches extensions case-insensitively…") · 용량 계산 `plan.test.ts`("fits under maxTotalBytes", "until the volume has minFreeBytes again", "reports rules it cannot satisfy") · 삭제 대상 선정 `plan.test.ts`("deletes files older than the retention window", "names the rule that condemned each file", "never proposes a file that may still be open for writing", "orders equal timestamps by path") · dry-run 기본값 `cli.test.ts`("is a dry run unless apply is asked for", "deletes nothing without --apply"). 아카이브 관련 60 tests |
+| 1 | 스크립트 dry-run 모드와 단위 테스트(경로·용량 계산·삭제 대상 선정) | **met** | dry run: `Register/Unregister/Start-VerticalLive.ps1 -WhatIf` 3종 실행(아래 Result 1), `node apps/server/dist/bin/archive.js`(기본이 dry run) 실행(Result 2), `obs-launch.js --dry-run` 실행(Result 2). 단위 테스트: 경로 `sweep.test.ts`("resolves relative roots…", "rejects paths outside the root…", "drops a listed path that is not inside its root", "matches extensions case-insensitively…") · 용량 계산 `plan.test.ts`("fits under maxTotalBytes", "until the volume has minFreeBytes again", "reports rules it cannot satisfy") · 삭제 대상 선정 `plan.test.ts`("deletes files older than the retention window", "names the rule that condemned each file", "never proposes a file that may still be open for writing", "orders equal timestamps by path") · dry-run 기본값 `cli.test.ts`("is a dry run unless apply is asked for", "deletes nothing without --apply") · **실제 링크 경로 `sweep.test.ts`("runArchiveSweep against real links (review round 1, B1)" 3건 + nodeArchiveFs junction 1건, round 2 추가)**. `apps/server/src/ops/archive` 4 파일 **56 tests**, `apps/server/src/ops` 전체 6 파일 76 tests (round 1 m1 정정: 이전 표기 "60"은 archive가 아니라 ops 전체 수였고 그마저도 지금은 76이다) |
 | 2 | 이 PC에서 자동시작 등록·해제 실행 로그 첨부(가능하면), 아니면 "실행하지 않았음" | **met** | Result 3에 `schtasks /Create` → `/Query`(`Logon Mode: Interactive only`) → `/Delete` → `/Query`(없음) 전체 출력. **등록·해제 1사이클만 실행했고 호스트에 영구 변경은 남기지 않았다**(코디네이터 승인 조건 4에 따라 자동시작을 켜 두지 않았다) |
 
 범위 항목 대조:
@@ -218,3 +218,79 @@ $ npm run build                                   -> 전 워크스페이스 성�
 - **T16**: `docs/ops/runbook-operations.md`에서 시작·정지 절차를 이 문서로 연결.
 - 아카이브 스위퍼는 지금 스케줄된 task로만 돈다. 서버 프로세스 안에서도 돌릴 필요가 관측되면 `RetentionScheduler`(T13)와 같은 형태로 추가할 수 있다 — 지금은 서버가 죽어 있을 때도 도는 편이 낫다고 판단했다.
 - 여러 볼륨에 걸친 루트: 현재는 가장 빡빡한 여유공간 값을 쓴다(같은 볼륨 가정). 실제로 분리하면 볼륨별 계획으로 나눠야 한다.
+
+## Review round 1
+
+리뷰: PR #17 코멘트 `#4953245845`(verdict `request_changes`). 리뷰어는 게이트 5개를 직접 실행해 전부 pass를 확인했고, 합격 기준 2(등록·해제 사이클)도 독립적으로 재현했다. 합격 기준 1은 **삭제 경계가 실제로는 뚫린다**는 이유로 unmet 판정.
+
+| finding | 처리(고침 SHA / 반박 근거) |
+|---|---|
+| [blocker] `apps/server/src/ops/archive/sweep.ts:222` — `listFiles()`가 순회 **내부**의 심볼릭 링크만 걸러서, 설정된 root 자체가 junction이면 대상 파일을 lexical link 경로 아래로 보고하고 `--apply`가 그것을 지운다. 리뷰어 재현: dry run이 `configured-root\victim.mkv` 1개를 선택했고 apply 후 `outsideVictimExistsAfterApply=false` | **고침 `07006b6`.** 판정을 전부 **정규 경로**로 옮겼다. (1) `ArchiveFsPort`에 `isLink()`·`realPath()` 추가, `lstat`을 못 읽으면 **링크로 간주**(답을 못 하는 검사는 허용이 아니라 거부). (2) root가 reparse point면 스캔하지 않고 `REFUSED (reparse_point)`로 보고 — 링크가 가리키는 곳은 config로 검토할 수 없으므로 운영자가 승인한 삭제가 아니다. 정규 경로를 못 읽는 root는 `unresolvable`. (3) 항목은 `realpath` 후 정규 root와 비교하고, **삭제 직전에 같은 검사를 다시** 한다(스캔↔삭제 사이 교체 = TOCTOU) — 실패 시 삭제 대신 `path_escaped_root`로 보고. (4) 삭제·보고 경로는 검사한 정규 경로 그 자체. (5) refused root는 CLI exit 1. **테스트**: `sweep.test.ts`의 `runArchiveSweep against real links (review round 1, B1)` 3건이 `nodeArchiveFs`로 실제 junction/symlink를 만들어 검증하고(리뷰어가 지적한 fake `../` 케이스와 별개), `nodeArchiveFs`가 junction을 링크로 보고하는지도 확인한다. TOCTOU·unresolvable·정규경로 이탈은 주입 fs로 4건. 리뷰어 시나리오 실측 재현은 아래 Result 4-1 |
+| [major] `ops/windows/Start-VerticalLive.ps1:120` — raw `config/default.json`을 읽어 `VL_OBS_PROCESS_ENABLED`·`VL_RENDERER_STATIC_PORT/HOST`·`VL_OBS_URL`을 무시. `VL_OBS_PROCESS_ENABLED=true`로도 "obs.process.enabled is false"를 찍고 exit 0 | **고침 `df3e7f2`.** PowerShell에서 우선순위 규칙을 재구현하지 않고, 서버의 로더가 해석한 값을 받는다: 새 `apps/server/src/ops/ops-config.ts`(`describeOpsConfig`)와 bin `dist/bin/ops-config.js`가 `loadRendererStaticConfig`·`loadObsConfig`·`loadArchiveConfig`·`resolvePort`로 한 JSON을 만들고, 스크립트는 그것만 쓴다(자식 프로세스가 env를 상속하므로 같은 값을 본다). 시작 전에 `resolved config: …` 한 줄로 남기고, `repoRoot`가 스크립트의 저장소와 다르면 즉시 실패한다. **테스트** `ops-config.test.ts` 7건(각 env override + 비-loopback 거부). 실측은 Result 4-2 |
+| [major] `ops/windows/Start-VerticalLive.ps1:108`(렌더러는 97) — 열린 TCP 포트를 준비 완료로 보고 HTTP probe를 건너뛴다. 리뷰어가 `VL_PORT=18787`에 TCP 전용 리스너를 두자 `server already listening` 후 `start sequence complete`, exit 0 | **고침 `df3e7f2`.** 준비 판정을 프로토콜 응답으로 바꿨다: 렌더러 **HTTP 200**, 서버 **`/health` 200 + 건강 문서(`status` 필드)**, OBS는 4455를 **설정된 OBS 실행 파일이** 잡고 있을 때만. 게다가 이미 응답하는 포트라도 `Get-VLPortOwner`(Get-NetTCPConnection→Win32_Process, netstat fallback)로 **소유 프로세스의 명령행에 이 저장소 경로가 있을 때만** 채택하고, 아니면 소유 PID를 적고 실패한다 — 다른 worktree의 스택을 우리 것으로 착각하는 것이 이 확인이 막는 일이다. 명령행을 못 읽으면 "우리 것 아님"으로 본다. 실측은 Result 4-3(TCP 전용 리스너, 외부 200 응답 리스너 둘 다 거부) |
+| [minor] 티켓 68행 아카이브 테스트 수 60 → 실제 47 | **고침(이 커밋).** 합격 기준 표를 `apps/server/src/ops/archive` 4 파일 **56 tests**(round 2에서 링크 테스트 9건 추가), `apps/server/src/ops` 전체 **76 tests**로 고쳤고, 이전 "60"이 archive가 아니라 ops 전체 수였다는 것도 적었다 |
+
+### Result 4 — round 2 재현·검증 (모두 이 호스트에서 실행)
+
+**4-1. B1: 리뷰어의 junction root 시나리오** (`New-Item -ItemType Junction`으로 `configured-root` → `outside`, `outside\victim.mkv`는 30일 전 mtime)
+
+```text
+$ node apps/server/dist/bin/archive.js --config <tmp>.json
+root recordings: REFUSED (reparse_point) C:\...\vl-b1-repro\configured-root
+scanned 0 file(s), 0.0 MiB; 0 inside the write grace window; free 58808.6 MiB
+no files selected for deletion
+exit=1
+$ node apps/server/dist/bin/archive.js --config <tmp>.json --apply
+root recordings: REFUSED (reparse_point) C:\...\vl-b1-repro\configured-root
+no files selected for deletion
+exit=1
+outsideVictimExistsAfterApply=True      # 리뷰어 재현에서는 False였다
+```
+
+**4-2. M1: env override가 실제로 반영된다**
+
+```text
+$ powershell -File ops\windows\Start-VerticalLive.ps1 -WhatIf          # 기본값
+resolved config: renderer=http://127.0.0.1:5173/ server=http://127.0.0.1:8787/health obs=ws://127.0.0.1:4455 obsProcessEnabled=False
+
+$ $env:VL_OBS_PROCESS_ENABLED='true'; $env:VL_RENDERER_STATIC_PORT='5999'; $env:VL_PORT='18787'; $env:VL_OBS_URL='ws://127.0.0.1:4499'
+$ powershell -File ops\windows\Start-VerticalLive.ps1 -WhatIf
+resolved config: renderer=http://127.0.0.1:5999/ server=http://127.0.0.1:18787/health obs=ws://127.0.0.1:4499 obsProcessEnabled=True
+What if: would start renderer-static and wait for http://127.0.0.1:5999/ (HTTP 200)
+What if: would start server and wait for http://127.0.0.1:18787/health (health document)
+What if: would launch OBS and wait for obs-websocket :4499 owned by obs64.exe
+```
+
+**4-3. M2: 열린 포트는 준비가 아니고, 남의 프로세스는 채택하지 않는다**
+
+```text
+# (a) TCP 전용 리스너를 VL_PORT=18787에 두고 실행 — 리뷰어 재현과 같은 조건
+[error] server: port 18787 is held by pid 38320 (powershell) and does not answer http://127.0.0.1:18787/health (health document)
+[error] start sequence incomplete: server        EXIT=1
+
+# (b) 저장소 밖에서 200을 돌려주는 정적 서버를 렌더러 포트에 두고 실행
+[error] renderer-static: port 5899 answers but belongs to pid 11276 (node) outside C:\...\t17-windows-ops; refusing to adopt it
+[error] start sequence incomplete: renderer-static, server        EXIT=1
+
+# (c) 실제 기동: 우리 렌더러는 200으로 준비 판정되고, 재실행 시 우리 것이므로 채택된다
+[info] start renderer-static: ... serve-renderer.js
+[info] ready: http://127.0.0.1:5899/ (HTTP 200)
+[info] renderer-static already running and ready (pid 36836, http://127.0.0.1:5899/ (HTTP 200))
+# 같은 실행에서 서버는 vault에 server.rendererToken/adminToken이 없어 기동 직후 종료 →
+[error] timed out after 12s waiting for: http://127.0.0.1:18899/health (health document)
+[error] start sequence incomplete: server        EXIT=1     # 응답 없는 컴포넌트를 준비로 치지 않는다
+```
+
+(c)에서 서버가 뜨지 않는 것은 이 호스트의 vault가 비어 있기 때문이다(`secrets list` → 8개 전부 `missing`). 비밀정보를 만들지 않았고, 그 상태에서도 **거짓 성공이 나지 않는다**는 것이 여기서 확인된 것이다. 실행에 쓴 임시 리스너·fixture·프로세스는 모두 정리했고(포트 5173/8787/5899/18899 free, 잔여 node 프로세스 0), 등록된 scheduled task도 없다.
+
+### Gates (round 2, 재실행)
+
+```text
+$ npm run format:check  -> All matched files use Prettier code style!
+$ npm run lint          -> eslint 통과, check-no-legacy-imports: ok (0), check-install-scripts: ok (4 reviewed)
+$ npm run typecheck     -> tsc --build 통과(출력 없음)
+$ npm run test          -> Test Files 130 passed (130) / Tests 1818 passed | 1 skipped (1819)
+$ npm run build         -> 전 워크스페이스 성공
+```
+
+CI는 여전히 E-5(결제 차단)로 실행되지 않는다.
