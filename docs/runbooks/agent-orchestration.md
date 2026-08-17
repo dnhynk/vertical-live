@@ -110,7 +110,7 @@ orca terminal wait --terminal <handle> --for tui-idle --timeout-ms 90000 --json
 orca orchestration dispatch --task <review_task_id> --to <handle> --inject --json
 ```
 
-`dispatch --inject` 뒤 codex 화면에 `[Pasted Content N chars]`가 composer에 남으면(2026-08-16 R-T0-1 사례) `orca terminal send --terminal <handle> --enter`로 Enter 1회를 보내고 30초 뒤 `terminal read`로 `• Ran …`/`Working` 표시를 확인한다(2.2와 같은 gotcha).
+**주의(2026-08-17)**: codex 화면의 `esc to interrupt`는 MCP 서버 부팅 중에도 표시되므로 '시작됨'의 증거가 아니다 — 부팅 중 Enter를 보내면 MCP 부팅이 중단되고 프롬프트는 composer에 남는다(R-T8-1·R-T13-2에서 30분 유휴 사례). `• Ran`/`Working(`가 보이고 tail 끝에 `[Pasted Content …]`가 없을 때만 시작으로 판정한다(`start_reviewer.py`의 `is_running`). `dispatch --inject` 뒤 codex 화면에 `[Pasted Content N chars]`가 composer에 남으면(2026-08-16 R-T0-1 사례) `orca terminal send --terminal <handle> --enter`로 Enter 1회를 보내고 30초 뒤 `terminal read`로 `• Ran …`/`Working` 표시를 확인한다(2.2와 같은 gotcha).
 
 `review` worktree는 처음 한 번 `orca worktree create --repo id:f5dd… --name review --no-parent --setup run --json`으로 만든다(브랜치는 리뷰어가 PR마다 `gh pr checkout <n> --branch review/pr-<n> --force`로 바꾼다; worker worktree에 checkout된 브랜치는 다른 worktree에서 checkout할 수 없으므로 반드시 `--branch`로 별도 이름을 쓴다). 리뷰는 **한 번에 하나**만 돌린다(같은 worktree).
 

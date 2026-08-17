@@ -64,19 +64,27 @@ time.sleep(5)
 dsp = run(["orchestration", "dispatch", "--task", task_id, "--to", handle, "--inject"])
 print("dispatch ok:", dsp.get("ok"), json.dumps(dsp.get("error"), ensure_ascii=False)[:300] if not dsp.get("ok") else "")
 # Wait until the injected text has fully landed (stable for 3 polls), then press Enter once; verify start.
+# NOTE (2026-08-17): "esc to interrupt" also appears during MCP-server startup, so it is NOT proof the prompt was
+# submitted. Treat as started only when a tool ran / model is working AND no pasted content sits in the composer.
+def is_running(t):
+    tail_part = t[-400:]
+    composer_pending = ("Pasted Content" in tail_part) or ("수정하지 않는다" in tail_part)
+    active = ("• Ran" in t) or ("Working(" in t) or ("Running PreToolUse" in t) or ("thinking" in t)
+    return active and not composer_pending
 prev = None; stable = 0; started = False
 for i in range(60):
     time.sleep(10)
     t = tail(handle, 1500)
-    if "• Ran" in t or "esc to interrupt" in t:
+    if is_running(t):
         started = True; break
     stable = stable + 1 if t == prev else 0
     if stable >= 3 and ("Pasted Content" in t or "수정하지 않는다" in t or "worker_done" in t):
+        run(["terminal", "wait", "--terminal", handle, "--for", "tui-idle", "--timeout-ms", "15000"])
         run(["terminal", "send", "--terminal", handle, "--enter"])
         print(f"sent Enter (poll {i})")
-        time.sleep(40)
+        time.sleep(45)
         t = tail(handle, 1500)
-        if "• Ran" in t or "esc to interrupt" in t:
+        if is_running(t):
             started = True; break
         stable = 0
     prev = t
