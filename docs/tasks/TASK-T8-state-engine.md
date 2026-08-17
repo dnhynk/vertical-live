@@ -154,6 +154,10 @@ copied 2 migration(s) to dist/db/migrations
 리뷰: <https://github.com/dnhynk/vertical-live/pull/12#pullrequestreview-4950813879> (request_changes,
 blocker 4 + major 2). 고침은 모두 `423a5fa`(엔진·인증·수집)와 `68396c2`(보존 스케줄)에 있다.
 
+> round 2 정정: 아래 blocker 3·4 항목은 **완결이 아니었다**. 인증은 붙였지만 `?mode=dev` 패널이
+> 토큰을 화면에 그렸고, 저장 경계에서 토큰을 지웠지만 거부 사실이 DB에 남지 않아
+> `processing_result`가 `applied`였다. 둘 다 "## Review round 2"에서 고쳤다.
+
 | finding | 처리 |
 |---|---|
 | [blocker] `engine.ts:615/637/742` — 창 마감 시 held 행의 처리 기록이 이후 resolved 행 뒤에 붙어 `ingestSeq` 오름차순 위반 → `ProcessedCursorError` → writer wedge | **고침 `423a5fa`.** `#resolve()`가 `#resolved`를 `ingestSeq` 정렬로 유지(삽입 정렬)하고, `#cursorPlan()`이 오름차순을 다시 검사해 어긋나면 `EngineInvariantError`로 이름을 붙여 던진다. 회귀 테스트 `aggregate.test.ts` "closes a window whose held rows sit below an already-resolved later row"는 리뷰어 시나리오 그대로(direct 20 + held 21/22 + Super Chat 23)이며, 정렬을 되돌리면 `processing records are not ascending: 23 then 21`로 실패하는 것을 확인했다. wedge 표면화: 실패한 pass는 `pump()`가 잡아 `health().lastFailure`·`consecutiveFailures`·degraded 사유 `writer_failing`·카운터 `writer_pass_failed`로 드러나고, 성공하면 0으로 돌아간다(테스트 "reports a failed pass on /health instead of retrying it silently"). 타이머와 `/ingest/simulator`는 이제 `pump()`를 쓴다 |
@@ -176,3 +180,35 @@ $ npm run build          -> four workspaces built; data-map --check passed
 
 로컬 지연(단독 e2e 실행, round 2): `receivedToAcked` p95 17 ms(p50 10, max 52), 구간별 p95
 `receivedToCommitted` 14 / `committedToPublished` 0 / `publishedToAcked` 6.
+
+## Review round 2
+
+리뷰: PR #12 R-T8-2 코멘트(review `4951117417`, request_changes, blocker 2). 게이트·합격 기준
+1–5·round 1 재현 probe는 모두 met로 확인됐고, 남은 두 건은 아래에서 고쳤다. 고침은 `439120b`.
+
+| finding | 처리 |
+|---|---|
+| [blocker] `components/DevPanel.tsx:29` + `config.ts:103` — `?mode=dev` 패널이 토큰이 붙은 `wsUrl`을 그대로 렌더해 vault 비밀이 화면에 노출(§10.2, CLAUDE.md §3) | **고침 `439120b`.** 필드를 갈랐다: `RendererConfig.wsUrl`은 **토큰 없는** 주소(화면·로그가 읽는 값)이고 비밀은 `wsToken`에만 있으며, 둘을 다시 합치는 곳은 `authenticatedWsUrl()` 하나뿐(소켓 전용)이다. 즉 "다른 필드를 쓰는 걸 기억하라"가 아니라, 흔한 방식대로 쓰면 자동으로 안전하다. `ws=` override에 토큰이 끼어 있어도 `redactWsUrl()`로 떼어내 두 번째 유입 경로를 막는다. 회귀: `components/DevPanel.test.tsx` 6건 — sentinel 토큰이 DOM(`innerHTML`·`textContent`)·로그·직렬화한 config 어디에도 없고, 그럼에도 소켓 URL에는 붙어 인증이 유지되는 것까지 확인한다. DevPanel을 `authenticatedWsUrl()`로 되돌리면 첫 테스트가 실패하는 것을 확인했다. round 1에 쓴 `config.test.ts`의 기대치도 새 의미로 정정 |
+| [blocker] `engine/argument.ts:42` + `argument.test.ts:78` — 어휘 밖 argument가 배치 로컬 카운트로만 남고 DB `processing_result`는 `applied` | **고침 `439120b`.** 마커를 영속화했다: migration `005_inbox-argument-rejected.sql`이 `ingest_inbox.argument_rejected`(0/1, CHECK)를 추가하고, `commitIngestBatch`가 envelope과 **같은 트랜잭션**에서 쓴다(배치 카운터·엔진 상태로는 재시작을 못 넘긴다 — 라운드 1 B2와 같은 이유). 저장되는 것은 "거부됐다"는 사실뿐이고 토큰은 여전히 어디에도 없다. writer는 행의 마커와 열린 창 어휘 검사를 OR해서 `applied:argument_rejected`(집계 창은 `aggregated:argument_rejected`)로 기록한다. 회귀 `argument.test.ts` 7건: DB 관측으로 (1) `envelope_json`에 토큰 없음 + `argument_rejected=1` + 이유 코드, (2) **재시작 후에도** 이유 코드가 나오고 새 프로세스는 배치 카운터를 본 적이 없음을 확인. 리뷰어가 지목한 `argument.test.ts:78`의 `applied` 기대치를 정정했다. 마커를 무시하도록 되돌리면 두 테스트가 실패하는 것을 확인했다 |
+| (rebase) `origin/main` = `7aee54d`(PR #13 렌더러 머지 포함) | 충돌 없이 rebase. 마이그레이션 번호는 main의 002 + PR #11(T10, open)의 003을 피해 **005**. `config/retention.json`에 `argument_rejected`를 신고하고 `docs/ops/data-map.md`를 재생성했다 |
+
+### T4 store 확장 (누적, 코디네이터 승인 범위 안)
+
+이 PR이 T4에 더한 것은 셋이며 모두 T8이 유일한 사용자다: `commitStateTransition`의 선택 필드
+`engineState`(승인됨), 읽기 전용 `hasPaidLedgerEntry()`, 그리고 이번 라운드의
+`commitIngestBatch` 입력이 `IngestEnvelope | InboxSubmission`을 받는 것(맨 envelope는 "거른 것
+없음"을 뜻하므로 기존 호출자·테스트는 그대로 컴파일된다). 셋 다 스키마·API를 좁게 늘렸을 뿐
+기존 동작을 바꾸지 않는다.
+
+### Gates (round 3, `git rebase origin/main` = `7aee54d` 뒤)
+
+```text
+$ npm run format:check   -> All matched files use Prettier code style!
+$ npm run lint           -> eslint clean; legacy-import ok; install-script ok
+$ npm run typecheck      -> tsc --build, no errors
+$ npx vitest run         -> 1291 passed | 1 skipped
+$ npm run build          -> four workspaces built; data map current
+```
+
+로컬 지연(단독 e2e 실행, round 3): `receivedToAcked` p95 8 ms(p50 6, max 32), 구간별 p95
+`receivedToCommitted` 6 / `committedToPublished` 0 / `publishedToAcked` 3.
