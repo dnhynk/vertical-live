@@ -146,3 +146,4 @@
 | 2026-08-17 23:05 | F-T10-3 완료(절단 목록 무판정, A-18 private 삽입·update로 마커 제거·publish 게이트, liveBroadcasts.update quota 추가; 1399 tests). R-T10-4 `task_5b75f1bb9801` → `ctx_3cfb36dc9eda`(review). 진행: T9, T11 |
 | 2026-08-17 23:35 | R-T10-4 verdict request_changes(blocker: 절단 liveStreams reconcile이 decoy 키를 vault에 선기록; major 2: update 본문의 scheduledEndTime 미보존·title 재전송 불필요, selfDeclaredMadeForKids는 update 불가) → F-T10-4 `task_4cc98e9a8711` → T10 터미널. **E-4 보고 항목 등록**(round 4 도달). 진행: T9, T11 |
 | 2026-08-18 00:00 | F-T10-4 완료(vault 선기록 제거, update 본문 정확화; 1404 tests). R-T10-5 `task_7135e2ceb60d` → `ctx_3b684c6cc3cc`(review). 진행: T9, T11 |
+| 2026-08-18 00:30 | R-T10-5 verdict request_changes(잔존 blocker 1: 완전 목록에서 same-title stream 복수 시 decoy 선택·vault 기록) → F-T10-5 `task_e2ff1075905a`(stream attempt 마커/복수 후보 inconclusive). E-4 갱신: round 5. 진행: T9, T11 |
