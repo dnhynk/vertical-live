@@ -74,7 +74,7 @@
 | # | 기준 | 상태(met/unmet/unverifiable) | 근거(테스트 파일·명령·출력) |
 |---|---|---|---|
 | 1 | 문서에 Pokémon 직접 사용·유료 부활·게임 파워 판매 서술 0건(grep 증빙) | met | 아래 "grep 증빙" |
-| 2 | 모든 외부 주장에 스펙 [S] 번호 또는 URL이 붙는다 | met | 아래 "외부 주장 감사" |
+| 2 | 모든 외부 주장에 스펙 [S] 번호 또는 URL이 붙는다 | met (round 2) | 아래 "외부 주장 감사". **round 1에서는 unmet이었다** — ACCOUNT_SETUP의 advanced-features 필요조건과 fan-funding→chat/comments 주장 2건이 근거 없이 확정형으로 남아 있었고(리뷰 B1), round 2에서 각각 "확인 필요(출처 없음)"과 URL 부착으로 고쳤다 |
 
 ### grep 증빙 (기준 1)
 
@@ -127,20 +127,24 @@ docs/ops/runbook-operations.md:166:연출 시간이 지나면 **게임 파워가
 
 ### 외부 주장 감사 (기준 2)
 
-```text
-$ for f in <8개 파일>; do echo "$f | [S]: $(grep -oE '\[S[0-9]+\]' $f | sort -u | tr '\n' ' ') | URLs: $(grep -coE 'https?://' $f)"; done
-README.md                            | [S]: none                                                                              | URLs: 1
-docs/ROADMAP.md                      | [S]: [S10] [S13] [S14] [S15] [S29] [S32] [S36] [S41] [S42] [S8] [S9]                   | URLs: 0
-docs/ACCOUNT_SETUP_FROM_ZERO.md      | [S]: [S1] [S13] [S14] [S15] [S16] [S17] [S18] [S23] [S29] [S32] [S36] [S8]             | URLs: 6
-docs/YOUTUBE_MONETIZATION_RUNBOOK.md | [S]: [S1] [S10] [S11] [S13] [S14] [S15] [S17] [S18] [S2] [S29] [S3] [S30] [S31] [S32] [S35] [S36] [S8] [S9] | URLs: 7
-docs/ops/gate0-checklist.md          | [S]: [S10] [S17] [S18] [S36] [S41] [S42] [S8]                                          | URLs: 0
-docs/ops/gate2-experiments.md        | [S]: [S1] [S10] [S2] [S23] [S3] [S33] [S34] [S37] [S38] [S4] [S42] [S5] [S7] [S8]      | URLs: 0
-docs/ops/moderation-call-table.md    | [S]: [S16]                                                                             | URLs: 0
-docs/ops/runbook-operations.md       | [S]: [S23]                                                                             | URLs: 4
+round 2 기준(리뷰 B1 반영 후).
 
-$ grep -nE "https?://" README.md docs/ops/runbook-operations.md
-README.md:94: http://127.0.0.1:5173/                (loopback, 외부 주장 아님)
-docs/ops/runbook-operations.md:61,72,151,184: http://127.0.0.1:{5173,8787}   (loopback, 외부 주장 아님)
+```text
+$ for f in <8개 파일>; do echo "$f | [S]: … | URLs: … | 확인필요: …"; done
+README.md                            | [S]: none                                                                              | URLs: 3 | 확인필요: 0
+docs/ROADMAP.md                      | [S]: [S10] [S13] [S14] [S15] [S29] [S32] [S36] [S41] [S42] [S8] [S9]                   | URLs: 0 | 확인필요: 0
+docs/ACCOUNT_SETUP_FROM_ZERO.md      | [S]: [S1] [S13] [S14] [S15] [S16] [S17] [S18] [S23] [S29] [S32] [S36] [S8]             | URLs: 7 | 확인필요: 2
+docs/YOUTUBE_MONETIZATION_RUNBOOK.md | [S]: [S1] [S10] [S11] [S13] [S14] [S15] [S17] [S18] [S2] [S29] [S3] [S30] [S31] [S32] [S35] [S36] [S8] [S9] | URLs: 7 | 확인필요: 1
+docs/ops/gate0-checklist.md          | [S]: [S10] [S17] [S18] [S36] [S41] [S42] [S8]                                          | URLs: 0 | 확인필요: 0
+docs/ops/gate2-experiments.md        | [S]: [S1] [S10] [S2] [S23] [S3] [S33] [S34] [S37] [S38] [S4] [S42] [S5] [S7] [S8]      | URLs: 0 | 확인필요: 0
+docs/ops/moderation-call-table.md    | [S]: [S16]                                                                             | URLs: 0 | 확인필요: 0
+docs/ops/runbook-operations.md       | [S]: [S23]                                                                             | URLs: 4 | 확인필요: 0
+
+$ grep -noE "https?://[^ )\`]*" README.md docs/ops/runbook-operations.md | sort -u
+README.md:94:  http://127.0.0.1:5173/          README.md:100: http://127.0.0.1:5194/ · http://[::1]:5194/
+README.md:132: http://127.0.0.1:8787
+docs/ops/runbook-operations.md:66,77,156,189: http://127.0.0.1:{5194,8787}
+   → 전부 loopback 주소이고 외부 플랫폼 주장이 아니다
 ```
 
 - `README.md`와 `moderation-call-table.md`·`runbook-operations.md`는 플랫폼 사실 주장을 하지 않는다(저장소 내부
@@ -148,13 +152,17 @@ docs/ops/runbook-operations.md:61,72,151,184: http://127.0.0.1:{5173,8787}   (lo
 - 계정·수익화 런북의 URL은 **원문에서 이어받은 것**이고 T16에서 재확인하지 않았다. 두 문서 머리말과 각 URL 옆에
   "not re-verified in T16"으로 명시했다.
 - 근거가 없는 서술은 지우거나 **확인 필요(출처 없음)**으로 표시했다: ACCOUNT_SETUP §3(업로드 카테고리),
-  §2 Step 4(advanced features 해제 경로), MONETIZATION §6(age-restricted·unlisted/private·fundraiser 3항목).
+  §2 Step 4(advanced features **필요조건과** 해제 경로 — round 1 B1), MONETIZATION §6(age-restricted·
+  unlisted/private·fundraiser 3항목). ACCOUNT_SETUP §3의 fan-funding→chat/comments 주장에는 URL을 직접 붙였다
+  (round 1 B1).
 
 ### Gates (executed)
 
+round 2(리뷰 fix 후) 실행 결과다.
+
 ```text
 $ git fetch origin && git rebase origin/main
-Successfully rebased and updated refs/heads/dnhynk/t16-docs-alignment.   (origin/main = 854492a)
+Successfully rebased and updated refs/heads/dnhynk/t16-docs-alignment.   (origin/main = a29c44a)
 
 $ npm run format:check
 Checking formatting...
@@ -170,13 +178,15 @@ $ npm run typecheck
 $ npm run test
  Test Files  123 passed (123)
       Tests  1723 passed | 1 skipped (1724)
-   Duration  34.09s
+   Duration  48.44s
 
 $ npm run build
 copied 5 migration(s) to dist/db/migrations
 docs/ops/data-map.md up to date
 (@vl/contract · @vl/renderer · @vl/server · @vl/simulator 전부 성공)
 ```
+
+round 1의 게이트 실행 결과도 같았다(origin/main = 854492a, test 1723 passed | 1 skipped, duration 34.09s).
 
 5개 게이트 전부 통과. **실행하지 않았음**: 실제 서버 기동(`npm run start -w @vl/server`)·OBS·YouTube 연동 스모크 —
 vault 비밀정보와 실제 계정이 필요하고, 이는 Gate 2 항목이다(`docs/ops/gate2-experiments.md` 3장). 이 PR은 문서만
@@ -199,3 +209,24 @@ vault 비밀정보와 실제 계정이 필요하고, 이는 Gate 2 항목이다(
 - Gate 0 승인이 나면 `docs/ops/gate0-checklist.md`의 결과를 BOARD `D-*`로 옮기고 `config/default.json`의
   `supervisor.moderation`·provisional 값을 승인값으로 교체한다.
 - T15·T17 머지 후 `docs/ops/runbook-operations.md`의 "다른 문서" 표에 `fault-matrix.md`·`windows-host.md` 링크 추가.
+- **생성 도구 마커 재발 방지**: `</content>`·`</invoke>`가 문서 끝에 남는 사고가 T2(2026-08-17)와 T16(round 1)에서
+  두 번 일어났다. 저장소 게이트에 "마크다운 끝의 tool-wrapper 태그 0건" 검사를 추가할지는 별도 판단이 필요하다
+  (`scripts/`에 한 줄 검사로 가능하지만 T16 범위 밖이라 하지 않았다).
+- `docs/ops/obs-setup.md`(T2 산출물, 이 PR 범위 밖)의 Browser Source URL `http://127.0.0.1:5173/?mode=broadcast`는
+  아래 B2와 같은 bind 제약을 받는다. dev 서버를 그 자리에 쓰려면 `--host 127.0.0.1`이 필요하고, 운영 서빙 방식은
+  T17이 정한다.
+
+## Review round 1
+
+리뷰: PR #19 코멘트 `#4953468646`(verdict `request_changes`, blocker 3 · major 2 · minor 1).
+게이트는 리뷰어 실행에서도 5개 전부 pass였고, 합격 기준 1은 met, 기준 2가 B1 때문에 unmet이었다.
+아래 고침은 전부 커밋 `82d721c`(rebase 후 SHA).
+
+| finding | 처리(고침 SHA / 반박 근거) |
+|---|---|
+| **[blocker] B1** `docs/ACCOUNT_SETUP_FROM_ZERO.md:79`·`:120` — advanced features 필요조건, fan-funding→chat/comments 필요 주장이 `[S]`/URL 없이 확정형 | **고침** `82d721c`. Step 4는 스펙이 실제로 뒷받침하는 것(§8.1의 audit 항목)만 남기고, "advanced features가 필요하다"와 해제 경로 둘 다 **확인 필요(출처 없음)**으로 내렸다("not asserted here" 명시 + Gate 0 audit에서 Studio 원문 확인 지시). §3의 chat/comments 항목에는 이어받은 URL(`answer/9277801`, not re-verified in T16)을 **직접** 붙이고, 그 주장과 무관하게 이 제품은 chat이 유일한 입력 경로라 chat 없이 못 돈다는 스펙 근거(§7.2)를 분리해 적었다 |
+| **[blocker] B2** `README.md:94` — `npm run dev`가 `127.0.0.1:5173`을 연다는 서술이 실제 bind와 불일치 | **고침** `82d721c`. 재현으로 확인: `npm run dev -w @vl/renderer -- --port 5194`는 `netstat`에 `[::1]:5194`만 LISTENING이고 `curl http://127.0.0.1:5194/` 실패(000) / `curl http://[::1]:5194/` 200. `--host 127.0.0.1`을 주면 `127.0.0.1:5195` LISTENING + 200. 원인은 Vite 기본 host `localhost`가 이 호스트에서 `::1`로 해석되는 것(`apps/renderer/vite.config.ts`에 `server.host` 없음). **코드는 고치지 않고** README 4.2와 `runbook-operations.md` 1.3의 절차를 `--host 127.0.0.1` 명시로 바꾸고 관측 결과를 근거로 적었다 |
+| **[blocker] B3** `docs/ops/gate2-experiments.md:82` — §7.5 구간 계측 설명이 `metrics.ts` 구현과 불일치, 서로 다른 히스토그램 p95 합산 | **고침** `82d721c`. `apps/server/src/engine/metrics.ts`를 읽고 표를 다시 썼다: 구간 2(`API 수신 → 상태 확정 → renderer 확인`)는 **`receivedToAcked` 하나로** 판정한다(`receivedAt` → state ACK `appliedAt` 직접 기록). §7.5의 별도 측정 구간 `상태 확정 → 인코더 frame`은 **현재 확인 불가**로 명시했다(저장소는 renderer ACK까지만 계측, OBS frame 시각은 계측하지 않음). 히스토그램 4종의 모집단 차이(`committedToPublished`는 effect+snapshot 혼재, `publishedToAcked`는 effect만)를 표로 적고 **합산 금지**를 명시했다 |
+| **[major] M1** `runbook-operations.md:174` — `npm run kill -- --clear`는 루트에 script가 없어 실패 | **고침** `82d721c`. `npm run kill -w @vl/server -- --clear`로 정정. 문서 내 나머지 6곳과 `README.md` 2곳은 이미 `-w @vl/server` 형태였음을 grep으로 확인 |
+| **[major] M2** `gate0-checklist.md:13`·`ROADMAP.md:41` — "선택지 양쪽 구현" 과장, 같은 문서 68행과 모순 | **고침** `82d721c`. 두 곳 모두 "**안전한 기본 경로만** 구현(A-1 identity 비활성, A-3 direct+비경쟁 집계, A-4 single)"으로 정정하고, 숫자·값은 설정 교체지만 **경로 선택은 후속 구현이 필요할 수 있다**고 적었다. §1.5에 "vote 경로는 identity gate 개방 전에는 켤 수 없다", ROADMAP identity 행에 "비활성화만 구현" 추가 |
+| **[minor] m1** `README.md:168` 외 — `</content>`/`</invoke>` 생성 도구 마커가 9개 파일 끝에 잔존 | **고침** `82d721c`. 9개 파일 전부에서 마지막 두 줄을 제거했다. 제거 후 `grep -rn '</content>\|</invoke>' README.md docs/ *.md`의 잔여 hit 2건은 **문서 본문이 아니라 서술**이다: 이 표의 이 줄과, 같은 유형을 이미 한 번 겪은 `docs/tasks/TASK-T2-obs-monitor.md:219`의 이력 기록(2026-08-17, BSOD로 소실된 세션의 잔재). 저장소에서 두 번째 발생이므로 Follow-up에 재발 방지를 적었다 |
