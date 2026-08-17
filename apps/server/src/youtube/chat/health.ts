@@ -103,10 +103,7 @@ export interface ChatObservation {
   readonly userEvents: ChatUserEventObservation
 }
 
-export function buildChatHealthSignals(
-  observation: ChatObservation,
-  clock: Clock,
-): HealthSignal[] {
+export function buildChatHealthSignals(observation: ChatObservation, clock: Clock): HealthSignal[] {
   const observedAtUtc = clock.nowUtcIso()
   const observedAtMonotonicMs = clock.monotonicMs()
   const base = { component: 'youtube-chat' as const, observedAtUtc, observedAtMonotonicMs }

@@ -8,6 +8,8 @@ import { loadInputConfig } from './input/config.js'
 import { defaultSecretProvider } from './secrets/resolve.js'
 import { requireSecret } from './secrets/types.js'
 import { createServer, DEFAULT_HOST, resolvePort } from './server.js'
+import type { ChatSource } from './youtube/chat/chat-source.js'
+import { createChatSource } from './youtube/chat/runtime.js'
 
 /**
  * Process entry point: one store, one engine, one renderer hub, one HTTP
@@ -56,6 +58,10 @@ const ingest = new SimulatorIngestEndpoint({
   },
 })
 
+// Declared before the HTTP server so `/health` can read it through a closure;
+// it is only built after the engine exists (and only when chat is enabled).
+let chatSource: ChatSource | null = null
+
 const httpServer = createServer({
   engine: {
     health: () => engine.health(),
@@ -63,6 +69,7 @@ const httpServer = createServer({
   },
   ingest,
   rendererHealth: () => hub.lastHealth,
+  sourceHealth: () => chatSource?.signals() ?? [],
 })
 
 const hub = new RendererHub({
@@ -93,7 +100,27 @@ const engine = new StateEngine({
   publisher: hub,
 })
 
+// The YouTube chat source waits for `engine.ready` on its own (spec §7.3(3)),
+// so it can be built before the engine has finished its recovery drain.
+chatSource = await createChatSource({
+  store,
+  inbox: { ingest: (envelopes, checkpoint) => engine.ingest(envelopes, checkpoint) },
+  engine: {
+    get ready() {
+      return engine.ready
+    },
+    snapshot: () => engine.snapshot(),
+  },
+  clock: systemClock,
+  inputConfig,
+  identityGateOpen: config.engine.identityGateOpen,
+  onIngested: () => {
+    engine.pump()
+  },
+})
+
 httpServer.listen(port, DEFAULT_HOST, () => {
   engine.start()
+  chatSource?.start()
   process.stdout.write(`@vl/server listening on http://${DEFAULT_HOST}:${port}\n`)
 })

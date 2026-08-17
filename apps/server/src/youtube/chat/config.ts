@@ -203,7 +203,9 @@ function readParts(value: unknown): string[] {
       `parts must not contain ${IDENTITY_PART}: the identity gate is closed in V1, so no author identity may be requested (spec §7.2, §7.4, BOARD A-1)`,
     )
   }
-  const unknown = parts.filter((part) => !ALLOWED_PARTS.includes(part as (typeof ALLOWED_PARTS)[number]))
+  const unknown = parts.filter(
+    (part) => !ALLOWED_PARTS.includes(part as (typeof ALLOWED_PARTS)[number]),
+  )
   if (unknown.length > 0) {
     throw new ChatConfigError(`parts contains unsupported value(s): ${unknown.join(', ')}`)
   }

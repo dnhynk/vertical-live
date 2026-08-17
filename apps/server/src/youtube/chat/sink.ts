@@ -163,7 +163,8 @@ export class ChatIngestSink {
     // Committed even when `envelopes` is empty: a heartbeat response with a new
     // token still has to move the checkpoint, or a reconnect would replay from
     // an older point.
-    const token = batch.nextPageToken === null || batch.nextPageToken === '' ? null : batch.nextPageToken
+    const token =
+      batch.nextPageToken === null || batch.nextPageToken === '' ? null : batch.nextPageToken
     const result = this.#options.inbox.ingest(envelopes, {
       sourceKey: this.#options.sourceKey,
       liveChatId: this.#options.liveChatId,

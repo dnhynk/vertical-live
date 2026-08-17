@@ -167,7 +167,9 @@ describe('GrpcChatSource', () => {
     )
 
     const running = h.source.run()
-    await waitFor(() => temp.store.getSourceCheckpoint(TEST_SOURCE_KEY)?.nextPageToken === 'token_1')
+    await waitFor(
+      () => temp.store.getSourceCheckpoint(TEST_SOURCE_KEY)?.nextPageToken === 'token_1',
+    )
     h.breaker?.breakAll()
     await running
 

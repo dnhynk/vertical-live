@@ -119,9 +119,7 @@ export class FakeStreamListServer {
       parts,
       maxResults: asNumber(request['max_results']),
       pageToken: asString(request['page_token']),
-      authorized: (call.metadata.get('authorization')[0] ?? '')
-        .toString()
-        .startsWith('Bearer '),
+      authorized: (call.metadata.get('authorization')[0] ?? '').toString().startsWith('Bearer '),
     })
 
     const index = Math.min(this.#connections, this.#script.length - 1)

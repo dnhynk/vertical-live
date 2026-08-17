@@ -3,7 +3,11 @@ import { readFileSync } from 'node:fs'
 import { loadSync } from '@grpc/proto-loader'
 import { describe, expect, it } from 'vitest'
 
-import { PROTO_LOADER_OPTIONS, STREAM_LIST_PROTO_PATH, loadStreamListClientClass } from './transport.js'
+import {
+  PROTO_LOADER_OPTIONS,
+  STREAM_LIST_PROTO_PATH,
+  loadStreamListClientClass,
+} from './transport.js'
 
 /**
  * The copied proto is a fact about YouTube's wire contract, not our code
@@ -17,9 +21,7 @@ const source = readFileSync(STREAM_LIST_PROTO_PATH, 'utf8')
 
 describe('stream_list.proto provenance', () => {
   it('records the source URL and the copy date in its header', () => {
-    expect(source).toContain(
-      'https://developers.google.com/youtube/v3/live/streaming-live-chat',
-    )
+    expect(source).toContain('https://developers.google.com/youtube/v3/live/streaming-live-chat')
     expect(source).toMatch(/copied:\s+2026-08-17/)
   })
 
