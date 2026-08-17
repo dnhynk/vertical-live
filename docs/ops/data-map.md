@@ -64,6 +64,12 @@ const authEvents = new RevocationAuthEventSink({
 `scheduler.failures`/`unhealthy`, `authEvents.failures`/`failed` 상태에도 남는다(알림 sink 자체가 throw해도 관측 가능).
 `onResult`는 `clean === false`(=`reverificationDue`·`truncated`·`failed`가 비어 있지 않음)를 알림 대상으로 삼는다.
 
+**알림 sink가 throw해도 파이프라인은 멈추지 않는다**(리뷰 round 2). sink 호출은 격리되어 실패가
+`failures[].stage`(`onResult`/`onError`)로 따로 기록되고, (M1) 스케줄러는 다음 tick을 `finally`에서 등록하며,
+(M2) 철회 큐는 tail이 rejected로 남지 않아 **다음 `auth_revoked`도 handler에 도달한다**. 예전에는 각각
+"한 번 실패하면 이후 sweep 없음", "한 번 실패하면 이후 철회 삭제가 전부 조용히 누락"이 됐다.
+`RevocationAuthEventSink.pending`은 이제 reject하지 않는다(실패는 `onError`와 `failures`로만 전달된다).
+
 `delete` 정책은 만료 행을 배치로 삭제한다. `refresh` 정책은 **삭제하지 않는다** — 허용 기간 안에 다시 쓰였는지
 확인하고, 아니면 `reverification_due`로 기록해 사람 판단을 요구한다(§12.4 "30일마다 권한과 삭제 여부를 다시 확인").
 `Reverifier`를 주입하면 재확인 결과(`still_authorized` / `delete`)가 그대로 집행된다.

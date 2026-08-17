@@ -287,6 +287,8 @@ export interface RevocationAuthEventSinkOptions {
 export interface RevocationFailure {
   readonly reason: AuthRevokedEvent['reason']
   readonly at: string
+  /** `handler` is the revocation itself; the others are a caller sink that threw. */
+  readonly stage: 'handler' | 'onResult' | 'onError'
   readonly error: unknown
 }
 
@@ -294,12 +296,19 @@ export interface RevocationFailure {
  * Adapts the async handler to T3's synchronous `AuthEventSink`, so T12 can wire
  * revocation-driven deletion by handing this sink to the `TokenManager`.
  *
- * `emit` cannot await, so the run is tracked on `pending`. Both callbacks are
- * **required** and validated at construction (review round 1, B2): the earlier
- * optional `onError` meant a missed T12 wire turned a failed privacy deletion into
- * a resolved promise and nothing else. Belt and braces, every failure is also kept
- * in `failures` and logged at error level, so an `onError` that itself throws still
- * leaves the failure observable in process state.
+ * `emit` cannot await, so runs are serialized on an internal queue and `pending`
+ * exposes its tail. Both callbacks are **required** and validated at construction
+ * (review round 1, B2): the earlier optional `onError` meant a missed T12 wire
+ * turned a failed privacy deletion into a resolved promise and nothing else. Belt
+ * and braces, every failure is also kept in `failures` and logged at error level,
+ * so an `onError` that itself throws still leaves the failure observable.
+ *
+ * The queue is the subtle part (review round 2, M2). A sink that threw used to
+ * leave the tail rejected, and a rejected tail makes `.then(onFulfilled)` skip the
+ * work — so every *later* `auth_revoked` in that process was silently dropped,
+ * which is exactly the §12.4 obligation this class exists to keep. Callback errors
+ * are now contained inside the run, and the next run is chained onto both settled
+ * states, so a poisoned tail cannot stop the queue.
  */
 export class RevocationAuthEventSink implements AuthEventSink {
   readonly #handler: RevocationHandler
@@ -318,7 +327,11 @@ export class RevocationAuthEventSink implements AuthEventSink {
     this.#logger = options.logger ?? silentLogger
   }
 
-  /** Resolves when every revocation started so far has finished. */
+  /**
+   * Resolves when every revocation started so far has finished. It never
+   * rejects — failures are delivered to `onError` and recorded in `failures`,
+   * because a rejected tail would stop the queue (review round 2, M2).
+   */
   get pending(): Promise<void> {
     return this.#pending
   }
@@ -335,19 +348,43 @@ export class RevocationAuthEventSink implements AuthEventSink {
 
   emit(event: AuthEvent): void {
     if (event.type !== 'auth_revoked') return
-    this.#pending = this.#pending.then(async () => {
-      try {
-        const result = await this.#handler.handle(event)
-        this.#onResult(result)
-      } catch (error) {
-        this.#failures.push({ reason: event.reason, at: event.at, error })
-        this.#logger.error('revocation deletion failed', {
-          reason: event.reason,
-          message: error instanceof Error ? error.message : String(error),
-        })
-        this.#onError(error)
-      }
-    })
+    // Chained onto *both* settled states: `#run` is written not to reject, and
+    // this is the second guard so no future rejection can strand the queue.
+    const run = (): Promise<void> => this.#run(event)
+    this.#pending = this.#pending.then(run, run)
+  }
+
+  async #run(event: AuthRevokedEvent): Promise<void> {
+    try {
+      const result = await this.#handler.handle(event)
+      this.#notify(() => this.#onResult(result), event, 'onResult')
+    } catch (error) {
+      this.#failures.push({ reason: event.reason, at: event.at, stage: 'handler', error })
+      this.#logger.error('revocation deletion failed', {
+        reason: event.reason,
+        message: error instanceof Error ? error.message : String(error),
+      })
+      this.#notify(() => this.#onError(error), event, 'onError')
+    }
+  }
+
+  /**
+   * Delivers to a caller-supplied sink without letting it poison the queue. A
+   * sink that throws is recorded and logged — the failure stays observable — but
+   * it does not reject the run, so the next `auth_revoked` still reaches the
+   * handler.
+   */
+  #notify(deliver: () => void, event: AuthRevokedEvent, stage: 'onResult' | 'onError'): void {
+    try {
+      deliver()
+    } catch (sinkError) {
+      this.#failures.push({ reason: event.reason, at: event.at, stage, error: sinkError })
+      this.#logger.error('revocation sink threw', {
+        reason: event.reason,
+        stage,
+        message: sinkError instanceof Error ? sinkError.message : String(sinkError),
+      })
+    }
   }
 }
 

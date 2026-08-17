@@ -11,9 +11,11 @@ import type { RetentionSweepResult, RetentionSweeper } from './retention.js'
  *
  * - `start()` sweeps immediately, then on the interval. After downtime the
  *   deletions that came due while the host was off must not wait a full period.
- * - a failing sweep does not stop the schedule. A retention job that silently
- *   stopped after one bad run is the failure mode this whole task exists to
- *   prevent; the error is reported and the next tick is scheduled anyway.
+ * - a failing sweep does not stop the schedule, and neither does a failing
+ *   *report* of one. A retention job that silently stopped after one bad run is
+ *   the failure mode this whole task exists to prevent, so the next tick is
+ *   registered in a `finally` and a sink that throws is contained and recorded
+ *   rather than allowed to escape (review round 2, M1).
  */
 
 export interface RetentionSchedulerOptions {
@@ -28,9 +30,11 @@ export interface RetentionSchedulerOptions {
   readonly logger?: Logger
 }
 
-/** One recorded failure of a scheduled sweep. */
+/** One recorded failure of a scheduled sweep, or of reporting one. */
 export interface RetentionSweepFailure {
   readonly at: string
+  /** `sweep` is the run itself; the others are a caller sink that threw. */
+  readonly stage: 'sweep' | 'onResult' | 'onError'
   readonly error: unknown
 }
 
@@ -124,20 +128,42 @@ export class RetentionScheduler {
           failed: result.failed.length,
         })
       }
-      this.#onResult(result)
+      this.#notify(() => this.#onResult(result), 'onResult')
     } catch (error) {
       // Recorded in state as well as reported, so an `onResult`/`onError` that
       // itself throws cannot erase the fact that a sweep failed.
-      this.#failures.push({ at: this.#clock.nowUtcIso(), error })
+      this.#failures.push({ at: this.#clock.nowUtcIso(), stage: 'sweep', error })
       this.#logger.error('retention sweep failed', {
         message: error instanceof Error ? error.message : String(error),
       })
-      this.#onError(error)
+      this.#notify(() => this.#onError(error), 'onError')
+    } finally {
+      // `finally`, not a trailing statement (review round 2, M1): a throwing sink
+      // used to skip this line, so a broken alert path silently ended the
+      // schedule and every later §12.4 deletion with it. The next tick is now
+      // registered on every path out of the try.
+      this.#timer = this.#clock.setTimeout(() => {
+        this.#tick()
+      }, this.#intervalMs)
     }
-    // Scheduled last and unconditionally: see the class comment.
-    this.#timer = this.#clock.setTimeout(() => {
-      this.#tick()
-    }, this.#intervalMs)
+  }
+
+  /**
+   * Delivers to a caller-supplied sink without letting it break the driver. A
+   * sink that throws is itself recorded and logged — the failure stays
+   * observable — but it never escapes into the host timer callback, where an
+   * uncaught exception would take a 24/7 process down.
+   */
+  #notify(deliver: () => void, stage: 'onResult' | 'onError'): void {
+    try {
+      deliver()
+    } catch (sinkError) {
+      this.#failures.push({ at: this.#clock.nowUtcIso(), stage, error: sinkError })
+      this.#logger.error('retention scheduler sink threw', {
+        stage,
+        message: sinkError instanceof Error ? sinkError.message : String(sinkError),
+      })
+    }
   }
 }
 

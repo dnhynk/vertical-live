@@ -162,6 +162,61 @@ describe('RetentionScheduler', () => {
     ).toThrow(TypeError)
   })
 
+  it('keeps the schedule when the error sink itself throws', async () => {
+    // Review round 2, M1: `onError` ran before the timer assignment and outside a
+    // `finally`, so a broken alert path ended the schedule — a failed sweep was
+    // observable but no later §12.4 deletion would ever run.
+    const active = open()
+    let calls = 0
+    const failing = {
+      config: active.config,
+      run: (): RetentionSweepResult => {
+        calls += 1
+        if (calls === 1) throw new Error('injected sweep failure')
+        return sweeperFor(active).run()
+      },
+    } as unknown as RetentionSweeper
+
+    scheduler = new RetentionScheduler({
+      sweeper: failing,
+      clock: active.clock,
+      intervalMs: 1000,
+      onResult: noop,
+      onError: () => {
+        throw new Error('alert sink unavailable')
+      },
+    })
+    scheduler.start()
+
+    expect(calls).toBe(1)
+    expect(scheduler.running).toBe(true)
+    // The sweep failure and the sink failure are both recorded.
+    expect(scheduler.failures.map((failure) => failure.stage)).toEqual(['sweep', 'onError'])
+    expect(scheduler.unhealthy).toBe(true)
+
+    await active.clock.advance(2000)
+    expect(calls).toBe(3)
+  })
+
+  it('keeps the schedule when the result sink throws', async () => {
+    const active = open()
+    scheduler = new RetentionScheduler({
+      sweeper: sweeperFor(active),
+      clock: active.clock,
+      intervalMs: 1000,
+      onResult: () => {
+        throw new Error('alert sink unavailable')
+      },
+      onError: noop,
+    })
+    scheduler.start()
+
+    expect(scheduler.runCount).toBe(1)
+    expect(scheduler.failures.map((failure) => failure.stage)).toEqual(['onResult'])
+    await active.clock.advance(2000)
+    expect(scheduler.runCount).toBe(3)
+  })
+
   it('reports an unmet obligation through the result sink and its own state', async () => {
     const active = open()
     // A world snapshot untouched for longer than its re-verification period leaves

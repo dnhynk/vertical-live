@@ -11,6 +11,7 @@ import {
   vaultGrantRevoker,
   type GrantRevokeOutcome,
   type GrantRevoker,
+  type RevocationResult,
 } from './revocation.js'
 import {
   DAY_MS,
@@ -350,8 +351,80 @@ describe('RevocationAuthEventSink', () => {
     })
 
     sink.emit(revokedEvent('operator_revoked'))
-    await sink.pending.catch(() => undefined)
+    await sink.pending
     expect(sink.failed).toBe(true)
+    // Both the revocation failure and the broken alert path are recorded.
+    expect(sink.failures.map((failure) => failure.stage)).toEqual(['handler', 'onError'])
     expect((sink.failures[0]?.error as Error).message).toBe('vault unavailable')
+    expect((sink.failures[1]?.error as Error).message).toBe('alerting is broken too')
+  })
+
+  it('still handles the next revocation after a sink threw on the previous one', async () => {
+    // Review round 2, M2: a throwing sink left the queue tail rejected, so every
+    // later auth_revoked skipped the handler entirely — the first failure was
+    // recorded and all subsequent §12.4 deletions silently never ran.
+    const active = open()
+    seedAuthorizedData(active)
+    let calls = 0
+    const results: string[] = []
+    let firstEvent = true
+    const sink = new RevocationAuthEventSink({
+      handler: {
+        handle: async (event: AuthRevokedEvent) => {
+          calls += 1
+          if (firstEvent) {
+            firstEvent = false
+            throw new Error('vault unavailable')
+          }
+          return handlerFor(active, fakeRevoker()).handle(event)
+        },
+      } as unknown as RevocationHandler,
+      onResult: (result) => results.push(result.revocationClass),
+      onError: () => {
+        throw new Error('alerting is broken too')
+      },
+    })
+
+    sink.emit(revokedEvent('operator_revoked'))
+    await sink.pending
+    expect(calls).toBe(1)
+    expect(results).toEqual([])
+
+    sink.emit(revokedEvent('invalid_grant'))
+    await sink.pending
+    expect(calls).toBe(2)
+    expect(results).toEqual(['provider_side'])
+    // The second revocation really deleted and recorded, not just "ran".
+    expect(active.store.countRows('ingest_inbox')).toBe(0)
+    expect(active.store.listRetentionLedger({ reason: 'provider_revoked' }).length).toBeGreaterThan(
+      0,
+    )
+    expect(sink.failures.map((failure) => failure.stage)).toEqual(['handler', 'onError'])
+  })
+
+  it('serializes revocations in emit order', async () => {
+    const order: string[] = []
+    const sink = new RevocationAuthEventSink({
+      handler: {
+        handle: async (event: AuthRevokedEvent) => {
+          order.push(`start:${event.reason}`)
+          await Promise.resolve()
+          order.push(`end:${event.reason}`)
+          return { reason: event.reason } as unknown as RevocationResult
+        },
+      } as unknown as RevocationHandler,
+      onResult: noop,
+      onError: noop,
+    })
+
+    sink.emit(revokedEvent('operator_revoked'))
+    sink.emit(revokedEvent('invalid_grant'))
+    await sink.pending
+    expect(order).toEqual([
+      'start:operator_revoked',
+      'end:operator_revoked',
+      'start:invalid_grant',
+      'end:invalid_grant',
+    ])
   })
 })
