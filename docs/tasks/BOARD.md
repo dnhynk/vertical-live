@@ -15,7 +15,7 @@
 | T2 | obs-websocket 5 감시·제어 + OBS 프로파일 | T0 | — | merged | t2-obs-monitor | #3 | `task_6e0c43d6b74c` |
 | T3 | OAuth·비밀정보 vault·quota | T0 | — | changes_requested | t3-auth-vault | #4 | `task_62829ec3ab8b` |
 | T4 | SQLite 영속층(inbox·checkpoint·snapshot·outbox·deadline) | T1 | — | changes_requested | t4-persistence | #5 | `task_6bb9ff9f79c8` |
-| T5 | 렌더러 read model(snapshot 복구·effect 멱등·ACK·건강) | T1 | — | dispatched | t5-renderer-readmodel | | `task_6ba022bb6151` |
+| T5 | 렌더러 read model(snapshot 복구·effect 멱등·ACK·건강) | T1 | — | in_review | t5-renderer-readmodel | #9 | `task_6ba022bb6151` |
 | T6 | 명령 파서·모더레이션·입력 arbiter | T1 | — | in_review | t6-command-parser | #8 | `task_a0f96dd7e038` |
 | T7 | 콘텐츠 디렉터·크리처 상태 모델(순수 도메인) | T1 | — | changes_requested | t7-content-director | #6 | `task_e1e7531798ad` |
 | T8 | 상태 엔진(단일 writer·outbox·WS·ACK·유료 멱등) | T1b, T4, T6, T7 | — | pending | t8-state-engine | | `task_0aadf1c96dcf` |
@@ -114,3 +114,4 @@
 | 2026-08-17 10:25 | R-T7-1 verdict **request_changes**(blocker 2: skip 정책이 반복 deadline 후속을 만들지 않아 무입력 진행 단절; 무료 명령으로 동기 완료된 mission effect가 deadline cause로 오표기(A-17 위반); major 1: deadlineId에 beat 라벨; minor 1: literal NUL 구분자). F-T7-1 `task_da44c70877ec` → T7 터미널 `ctx_6e08a6061e08`(rebase 포함). R-T3-2 `task_df2e3eeada0d` → `ctx_7e725f235839`. 리뷰 대기열: R-T3-2(진행) → R-T6-1 → R-T4-2 → R-T7-2 |
 | 2026-08-17 10:40 | T5 질문: `apps/renderer/public/pet.glb`가 피카츄 실루엣(뾰족 귀·번개 꼬리)임을 발견 → 답 A(legacy 격리 + primitive placeholder + ASSETS.md 신설). **A-10 정정** |
 | 2026-08-17 11:20 | R-T3-2 verdict request_changes(minor 1만 잔존) → F-T3-2 `task_9624db0f3a84` 완료(rebase 포함, 575 tests). F-T7-1 완료(skip 정책 recurrence 도메인 완결, mission effect cause 전파, deadlineId 제거, NUL 제거; 615 tests). F-T4-1 완료(커서 증명, 마이그레이션 감사, `.npmrc ignore-scripts=true` + lint 가드; 585 tests). R-T6-1 `task_8fee8a668d75` → `ctx_3faf029c6180`(review). 리뷰 병목 완화: **review2 worktree 추가**, R-T4-2 `task_587d2cd12a10` → `ctx_8cc949cb4978`(review2). 대기열: R-T3-3 → R-T7-2. 발견: agent-first `terminal create --command`가 자주 타임아웃 → 스크립트가 생성된 codex 터미널 재사용 또는 셸+codex fallback(주입이 느리고 문자 손실 위험 → 안정 대기 후 Enter) |
+| 2026-08-17 11:40 | T5 worker_done(succeeded, PR #9: TS 전환, snapshot 치환·effect 멱등·프레임 게이트 ACK·renderer_health, headless Chrome 스모크, ASSETS.md 신설·pet.glb 격리, 552 tests). TASK_SPECS §T14의 pet.glb 문구 정정. 리뷰 대기열: R-T6-1(review)·R-T4-2(review2) 진행 → R-T3-3 → R-T7-2 → R-T5-1. 구현 worker 0 활성(모두 리뷰 대기; T8/T10/T13은 머지 후 기동) |
