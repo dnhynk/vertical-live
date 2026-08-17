@@ -78,13 +78,24 @@ protocol.md의 Hello 예시와 Identify 예시는 **같은 세션의 쌍이 아�
 
 | # | 기준 | 상태 | 근거(테스트 파일·명령·출력) |
 |---|---|---|---|
-| 1 | 가짜 obs-websocket v5 서버 또는 mock에 대한 테스트로 연결·인증·재연결·`GetStreamStatus` 파싱·이벤트 구독 검증 | **met** | `apps/server/src/testing/fake-obs-server.ts`(wire 수준 Hello/Identify/Identified·Request/RequestResponse·Event·강제 close)에 대해 `client.test.ts`(10) + `health.test.ts`(16) + `control.test.ts`(14) + `protocol.test.ts`(7) + `probe.test.ts`(8). `npm run test` → **11 files / 101 tests passed** (아래 Gates) |
+| 1 | 가짜 obs-websocket v5 서버 또는 mock에 대한 테스트로 연결·인증·재연결·`GetStreamStatus` 파싱·이벤트 구독 검증 | **met** | `apps/server/src/testing/fake-obs-server.ts`(wire 수준 Hello/Identify/Identified·Request/RequestResponse·Event·강제 close)에 대해 `client.test.ts`(12) + `health.test.ts`(17) + `control.test.ts`(19) + `protocol.test.ts`(7) + `probe.test.ts`(8). `npm run test` → **11 files / 109 tests passed** (아래 Gates). Round 1 이후 인증은 우회 불가이고(finding 1) 가짜 서버도 항상 challenge를 보낸다 |
 | 2 | 로컬 OBS 실제 연결 스모크(`npm run obs:probe`) 실행 후 출력 첨부, 없으면 "실행하지 않았음" 명시 | **실행하지 않았음(명시)** | **실제 OBS 스모크 실행하지 않았음: OBS 32.0.2 미실행 · obs-websocket 5.6.3 `server_enabled=false`, 호스트 설정 변경은 범위 밖**(코디네이터 결정 B, 2026-08-17). 대신 `npm run obs:probe -- --fake`를 **실제 실행**했고 출력은 아래 "obs:probe 실행 출력". 사용자용 실제 스모크 절차는 `docs/ops/obs-setup.md` §2·§4·§6 |
 | 3 | 프로파일 값이 [S26][S27]과 일치함을 문서에 표로 대조 | **met** | `docs/ops/obs-setup.md` §5 대조표(15행) + "출처에 값이 없어 우리가 정한 것"(5행). 표의 모든 행을 `apps/server/src/obs/profile.test.ts`(14 tests)가 `ops/obs/`의 실제 파일에 대해 검사하므로 문서와 파일이 갈라질 수 없다 |
 
 ### Gates (executed)
 
-2026-08-17, `origin/main` = `789be11` rebase 이후 실행.
+**Review round 1 수정 후 재실행 (2026-08-17, HEAD `61819b7`)** — 5개 전부 통과, 테스트는 101 → **109**(round 1 findings 커버 8개 추가), unhandled error 0:
+
+```text
+$ npm run format:check   -> All matched files use Prettier code style!
+$ npm run lint           -> eslint clean; check-no-legacy-imports: ok (0 legacy imports)
+$ npm run typecheck      -> tsc --build tsconfig.json (no output)
+$ npm run test           -> Test Files 11 passed (11) / Tests 109 passed (109)
+$ npm run build          -> renderer + @vl/server + @vl/simulator
+$ npm run obs:probe -- --fake -> exit 0 (출력은 아래, round 1 이전과 동일; 합성 비밀번호는 출력되지 않는다)
+```
+
+아래는 최초 제출(round 1 리뷰 대상) 시점의 기록이다. 2026-08-17, `origin/main` = `789be11` rebase 이후 실행.
 
 ```text
 $ npm run format:check
@@ -178,6 +189,24 @@ npm error code 1
 
 비밀번호 값은 메시지에 들어가지 않는다(이름만). 이 실행을 근거로 `docs/ops/obs-setup.md` §4에 `--` 전달 규칙을 명시했다.
 
+## Review round 1
+
+리뷰: [PR #3 review 4948338037](https://github.com/dnhynk/vertical-live/pull/3#pullrequestreview-4948338037) · verdict `request_changes` · blocker 2 + major 3. 반박 없음 — 5개 모두 재현했고 모두 고쳤다.
+
+| # | 심각도 | 위치 | finding | 처리 |
+|---|---|---|---|---|
+| 1 | blocker | `obs/client.ts:38` | `allowUnauthenticated`가 export돼 있어 호출자가 비밀번호를 생략하고 `undefined`를 obs-websocket-js로 보낼 수 있었다. 실제 기본값은 안전하지만 프로덕션 클라이언트 계약이 §10.2의 필수 인증을 더 이상 강제하지 않았다 | **고침 (98bcf46)** — 옵션·필드 삭제, `#openSocket`은 항상 `requireSecret`. 가짜 서버는 이제 **항상** challenge를 보내고(`FAKE_OBS_DEFAULT_PASSWORD`, 합성값) `obs:probe --fake`는 자체 합성 비밀번호(`fake-obs-probe-password-<hex>`)를 만들어 양쪽에 넘긴다 → 테스트·probe도 실제로 인증한다. 테스트: `client.test.ts` "has no unauthenticated path: a default fake server still challenges" |
+| 2 | blocker | `docs/ops/obs-setup.md:88` | 운영자에게 스트림 키를 OBS에 붙여넣으라고 하면서 동시에 vault 전용 저장을 주장했다. OBS는 `settings.key`를 읽고(`rtmp-common.c:154`) 서비스 설정 전체를 `service.json`에 직렬화한다(`OBSBasic_Service.cpp:35-40`) → 키가 vault 밖에 영속된다 | **고침 (61819b7)** — 코디네이터 결정대로 vault가 정본이고 서버가 주입한다. `ObsControl.setStreamServiceFromVault()`가 `SetStreamServiceSettings{rtmp_custom, server=obs.streamIngestUrl, key=vault}`를 보내고 `GetStreamServiceSettings`로 되읽어 검증하되 **키 값은 비교·반환·로그하지 않는다**(반환은 `{streamServiceType, server, keyConfigured}`). 문서는 "운영자는 키를 OBS UI에 입력하지 않는다"로 고치고, **주입 후 키가 호스트 프로파일 `service.json`에도 남는다는 사실을 리뷰어가 인용한 OBS 소스 링크와 함께 명시**했다("오직 vault에만"이라고 쓰지 않았다). 정지 시 키 제거·프로파일 디렉터리 ACL은 T17 후속으로 아래 Follow-ups에 기록. 테스트 5개: `control.test.ts` "ObsControl stream service injection" |
+| 3 | major | `obs/client.ts:190` | `#withTimeout`이 이겨도 소켓을 닫지 않아, 지연된 Hello가 타임아웃 뒤에 핸드셰이크를 끝내고 `{state:"disconnected", identified:true}`인 ghost connection을 남겼다(§10.2 단일 supervisor 모델 위반) | **고침 (a2718fc)** — 타임아웃 경로가 소켓을 닫고 늦은 결과를 삼킨다. 가짜 서버에 `helloDelayMs` 추가. 테스트: `client.test.ts` "closes the socket when the connect timeout wins, leaving no ghost connection" — **수정을 되돌리면 실패함을 확인**했다 |
+| 4 | major | `obs/client.ts:234` | 재연결 성공 시 `#openSocket`이 `connected` 신호를 먼저 내고 `#retry`가 그 뒤에 `#reconnectCount`를 올려, 증가 후 신호가 없었다. getter로만 보이고 신호를 집계하는 T12는 완료된 재연결을 관측할 수 없었다 | **고침 (4ef39a6)** — `#openSocket(onEstablished?)` 훅이 핸드셰이크 성공 후 · 신호 방출 전에 실행된다. 테스트: 기존 재연결 테스트에 신호별 `reconnectCount` 순열 `[0,0,0,1]` 단언 추가 — **순서를 되돌리면 실패함을 확인**했다 |
+| 5 | major | `obs/health.ts:313` | `StreamStateChanged`가 `outputActive`만 보고 상태를 정해, `outputActive:true` + `OBS_WEBSOCKET_OUTPUT_RECONNECTING`이 reason 없는 `ok`로 나갔다. 이미 선언해 둔 `OBS_OUTPUT_STATE.reconnecting`이 무시됐고 §9.4(5)는 reconnecting이 관측 가능할 것을 요구한다 | **고침 (9522cdd)** — 핸들러가 `outputState`를 읽어 `degraded` / `output_reconnecting`을 내고 `outputReconnecting`을 detail에 싣는다. 우선순위는 폴링 경로(`deriveObsHealthSignals`)와 동일해 `obs.stream` 두 소스가 일치한다. 테스트: `health.test.ts` "reports a reconnecting output from StreamStateChanged as degraded"(복구 `RECONNECTED` → `ok`까지) |
+
+리뷰어가 통과시킨 항목(게이트 6개, 합격 기준 3개, scope/policy, provisional, Result 정직성)은 이 라운드에서 건드리지 않았다.
+
+### 이 라운드에서 추가로 발견해 고친 것
+
+- `client.test.ts`의 새 ghost-connection 테스트가 vitest unhandled rejection 1건을 냈다. 원인은 프로덕션 코드가 아니라 테스트였다: 거부가 `clock.advance()` 안에서 일어나는데 핸들러를 그 뒤에 붙여 한 틱 동안 관측되지 않았다. 기대를 advance 앞에서 붙이도록 고쳤고(61819b7에 포함), 전체 실행에서 `Errors 0`을 확인했다.
+
 ## Not done / out of scope
 
 - supervisor 상태기계·건강 집계·알림(T12), Windows 자동시작·OBS 프로세스 기동(T17)
@@ -185,6 +214,8 @@ npm error code 1
 
 ## Follow-ups
 
-- T3가 `EnvSecretProvider`를 vault 구현으로 교체할 때 `obs.websocketPassword` 이름을 그대로 쓴다.
+- T3가 `EnvSecretProvider`를 vault 구현으로 교체할 때 `obs.websocketPassword`·`youtube.streamKey` 이름을 그대로 쓴다.
+- **T17 (BOARD 후보, review round 1 finding 2에서 파생)**: `setStreamServiceFromVault()`로 주입한 스트림 키는 OBS가 활성 프로파일의 `service.json`에 영속시킨다. 남은 노출을 닫으려면 (1) `StopStream` 후 `SetStreamServiceSettings`로 `key`를 비워 프로파일에서 제거하고, (2) `%APPDATA%\obs-studio\basic\profiles\vertical-live\` 디렉터리 ACL을 서비스 계정으로 제한한다. 근거·링크는 `docs/ops/obs-setup.md` §3 "정직하게: 주입 후 키는 호스트 OBS 프로파일에도 남는다".
+- **T12**: go-live 시퀀스에서 `startStream()` **앞에** `setStreamServiceFromVault()`를 호출한다. T2는 명령만 제공하고 시퀀스를 엮지 않는다(`startStream()`은 암묵적으로 주입하지 않는다 — 그러면 모든 시작이 스트림 키를 요구하고 idempotent 조기 반환이 깨진다).
 </content>
 </invoke>
