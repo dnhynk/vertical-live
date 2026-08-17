@@ -1,0 +1,97 @@
+import { describe, expect, it } from 'vitest'
+
+import {
+  buildSkeleton,
+  foldConfusables,
+  normalizeText,
+  tokenize,
+  trimPunctuation,
+} from './normalize.js'
+
+describe('normalizeText', () => {
+  it('applies NFKC so width and style variants collapse', () => {
+    expect(normalizeText('ＦＥＥＤ').normalized).toBe('feed')
+    expect(normalizeText('𝐅𝐄𝐄𝐃').normalized).toBe('feed')
+    expect(normalizeText('ｷﾁｶﾞｲ').normalized).toBe('キチガイ')
+  })
+
+  it('removes zero-width, bidi, tag and filler characters', () => {
+    expect(normalizeText('FE​ED').normalized).toBe('feed')
+    expect(normalizeText('FE‍ED').normalized).toBe('feed')
+    expect(normalizeText('‮FEED‬').normalized).toBe('feed')
+    expect(normalizeText('⁦feed⁩').normalized).toBe('feed')
+    expect(normalizeText('FEED\u{E0041}').normalized).toBe('feed')
+    expect(normalizeText('FEㅤED').normalized).toBe('feed')
+    expect(normalizeText('FEED⠀').normalized).toBe('feed')
+    expect(normalizeText('FE­ED').normalized).toBe('feed')
+    expect(normalizeText('FE\u0000ED').normalized).toBe('feed')
+  })
+
+  it('drops combining marks that NFKC could not compose', () => {
+    expect(normalizeText('F̈E̋E̊D̃').normalized).toBe('feed')
+  })
+
+  it('keeps precomposed Japanese voicing intact', () => {
+    // が must not lose its dakuten: NFKC composes it, so no mark is left over.
+    expect(normalizeText('が').normalized).toBe('が')
+    expect(normalizeText('ｶﾞ').normalized).toBe('ガ')
+    expect(normalizeText('パン').normalized).toBe('パン')
+  })
+
+  it('folds case and collapses whitespace', () => {
+    expect(normalizeText('\t FeEd \n\n Now 　').normalized).toBe('feed now')
+  })
+
+  it('strips the emoji variation selector from both sides of a match', () => {
+    expect(normalizeText('❤️').normalized).toBe(normalizeText('❤').normalized)
+  })
+
+  it('returns an empty string when only invisible characters were sent', () => {
+    expect(normalizeText('​‍­⠀').normalized).toBe('')
+  })
+})
+
+describe('foldConfusables', () => {
+  it('maps Cyrillic and Greek look-alikes onto ASCII', () => {
+    expect(foldConfusables('ехample')).toBe('example')
+    expect(foldConfusables('ροrn')).toBe('porn')
+  })
+
+  it('folds katakana to hiragana', () => {
+    expect(foldConfusables('キチガイ')).toBe('きちがい')
+  })
+
+  it('leaves an already-ASCII string untouched', () => {
+    expect(foldConfusables('feed apple')).toBe('feed apple')
+  })
+})
+
+describe('buildSkeleton', () => {
+  it('applies leetspeak substitutions and removes every separator', () => {
+    expect(buildSkeleton('p0rn')).toBe('porn')
+    expect(buildSkeleton('s-u-b-4-s-u-b')).toBe('subasub')
+    expect(buildSkeleton('k y s')).toBe('kys')
+  })
+
+  it('keeps letters of any script', () => {
+    expect(buildSkeleton('無料配布 feed')).toBe('無料配布feed')
+  })
+})
+
+describe('tokenize', () => {
+  it('splits on spaces and trims punctuation from both ends', () => {
+    expect(tokenize('feed!!!')).toEqual(['feed'])
+    expect(tokenize('「あそぶ」')).toEqual(['あそぶ'])
+    expect(tokenize('feed apple, please.')).toEqual(['feed', 'apple', 'please'])
+  })
+
+  it('keeps characters that are legal in a command argument', () => {
+    expect(trimPunctuation('tag-game')).toBe('tag-game')
+    expect(trimPunctuation('snack_time')).toBe('snack_time')
+    expect(trimPunctuation('ラーメン')).toBe('ラーメン')
+  })
+
+  it('drops tokens that were only punctuation', () => {
+    expect(tokenize('feed ... !')).toEqual(['feed'])
+  })
+})

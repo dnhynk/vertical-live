@@ -4,6 +4,22 @@
     "busyTimeoutMs": 5000,
     "provisional": ["busyTimeoutMs"]
   },
+  "input": {
+    "maxRawLength": 500,
+    "window": {
+      "windowMs": 5000,
+      "enterAggregateAtCommands": 30,
+      "exitAggregateAtCommands": 10,
+      "maxDirectPerWindow": 20
+    },
+    "provisional": [
+      "maxRawLength",
+      "window.windowMs",
+      "window.enterAggregateAtCommands",
+      "window.exitAggregateAtCommands",
+      "window.maxDirectPerWindow"
+    ]
+  },
   "obs": {
     "url": "ws://127.0.0.1:4455",
     "connectTimeoutMs": 5000,
