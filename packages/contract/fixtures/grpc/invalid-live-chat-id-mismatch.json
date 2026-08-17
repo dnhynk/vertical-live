@@ -1,0 +1,12 @@
+{
+  "kind": "youtube#liveChatMessage",
+  "id": "msg_test_0013",
+  "snippet": {
+    "type": "TEXT_MESSAGE_EVENT",
+    "live_chat_id": "chat_test_OTHER",
+    "published_at": "2026-08-16T00:08:00.000Z",
+    "text_message_details": {
+      "message_text": "ごはん"
+    }
+  }
+}

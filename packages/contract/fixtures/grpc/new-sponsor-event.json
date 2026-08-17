@@ -1,0 +1,13 @@
+{
+  "kind": "youtube#liveChatMessage",
+  "id": "msg_test_0005",
+  "snippet": {
+    "type": "NEW_SPONSOR_EVENT",
+    "live_chat_id": "chat_test_0001",
+    "published_at": "2026-08-16T00:04:00.000Z",
+    "new_sponsor_details": {
+      "member_level_name": "test_level_a",
+      "is_upgrade": false
+    }
+  }
+}

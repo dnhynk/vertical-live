@@ -9,9 +9,18 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
-    }
+    },
+    "./fixtures": {
+      "types": "./dist/fixtures/load.d.ts",
+      "default": "./dist/fixtures/load.js"
+    },
+    "./schema/*": "./schema/*"
   },
   "scripts": {
-    "build": "tsc --build"
+    "build": "tsc --build && node scripts/generate-schema.mjs --check",
+    "schema:generate": "tsc --build && node scripts/generate-schema.mjs"
+  },
+  "dependencies": {
+    "zod": "4.4.3"
   }
 }

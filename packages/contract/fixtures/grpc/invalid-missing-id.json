@@ -1,0 +1,11 @@
+{
+  "kind": "youtube#liveChatMessage",
+  "snippet": {
+    "type": "TEXT_MESSAGE_EVENT",
+    "live_chat_id": "chat_test_0001",
+    "published_at": "2026-08-16T00:07:30.000Z",
+    "text_message_details": {
+      "message_text": "なでる"
+    }
+  }
+}

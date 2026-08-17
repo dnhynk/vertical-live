@@ -1,0 +1,14 @@
+{
+  "kind": "youtube#liveChatMessage",
+  "id": "msg_test_0006",
+  "snippet": {
+    "type": "memberMilestoneChatEvent",
+    "liveChatId": "chat_test_0001",
+    "publishedAt": "2026-08-16T00:04:30.000Z",
+    "memberMilestoneChatDetails": {
+      "memberLevelName": "test_level_a",
+      "memberMonth": 6,
+      "userComment": "あそぶ"
+    }
+  }
+}

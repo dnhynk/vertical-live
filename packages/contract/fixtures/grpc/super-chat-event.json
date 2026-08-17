@@ -1,0 +1,17 @@
+{
+  "kind": "youtube#liveChatMessage",
+  "id": "msg_test_0003",
+  "snippet": {
+    "type": "SUPER_CHAT_EVENT",
+    "live_chat_id": "chat_test_0001",
+    "published_at": "2026-08-16T00:01:00.000Z",
+    "has_display_content": true,
+    "super_chat_details": {
+      "amount_micros": "550000",
+      "currency": "JPY",
+      "amount_display_string": "¥550",
+      "user_comment": "ごはん",
+      "tier": 2
+    }
+  }
+}

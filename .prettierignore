@@ -2,6 +2,11 @@ node_modules
 **/dist
 package-lock.json
 
+# Generated from the zod schemas by `npm run schema:generate -w @vl/contract`
+# and never hand-edited (CLAUDE.md §4). Byte-for-byte freshness is enforced by
+# packages/contract/src/schema/registry.test.ts, not by a formatter.
+packages/contract/schema
+
 # Prototype snapshot kept for reference only (spec §10.4). Not on the product path.
 legacy
 

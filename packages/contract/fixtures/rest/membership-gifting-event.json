@@ -1,0 +1,13 @@
+{
+  "kind": "youtube#liveChatMessage",
+  "id": "msg_test_0007",
+  "snippet": {
+    "type": "membershipGiftingEvent",
+    "liveChatId": "chat_test_0001",
+    "publishedAt": "2026-08-16T00:05:00.000Z",
+    "membershipGiftingDetails": {
+      "giftMembershipsCount": 5,
+      "giftMembershipsLevelName": "test_level_a"
+    }
+  }
+}

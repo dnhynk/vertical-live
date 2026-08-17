@@ -1,0 +1,469 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:vl:contract:v1:world-snapshot",
+  "title": "WorldSnapshot",
+  "description": "Authoritative world state read model (spec §5.2, §6.3, §6.4, §9.2).",
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "stateRevision": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "processedIngestSeq": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "worldTimeUtc": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+    },
+    "inputMode": {
+      "type": "string",
+      "enum": [
+        "direct",
+        "aggregate"
+      ]
+    },
+    "interactionEnabled": {
+      "type": "boolean"
+    },
+    "broadcastLifecycle": {
+      "type": "string",
+      "enum": [
+        "offline",
+        "starting",
+        "live",
+        "degraded",
+        "recovering",
+        "safe_stopped"
+      ]
+    },
+    "creature": {
+      "type": "object",
+      "properties": {
+        "creatureId": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+        },
+        "lifeStage": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+        },
+        "growthStage": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+        },
+        "needId": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+        },
+        "emotionId": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+        },
+        "bondProgress": {
+          "type": "object",
+          "properties": {
+            "current": {
+              "type": "number",
+              "minimum": 0
+            },
+            "target": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            }
+          },
+          "required": [
+            "current",
+            "target"
+          ],
+          "additionalProperties": false
+        },
+        "growthProgress": {
+          "type": "object",
+          "properties": {
+            "current": {
+              "type": "number",
+              "minimum": 0
+            },
+            "target": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            }
+          },
+          "required": [
+            "current",
+            "target"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "creatureId",
+        "lifeStage",
+        "growthStage",
+        "needId",
+        "emotionId",
+        "bondProgress",
+        "growthProgress"
+      ],
+      "additionalProperties": false
+    },
+    "mission": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "missionId": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+            },
+            "progress": {
+              "type": "object",
+              "properties": {
+                "current": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "target": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                }
+              },
+              "required": [
+                "current",
+                "target"
+              ],
+              "additionalProperties": false
+            },
+            "choices": {
+              "maxItems": 8,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "choiceId": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+                  },
+                  "labelKey": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9]*(\\.[a-z0-9_]+)+$"
+                  },
+                  "commandName": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "FEED",
+                          "PLAY",
+                          "PET",
+                          "VOTE_A",
+                          "VOTE_B",
+                          "VOTE_C"
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "choiceId",
+                  "labelKey",
+                  "commandName"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "choiceClosesAt": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "missionId",
+            "progress",
+            "choices",
+            "choiceClosesAt"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "environment": {
+      "type": "object",
+      "properties": {
+        "environmentId": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+        },
+        "worldPhaseId": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+        },
+        "weatherId": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+        },
+        "chapterId": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+        },
+        "chapterProgress": {
+          "type": "object",
+          "properties": {
+            "current": {
+              "type": "number",
+              "minimum": 0
+            },
+            "target": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            }
+          },
+          "required": [
+            "current",
+            "target"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "environmentId",
+        "worldPhaseId",
+        "weatherId",
+        "chapterId",
+        "chapterProgress"
+      ],
+      "additionalProperties": false
+    },
+    "nextTransitionAt": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+    },
+    "season": {
+      "type": "object",
+      "properties": {
+        "seasonId": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+        },
+        "previousSeasonMementoIds": {
+          "maxItems": 32,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+          }
+        }
+      },
+      "required": [
+        "seasonId",
+        "previousSeasonMementoIds"
+      ],
+      "additionalProperties": false
+    },
+    "display": {
+      "type": "object",
+      "properties": {
+        "currentNeedOrMission": {
+          "type": "object",
+          "properties": {
+            "textKey": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9]*(\\.[a-z0-9_]+)+$"
+            },
+            "iconId": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+            }
+          },
+          "required": [
+            "textKey",
+            "iconId"
+          ],
+          "additionalProperties": false
+        },
+        "lastAppliedAction": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "commandName": {
+                  "type": "string",
+                  "enum": [
+                    "FEED",
+                    "PLAY",
+                    "PET",
+                    "VOTE_A",
+                    "VOTE_B",
+                    "VOTE_C"
+                  ]
+                },
+                "appliedAt": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+                },
+                "contributionCount": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "commandName",
+                "appliedAt",
+                "contributionCount"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "growthOrChapterProgress": {
+          "type": "object",
+          "properties": {
+            "textKey": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9]*(\\.[a-z0-9_]+)+$"
+            },
+            "progress": {
+              "type": "object",
+              "properties": {
+                "current": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "target": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                }
+              },
+              "required": [
+                "current",
+                "target"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "textKey",
+            "progress"
+          ],
+          "additionalProperties": false
+        },
+        "nextChoiceAt": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "aggregateWindow": {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": [
+                "direct",
+                "aggregate"
+              ]
+            },
+            "endsAt": {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+            },
+            "tallies": {
+              "maxItems": 16,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "commandName": {
+                    "type": "string",
+                    "enum": [
+                      "FEED",
+                      "PLAY",
+                      "PET",
+                      "VOTE_A",
+                      "VOTE_B",
+                      "VOTE_C"
+                    ]
+                  },
+                  "count": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "commandName",
+                  "count"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "mode",
+            "endsAt",
+            "tallies"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "currentNeedOrMission",
+        "lastAppliedAction",
+        "growthOrChapterProgress",
+        "nextChoiceAt"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "stateRevision",
+    "processedIngestSeq",
+    "worldTimeUtc",
+    "inputMode",
+    "interactionEnabled",
+    "broadcastLifecycle",
+    "creature",
+    "mission",
+    "environment",
+    "nextTransitionAt",
+    "display"
+  ],
+  "additionalProperties": false
+}

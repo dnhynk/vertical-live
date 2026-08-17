@@ -28,7 +28,12 @@ export default defineConfig([
 
   // Repo-level ESM tooling that runs on Node.
   {
-    files: ['scripts/**/*.mjs', 'eslint.config.js', 'apps/renderer/vite.config.js'],
+    files: [
+      'scripts/**/*.mjs',
+      '{packages,apps,tools}/*/scripts/**/*.mjs',
+      'eslint.config.js',
+      'apps/renderer/vite.config.js',
+    ],
     extends: [js.configs.recommended],
     languageOptions: {
       ecmaVersion: 2023,

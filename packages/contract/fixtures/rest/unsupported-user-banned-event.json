@@ -1,0 +1,15 @@
+{
+  "kind": "youtube#liveChatMessage",
+  "id": "msg_test_0010",
+  "snippet": {
+    "type": "userBannedEvent",
+    "liveChatId": "chat_test_0001",
+    "publishedAt": "2026-08-16T00:06:10.000Z",
+    "userBannedDetails": {
+      "bannedUserDetails": {
+        "channelId": "UC_TEST_SYNTHETIC_0003"
+      },
+      "banType": "permanent"
+    }
+  }
+}

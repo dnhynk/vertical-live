@@ -1,0 +1,14 @@
+{
+  "kind": "youtube#liveChatMessage",
+  "id": "msg_test_0002",
+  "snippet": {
+    "type": "textMessageEvent",
+    "liveChatId": "chat_test_0001",
+    "publishedAt": "2026-08-16T00:00:30.000Z",
+    "hasDisplayContent": true,
+    "displayMessage": "ＦＥＥＤ​ https://example.invalid/spam NGWORD_TEST",
+    "textMessageDetails": {
+      "messageText": "ＦＥＥＤ​ https://example.invalid/spam NGWORD_TEST"
+    }
+  }
+}

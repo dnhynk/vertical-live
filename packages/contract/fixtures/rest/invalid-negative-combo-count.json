@@ -1,0 +1,21 @@
+{
+  "kind": "youtube#liveChatMessage",
+  "id": "msg_test_gift_0003",
+  "snippet": {
+    "type": "giftEvent",
+    "liveChatId": "chat_test_0001",
+    "publishedAt": "2026-08-16T00:09:00.000Z",
+    "hasDisplayContent": true,
+    "giftEventDetails": {
+      "giftMetadata": {
+        "giftName": "test_gift_lantern",
+        "jewelsAmount": 30,
+        "comboCount": -2,
+        "giftUrl": "https://example.invalid/gift.png",
+        "altText": "test gift",
+        "language": "ja",
+        "hasVisualEffect": true
+      }
+    }
+  }
+}
