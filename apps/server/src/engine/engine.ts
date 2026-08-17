@@ -228,23 +228,24 @@ export class StateEngine {
   /** Failed writer passes since the last one that completed. */
   #consecutiveFailures = 0
   /**
-   * Open effects whose ACK the store refused and has not recorded since (T8c,
-   * R-T8c-1 blocker 1).
+   * Open effects that still owe the outbox a row the store refused to write —
+   * the renderer's ACK, or §7.3(7)'s expiry (T8c, R-T8c-1 blocker 1, R-T8c-2
+   * blocker 1).
    *
-   * ACK-store health cannot live on `#consecutiveFailures`: that is the *pass*
+   * This health cannot live on `#consecutiveFailures`: that is the *pass*
    * streak, and a completed pass clears it — which on this loop happens every
    * `tickIntervalMs` (250ms), while T12 evaluates every `evaluateIntervalMs`
    * (2000ms). A full file refuses the `UPDATE` that grows an `effect_outbox`
    * row while a pass with nothing to commit writes nothing and succeeds, so the
    * fault was gone from the shared counter long before the supervisor read it.
    *
-   * An id enters when the store refuses that effect's ACK and leaves only when
-   * the effect leaves the open set — the ACK was finally recorded, or §7.3(7)
-   * expired the effect and there is nothing left to retry. So the condition
-   * outlives unrelated passes without being able to latch for the rest of the
-   * run.
+   * An id enters when the store refuses one of those two writes and leaves only
+   * when the effect leaves the open set — which now happens only *after* a
+   * durable write succeeded, so the count is exactly the set of effects whose
+   * outcome the database has not taken yet. The condition outlives unrelated
+   * passes without being able to latch for the rest of the run.
    */
-  #unrecordedAcks = new Set<string>()
+  #unrecordedEffects = new Set<string>()
   #timer: TimerHandle | null = null
   readonly #autoTick: boolean
 
@@ -371,7 +372,7 @@ export class StateEngine {
     const commits = this.#runPending()
     // Only the pass streak. A completed pass is evidence about *this* pass, not
     // about a renderer ACK the store is still refusing (R-T8c-1 blocker 1) —
-    // `#unrecordedAcks` clears on its own evidence instead.
+    // `#unrecordedEffects` clears on its own evidence instead.
     this.#consecutiveFailures = 0
     return commits
   }
@@ -453,7 +454,7 @@ export class StateEngine {
       return
     }
     // The row is written, so this effect no longer owes the supervisor anything.
-    this.#unrecordedAcks.delete(effectId)
+    this.#unrecordedEffects.delete(effectId)
     const open = this.#openEffects.get(effectId)
     if (open?.effect.paid === true && open.effect.causedByEventKey !== null) {
       // The original thanks reached a frame, so the substitute of spec §9.2 is no
@@ -479,32 +480,56 @@ export class StateEngine {
    * on `/metrics` and in the operator log.
    *
    * What it does **not** share is the lifetime: the count goes on
-   * `#unrecordedAcks`, which a completed pass does not clear, because a pass
+   * `#unrecordedEffects`, which a completed pass does not clear, because a pass
    * completing says nothing about the ACK write that is still failing
    * (R-T8c-1 blocker 1). Only an effect still in the open set is tracked — an
-   * ACK for an effect that already left it (expired, or already acked) has no
-   * retransmit to repair it, so counting it would be a fault nothing can clear.
-   * It is still on `lastFailure`, `/metrics` and the log.
+   * ACK for an effect that already left it (acked, or expired with the row
+   * written) has no retransmit to repair it, so counting it would be a fault
+   * nothing can clear. It is still on `lastFailure`, `/metrics` and the log.
    */
   #recordAckFailure(effectId: string, error: unknown): void {
     const failure = classifySqliteError(error)
     const message = error instanceof Error ? error.message : String(error)
     this.#lastFailure = { at: this.#clock.nowUtcIso(), error: `ack ${effectId}: ${message}` }
-    if (this.#openEffects.has(effectId)) this.#unrecordedAcks.add(effectId)
+    if (this.#openEffects.has(effectId)) this.#unrecordedEffects.add(effectId)
     this.#metrics.count('ack_effect_store_failed')
     this.#logger.error('engine.ack_store_failed', {
       effectId,
       kind: failure.kind,
       code: failure.code,
       retryable: failure.retryable,
-      unrecordedAcks: this.#unrecordedAcks.size,
+      unrecordedEffects: this.#unrecordedEffects.size,
       error: message,
     })
   }
 
   /**
-   * The one number T12 reads: failed writer passes plus renderer ACKs the store
-   * refused and still owes a row (`EngineHealth.consecutiveFailures`).
+   * The §7.3(7) expiry the store refused (R-T8c-2 blocker 1).
+   *
+   * Reported exactly like a refused ACK, and for the same reason: the effect is
+   * still open, the outbox row still has neither `acked_at` nor `expired_at`,
+   * and the single writer's database is what would not take the write. The next
+   * pass sweeps it again, so the retry needs no state of its own.
+   */
+  #recordExpiryFailure(effectId: string, error: unknown): void {
+    const failure = classifySqliteError(error)
+    const message = error instanceof Error ? error.message : String(error)
+    this.#lastFailure = { at: this.#clock.nowUtcIso(), error: `expire ${effectId}: ${message}` }
+    this.#unrecordedEffects.add(effectId)
+    this.#metrics.count('effect_expiry_store_failed')
+    this.#logger.error('engine.expiry_store_failed', {
+      effectId,
+      kind: failure.kind,
+      code: failure.code,
+      retryable: failure.retryable,
+      unrecordedEffects: this.#unrecordedEffects.size,
+      error: message,
+    })
+  }
+
+  /**
+   * The one number T12 reads: failed writer passes plus open effects whose ACK
+   * or expiry the store refused (`EngineHealth.consecutiveFailures`).
    *
    * They are added rather than kept apart because they are the same fact for the
    * supervisor — the single writer's database would not take a write — and
@@ -514,7 +539,7 @@ export class StateEngine {
    * transition.
    */
   #writeFailures(): number {
-    return this.#consecutiveFailures + this.#unrecordedAcks.size
+    return this.#consecutiveFailures + this.#unrecordedEffects.size
   }
 
   /** Health of the input path, reported by the source adapter (spec §9.4(3)). */
@@ -1126,16 +1151,40 @@ export class StateEngine {
    * it again; one whose window has passed without an ACK is recorded `expired`
    * so the substitute acknowledgement of spec §9.2 can be the world's decision
    * and not a guess made on the wire.
+   *
+   * Expiry writes to the store **before** anything in memory moves, for the same
+   * reason `onAckEffect()` does (R-T8c-2 blocker 1): forgetting the effect first
+   * and then failing to persist leaves the row with neither `acked_at` nor
+   * `expired_at` while nothing is left to retransmit, retry or report — the
+   * engine would look recovered on the next unrelated pass and the §7.3(7) work
+   * would be lost until a restart re-read the outbox.
    */
   #sweepEffects(now: string): void {
     const nowMs = toMillis(now)
     for (const [effectId, open] of [...this.#openEffects.entries()]) {
       if (nowMs > toMillis(open.effect.endsAt) + this.#config.engine.effects.expiryGraceMs) {
+        try {
+          this.#store.markEffectExpired(effectId, now)
+        } catch (error) {
+          // No row to expire: the outbox no longer holds this effect, so there
+          // is no write left owing and keeping it open would be a fault nothing
+          // could ever clear. It is dropped and counted, as an unknown ACK is.
+          if (error instanceof UnknownEffectError) {
+            this.#openEffects.delete(effectId)
+            this.#unrecordedEffects.delete(effectId)
+            this.#metrics.count('effect_expiry_unknown')
+            continue
+          }
+          // The store refused it (spec §11 "disk-full", "DB lock"). The effect
+          // stays open so the next pass sweeps it again, and the failure stays
+          // on the health surface until one of those passes records the row.
+          this.#recordExpiryFailure(effectId, error)
+          continue
+        }
         this.#openEffects.delete(effectId)
         // Nothing retransmits it any more, so a refused ACK for it has no repair
         // left and must stop being reported as one (T8c).
-        this.#unrecordedAcks.delete(effectId)
-        this.#store.markEffectExpired(effectId, now)
+        this.#unrecordedEffects.delete(effectId)
         this.#metrics.count('effect_expired')
         continue
       }
