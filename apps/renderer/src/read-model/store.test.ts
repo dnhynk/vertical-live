@@ -104,7 +104,9 @@ describe('ReadModel effects (spec §7.3(7), §9.2)', () => {
     expect(harness.model.effectStartCount).toBe(1)
     expect(harness.model.activeEffects).toHaveLength(1)
 
-    harness.model.markCommitted()
+    // No `markCommitted()` here on purpose: a resend changes nothing on screen,
+    // so React does not render and production never commits again. The ACK must
+    // still leave on the next frame (review round 1, blocker 1).
     harness.model.markFramePresented()
     // The server only resends when it holds no ACK, so the ACK is repeated.
     expect(harness.effectAcks).toHaveLength(2)
@@ -163,10 +165,69 @@ describe('ReadModel effects (spec §7.3(7), §9.2)', () => {
     harness.model.markFramePresented()
     expect(harness.effectAcks).toEqual([])
 
+    // The frame that opens the window activates the projection but must not ACK:
+    // no committed render has carried the effect yet (review round 1, blocker 2).
     harness.clock.advance(4_000)
     harness.model.markFramePresented()
     expect(harness.model.activeEffects).toHaveLength(1)
+    expect(harness.effectAcks).toEqual([])
+
+    // React renders the now-active effect, and the next frame acknowledges it.
+    harness.model.markCommitted()
+    harness.model.markFramePresented()
     expect(harness.effectAcks.map((ack) => ack.effectId)).toEqual(['sample-effect-action-2'])
+  })
+
+  it('activates, lets React commit, and only then acknowledges (observed order)', () => {
+    // The loop below is the production one: a notification makes React render
+    // and commit, and the frame loop runs afterwards. Recording every step
+    // pins the order the review asked for (review round 1, blocker 2).
+    const trace: string[] = []
+    const clock = new FakeClock()
+    const log = new RendererLog(clock)
+    const model = new ReadModel({ clock, log })
+    model.setAckSink({
+      ackState: (stateRevision) => trace.push(`ack_state:${String(stateRevision)}`),
+      ackEffect: (effectId) => trace.push(`ack_effect:${effectId}`),
+    })
+
+    let dirty = false
+    model.subscribe(() => {
+      dirty = true
+    })
+    const react = (): void => {
+      if (!dirty) return
+      dirty = false
+      trace.push(`commit:[${model.activeEffects.map((effect) => effect.effectId).join(',')}]`)
+      model.markCommitted()
+    }
+    const frame = (): void => {
+      trace.push('frame')
+      model.markFramePresented()
+      react()
+    }
+
+    model.receiveEffect(
+      sampleActionEffect({
+        effectId: 'sample-effect-future',
+        startsAt: '2026-08-17T00:00:03.000Z',
+        endsAt: '2026-08-17T00:00:09.000Z',
+      }),
+    )
+    react()
+    frame()
+    clock.advance(3_000)
+    frame()
+    frame()
+
+    expect(trace).toEqual([
+      'commit:[]',
+      'frame',
+      'frame',
+      'commit:[sample-effect-future]',
+      'frame',
+      'ack_effect:sample-effect-future',
+    ])
   })
 
   it('reports the effect as expired instead of acking it when it is never drawn', () => {

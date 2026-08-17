@@ -67,6 +67,12 @@ export class ReadModel {
   readonly #pendingEffectAcks = new Set<EffectId>()
   /** Effect ids committed and waiting for the frame that shows them. */
   readonly #committedEffectAcks = new Set<EffectId>()
+  /**
+   * The active effects of the last committed render. An effect is only
+   * acknowledged once a commit has actually carried it onto the screen, so
+   * becoming active and being acknowledged can never happen in one step.
+   */
+  #committedActiveEffectIds: ReadonlySet<EffectId> = new Set()
 
   #activeEffects: readonly Effect[] = []
   #effectStartCount = 0
@@ -168,7 +174,14 @@ export class ReadModel {
     }
 
     if (known !== undefined) {
-      this.#pendingEffectAcks.add(effect.effectId)
+      // A resend changes nothing on screen, so React has no reason to render
+      // and `markCommitted` may never run again. Queueing the ACK behind a
+      // commit would strand it, so a copy whose original has already been
+      // committed goes straight into the frame queue; only a copy that is still
+      // waiting for its first commit stays pending (spec §7.3(7)).
+      if (!this.#pendingEffectAcks.has(effect.effectId)) {
+        this.#committedEffectAcks.add(effect.effectId)
+      }
       this.#log.info('effect_repeat', effect.effectId)
       return 'repeat'
     }
@@ -196,6 +209,9 @@ export class ReadModel {
     }
     for (const effectId of this.#pendingEffectAcks) this.#committedEffectAcks.add(effectId)
     this.#pendingEffectAcks.clear()
+    // What this commit put on screen. The frame loop acknowledges an effect
+    // only if the committed render contained it.
+    this.#committedActiveEffectIds = new Set(this.#activeEffects.map((effect) => effect.effectId))
   }
 
   /**
@@ -229,6 +245,13 @@ export class ReadModel {
         continue
       }
       if (now < tracked.startsAtMs) continue
+      if (!this.#committedActiveEffectIds.has(effectId)) {
+        // The window has opened but no committed render has carried the effect
+        // yet. `#refreshActiveEffects` below notifies React; the ACK goes out on
+        // the frame after that commit, never on the frame that activates it
+        // (spec §7.3(7)).
+        continue
+      }
 
       tracked.displayed = true
       this.#committedEffectAcks.delete(effectId)

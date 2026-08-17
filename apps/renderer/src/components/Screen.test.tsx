@@ -2,7 +2,7 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, describe, expect, it } from 'vitest'
-import type { RendererToServerMessage } from '@vl/contract'
+import type { Effect, RendererToServerMessage } from '@vl/contract'
 
 import { createRuntime, type RendererRuntime } from '../runtime'
 import {
@@ -13,7 +13,7 @@ import {
   sequenceRandom,
   type FakeSocketFactory,
 } from '../testing/fakes'
-import { sampleSnapshot } from '../testing/fixtures'
+import { sampleActionEffect, sampleSnapshot } from '../testing/fixtures'
 import Screen from './Screen'
 
 /**
@@ -26,11 +26,15 @@ import Screen from './Screen'
 
 interface Harness {
   runtime: RendererRuntime
+  clock: FakeClock
   scheduler: FakeFrameScheduler
   sockets: FakeSocketFactory
   container: HTMLElement
   root: Root
   sent(): RendererToServerMessage[]
+  /** One `requestAnimationFrame` tick, with React allowed to commit after it. */
+  frame(): void
+  effectAcks(): RendererToServerMessage[]
 }
 
 const mounted: Harness[] = []
@@ -59,16 +63,37 @@ function mount(search = ''): Harness {
     root.render(<Screen runtime={runtime} />)
   })
 
+  const sent = (): RendererToServerMessage[] =>
+    sockets.last().parsedSent() as RendererToServerMessage[]
+
   const harness: Harness = {
     runtime,
+    clock,
     scheduler,
     sockets,
     container,
     root,
-    sent: () => sockets.last().parsedSent() as RendererToServerMessage[],
+    sent,
+    frame: () => {
+      act(() => {
+        scheduler.runFrame()
+      })
+    },
+    effectAcks: () => sent().filter((message) => message.type === 'ack_effect'),
   }
   mounted.push(harness)
   return harness
+}
+
+function sendEffect(harness: Harness, effect: Effect): void {
+  act(() => {
+    harness.sockets.last().emitMessage({
+      schemaVersion: 1,
+      sentAt: '2026-08-17T00:00:00.000Z',
+      type: 'effect',
+      effect,
+    })
+  })
 }
 
 function show(harness: Harness, snapshot = sampleSnapshot()): void {
@@ -193,6 +218,58 @@ describe('Screen (spec §5.2, §9.2, §12.3)', () => {
       stateRevision: 21,
       appliedAt: '2026-08-17T00:00:00.000Z',
     })
+  })
+
+  it('re-acknowledges a resent effect without a further React render', () => {
+    // Review round 1, blocker 1: a resend changes nothing on screen, so React
+    // never renders and `markCommitted` never runs again. The ACK must still go
+    // out on the next real frame (spec §7.3(7)).
+    const harness = mount()
+    show(harness)
+
+    sendEffect(harness, sampleActionEffect())
+    harness.frame()
+    expect(harness.effectAcks()).toHaveLength(1)
+    expect(query(harness, 'effect-sample-effect-action-1')).not.toBeNull()
+
+    const versionBeforeResend = harness.runtime.model.version
+    sendEffect(harness, sampleActionEffect())
+    // Nothing changed on screen: no notification, therefore no commit.
+    expect(harness.runtime.model.version).toBe(versionBeforeResend)
+    expect(harness.container.querySelectorAll('.effect')).toHaveLength(1)
+
+    harness.frame()
+    expect(harness.effectAcks()).toHaveLength(2)
+    expect(harness.runtime.model.effectStartCount).toBe(1)
+  })
+
+  it('shows a scheduled effect on a committed frame before acknowledging it', () => {
+    // Review round 1, blocker 2: the frame that opens the window may activate
+    // the projection but must not acknowledge it.
+    const harness = mount()
+    show(harness)
+
+    sendEffect(
+      harness,
+      sampleActionEffect({
+        effectId: 'sample-effect-future',
+        startsAt: '2026-08-17T00:00:03.000Z',
+        endsAt: '2026-08-17T00:00:09.000Z',
+      }),
+    )
+    harness.frame()
+    expect(query(harness, 'effect-sample-effect-future')).toBeNull()
+    expect(harness.effectAcks()).toEqual([])
+
+    harness.clock.advance(3_000)
+    harness.frame()
+    // Now on screen, and still not acknowledged.
+    expect(query(harness, 'effect-sample-effect-future')).not.toBeNull()
+    expect(harness.effectAcks()).toEqual([])
+
+    harness.frame()
+    expect(harness.effectAcks()).toHaveLength(1)
+    expect(harness.effectAcks()[0]).toMatchObject({ effectId: 'sample-effect-future' })
   })
 
   it('keeps the debug panel out of the broadcast mode', () => {
