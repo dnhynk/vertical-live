@@ -216,4 +216,28 @@ missing  server.simulatorToken
 | M2 | `resolve.ts:37` — `VL_ALLOW_IN_MEMORY_VAULT=1` 하나로 프로덕션 `auth:login`이 메모리 vault에 붙어 refresh token을 종료 시 잃을 수 있었다 | **고침 (0129785)** — env 플래그와 `VITEST` 감지를 모두 제거했다. `resolveSecretVault()`는 OS vault를 주거나 실패한다. in-memory vault는 테스트가 **코드로 주입**할 때만 쓰이고 프로덕션 진입점(`bin/auth-login.ts`, `bin/secrets.ts`)에는 그 경로가 없다. 테스트: `vault.test.ts` "has no environment-flag path to an unencrypted store"(플래그를 실제로 설정해 두고도 실패함을 확인) |
 | M3 | `token-manager.ts:146` — 원격 revoke 성공 후 vault 삭제가 실패하면 `auth_revoked`가 발생하지 않아 T13이 §12.4 삭제 트리거를 못 받았다 | **고침 (95ecdf7)** — `revokeGrant()`는 vault read/remote revoke/vault delete를 각각 잡고, **먼저** `auth_revoked`를 발행·latch한 뒤 실패를 오류로 보고한다(삭제 실패는 수동 삭제 명령을 안내하는 별도 오류). 테스트 2건: "still emits auth_revoked when the vault delete fails, and reports the failure", "still emits auth_revoked when the vault cannot even be read" |
 | m1 | `config.ts:69`, `loopback-login.ts:126,196` — `::1`을 허용하면서 URL은 `http://::1:<port>`로 조립돼 유효하지 않았다 | **고침 (95ecdf7)** — `formatLoopbackAuthority()`가 IPv6 리터럴을 대괄호로 감싼다. 테스트: 단위 검증 + `::1`에 실제로 bind해 로그인을 끝내는 통합 테스트(IPv6 loopback이 없는 호스트에서는 사유와 함께 skip) |
-| m2 | `loopback-login.ts:180`, `login-cli.ts:106` — code 교환·vault 저장 전에 "The credential was stored" 성공 페이지를 보냈다 | **고침 (95ecdf7)** — 브라우저 응답을 보류하고, code 교환과 `persistGrant`(vault 저장)가 성공한 뒤에만 성공 페이지를 보낸다. 실패하면 400과 실패 문구. 테스트: "shows the success page only after the grant has been persisted"(순서 검증), "fails the login and says so in the browser when persistence fails", 그리고 기존 교환 거부 테스트가 성공 문구 부재를 검사 |
+| m2 | `loopback-login.ts:180`, `login-cli.ts:106` — code 교환·vault 저장 전에 "The credential was stored" 성공 페이지를 보냈다 | **부분 고침 (95ecdf7 → round 2에서 완결)** — 브라우저 응답을 보류하고 code 교환과 `persistGrant`가 성공한 뒤에만 성공 페이지를 보낸다. 실패하면 400과 실패 문구. 테스트: "shows the success page only after the grant has been persisted"(순서 검증), "fails the login and says so in the browser when persistence fails", 기존 교환 거부 테스트가 성공 문구 부재를 검사. **다만 `persistGrant`가 없는 호출(내보낸 helper 직접 사용)에서는 여전히 저장을 주장했다 — round 2 finding 1로 이어짐** |
+
+## Review round 2
+
+리뷰: PR #4 `pullrequestreview-4949246767`, verdict **request_changes**(blocker 0 · major 0 · minor 1). round 1의 8건은 모두 met으로 확인됐고 m2만 미완으로 남았다. 수용했고 반박한 finding은 없다.
+
+| # | finding | 처리(고침 SHA / 반박 근거) |
+|---|---|---|
+| 1 (minor) | `loopback-login.ts:43,108,112` — round 1 m2가 프로덕션 CLI 호출자에서만 고쳐졌다. 내보낸 `loginWithLoopback`을 `persistGrant` 없이 부르면 아무것도 저장하지 않고도 "Windows Credential Manager에 저장됨" 페이지를 보낸다(리뷰어 재현: `{"persistGrantProvided":false,"status":200,"claimsStoredInCredentialManager":true}`). 기본 성공 테스트도 저장 없이 돈다 | **고침 (bb4bdf7)** — 주장이 의도가 아니라 **실제로 일어난 일**을 따르게 했다. `persistGrant`가 실행된 경우에만 "The credential was stored."를 보내고, 없으면 "Nothing was stored: the credential was handed to the terminal that started the login."을 보낸다. 반환값에 `persisted: boolean`을 추가해 프로그램 호출자도 잘못 보고할 수 없게 했다. 덧붙여 저장 문구에서 "Windows Credential Manager"를 뺐다 — 이 helper는 `persistGrant`가 어디에 저장하는지 알 수 없으므로 그 이름은 근거 없는 주장이었다. 테스트 3건: 기본 성공 경로가 저장을 주장하지 않고 `persisted:false`임을 검사, 저장 경로가 "The credential was stored."와 `persisted:true`임을 검사, 그리고 리뷰어 재현을 그대로 옮긴 "claims storage only when a persistGrant callback actually ran" |
+
+### Review round 2 수정 후 재실행 (F-T3-2, 2026-08-17)
+
+`origin/main` `d0b01ae`(PR #7 contract 변경 포함) 위로 rebase했다. **충돌 없음**(13 커밋 재적용), `npm install` 후 lockfile 변경 없음, `git diff origin/main HEAD`에 T3 밖 파일 없음.
+
+```text
+$ npm run format:check   -> All matched files use Prettier code style!
+$ npm run lint           -> eslint clean; check-no-legacy-imports: ok (0 legacy imports)
+$ npm run typecheck      -> tsc --build, 오류 없음
+$ npm run test           -> Test Files 25 passed (25); Tests 575 passed | 1 skipped (576)
+$ npm run build          -> @vl/contract / @vl/server / @vl/renderer / @vl/simulator, 오류 없음
+```
+
+564 → 576의 차이는 main에서 들어온 T1b(#7)·기타 테스트 11건과 이번 라운드에서 추가한 1건이다. skip 1건은 이전과 같은 "Windows Credential Manager off Windows"(이 호스트가 win32).
+
+실행하지 않았음: 실제 Google 계정 로그인(worker 계약 3.9 / 스펙 §11 Gate 2).
