@@ -81,11 +81,12 @@ T3는 `googleapis@174.0.1`을 "T9/T10이 쓸 Data API 클라이언트"로 선언
 | `youtube/broadcast/api.ts` | `fetch` + `AbortSignal`(주입 Clock) REST 클라이언트. `METHOD_ALLOWED_PARTS`로 메서드별 part를 강제(B1), 목록은 `ListResult{items, complete}`로 잘림을 알리고(B2), status-only `listLiveStreamStatuses`는 `cdn`을 아예 요청하지 않는다(M1). 실패를 `not_attempted` / `rejected` / `uncertain`으로 정규화, quota 사전검사·기록, `streamName`을 파싱 즉시 sink로 넘기고 반환 shape·오류 메시지에서 제거 |
 | `youtube/broadcast/stream-key.ts` | `StreamKeyCustodian`: stream별 staging → 선택된 stream만 vault write, redactor 등록, unchanged면 미기록, 생성된 stream에 키 없으면 실패 |
 | `youtube/broadcast/limits.ts` | 3종 named reason + limit-shaped unknown(일일 한도) 판정, adoptable lifecycle 목록 |
-| `youtube/broadcast/lifecycle.ts` | `resume` · `ensureBound` · `goLive` · `ensureLive` · `rollOver` · `stopBroadcast`(모두 같은 reconcile 래퍼를 통과). 호출 전 영속 → 불확실이면 `list` reconcile → 결론이 나야만 재시도(불완전 목록은 inconclusive), `invalidAutoStart`/`invalidScheduledStartTime`/`redundantTransition`/`errorStreamInactive` 개별 처리, 한도는 복구 우선 → 불가 시 safe stop |
+| `youtube/broadcast/lifecycle.ts` | `resume` · `ensureBound` · `goLive` · `ensureLive` · `rollOver` · `stopBroadcast` · `publish`(모두 같은 reconcile 래퍼를 통과). 호출 전 영속 → 불확실이면 `list` reconcile → 결론이 나야만 재시도(불완전 목록은 inconclusive), `invalidAutoStart`/`invalidScheduledStartTime`/`redundantTransition`/`errorStreamInactive` 개별 처리, 한도는 복구 우선 → 불가 시 safe stop |
 | `youtube/broadcast/health.ts` | §9.4(6) 신호 3개(`youtube.stream_status`·`youtube.stream_health`·`youtube.broadcast_lifecycle`) + 폴링 모니터. 관측 실패는 `unknown`이며 판정하지 않음 |
 | `youtube/broadcast/alerts.ts` | `BroadcastAlertSink` · `SafeStopRequestSink` 인터페이스(구현은 T12) |
 | `testing/fake-youtube-api-server.ts` | 상태를 가진 loopback 가짜 API. 문서화된 part 집합·필터 배타성을 검증하고 요청한 part만 응답에 담는다(B1). `holdApplied()`는 **적용 후 응답 보류**로 벽시계 없는 applied-but-unknown을 만든다(M2) |
 | `config/default.json` `youtube.broadcast` + `broadcast/config.ts` | 전략·공개범위·MFK·지연·auto-start·stream cdn 값과 provisional 목록 |
+| `docs/ops/broadcast-lifecycle.md`(신설) | 자원 생성 순서, attempt marker 생명주기(A-18), 공개 전환이 사람의 결정인 이유, 확인 쿼리 |
 | `docs/ops/obs-setup.md`, `docs/ops/youtube-auth-setup.md` | stream key는 이제 서버가 vault에 채우고 수동 입력은 fallback임을 명시(기존 안내가 틀린 상태로 남지 않게) |
 
 ## Result
@@ -98,6 +99,7 @@ T3는 `googleapis@174.0.1`을 "T9/T10이 쓸 Data API 클라이언트"로 선언
 | 1 | timeout → reconcile | met | 같은 파일 "uncertain results are reconciled, never retried blindly" 10건(round 2에서 마커 기반 negative 4건 추가: 같은 시각 무관 방송 미채택, insert 미적용 시 미채택, 마커 중복 inconclusive, 마커-시각 불일치 inconclusive) + `attempt-marker.test.ts` 9건(round 1에서 배리어 기반으로 전환 + 잘린 목록 inconclusive 2건 추가): insert timeout 후 insert 요청 **1회**·broadcast **1개**·`call_reconciled=applied`; liveStreams timeout 후 vault에 키 저장; 503 bind는 reconcile이 not_applied를 확인한 뒤에만 재시도(요청 2회); 끝까지 불확실하면 `BroadcastReconcileFailedError` |
 | 1 | 3종 한도 오류 | met | 같은 파일 "channel limits" 5건: `userBroadcastsExceedLimit`(복구), `concurrentBroadcastsExceedLimit`(live 방송 채택), 복구 불가 시 `safe_stopped` 요청 + alert + attempt abandoned, 문서화되지 않은 일일 한도(limit-shaped) 동일 경로·insert 1회, `liveStreams` 한도는 stream 재사용으로 복구. reason 매핑 단위 테스트는 `limits.test.ts`(rate limit·quota를 한도로 오분류하지 않음 포함) |
 | 1 | invalidAutoStart fallback | met | 같은 파일 "auto-start" 3건: 400 `invalidAutoStart` → alert + `enableAutoStart:false`로 재-insert → transition 2회, attempt `autoStart=false`; auto-start가 실제로 동작하면 transition 0회; 수락됐지만 발화하지 않으면 `auto_start_did_not_fire`로 transition fallback |
+| 2 | 내부 식별자가 시청자 화면에 남지 않음(A-18) | met | 같은 파일 "the attempt marker does not outlive its purpose" 6건: insert는 항상 private, ID 확정 직후 마커 제거(운영자 문구·title·scheduledStartTime 보존), 마커가 남아 있으면 `publish()` 거부, config가 private면 publish 거부, 불확실한 제거는 reconcile로 확정, 채택한 방송은 미변경 |
 | 2 | stream key가 로그·DB·응답에 없음 | met | 같은 파일 "the stream key never leaves the vault" 5건(round 1: 폴링이 `cdn`을 요청하지 않음, 미일치 조회 후 staging 0): 반환값·attempt 행 전체·alert·로그 dump·**DB 디렉터리의 모든 바이트(WAL 포함)** 에 키 없음, vault에는 있음; 채널에 stream이 여러 개일 때 선택된 것만 저장; redactor로 마스킹됨. 스키마 차원 강제는 `db/broadcast-resources.test.ts` "has no column that could hold a stream key", 전송 차원은 `api.test.ts` "stream key handling" 3건 |
 | 3 | 단계 영속 → 재기동 후 이어가기 | met | 같은 파일 "restart" 3건 + "stopping a broadcast" 3건(round 1 B4: 불확실한 stop은 행을 닫지 않고, 재기동이 `pending_transition`으로 관측을 해석): `ensureBound` 후 store 재오픈 → `goLive`가 같은 attempt/broadcast/stream으로 이어가고 insert·bind 각 1회; 호출 중 사망(pending transition) → 재기동 `resume()`이 reconcile로 `live` 확정, transition 요청 0회; insert가 이미 만든 broadcast를 **영속된 `attempt_marker`**(시각은 보강 조건)로 찾아 채택, broadcast 1개 — 시각 단독 매칭은 round 2 B1로 폐기됐고, 목록이 절단되면 채택도 미적용도 결론으로 삼지 않는다(round 3 B1) |
 
@@ -125,6 +127,16 @@ $ npx vitest run .../lifecycle.test.ts -t "never adopts an unrelated broadcast"
 $ (원복 후) 동일 명령 → Tests  1 passed | 42 skipped (43)
 ```
 
+### Reproduction checks (round 3)
+
+세 변경 모두 **되돌린 빌드에서 해당 테스트가 실패**함을 확인했다.
+
+```text
+B1-truncation:      exit=1 Tests  1 failed | 49 skipped (50)   (complete 검사를 채택 앞에서 제거)
+A18-publish-guard:  exit=1 Tests  1 failed | 49 skipped (50)   (marker_cleared_at 검사 제거)
+A18-private-insert: exit=1 Tests  1 failed | 49 skipped (50)   (insert가 config.privacyStatus 사용)
+```
+
 ### Gates (executed)
 
 ```text
@@ -137,6 +149,8 @@ $ npm run build          -> contract, renderer(vite ✓ built), server(copied 2 
 ```
 
 round 1 수정 후 재실행(base `44fefaa`로 rebase): 위 5개 게이트 모두 통과, 테스트 **1129 passed | 1 skipped (1130)**, `copied 2 migration(s)`(003 재번호 후 dist 정리 확인).
+
+round 3 수정 후 재실행(base `7aee54d`로 rebase): format pass · lint pass · typecheck pass · test **1289 passed | 1 skipped (1290)** · build pass(`copied 3 migration(s)`, `docs/ops/data-map.md up to date`). `marker_cleared_at` 컬럼을 T13 데이터 맵에 선언하고 생성 스크립트를 다시 돌렸다.
 
 round 2 수정 후 재실행(`git fetch && git rebase origin/main`): format `All matched files use Prettier code style!` · lint 0 problems · typecheck 무출력 · test **1141 passed | 1 skipped (1142)** · build `copied 2 migration(s)`.
 
@@ -196,6 +210,27 @@ round 2 수정 후 재실행(`git fetch && git rebase origin/main`): format `All
 | 개인정보 | 마커는 합성 attempt id뿐이다(§12.4 대상 데이터 아님). 기본 `privacyStatus: private` | 스펙 §12.4 |
 
 마커를 **파생값이 아니라 열로 영속**한 이유: 재기동 후의 reconcile은 "지금 빌드의 마커 형식"이 아니라 "그 attempt가 실제로 보낸 문자열"과 대조해야 한다. 형식이 바뀐 빌드로 재기동하면 파생값은 어긋나고, 그 결과는 정확히 이 task가 막으려는 중복 insert다.
+
+## Review round 3
+
+리뷰: https://github.com/dnhynk/vertical-live/pull/11#pullrequestreview-4951173267 (verdict `request_changes`, blocker 1 · major 1 · minor 1). round 2 findings와 T13 통합은 리뷰어가 모두 fixed/consistent로 확인했다. 커밋 `5c30775`.
+
+| finding | 처리 |
+|---|---|
+| **B1** `lifecycle.ts:674` 절단된 목록에서 마커 1건이 보이면 즉시 채택 — `markerMatches`는 하한일 뿐이라 유일성을 증명하지 못한다(§9.1, 합격 1) | 고침 `5c30775`. `search.complete` 검사를 **채택 판단보다 앞으로** 옮겨, 절단된 스캔에서는 채택도 미적용도 결론이 되지 않는다(`broadcast_list_truncated` inconclusive → `pending_call` 유지·재시도 금지). `liveStreams.insert` reconcile도 같은 규칙으로 맞췄다(대칭성). 재현 테스트: 첫 페이지에 마커를 가진 decoy + 무관 방송 200개 + 실제 insert는 페이지 경계 밖 → inconclusive, `broadcastId` null, insert 요청 1회, decoy 미바인딩 |
+| **M1** `lifecycle.ts:362` 마커가 공개 description에 영구 잔존(`privacyStatus: public`도 설정 가능) | 고침 `5c30775`, **코디네이터 결정 A-18** 4항 모두 구현: (1) insert는 config가 `public`이어도 **항상 `private`**(§9.1 최초 공개는 사람), (2) broadcast ID가 DB에 확정된 직후 `liveBroadcasts.update`로 description에서 **마커만** 제거(운영자가 고친 문구는 보존; `marker_cleared_at` 영속; 이 update도 호출 전 영속·reconcile 규칙), (3) `publish()`가 `marker_cleared_at`이 없으면 `BroadcastMarkerNotClearedError`로 거부 — 공개 경로는 이것뿐이고 `ensureLive()`는 호출하지 않는다, (4) `docs/ops/broadcast-lifecycle.md` 신설. quota·scope는 T3 표(`costs.ts`, `scopes.ts`)에 `liveBroadcasts.update` 추가. 채택한 남의 방송은 우리 마커가 없으므로 description을 건드리지 않는다(테스트) |
+| **m1** 티켓 102행·`lifecycle.ts:44-46`·`config.ts:72`의 stale 서술 | 고침 `5c30775`. 102행은 "영속된 `attempt_marker`(시각은 보강)"로, 모듈 주석은 마커 identity + 절단 규칙 + A-18 생명주기로, `config.ts`는 "빈 description도 마커를 보낸다"와 "`privacyStatus`는 `publish()`가 적용하는 목표값(insert는 항상 private)"으로 정정 |
+
+### `liveBroadcasts.update` 공식 사실 (2026-08-17 확인)
+
+| 항목 | 내용 | 출처 |
+|---|---|---|
+| part | `id, snippet, contentDetails, monetizationDetails, status` | https://developers.google.com/youtube/v3/live/docs/liveBroadcasts/update |
+| 덮어쓰기 규칙 | "this method will override the existing values for all of the mutable properties that are contained in any parts that the parameter value specifies" / "if your request does not specify a value for a property that already has a value, the property's existing value will be deleted" | 같은 문서 |
+| 필수 본문 | `id`, `snippet.scheduledStartTime`(snippet을 보낼 때), `contentDetails.monitorStream.enableMonitorStream`·`broadcastStreamDelayMs`(contentDetails를 보낼 때) | 같은 문서 |
+| scope | `youtube`, `youtube.force-ssl` | 같은 문서 Authorization |
+| 그래서 코드가 하는 일 | description만 바꿀 때도 `snippet.title`·`scheduledStartTime`을 함께 보내고, privacy를 바꿀 때는 `status.selfDeclaredMadeForKids`를 함께 보낸다. `contentDetails`는 이 경로로 보내지 않는다(추가 필수 필드 + 시작 후 수정 금지 오류) | — |
+| 비용 | write 50 units(`documented: false`, Data API write 규칙 근거). 방송당 최대 2회(마커 제거 + publish) | https://developers.google.com/youtube/v3/getting-started |
 
 ## Follow-ups
 
