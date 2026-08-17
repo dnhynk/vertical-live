@@ -105,6 +105,30 @@ $ npm run build
 > @vl/contract@0.0.0 build / @vl/server@0.0.0 build / @vl/simulator@0.0.0 build   (오류 없음)
 ```
 
+### Rebase 후 재실행 (F-T3-0, 2026-08-17)
+
+PR #2(contract, `b760ed5`)·PR #3(obs, `7842a2b`)가 머지되면서 `origin/main`(`079635d`) 위로 rebase했다. 위 "Assumptions" 마지막 행에 적어둔 중복 파일 5개(`apps/server/src/clock.ts`, `secrets/{types,env,index,secrets.test}.ts`, `testing/fake-clock.ts`)는 예정대로 **자동으로 합쳐졌다** — `clock.ts`·`types.ts`·`env.ts`·`secrets.test.ts`·`fake-clock.ts`는 main과 byte-identical이라 충돌 없이 사라졌고, 실제 해소가 필요했던 것은 세 파일뿐이다:
+
+| 파일 | 해소 |
+|---|---|
+| `apps/server/src/secrets/index.ts` | union — main의 3줄(T2 read-only 계약) + T3가 더한 vault/redaction export 19줄 |
+| `config/default.json` | union — main의 `obs` 섹션(리뷰에서 추가된 `streamIngestUrl` 포함) 그대로 + T3의 `youtube` 섹션 |
+| `apps/server/package.json` | union — 스크립트 `obs:probe` + `auth:login`·`secrets`, dependencies `obs-websocket-js` + `googleapis`·`@napi-rs/keyring`, devDependencies `@types/ws`·`ws` |
+
+`package-lock.json`은 병합하지 않고 `npm install`로 재생성했다(별도 커밋). 코드 기능 변경은 없다: rebase 후 `git diff origin/main HEAD`는 T3가 새로 추가한 파일과 위 세 파일의 T3 몫만 남고, `docs/tasks/BOARD.md`는 건드리지 않는다.
+
+rebase 후 같은 호스트에서 게이트 5개 재실행:
+
+```text
+$ npm run format:check   -> All matched files use Prettier code style!
+$ npm run lint           -> eslint clean; check-no-legacy-imports: ok (0 legacy imports)
+$ npm run typecheck      -> tsc --build, 오류 없음
+$ npm run test           -> Test Files 25 passed (25); Tests 551 passed | 1 skipped (552)
+$ npm run build          -> @vl/contract / @vl/server / @vl/renderer / @vl/simulator, 오류 없음
+```
+
+테스트 수가 86 → 552로 는 것은 T1(contract)·T2(obs) 테스트가 main에 들어왔기 때문이고, skip 1건은 rebase 전과 같은 "Windows Credential Manager off Windows"(이 호스트가 win32)다.
+
 CI(GitHub Actions, ubuntu-latest, run 31994493250, PR #4): `ci` **pass** (47s). 같은 게이트가 리눅스에서 돌며 테스트는 `84 passed | 2 skipped` — Windows 전용 Credential Manager round-trip 2건이 skip되고, 그 대신 "off Windows에서 `create()`가 unavailable을 던진다" 테스트가 실행된다(이 호스트에서는 정확히 반대: `85 passed | 1 skipped`). 즉 native 바인딩은 CI에서 설치는 되지만 로드되지 않는다.
 
 실제 Windows Credential Manager 스모크(이 호스트, 합성값):
@@ -144,7 +168,7 @@ deleted server.adminToken
 
 - T9: `liveChatMessages.streamList`와 `videos.list`의 scope를 공식 문서로 확정하고 `METHOD_SCOPES`의 `verified`를 올릴 것.
 - Gate 2: quota 대시보드 실측값으로 `costs.ts`의 `documented:false` 항목과 `reserveUnits`/`backoff`를 교체할 것.
-- PR #3(T2) 머지 후 rebase 시 중복 파일(`clock.ts`, `secrets/{types,env,index}.ts`, `secrets.test.ts`, `testing/fake-clock.ts`, `config/default.json`)을 합칠 것. 내용이 동일하므로 충돌 해소는 union 한 번.
+- ~~PR #3(T2) 머지 후 rebase 시 중복 파일을 합칠 것~~ — **완료**(F-T3-0, 위 "Rebase 후 재실행" 참조).
 - consent screen을 `In production`으로 올리기 전에는 refresh token이 7일마다 만료된다(문서화됨). Gate 2 전 운영자 확인 필요.
 
 ## Review round <n>
