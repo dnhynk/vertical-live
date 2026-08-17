@@ -15,9 +15,60 @@
           "type": "string",
           "pattern": "^[A-Za-z0-9_-]{1,128}$"
         },
+        "cause": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "event"
+                },
+                "eventKey": {
+                  "type": "string",
+                  "pattern": "^(youtube|simulator):([A-Za-z0-9_-]{1,128}):([A-Za-z0-9_-]{1,128})(?::gift:([1-9][0-9]{0,15}))?$"
+                }
+              },
+              "required": [
+                "kind",
+                "eventKey"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "deadline"
+                },
+                "deadlineKind": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+                },
+                "deadlineId": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9_-]{1,128}$"
+                }
+              },
+              "required": [
+                "kind",
+                "deadlineKind"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
         "causedByEventKey": {
-          "type": "string",
-          "pattern": "^(youtube|simulator):([A-Za-z0-9_-]{1,128}):([A-Za-z0-9_-]{1,128})(?::gift:([1-9][0-9]{0,15}))?$"
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^(youtube|simulator):([A-Za-z0-9_-]{1,128}):([A-Za-z0-9_-]{1,128})(?::gift:([1-9][0-9]{0,15}))?$"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "stateRevision": {
           "type": "integer",
@@ -72,6 +123,7 @@
       "required": [
         "schemaVersion",
         "effectId",
+        "cause",
         "causedByEventKey",
         "stateRevision",
         "startsAt",
@@ -93,9 +145,60 @@
           "type": "string",
           "pattern": "^[A-Za-z0-9_-]{1,128}$"
         },
+        "cause": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "event"
+                },
+                "eventKey": {
+                  "type": "string",
+                  "pattern": "^(youtube|simulator):([A-Za-z0-9_-]{1,128}):([A-Za-z0-9_-]{1,128})(?::gift:([1-9][0-9]{0,15}))?$"
+                }
+              },
+              "required": [
+                "kind",
+                "eventKey"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "deadline"
+                },
+                "deadlineKind": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+                },
+                "deadlineId": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9_-]{1,128}$"
+                }
+              },
+              "required": [
+                "kind",
+                "deadlineKind"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
         "causedByEventKey": {
-          "type": "string",
-          "pattern": "^(youtube|simulator):([A-Za-z0-9_-]{1,128}):([A-Za-z0-9_-]{1,128})(?::gift:([1-9][0-9]{0,15}))?$"
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^(youtube|simulator):([A-Za-z0-9_-]{1,128}):([A-Za-z0-9_-]{1,128})(?::gift:([1-9][0-9]{0,15}))?$"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "stateRevision": {
           "type": "integer",
@@ -164,6 +267,7 @@
       "required": [
         "schemaVersion",
         "effectId",
+        "cause",
         "causedByEventKey",
         "stateRevision",
         "startsAt",
@@ -185,9 +289,60 @@
           "type": "string",
           "pattern": "^[A-Za-z0-9_-]{1,128}$"
         },
+        "cause": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "event"
+                },
+                "eventKey": {
+                  "type": "string",
+                  "pattern": "^(youtube|simulator):([A-Za-z0-9_-]{1,128}):([A-Za-z0-9_-]{1,128})(?::gift:([1-9][0-9]{0,15}))?$"
+                }
+              },
+              "required": [
+                "kind",
+                "eventKey"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "deadline"
+                },
+                "deadlineKind": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+                },
+                "deadlineId": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9_-]{1,128}$"
+                }
+              },
+              "required": [
+                "kind",
+                "deadlineKind"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
         "causedByEventKey": {
-          "type": "string",
-          "pattern": "^(youtube|simulator):([A-Za-z0-9_-]{1,128}):([A-Za-z0-9_-]{1,128})(?::gift:([1-9][0-9]{0,15}))?$"
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^(youtube|simulator):([A-Za-z0-9_-]{1,128}):([A-Za-z0-9_-]{1,128})(?::gift:([1-9][0-9]{0,15}))?$"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "stateRevision": {
           "type": "integer",
@@ -228,6 +383,7 @@
       "required": [
         "schemaVersion",
         "effectId",
+        "cause",
         "causedByEventKey",
         "stateRevision",
         "startsAt",
@@ -249,9 +405,60 @@
           "type": "string",
           "pattern": "^[A-Za-z0-9_-]{1,128}$"
         },
+        "cause": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "event"
+                },
+                "eventKey": {
+                  "type": "string",
+                  "pattern": "^(youtube|simulator):([A-Za-z0-9_-]{1,128}):([A-Za-z0-9_-]{1,128})(?::gift:([1-9][0-9]{0,15}))?$"
+                }
+              },
+              "required": [
+                "kind",
+                "eventKey"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "deadline"
+                },
+                "deadlineKind": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+                },
+                "deadlineId": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9_-]{1,128}$"
+                }
+              },
+              "required": [
+                "kind",
+                "deadlineKind"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
         "causedByEventKey": {
-          "type": "string",
-          "pattern": "^(youtube|simulator):([A-Za-z0-9_-]{1,128}):([A-Za-z0-9_-]{1,128})(?::gift:([1-9][0-9]{0,15}))?$"
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^(youtube|simulator):([A-Za-z0-9_-]{1,128}):([A-Za-z0-9_-]{1,128})(?::gift:([1-9][0-9]{0,15}))?$"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "stateRevision": {
           "type": "integer",
@@ -302,6 +509,7 @@
       "required": [
         "schemaVersion",
         "effectId",
+        "cause",
         "causedByEventKey",
         "stateRevision",
         "startsAt",
