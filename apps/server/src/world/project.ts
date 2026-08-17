@@ -17,10 +17,18 @@ import { CHAPTER_BEATS, type GameState, type WorldState } from './types.js'
  * a chat line has no path onto the broadcast through the snapshot (spec §12.3),
  * and no field names a person (spec §7.4, BOARD A-1).
  */
-export type WorldView = Pick<
+type WorldViewBase = Pick<
   WorldSnapshot,
-  'worldTimeUtc' | 'creature' | 'mission' | 'environment' | 'nextTransitionAt' | 'display'
+  'worldTimeUtc' | 'creature' | 'environment' | 'nextTransitionAt' | 'display'
 >
+
+export interface WorldView extends WorldViewBase {
+  /**
+   * The world always has exactly one active goal on screen (spec §5.2), so this
+   * is narrower than the contract's nullable field — and still assignable to it.
+   */
+  readonly mission: NonNullable<WorldSnapshot['mission']>
+}
 
 /** The earliest pending deadline, i.e. the next state transition (spec §6.3). */
 export function nextTransitionAt(world: GameState): IsoUtcInstant {
