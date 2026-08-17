@@ -1,0 +1,29 @@
+{
+  "name": "@vl/soak",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "vl-soak": "./dist/bin.js"
+  },
+  "scripts": {
+    "build": "tsc --build"
+  },
+  "dependencies": {
+    "@vl/contract": "0.0.0",
+    "@vl/server": "0.0.0",
+    "@vl/simulator": "0.0.0",
+    "ws": "8.21.3"
+  },
+  "devDependencies": {
+    "@types/ws": "8.18.1"
+  }
+}

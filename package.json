@@ -22,7 +22,10 @@
     "build": "npm run build --workspaces --if-present",
     "obs:probe": "npm run obs:probe -w @vl/server --",
     "sim": "npm run build -w @vl/server && npm run build -w @vl/simulator && node tools/simulator/dist/bin.js",
-    "sim:report": "npm run sim -- report"
+    "sim:report": "npm run sim -- report",
+    "soak": "npm run build -w @vl/server && npm run build -w @vl/simulator && npm run build -w @vl/soak && node tools/soak/dist/bin.js",
+    "soak:matrix": "npm run soak -- matrix --write",
+    "soak:ci": "npm run soak -- run --mode accelerated --report data/diagnostics/soak/accelerated.json"
   },
   "devDependencies": {
     "@eslint/js": "9.39.1",
