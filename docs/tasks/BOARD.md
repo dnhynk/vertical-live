@@ -25,7 +25,7 @@
 | T12 | supervisor 상태기계·건강 집계·kill switch·알림·dead-man | T2, T8, T9, T10 | — | merged | t12-supervisor | #16 | `task_560530cfb813` |
 | T13 | 데이터 보존·삭제·철회 자동화 | T3, T4 | — | merged | t13-data-policy | #10 | `task_15cd2ae24e82` |
 | T14 | 렌더러 화면 완성(5초 무음·감사 연출·i18n) | T5, T7 | — | merged | t14-renderer-screen | #13 | `task_82f32652b3cf` |
-| T15 | fault matrix·72h soak harness | T11, T12, T13 | — | changes_requested | t15-fault-soak | #18 | `task_f32603eaee51` |
+| T15 | fault matrix·72h soak harness | T11, T12, T13 | — | merged | t15-fault-soak | #18 | `task_f32603eaee51` |
 | T16 | 문서 정합화·운영 런북·Gate 체크리스트 | T12 | — | changes_requested | t16-docs-alignment | #19 | `task_60d68899d24c` |
 | T17 | Windows 운영 스크립트(자동시작·OBS·아카이브) | T2, T12 | — | merged | t17-windows-ops | #17 | `task_e2466b978ebe` |
 | T8b | 엔진 버그픽스: /ingest/simulator inbox write 예외 시 hang(T15 발견) | T8 | — | merged | t8b-ingest-hang | #20 | `task_f1aeb51337bf` |
@@ -184,3 +184,4 @@
 | 2026-08-17 18:51 | F-T16-1 완료(6건, .md 11개). R-T16-2 → review2. 진행: R-T8b-1(review), F-T15-1 |
 | 2026-08-17 18:55 | R-T8b-1 verdict **approve** → **PR #20 squash merge**(main 01d8f2a). T8b worker release·worktree 제거. 남은 open PR: #18(T15, F-T15-1 진행), #19(T16, R-T16-2 진행) |
 | 2026-08-17 19:05 | F-T15-1 완료(프로덕션 엔진 child SIGKILL 경계 주입·실제 SQLITE_FULL·coverage 실행 도출; 1871 tests, soak:ci PASS). 발견: T8 renderer ACK 경로 disk-full uncaught → **T8c 등록·디스패치** `ctx_2313b56ee0d2`. R-T15-2 `task_d50420fe3800` → `ctx_1bffa8f59051`(review). 진행: R-T16-2(review2) |
+| 2026-08-17 19:16 | R-T15-2 verdict **approve**(로컬 게이트 5개+soak:ci 52.5s PASS, 경계 negative probe) → 최종 게이트(server subpath export만 추가·deps 없음·config soak 절 합격선 null(A-15)) → **PR #18 squash merge**(main 499cdaa). T15 worker release·worktree 제거. R-T16-2 verdict request_changes(잔여 blocker 1: ACCOUNT_SETUP_FROM_ZERO.md:168 무출처 advanced-features 항목) → **F-T16-2** `task_dcb1fb230065` → T16 터미널. 진행: T8c, F-T16-2. 남은 open PR: #19 |
