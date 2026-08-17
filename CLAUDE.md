@@ -8,7 +8,7 @@
 2. `docs/tasks/TASK_SPECS.md` — 스펙을 PR 단위 작업(T0–T17)으로 나눈 명세. 자기 T-ID 절과 그 절이 지정한 스펙 절을 반드시 읽는다.
 3. `docs/tasks/BOARD.md` — 상태·사용자 결정(D-*)·코디네이터 가정(A-*). 가정은 뒤집힐 수 있으니 티켓에 번호로 인용한다.
 4. `docs/runbooks/agent-orchestration.md` — 코디네이터·worker·리뷰어 절차와 계약.
-5. `README.md`, `docs/ROADMAP.md`, `docs/ACCOUNT_SETUP_FROM_ZERO.md`, `docs/YOUTUBE_MONETIZATION_RUNBOOK.md`는 **T16에서 정합화 전까지 구식**이다. 스펙과 충돌하는 서술(Pokémon 사용, 후원→부활, Gifts 지역 등)은 무시한다.
+5. `README.md`, `docs/ROADMAP.md`, `docs/ACCOUNT_SETUP_FROM_ZERO.md`, `docs/YOUTUBE_MONETIZATION_RUNBOOK.md`는 **T16(2026-08-18)에서 스펙 v1과 정합화됐다.** 정본 우선순위는 그대로이며 충돌이 남아 있으면 스펙이 이긴다. 운영 절차는 `docs/ops/`(`runbook-operations.md`, `gate0-checklist.md`, `gate2-experiments.md`, `moderation-call-table.md` 포함).
 
 ## 2. 고정 결정
 
