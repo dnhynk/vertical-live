@@ -58,8 +58,13 @@ npm run start -w @vl/server        # = node apps/server/dist/main.js  (127.0.0.1
 
 렌더러는 OBS Browser Source가 연다. URL에는 `?mode=broadcast`와 `&token=<server.rendererToken>`이 필요하고,
 토큰은 운영자가 손으로 넣지 않는다 — 정본은 vault이고 서버가 obs-websocket으로 주입한다
-([`obs-setup.md`](obs-setup.md) 4장, BOARD A-16). 개발 중에는 `npm run dev`(Vite, `http://127.0.0.1:5173/`)로 연다.
-정적 서빙 구성은 T17이다.
+([`obs-setup.md`](obs-setup.md) 4장, BOARD A-16). 정적 서빙 구성은 T17이다.
+
+> **Vite dev 서버를 방송 화면 자리에 쓸 때**: `npm run dev -w @vl/renderer -- --host 127.0.0.1`로 띄운다.
+> Vite 기본 host는 `localhost`이고 이 호스트에서는 `::1`로 해석돼 `[::1]:<port>`에만 bind되므로, IPv4
+> `127.0.0.1`을 쓰는 OBS Browser Source URL이 연결되지 않는다(2026-08-18 확인: `netstat`에 `[::1]:5194`만,
+> `curl http://127.0.0.1:5194/` 실패 / `--host 127.0.0.1`로 띄운 5195는 200). 이것은 **개발 편의용 경로**이고,
+> 운영 서빙 방식은 T17이 정한다.
 
 ### 1.4 시작 순서와 "떴다"의 판정
 
@@ -171,7 +176,7 @@ curl -s http://127.0.0.1:8787/health | jq '.supervisor.families[] | select(.stat
 
 | kind | 무엇이 있었는가 | 재개 전에 할 일 |
 |---|---|---|
-| `kill_switch` | 운영자가 3경로 중 하나를 당김 | 원인 해결 → `npm run kill -- --clear` → 재시작 |
+| `kill_switch` | 운영자가 3경로 중 하나를 당김 | 원인 해결 → `npm run kill -w @vl/server -- --clear` → 재시작 |
 | `rights_or_policy` | 권리·정책·약관 문제, 방송 한도에서 복구 불가 | **자동으로 재개하지 않는다.** 권리·정책 판단이 먼저다(§9.1) |
 | `data_integrity` | DB 파일 손상(`SQLITE_CORRUPT`/`SQLITE_NOTADB`) 또는 검증 불가한 마이그레이션 이력 | 4.4 |
 | `account_action` | 계정 정지·strike·재동의 필요, grant 철회 | Studio·Google 계정 상태 확인 후 재동의([`youtube-auth-setup.md`](youtube-auth-setup.md)) |
@@ -273,5 +278,3 @@ npm run start -w @vl/server
 - 재발 방지와 설정 변경 여부
 
 이 기록은 §11의 "첫 공개 운영: 내부·off-host에서 관측된 장애·복구·중단을 기록함"과 Gate 3·5의 증빙이 된다.
-</content>
-</invoke>

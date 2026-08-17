@@ -91,10 +91,16 @@ npm install       # 새 clone·CI는 npm ci
 ### 4.2 렌더러만 띄우기 (서버 없이 화면 확인)
 
 ```bash
-npm run dev                       # = npm run dev -w @vl/renderer (Vite, http://127.0.0.1:5173/)
-npm run dev -w @vl/renderer -- --port <n>   # 포트가 겹칠 때
+npm run dev -w @vl/renderer -- --host 127.0.0.1              # http://127.0.0.1:5173/
+npm run dev -w @vl/renderer -- --host 127.0.0.1 --port <n>   # 포트가 겹칠 때
 ```
 
+- **`--host 127.0.0.1`을 빼지 않는다.** Vite의 기본 host는 `localhost`이고, 이 호스트에서 `localhost`는 IPv6
+  `::1`로 해석돼 dev 서버가 `[::1]:<port>`에만 bind된다(2026-08-18 확인: `netstat -ano`에 `[::1]:5194`만,
+  `curl http://127.0.0.1:5194/` 연결 실패, `curl http://[::1]:5194/` 200). OBS Browser Source와 이 저장소의
+  다른 문서는 IPv4 `127.0.0.1`을 쓰므로, 명시하지 않으면 화면이 뜨지 않는다. `--host 127.0.0.1`을 주면
+  `127.0.0.1:<port>`에 bind되고 200을 돌려준다(같은 날 확인).
+- `npm run dev`(루트 별칭)는 옵션 없이 `@vl/renderer`를 띄우므로 위 제약이 그대로 적용된다. 정적 서빙 구성은 T17.
 - `?mode=broadcast`(기본): 방송 화면. `?mode=dev`: 개발 패널(이벤트 주입·진단).
 - `/ws/renderer`는 인증을 요구하므로 서버에 실제로 붙이려면 `?token=<server.rendererToken>`이 필요하다
   (§10.2). 토큰 없이 열면 서버가 4401로 닫고 화면은 그 사실을 표시한다.
@@ -165,5 +171,3 @@ npm run build
 - `main` 직접 push·자기 PR 머지 금지. squash merge만 쓴다(BOARD D-4).
 - 스펙·명세에 값이 없으면 **추측으로 메우지 않는다.** 공식 문서로 확정해 URL·확인 날짜를 남기거나,
   `provisional: true` 설정으로 두고 티켓·PR에 적는다(`CLAUDE.md` §4).
-</content>
-</invoke>

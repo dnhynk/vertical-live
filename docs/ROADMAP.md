@@ -31,15 +31,17 @@
 | 절대 목표, 오리지널 IP, 무료 핵심 플레이, V1 콘텐츠, 수익화 금지선에 사용자 동의 | 미승인 |
 | YouTube Studio에서 기존 채널·YPP·Gifts·Supers·Membership·Shopping 상태 audit·증빙 | 미수행(§17) |
 | 전용 채널 또는 기존 채널 기준선·증분 수익 귀속 규칙 승인 | 미승인(§17) |
-| identity 고지·동의·삭제·compliance 경로 또는 개인 식별 기능 비활성화 결정 | 미승인. 코드는 **비활성화**를 기본값으로 구현(BOARD A-1) |
+| identity 고지·동의·삭제·compliance 경로 또는 개인 식별 기능 비활성화 결정 | 미승인. 코드는 **비활성화만** 구현했다(BOARD A-1). 개방 경로는 schema extension·동의 UX·삭제 경로가 붙는 후속 작업 |
 | 첫 5초 일본 패널 모집 조건·통과 기준, 24시간 콘텐츠 목록과 반복 표본 기준 승인 | 미승인(§17) |
 | 정책상 허용되는 일본 시장 증빙 방식과 일본 범위 합격 기준 승인 | 미승인(§17) |
 | 파일럿 기본 입력 모드, hard backlog·flood 보호값, direct↔vote 실험 순서 승인 | 미승인. 코드는 `direct` 기본 + 비경쟁 집계를 provisional 값으로 구현(A-3, A-9) |
 | 방송 길이 실험 순서와 Gate 3 자동화 전략 선택 절차 승인 | 미승인. 코드는 `single` 기본 + rolling 실험 플래그(A-4) |
 | 72시간·장기 운영 측정식과 provisional 목표, 24시간 moderation 호출표, public 예산·손실 중단선·최대 관측기간 승인 | 미승인. 호출표 템플릿은 [`docs/ops/moderation-call-table.md`](ops/moderation-call-table.md), 코드 게이트는 `assertModerationCallTableApproved()` |
 
-Gate 0이 승인되기 전에도 구현은 진행한다(스펙이 방향을 정한 항목은 BOARD의 가정 A-*로 두고 플래그·provisional
-설정으로 양쪽을 구현). 승인 결과가 나오면 그 값으로 설정을 교체한다.
+Gate 0이 승인되기 전에도 구현은 진행하되, 구현된 것은 **스펙이 정한 안전한 기본 경로**뿐이다(BOARD 가정 A-*):
+identity 비활성(A-1), `direct` + 비경쟁 집계(A-3), `single` broadcast(A-4). 승인 결과 중 숫자·값은 설정 교체로
+반영되지만, **다른 경로를 고르면 후속 구현이 필요하다** — identity (B)는 schema extension·동의 UX·삭제 경로가 붙는
+새 작업이다([`docs/ops/gate0-checklist.md`](ops/gate0-checklist.md) 1.3).
 
 ---
 
@@ -141,5 +143,3 @@ reboot·자동 시작·sleep·GPU reset·remote-session 종료·자동 업데이
 | public traffic 수집 후 | direct↔vote 자동 전환 임계값 |
 | 광고 단계 전 | 세로 단독 또는 dual stream |
 | 첫 공개 baseline 후(결과 확인 전) | 상업 성공 수치와 평가 기간 |
-</content>
-</invoke>

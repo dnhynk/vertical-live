@@ -73,17 +73,31 @@ broadcast ID의 영속성이 아니다.
 
 ### 2.1 구간 정의
 
-§7.5는 **네 구간을 각각** 측정하라고 요구한다. 하나의 숫자로 합치지 않는다.
+§7.5는 엔지니어링 목표 구간 하나(`API 수신 → 서버 상태 확정 → 렌더러 확인`)와 **반드시 별도로 측정할** 구간 셋
+(`채팅 게시 → API 수신`, `상태 확정 → 인코더 frame`, `인코더 → 일본 실제 모바일 단말`)을 정한다. 넷을 하나의
+숫자로 합치지 않는다.
 
 | # | 구간 | 누가 측정하는가 |
 |---|---|---|
 | 1 | 채팅 게시 → API 수신 | **사람**(저장소는 게시 시각을 알 수 없다). 게시 시각을 기록한 채팅과 서버의 `receivedAt` 비교 |
-| 2 | API 수신 → 서버 상태 확정 | 서버 `GET /metrics` → `latencyMs.receivedToCommitted` |
-| 3 | 상태 확정 → renderer 확인 | `latencyMs.committedToPublished` + `latencyMs.publishedToAcked`(합산은 `receivedToAcked`) |
+| 2 | API 수신 → 서버 상태 확정 → renderer 확인 (§7.5 "엔진 내부 지연", 목표 p95 2초 이하) | 서버 `GET /metrics` → **`latencyMs.receivedToAcked` 하나**. 이 히스토그램이 `receivedAt`부터 renderer의 state ACK `appliedAt`까지를 **한 이벤트 안에서 직접** 잰다 |
+| 3 | 상태 확정 → 인코더 frame | **현재 확인 불가.** 저장소는 렌더러가 프레임에 반영한 시각(state ACK)까지만 계측하고, OBS가 그 화면을 인코딩한 frame의 시각은 계측하지 않는다. Gate 2에서 OBS 쪽 계측 방법을 정하기 전에는 이 구간의 숫자를 만들지 않는다 |
 | 4 | 인코더 → 일본 실제 모바일 단말 | **사람**. 화면의 상태 변화가 단말에 보이는 시각을 실측 |
 
-2·3번(= §7.5의 "엔진 내부 지연", 목표 p95 2초 이하)은 이미 계측되어 있고 로컬 시뮬레이터로 재현할 수 있다
-([`simulator.md`](simulator.md), `npm run sim:report`). 1·4번은 **실제 계정·실제 단말 없이는 측정할 수 없다.**
+2번은 이미 계측되어 있고 로컬 시뮬레이터로 재현할 수 있다([`simulator.md`](simulator.md), `npm run sim:report`).
+1·3·4번은 **실제 계정·실제 단말 또는 새 계측 없이는 측정할 수 없다.**
+
+**히스토그램 4종은 서로 다른 모집단이라 더하지 않는다**(`apps/server/src/engine/metrics.ts`).
+
+| 히스토그램 | 재는 것 | 모집단 |
+|---|---|---|
+| `receivedToCommitted` | `receivedAt` → `committedAt` | 이벤트가 원인인 commit만(타이머 유래는 `receivedAt`이 없어 기록하지 않는다) |
+| `committedToPublished` | `committedAt` → `publishedAt` | effect **와** snapshot 발행이 **섞여 있다** |
+| `publishedToAcked` | effect `publishedAt` → effect ACK `appliedAt` | **effect만** |
+| `receivedToAcked` | `receivedAt` → **state** ACK `appliedAt` | 이벤트가 원인인 revision만 |
+
+그래서 `committedToPublished`의 p95와 `publishedToAcked`의 p95를 더한 값은 어떤 구간의 지연도 아니다. 구간 2의
+합격 판정은 **`receivedToAcked` 하나로** 하고, 나머지 셋은 어느 단계가 느린지 보는 진단용이다.
 
 > "대부분 5초 미만"은 YouTube의 영상 지연 설명이지 제품 SLA가 아니다([S5], §7.5).
 
@@ -162,5 +176,3 @@ Gate 2는 다음이 **전부** 채워졌을 때 통과 후보가 된다.
 - [ ] T13: field별 삭제·철회·refresh 자동 test 통과 + API compliance gate 확인(사람)
 
 통과해도 그것은 **기술 검증**이다. 24시간 공개 운영은 Gate 3, 수익성은 Gate 5다(§15).
-</content>
-</invoke>

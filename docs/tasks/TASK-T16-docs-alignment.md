@@ -199,5 +199,3 @@ vault 비밀정보와 실제 계정이 필요하고, 이는 Gate 2 항목이다(
 - Gate 0 승인이 나면 `docs/ops/gate0-checklist.md`의 결과를 BOARD `D-*`로 옮기고 `config/default.json`의
   `supervisor.moderation`·provisional 값을 승인값으로 교체한다.
 - T15·T17 머지 후 `docs/ops/runbook-operations.md`의 "다른 문서" 표에 `fault-matrix.md`·`windows-host.md` 링크 추가.
-</content>
-</invoke>

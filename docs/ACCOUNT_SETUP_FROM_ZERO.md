@@ -76,12 +76,17 @@ Official reference (not re-verified in T16):
 
 ### Step 4: Request / Unlock Advanced Features
 
-The channel needs advanced features for live streaming and for the API usage this product depends on;
-advanced-features status is one of the items recorded in the Gate 0 audit (spec §8.1).
+What the spec supports: advanced-features status is one of the items the Gate 0 account audit records, alongside
+2-Step Verification, strikes and the AdSense link (spec §8.1).
 
-The unlock path itself — phone verification first, then either channel history or ID/video verification — is
-**확인 필요(출처 없음)**: it was carried over from the pre-spec version of this document and has no spec source. Read the
-current requirement from Studio during the Gate 0 audit.
+**확인 필요(출처 없음)** — both of the following were carried over from the pre-spec version of this document and have
+no spec source and no verified URL, so they are not asserted here:
+
+- that advanced features are *required* for live streaming and for this product's API usage
+- the unlock path itself (phone verification first, then either channel history or ID/video verification)
+
+Read the current requirement from YouTube Studio during the Gate 0 audit and record what it actually says
+(`docs/ops/gate0-checklist.md` §1.2). Do not plan the launch around the unverified version.
 
 ### Step 5: Enable Live Streaming
 
@@ -117,8 +122,10 @@ Set these before any public upload.
 - Channel audience: the outcome of Step 6 — not a default.
 - Language: Japanese, for the Japan-first market (spec §3, §5.3).
 - Comments: allowed, with moderation filters.
-- Live chat: enabled. Fan-funding features require live chat/comments to stay on (see
-  `docs/YOUTUBE_MONETIZATION_RUNBOOK.md` §5).
+- Live chat: enabled. The claim that fan-funding features require live chat/comments to stay on carries only the
+  URL it was carried over with (**not re-verified in T16**): https://support.google.com/youtube/answer/9277801 —
+  confirm it in the Gate 0 audit. Independently of that claim, this product cannot run without live chat: it is the
+  only input path (spec §7.2).
 - Chat safety defaults: blocked words, URL hold, hold potentially inappropriate messages for review, slow mode
   (spec §12.3, [S16]).
 - Branding: profile image, banner, description, links — original assets only (§12.1).
@@ -210,5 +217,3 @@ from transient failures and alert; and — if Gate 2 selects it — roll the bro
 **Outside automation entirely:** account suspensions, strikes, terms changes, re-consent after expiry, and rights
 disputes. These trigger an immediate safe stop and a human alert (§9.1); the operational procedure is
 `docs/ops/runbook-operations.md` §4.2.
-</content>
-</invoke>

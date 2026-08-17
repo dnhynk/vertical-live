@@ -249,5 +249,3 @@ Additional URLs carried over from the pre-spec version of this document (**not r
 - Super Chat and Super Stickers eligibility: https://support.google.com/youtube/answer/9277801
 - Channel memberships: https://support.google.com/youtube/answer/7636690
 - Turn on gifts: https://support.google.com/youtube/answer/15534883
-</content>
-</invoke>

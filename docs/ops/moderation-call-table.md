@@ -106,5 +106,3 @@
 2. `config/default.json`의 `supervisor.moderation`을 그 값으로 바꾸고 `approved: true`로 올린다.
 3. `docs/tasks/BOARD.md` §2에 `D-*`로 기록한다.
 4. [`gate0-checklist.md`](gate0-checklist.md) 1.8 체크박스를 닫는다.
-</content>
-</invoke>
