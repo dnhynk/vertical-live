@@ -6,6 +6,7 @@ import type {
   BroadcastAttemptRecord,
   BroadcastMutatingCall,
   BroadcastStage,
+  BroadcastTransitionTarget,
 } from '../../db/types.js'
 import type { HealthDetailValue } from '../../health/types.js'
 import { silentLogger, type Logger } from '../../secrets/redaction.js'
@@ -68,6 +69,25 @@ export class BroadcastStreamInactiveError extends Error {
       `broadcast ${broadcastId} cannot transition while its bound stream is inactive; start the encoder first`,
     )
     this.name = 'BroadcastStreamInactiveError'
+  }
+}
+
+/**
+ * A reconcile that could not decide. The pending call stays on the row, so nothing
+ * is retried and the next `resume()` asks YouTube again (review round 1, B2: a
+ * truncated list is not evidence of absence).
+ */
+export class BroadcastReconcileInconclusiveError extends Error {
+  readonly call: BroadcastMutatingCall
+  readonly detail: string
+
+  constructor(call: BroadcastMutatingCall, detail: string) {
+    super(
+      `${call} could not be reconciled (${detail}); the call stays pending and must not be retried`,
+    )
+    this.name = 'BroadcastReconcileInconclusiveError'
+    this.call = call
+    this.detail = detail
   }
 }
 
@@ -168,7 +188,7 @@ export class BroadcastLifecycle {
       pendingCall: open.pendingCall,
       stage: open.stage,
     })
-    return this.#reconcile(open, open.pendingCall)
+    return this.#reconcile(open, open.pendingCall, open.pendingTransition)
   }
 
   /** Creates or reuses the stream, creates or adopts the broadcast, binds them. */
@@ -232,33 +252,36 @@ export class BroadcastLifecycle {
    * is already complete, or was never created, closes without a call.
    */
   async stopBroadcast(attempt: BroadcastAttemptRecord): Promise<BroadcastAttemptRecord> {
-    const broadcastId = attempt.broadcastId
-    if (broadcastId === null) {
+    if (attempt.broadcastId === null) {
       return this.#store.closeBroadcastAttempt(attempt.attemptId, 'abandoned', 'never_created')
     }
-    let closeReason: string | undefined
-    try {
-      await this.#runCall(attempt, 'liveBroadcasts.transition', () =>
-        this.#api.transitionBroadcast({ broadcastId, broadcastStatus: 'complete' }),
-      )
-    } catch (error) {
-      const reason =
-        error instanceof YouTubeApiCallError
-          ? (error.reason ?? error.classification.kind)
-          : 'unknown'
-      if (reason !== 'redundantTransition') {
-        // The attempt is closed regardless: leaving it open would make the next
-        // `ensureLive` resume a broadcast this host has already walked away from.
-        // The reason is recorded so an operator can see that the broadcast may
-        // still be live at YouTube — the recover-first path above will find it.
-        closeReason = `complete_failed:${reason}`
-        this.#logger.warn('completing the broadcast failed; closing the attempt anyway', {
-          attemptId: attempt.attemptId,
-          reason,
-        })
-      }
-    }
-    return this.#store.closeBroadcastAttempt(attempt.attemptId, 'complete', closeReason)
+    // Ending a broadcast is a mutating call like any other, so it goes through the
+    // same reconcile-then-retry wrapper (review round 1, B4). Closing the attempt on
+    // an *unknown* outcome was the bug: the row said `complete` while YouTube still
+    // said `live`, and nothing had asked.
+    return this.#withRetries(
+      attempt,
+      'liveBroadcasts.transition',
+      async (current) => {
+        const broadcastId = requireId(current.broadcastId, 'broadcastId')
+        try {
+          await this.#runCall(
+            current,
+            'liveBroadcasts.transition',
+            () => this.#api.transitionBroadcast({ broadcastId, broadcastStatus: 'complete' }),
+            'complete',
+          )
+        } catch (error) {
+          // "already in the requested status" — the broadcast is over, which is the
+          // outcome this call wanted.
+          if (!(error instanceof YouTubeApiCallError) || error.reason !== 'redundantTransition') {
+            throw error
+          }
+        }
+        return this.#store.closeBroadcastAttempt(current.attemptId, 'complete')
+      },
+      (current) => current.closedAt !== null && current.stage === 'complete',
+    )
   }
 
   // ------------------------------------------------------------------- stages
@@ -287,14 +310,11 @@ export class BroadcastLifecycle {
     // Reuse before create: the configured title is the identity of this product's
     // ingestion stream, and a second stream would be a second stream key for the
     // operator to keep (spec §T10 "생성/재사용").
-    const existing = await this.#findStreamByTitle(attempt.streamTitle)
-    if (existing !== null) {
-      // The list response carried a key for every stream on the channel; only the
-      // selected one reaches the vault (see `StreamKeyCustodian`).
-      await this.#streamKeys.commit(existing, { required: false })
+    const existing = await this.#selectStreamByTitle(attempt.streamTitle, { requireKey: false })
+    if (existing.streamId !== null) {
       return this.#store.recordBroadcastCallResult(attempt.attemptId, {
         stage: 'stream_ready',
-        streamId: existing,
+        streamId: existing.streamId,
       })
     }
 
@@ -434,8 +454,11 @@ export class BroadcastLifecycle {
         const broadcastId = requireId(current.broadcastId, 'broadcastId')
         let result: LiveBroadcastSummary
         try {
-          result = await this.#runCall(current, 'liveBroadcasts.transition', () =>
-            this.#api.transitionBroadcast({ broadcastId, broadcastStatus }),
+          result = await this.#runCall(
+            current,
+            'liveBroadcasts.transition',
+            () => this.#api.transitionBroadcast({ broadcastId, broadcastStatus }),
+            broadcastStatus,
           )
         } catch (error) {
           if (error instanceof YouTubeApiCallError && error.reason === 'redundantTransition') {
@@ -508,8 +531,9 @@ export class BroadcastLifecycle {
     attempt: BroadcastAttemptRecord,
     call: BroadcastMutatingCall,
     invoke: () => Promise<T>,
+    transitionTarget?: BroadcastTransitionTarget,
   ): Promise<T> {
-    this.#store.markBroadcastCallPending(attempt.attemptId, call)
+    this.#store.markBroadcastCallPending(attempt.attemptId, call, transitionTarget)
     try {
       return await invoke()
     } catch (error) {
@@ -575,7 +599,11 @@ export class BroadcastLifecycle {
     error: YouTubeApiCallError,
   ): Promise<BroadcastAttemptRecord> {
     if (error.needsReconcile) {
-      return this.#reconcile(attempt, call)
+      // Re-read the row: `#runCall` wrote the pending marker (and, for a transition,
+      // its target) after this record was taken, and the reconcile is only readable
+      // with the target the call actually asked for (review round 1, B4).
+      const pending = this.#store.getBroadcastAttempt(attempt.attemptId) ?? attempt
+      return this.#reconcile(pending, call, pending.pendingTransition)
     }
     switch (error.reason) {
       case 'invalidAutoStart':
@@ -607,49 +635,66 @@ export class BroadcastLifecycle {
   async #reconcile(
     attempt: BroadcastAttemptRecord,
     call: BroadcastMutatingCall,
+    transitionTarget: BroadcastTransitionTarget | null,
   ): Promise<BroadcastAttemptRecord> {
     switch (call) {
       case 'liveStreams.insert': {
-        const streamId = await this.#findStreamByTitle(attempt.streamTitle)
-        this.#alertReconcile(call, streamId !== null, { attemptId: attempt.attemptId })
-        if (streamId === null) {
-          this.#streamKeys.discard()
+        const search = await this.#selectStreamByTitle(attempt.streamTitle, { requireKey: true })
+        this.#alertReconcile(call, search.streamId !== null, {
+          attemptId: attempt.attemptId,
+          listComplete: search.complete,
+        })
+        if (search.streamId !== null) {
+          // The insert did land: the stream exists, so its key has to reach the
+          // vault even though this process never saw the insert's own response.
           return this.#store.recordBroadcastCallResult(attempt.attemptId, {
-            lastErrorReason: 'reconciled_not_applied',
+            stage: 'stream_ready',
+            streamId: search.streamId,
           })
         }
-        // The insert did land: the stream exists, so its key has to reach the vault
-        // even though this process never saw the insert's own response.
-        await this.#streamKeys.commit(streamId, { required: true })
+        this.#assertConclusive(attempt, call, search.complete, 'stream_list_truncated')
         return this.#store.recordBroadcastCallResult(attempt.attemptId, {
-          stage: 'stream_ready',
-          streamId,
+          lastErrorReason: 'reconciled_not_applied',
         })
       }
       case 'liveBroadcasts.insert': {
-        const found = await this.#findBroadcastByScheduledStart(attempt.scheduledStartTime)
-        this.#alertReconcile(call, found !== null, { attemptId: attempt.attemptId })
-        if (found === null) {
+        const search = await this.#findBroadcastByScheduledStart(attempt.scheduledStartTime)
+        this.#alertReconcile(call, search.found !== null, {
+          attemptId: attempt.attemptId,
+          listComplete: search.complete,
+        })
+        if (search.found !== null) {
+          const found = search.found
           return this.#store.recordBroadcastCallResult(attempt.attemptId, {
-            lastErrorReason: 'reconciled_not_applied',
+            stage: 'broadcast_created',
+            broadcastId: found.id,
+            ...(found.liveChatId === null ? {} : { liveChatId: found.liveChatId }),
+            ...(found.enableAutoStart === null ? {} : { autoStart: found.enableAutoStart }),
           })
         }
+        // Absent from a *truncated* list is not absent (review round 1, B2). Another
+        // insert here is how a channel ends up with two broadcasts for one attempt.
+        this.#assertConclusive(attempt, call, search.complete, 'broadcast_list_truncated')
         return this.#store.recordBroadcastCallResult(attempt.attemptId, {
-          stage: 'broadcast_created',
-          broadcastId: found.id,
-          ...(found.liveChatId === null ? {} : { liveChatId: found.liveChatId }),
-          ...(found.enableAutoStart === null ? {} : { autoStart: found.enableAutoStart }),
+          lastErrorReason: 'reconciled_not_applied',
         })
       }
       case 'liveBroadcasts.bind': {
+        // An id lookup is one page by construction, so this answer is never partial.
         const observed = await this.#readBroadcast(requireId(attempt.broadcastId, 'broadcastId'))
         const applied = observed !== null && observed.boundStreamId === attempt.streamId
         this.#alertReconcile(call, applied, { attemptId: attempt.attemptId })
-        return applied
-          ? this.#store.recordBroadcastCallResult(attempt.attemptId, { stage: 'bound' })
-          : this.#store.recordBroadcastCallResult(attempt.attemptId, {
-              lastErrorReason: 'reconciled_not_applied',
-            })
+        if (applied) {
+          return this.#store.recordBroadcastCallResult(attempt.attemptId, { stage: 'bound' })
+        }
+        if (observed === null) {
+          // The broadcast we hold an id for is not there. Neither "bound" nor "not
+          // bound" is established, so nothing may be retried on this row.
+          this.#assertConclusive(attempt, call, false, 'broadcast_not_found')
+        }
+        return this.#store.recordBroadcastCallResult(attempt.attemptId, {
+          lastErrorReason: 'reconciled_not_applied',
+        })
       }
       case 'liveBroadcasts.transition': {
         const observed = await this.#readBroadcast(requireId(attempt.broadcastId, 'broadcastId'))
@@ -657,23 +702,57 @@ export class BroadcastLifecycle {
         this.#alertReconcile(call, status !== null, {
           attemptId: attempt.attemptId,
           lifeCycleStatus: status,
+          target: transitionTarget,
         })
         if (observed === null) {
-          return this.#store.recordBroadcastCallResult(attempt.attemptId, {
-            lastErrorReason: 'reconciled_not_applied',
-          })
+          this.#assertConclusive(attempt, call, false, 'broadcast_not_found')
         }
-        if (isLiveLifeCycleStatus(status)) {
+        // The observed status only answers the question the *target* asked
+        // (review round 1, B4): `complete` applies a stop and refutes a go-live.
+        if (transitionTarget === 'complete') {
+          return status === 'complete'
+            ? this.#store.closeBroadcastAttempt(attempt.attemptId, 'complete')
+            : this.#store.recordBroadcastCallResult(attempt.attemptId, {
+                lastErrorReason: `reconciled_not_applied:${String(status)}`,
+              })
+        }
+        if (isLiveLifeCycleStatus(status) && observed !== null) {
           return this.#markLive(attempt, observed)
         }
-        if (status === 'testing' || status === 'testStarting') {
+        if (transitionTarget === 'testing' && (status === 'testing' || status === 'testStarting')) {
           return this.#store.recordBroadcastCallResult(attempt.attemptId, { stage: 'testing' })
         }
         return this.#store.recordBroadcastCallResult(attempt.attemptId, {
-          lastErrorReason: 'reconciled_not_applied',
+          lastErrorReason: `reconciled_not_applied:${String(status)}`,
         })
       }
     }
+  }
+
+  /**
+   * Refuses to turn "we could not see it" into "it did not happen". The pending call
+   * is deliberately left on the row: the next `resume()` asks again, and until then
+   * no retry is authorized (spec §9.1).
+   */
+  #assertConclusive(
+    attempt: BroadcastAttemptRecord,
+    call: BroadcastMutatingCall,
+    conclusive: boolean,
+    detail: string,
+  ): void {
+    if (conclusive) {
+      return
+    }
+    this.#store.updateBroadcastAttempt(attempt.attemptId, {
+      lastErrorReason: `reconcile_inconclusive:${detail}`,
+    })
+    this.#alert('call_reconciled', 'inconclusive', { attemptId: attempt.attemptId, call, detail })
+    this.#logger.warn('reconcile inconclusive; leaving the call pending', {
+      attemptId: attempt.attemptId,
+      call,
+      detail,
+    })
+    throw new BroadcastReconcileInconclusiveError(call, detail)
   }
 
   // ------------------------------------------------------------------- limits
@@ -706,56 +785,76 @@ export class BroadcastLifecycle {
       // already searched once, so reaching here means there is none — but it is
       // searched again rather than assumed, because the first search may itself
       // have been the call that raced with another host.
-      const reused = await this.#findStreamByTitle(attempt.streamTitle)
-      if (reused === null) {
+      const reused = await this.#selectStreamByTitle(attempt.streamTitle, { requireKey: false })
+      if (reused.streamId === null) {
         return this.#requestSafeStop(attempt, reason, {
           limit,
           method: error.method,
           recoverable: false,
+          candidatesComplete: reused.complete,
         })
       }
-      await this.#streamKeys.commit(reused, { required: false })
-      this.#alert('broadcast_recovered', reason, { limit, streamId: reused })
+      this.#alert('broadcast_recovered', reason, { limit, streamId: reused.streamId })
       return this.#store.recordBroadcastCallResult(attempt.attemptId, {
         stage: 'stream_ready',
-        streamId: reused,
+        streamId: reused.streamId,
       })
     }
 
-    const candidate = await this.#findRecoverableBroadcast(attempt)
+    const search = await this.#findRecoverableBroadcast(attempt)
+    const candidate = search.candidate
     // A limit on `transition` blocked *going live*. Adopting a broadcast that is
     // not live would resolve nothing while reporting success, so only a live one
     // counts as recovery there.
-    const recovered =
+    const usable =
       candidate !== null &&
       (error.method !== 'liveBroadcasts.transition' ||
         isLiveLifeCycleStatus(candidate.lifeCycleStatus))
-    if (!recovered || candidate === null) {
+    if (!usable || candidate === null) {
       return this.#requestSafeStop(attempt, reason, {
         limit,
         method: error.method,
         recoverable: false,
+        // A partial candidate list is reported, not hidden: safe-stopping is the
+        // conservative answer either way, but the operator should know which it was.
+        candidatesComplete: search.complete,
         ...(candidate === null ? {} : { candidateLifeCycleStatus: candidate.lifeCycleStatus }),
       })
     }
+    const adoption = await this.#prepareAdoption(attempt, candidate)
+    if (!adoption.ok) {
+      return this.#requestSafeStop(attempt, adoption.reason, {
+        limit,
+        method: error.method,
+        broadcastId: candidate.id,
+        boundStreamId: candidate.boundStreamId,
+        selectedStreamId: attempt.streamId,
+      })
+    }
+    const adopted = await this.#adoptBroadcast(attempt, candidate, adoption.streamId)
     this.#alert('broadcast_recovered', reason, {
       limit,
       broadcastId: candidate.id,
       lifeCycleStatus: candidate.lifeCycleStatus,
+      streamId: adoption.streamId,
+      reboundStream: adoption.streamId !== attempt.streamId,
     })
-    return this.#adoptBroadcast(attempt, candidate)
+    return adopted
   }
 
-  async #findRecoverableBroadcast(
-    attempt: BroadcastAttemptRecord,
-  ): Promise<LiveBroadcastSummary | null> {
+  async #findRecoverableBroadcast(attempt: BroadcastAttemptRecord): Promise<{
+    readonly candidate: LiveBroadcastSummary | null
+    readonly complete: boolean
+  }> {
     const seen: LiveBroadcastSummary[] = []
+    let complete = true
     for (const broadcastStatus of ['active', 'upcoming'] as const) {
       const page = await this.#api.listBroadcasts(
         { broadcastStatus },
         { maxPages: this.#config.reconcileMaxPages },
       )
-      seen.push(...page)
+      seen.push(...page.items)
+      complete = complete && page.complete
     }
     const ours = seen.filter(
       (candidate) =>
@@ -765,27 +864,92 @@ export class BroadcastLifecycle {
           candidate.title === this.#config.title),
     )
     // Prefer one that is already carrying video: adopting it costs no transition.
-    return (
-      ours.find((candidate) => isLiveLifeCycleStatus(candidate.lifeCycleStatus)) ?? ours[0] ?? null
-    )
+    const candidate =
+      ours.find((entry) => isLiveLifeCycleStatus(entry.lifeCycleStatus)) ?? ours[0] ?? null
+    return { candidate, complete }
   }
 
   /**
-   * Points an attempt at an existing broadcast. When another attempt row already
-   * owns that broadcast (the unique index in migration 002), the current attempt is
-   * abandoned and the owning one continues — two rows must never claim one resource.
+   * Decides whether a candidate can be adopted *as it actually is*.
+   *
+   * Review round 1 (B3): adoption used to keep the attempt's own `streamId` while
+   * the candidate was bound to a different ingestion stream. The returned target
+   * then named stream A, YouTube was pushing from stream B, and the vault still held
+   * A's key — so the encoder would have streamed to the wrong place (BOARD A-16).
+   * Either the candidate's real binding *and* its key are adopted together, or the
+   * candidate is refused.
+   */
+  async #prepareAdoption(
+    attempt: BroadcastAttemptRecord,
+    candidate: LiveBroadcastSummary,
+  ): Promise<
+    | { readonly ok: true; readonly streamId: string | null }
+    | { readonly ok: false; readonly reason: string }
+  > {
+    const bound = candidate.boundStreamId
+    if (bound === null) {
+      // A live broadcast always has a bound stream; one that reports none is not
+      // something to build on.
+      return isLiveLifeCycleStatus(candidate.lifeCycleStatus)
+        ? { ok: false, reason: 'live_candidate_without_binding' }
+        : { ok: true, streamId: attempt.streamId }
+    }
+    if (bound === attempt.streamId) {
+      return { ok: true, streamId: bound }
+    }
+    const adopted = await this.#adoptStreamKey(bound)
+    return adopted
+      ? { ok: true, streamId: bound }
+      : { ok: false, reason: 'bound_stream_key_unavailable' }
+  }
+
+  /** Reads the bound stream by id and puts *its* key in the vault, or fails. */
+  async #adoptStreamKey(streamId: string): Promise<boolean> {
+    try {
+      const page = await this.#api.listLiveStreams({ ids: [streamId] }, { maxPages: 1 })
+      if (!page.items.some((stream) => stream.id === streamId)) {
+        this.#streamKeys.discard()
+        return false
+      }
+      await this.#streamKeys.commit(streamId, { required: true })
+      return true
+    } catch (error) {
+      this.#streamKeys.discard()
+      this.#logger.warn('the candidate broadcast is bound to a stream this host cannot key', {
+        streamId,
+        reason: error instanceof Error ? error.name : 'unknown',
+      })
+      return false
+    }
+  }
+
+  /**
+   * Points an attempt at an existing broadcast. A row owns at most one broadcast and
+   * one stream (write-once ids, plus migration 003's unique index), so adopting a
+   * different pairing finishes this row and starts another.
    */
   async #adoptBroadcast(
     attempt: BroadcastAttemptRecord,
     candidate: LiveBroadcastSummary,
+    resolvedStreamId: string | null,
   ): Promise<BroadcastAttemptRecord> {
-    this.#adopted = true
-    // An external id is write-once per row, so adopting a *different* broadcast than
-    // this attempt already owns means this attempt is finished and another row takes
-    // over: one open row per resource (migration 002's unique index).
     const owner = this.#store
       .listBroadcastAttempts()
       .find((row) => row.broadcastId === candidate.id && row.closedAt === null)
+    if (
+      owner !== undefined &&
+      owner.streamId !== null &&
+      resolvedStreamId !== null &&
+      owner.streamId !== resolvedStreamId
+    ) {
+      // The row that owns this broadcast disagrees with YouTube about the binding.
+      // Rewriting either would be a guess.
+      return this.#requestSafeStop(attempt, 'adoption_binding_conflict', {
+        broadcastId: candidate.id,
+        ownerStreamId: owner.streamId,
+        boundStreamId: resolvedStreamId,
+      })
+    }
 
     let target = attempt
     if (owner !== undefined) {
@@ -793,8 +957,13 @@ export class BroadcastLifecycle {
         this.#store.closeBroadcastAttempt(attempt.attemptId, 'abandoned', 'adopted_other_attempt')
       }
       target = owner
-    } else if (attempt.broadcastId !== null && attempt.broadcastId !== candidate.id) {
-      this.#store.closeBroadcastAttempt(attempt.attemptId, 'abandoned', 'adopted_other_broadcast')
+    } else if (
+      (attempt.broadcastId !== null && attempt.broadcastId !== candidate.id) ||
+      (resolvedStreamId !== null &&
+        attempt.streamId !== null &&
+        attempt.streamId !== resolvedStreamId)
+    ) {
+      this.#store.closeBroadcastAttempt(attempt.attemptId, 'abandoned', 'adopted_other_binding')
       target = this.#store.beginBroadcastAttempt({
         attemptId: this.#newAttemptId(),
         strategy: this.#config.strategy,
@@ -802,19 +971,19 @@ export class BroadcastLifecycle {
         scheduledStartTime: candidate.scheduledStartTime ?? attempt.scheduledStartTime,
       })
     }
+    this.#adopted = true
 
     const stage: BroadcastStage = isLiveLifeCycleStatus(candidate.lifeCycleStatus)
       ? 'live'
       : candidate.boundStreamId !== null
         ? 'bound'
         : 'broadcast_created'
-    // The ingestion stream belongs to this host, not to the broadcast, so a
-    // replacement row keeps the stream the abandoned attempt had already found.
-    const streamId = candidate.boundStreamId ?? attempt.streamId
     return this.#store.recordBroadcastCallResult(target.attemptId, {
       ...(stageAtLeast(target.stage, stage) ? {} : { stage }),
       broadcastId: candidate.id,
-      ...(streamId === null || target.streamId !== null ? {} : { streamId }),
+      ...(resolvedStreamId === null || target.streamId !== null
+        ? {}
+        : { streamId: resolvedStreamId }),
       ...(candidate.liveChatId === null || target.liveChatId !== null
         ? {}
         : { liveChatId: candidate.liveChatId }),
@@ -839,40 +1008,65 @@ export class BroadcastLifecycle {
 
   // ------------------------------------------------------------------ helpers
 
-  async #findStreamByTitle(title: string): Promise<string | null> {
-    const streams = await this.#api.listLiveStreams(
-      { mine: true },
-      { maxPages: this.#config.reconcileMaxPages },
-    )
-    return streams.find((stream) => stream.title === title)?.id ?? null
+  /**
+   * Finds this product's ingestion stream and finishes stream-key custody in the
+   * same step. `liveStreams.list` returns a key for **every** stream on the channel,
+   * so leaving the staged values behind would keep keys in memory outside the vault
+   * (review round 1, M1): the selected one is committed, the rest are discarded, on
+   * every path out of here.
+   */
+  async #selectStreamByTitle(
+    title: string,
+    options: { readonly requireKey: boolean },
+  ): Promise<{ readonly streamId: string | null; readonly complete: boolean }> {
+    let page
+    try {
+      page = await this.#api.listLiveStreams(
+        { mine: true },
+        { maxPages: this.#config.reconcileMaxPages },
+      )
+    } catch (error) {
+      this.#streamKeys.discard()
+      throw error
+    }
+    const streamId = page.items.find((stream) => stream.title === title)?.id ?? null
+    if (streamId === null) {
+      this.#streamKeys.discard()
+    } else {
+      await this.#streamKeys.commit(streamId, { required: options.requireKey })
+    }
+    return { streamId, complete: page.complete }
   }
 
-  async #findBroadcastByScheduledStart(
-    scheduledStartTime: string,
-  ): Promise<LiveBroadcastSummary | null> {
+  async #findBroadcastByScheduledStart(scheduledStartTime: string): Promise<{
+    readonly found: LiveBroadcastSummary | null
+    readonly complete: boolean
+  }> {
     const target = Date.parse(scheduledStartTime)
+    let complete = true
     for (const broadcastStatus of ['upcoming', 'active'] as const) {
       const page = await this.#api.listBroadcasts(
         { broadcastStatus },
         { maxPages: this.#config.reconcileMaxPages },
       )
+      complete = complete && page.complete
       // Compared as instants: YouTube echoes the time it stored, which may be the
       // same instant written with a different number of fractional digits.
-      const found = page.find(
+      const found = page.items.find(
         (candidate) =>
           candidate.scheduledStartTime !== null &&
           Date.parse(candidate.scheduledStartTime) === target,
       )
       if (found !== undefined) {
-        return found
+        return { found, complete }
       }
     }
-    return null
+    return { found: null, complete }
   }
 
   async #readBroadcast(broadcastId: string): Promise<LiveBroadcastSummary | null> {
-    const found = await this.#api.listBroadcasts({ ids: [broadcastId] }, { maxPages: 1 })
-    return found[0] ?? null
+    const page = await this.#api.listBroadcasts({ ids: [broadcastId] }, { maxPages: 1 })
+    return page.items[0] ?? null
   }
 
   async #requireOpenAttempt(): Promise<BroadcastAttemptRecord> {

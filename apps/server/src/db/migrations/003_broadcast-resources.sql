@@ -40,6 +40,11 @@ CREATE TABLE broadcast_resources (
                          'liveStreams.insert', 'liveBroadcasts.insert',
                          'liveBroadcasts.bind', 'liveBroadcasts.transition')),
   pending_since        TEXT,
+  -- Which transition was in flight. Without it a resumed reconcile cannot read the
+  -- observed `lifeCycleStatus`: `complete` means "applied" for a stop and "someone
+  -- else ended it" for a go-live (review round 1, B4).
+  pending_transition   TEXT    CHECK (pending_transition IS NULL OR pending_transition IN (
+                         'testing', 'live', 'complete')),
   stream_id            TEXT,
   -- Reuse and reconcile key for the ingestion stream. The stream *key*
   -- (`cdn.ingestionInfo.streamName`) is never stored here or anywhere else in this
@@ -58,6 +63,9 @@ CREATE TABLE broadcast_resources (
   updated_at           TEXT    NOT NULL,
   closed_at            TEXT,
   CHECK ((pending_call IS NULL) = (pending_since IS NULL)),
+  -- A target belongs to a transition, and an in-flight transition always has one.
+  CHECK (pending_transition IS NULL OR pending_call = 'liveBroadcasts.transition'),
+  CHECK (pending_call <> 'liveBroadcasts.transition' OR pending_transition IS NOT NULL),
   CHECK (closed_at IS NULL OR stage IN ('complete', 'abandoned')),
   -- A closed attempt cannot still be waiting on a call outcome.
   CHECK (closed_at IS NULL OR pending_call IS NULL)

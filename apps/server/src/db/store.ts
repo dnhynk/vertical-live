@@ -50,6 +50,7 @@ import {
   type BroadcastMutatingCall,
   type BroadcastStage,
   type BroadcastStrategy,
+  type BroadcastTransitionTarget,
 } from './types.js'
 import type {
   DeadlineRecord,
@@ -152,6 +153,7 @@ interface BroadcastAttemptColumns {
   readonly strategy: string
   readonly stage: string
   readonly pending_call: string | null
+  readonly pending_transition: string | null
   readonly pending_since: string | null
   readonly stream_id: string | null
   readonly stream_title: string
@@ -1022,7 +1024,11 @@ export class PersistenceStore {
    * process, so a crash or a timeout leaves the uncertainty on disk and the next
    * run reconciles instead of retrying blindly (spec §9.1).
    */
-  markBroadcastCallPending(attemptId: string, call: BroadcastMutatingCall): BroadcastAttemptRecord {
+  markBroadcastCallPending(
+    attemptId: string,
+    call: BroadcastMutatingCall,
+    transitionTarget?: BroadcastTransitionTarget,
+  ): BroadcastAttemptRecord {
     const current = this.#requireBroadcastAttempt(attemptId)
     if (current.closedAt !== null) {
       throw new PersistenceInvariantError(
@@ -1034,11 +1040,26 @@ export class PersistenceStore {
         `broadcast attempt ${attemptId} still has ${current.pendingCall} in flight; resolve it before calling ${call}`,
       )
     }
+    // The target is what makes a resumed transition reconcile readable, so it is
+    // required rather than optional for that call (review round 1, B4).
+    if (call === 'liveBroadcasts.transition' && transitionTarget === undefined) {
+      throw new PersistenceInvariantError(
+        `broadcast attempt ${attemptId}: a pending ${call} must record its target status`,
+      )
+    }
+    if (call !== 'liveBroadcasts.transition' && transitionTarget !== undefined) {
+      throw new PersistenceInvariantError(
+        `broadcast attempt ${attemptId}: ${call} has no transition target`,
+      )
+    }
+    const now = this.#clock.nowUtcIso()
     this.#db
       .prepare(
-        'UPDATE broadcast_resources SET pending_call = ?, pending_since = ?, updated_at = ? WHERE attempt_id = ?',
+        `UPDATE broadcast_resources
+            SET pending_call = ?, pending_transition = ?, pending_since = ?, updated_at = ?
+          WHERE attempt_id = ?`,
       )
-      .run(call, this.#clock.nowUtcIso(), this.#clock.nowUtcIso(), attemptId)
+      .run(call, transitionTarget ?? null, now, now, attemptId)
     return this.#requireBroadcastAttempt(attemptId)
   }
 
@@ -1080,7 +1101,7 @@ export class PersistenceStore {
     this.#db
       .prepare(
         `UPDATE broadcast_resources
-            SET stage = ?, pending_call = NULL, pending_since = NULL,
+            SET stage = ?, pending_call = NULL, pending_transition = NULL, pending_since = NULL,
                 last_error_reason = COALESCE(?, last_error_reason),
                 closed_at = ?, updated_at = ?
           WHERE attempt_id = ?`,
@@ -1144,6 +1165,7 @@ export class PersistenceStore {
                 auto_start = COALESCE(?, auto_start),
                 last_error_reason = CASE WHEN ? THEN ? ELSE last_error_reason END,
                 pending_call = CASE WHEN ? THEN NULL ELSE pending_call END,
+                pending_transition = CASE WHEN ? THEN NULL ELSE pending_transition END,
                 pending_since = CASE WHEN ? THEN NULL ELSE pending_since END,
                 updated_at = ?
           WHERE attempt_id = ?`,
@@ -1157,6 +1179,7 @@ export class PersistenceStore {
         update.autoStart === undefined ? null : update.autoStart ? 1 : 0,
         update.lastErrorReason === undefined ? 0 : 1,
         update.lastErrorReason ?? null,
+        options.clearPending ? 1 : 0,
         options.clearPending ? 1 : 0,
         options.clearPending ? 1 : 0,
         now,
@@ -1181,7 +1204,7 @@ const EFFECT_COLUMNS = `SELECT effect_id, cause_kind, caused_by_event_key, cause
 
 const DEADLINE_COLUMNS = `SELECT id, kind, due_at, policy, payload_json, status FROM deadlines`
 
-const BROADCAST_COLUMNS = `SELECT attempt_id, strategy, stage, pending_call, pending_since,
+const BROADCAST_COLUMNS = `SELECT attempt_id, strategy, stage, pending_call, pending_transition, pending_since,
          stream_id, stream_title, broadcast_id, live_chat_id, scheduled_start_time,
          auto_start, last_error_reason, created_at, updated_at, closed_at
     FROM broadcast_resources`
@@ -1192,6 +1215,7 @@ function toBroadcastAttempt(row: BroadcastAttemptColumns): BroadcastAttemptRecor
     strategy: row.strategy as BroadcastStrategy,
     stage: row.stage as BroadcastStage,
     pendingCall: row.pending_call as BroadcastMutatingCall | null,
+    pendingTransition: row.pending_transition as BroadcastTransitionTarget | null,
     pendingSince: row.pending_since,
     streamId: row.stream_id,
     streamTitle: row.stream_title,

@@ -92,6 +92,40 @@ const LIFECYCLE_BY_FILTER: Readonly<Record<string, readonly FakeBroadcast['lifeC
   completed: ['complete', 'revoked'],
 }
 
+/**
+ * The `part` names each method documents, and the resource's full property set
+ * (both checked 2026-08-17 — see `METHOD_ALLOWED_PARTS` in
+ * `youtube/broadcast/api.ts` for the per-page citations).
+ *
+ * Review round 1 (B1): the fake used to accept any `part`, so a request shape the
+ * real API rejects (`liveStreams.list` + `contentDetails`) passed every test and
+ * would have failed in production. Requests are now validated the way the API
+ * documents, and the response carries **only** the parts that were asked for — which
+ * is what makes a status-only poll verifiably free of the stream key.
+ */
+const ALLOWED_PARTS: Readonly<Record<FakeApiMethod, readonly string[]>> = {
+  'liveStreams.insert': ['id', 'snippet', 'cdn', 'contentDetails', 'status'],
+  'liveStreams.list': ['id', 'snippet', 'cdn', 'status'],
+  'liveBroadcasts.insert': ['id', 'snippet', 'contentDetails', 'status'],
+  'liveBroadcasts.list': ['id', 'snippet', 'contentDetails', 'monetizationDetails', 'status'],
+  'liveBroadcasts.bind': ['id', 'snippet', 'contentDetails', 'status'],
+  'liveBroadcasts.transition': ['id', 'snippet', 'contentDetails', 'status'],
+}
+
+/** Property names that exist on the resource at all, whatever the method accepts. */
+const RESOURCE_PARTS: Readonly<Record<'liveStream' | 'liveBroadcast', readonly string[]>> = {
+  liveStream: ['id', 'snippet', 'cdn', 'contentDetails', 'status'],
+  liveBroadcast: ['id', 'snippet', 'contentDetails', 'monetizationDetails', 'statistics', 'status'],
+}
+
+/** A queued hold: the request is applied, then the response is withheld. */
+export interface AppliedHold {
+  /** Resolves once the server has applied the request. */
+  readonly applied: Promise<void>
+  /** Lets the withheld response go out. */
+  release(): void
+}
+
 export class FakeYouTubeApiServer {
   readonly requests: FakeRequest[] = []
   readonly streams = new Map<string, FakeStream>()
@@ -101,6 +135,8 @@ export class FakeYouTubeApiServer {
   readonly #failures = new Map<FakeApiMethod, FakeFailure[]>()
   /** Queued response delays in ms, consumed one per matching call. */
   readonly #delays = new Map<FakeApiMethod, number[]>()
+  /** Queued applied-but-withheld holds, consumed one per matching call. */
+  readonly #holds = new Map<FakeApiMethod, InternalHold[]>()
 
   readonly #server: Server
   #baseUrl = ''
@@ -153,6 +189,27 @@ export class FakeYouTubeApiServer {
     const queue = this.#delays.get(method) ?? []
     queue.push(delayMs)
     this.#delays.set(method, queue)
+  }
+
+  /**
+   * Models "applied but unknown" without a wall-clock race (review round 1, M2): the
+   * next call to `method` is applied, `applied` resolves, and the response is held
+   * until `release()`. A test awaits `applied` — so the mutation provably happened —
+   * and only then drives its client-side timeout.
+   */
+  holdApplied(method: FakeApiMethod): AppliedHold {
+    let signalApplied: () => void = () => {}
+    const applied = new Promise<void>((resolve) => {
+      signalApplied = resolve
+    })
+    let releaseResponse: () => void = () => {}
+    const released = new Promise<void>((resolve) => {
+      releaseResponse = resolve
+    })
+    const queue = this.#holds.get(method) ?? []
+    queue.push({ signalApplied, released })
+    this.#holds.set(method, queue)
+    return { applied, release: releaseResponse }
   }
 
   requestsFor(method: FakeApiMethod): FakeRequest[] {
@@ -236,7 +293,14 @@ export class FakeYouTubeApiServer {
       return
     }
 
+    const partError = validateParts(method, query['part'])
+    if (partError !== null) {
+      json(res, 400, errorBody(400, partError, 'youtube.part', 'invalid part parameter'))
+      return
+    }
+
     const delayMs = this.#delays.get(method)?.shift()
+    const hold = this.#holds.get(method)?.shift()
     const failure = this.#failures.get(method)?.shift()
 
     const respond = (): void => {
@@ -275,6 +339,20 @@ export class FakeYouTubeApiServer {
       }
     }
 
+    if (hold !== undefined) {
+      // Apply first, signal, then wait: the caller learns the mutation landed before
+      // it aborts, so "applied but unknown" is a fact rather than a timing accident.
+      const applied = failure === undefined ? this.#apply(method, query, body) : undefined
+      hold.signalApplied()
+      await hold.released
+      if (applied === undefined) {
+        respond()
+        return
+      }
+      json(res, 200, applied)
+      return
+    }
+
     if (delayMs === undefined) {
       respond()
       return
@@ -296,19 +374,20 @@ export class FakeYouTubeApiServer {
     query: Record<string, string>,
     body: unknown,
   ): Record<string, unknown> {
+    const parts = requestedParts(query['part'])
     switch (method) {
       case 'liveStreams.insert':
-        return streamResource(this.#insertStream(body))
+        return streamResource(this.#insertStream(body), parts)
       case 'liveStreams.list':
-        return this.#listStreams(query)
+        return this.#listStreams(query, parts)
       case 'liveBroadcasts.insert':
-        return broadcastResource(this.#insertBroadcast(body))
+        return broadcastResource(this.#insertBroadcast(body), parts)
       case 'liveBroadcasts.list':
-        return this.#listBroadcasts(query)
+        return this.#listBroadcasts(query, parts)
       case 'liveBroadcasts.bind':
-        return broadcastResource(this.#bind(query))
+        return broadcastResource(this.#bind(query), parts)
       case 'liveBroadcasts.transition':
-        return broadcastResource(this.#transition(query))
+        return broadcastResource(this.#transition(query), parts)
     }
   }
 
@@ -331,11 +410,18 @@ export class FakeYouTubeApiServer {
     })
   }
 
-  #listStreams(query: Record<string, string>): Record<string, unknown> {
+  #listStreams(query: Record<string, string>, parts: readonly string[]): Record<string, unknown> {
     const all = [...this.streams.values()]
     const ids = query['id']?.split(',').filter((id) => id !== '')
+    if (ids === undefined && query['mine'] !== 'true') {
+      // "Specify exactly one" filter, like the real method.
+      throw fail(400, 'missingRequiredParameter', 'youtube.liveStream')
+    }
     const selected = ids === undefined ? all : all.filter((stream) => ids.includes(stream.id))
-    return page(selected.map(streamResource), query)
+    return page(
+      selected.map((stream) => streamResource(stream, parts)),
+      query,
+    )
   }
 
   #insertBroadcast(body: unknown): FakeBroadcast {
@@ -371,7 +457,18 @@ export class FakeYouTubeApiServer {
     })
   }
 
-  #listBroadcasts(query: Record<string, string>): Record<string, unknown> {
+  #listBroadcasts(
+    query: Record<string, string>,
+    parts: readonly string[],
+  ): Record<string, unknown> {
+    const filters = ['id', 'mine', 'broadcastStatus'].filter(
+      (name) => query[name] !== undefined && query[name] !== '',
+    )
+    if (filters.length !== 1) {
+      // https://developers.google.com/youtube/v3/live/docs/liveBroadcasts/list:
+      // "Specify exactly one" of broadcastStatus, id, mine.
+      throw fail(400, 'incompatibleParameters', 'youtube.liveBroadcast')
+    }
     const all = [...this.broadcasts.values()]
     const ids = query['id']?.split(',').filter((id) => id !== '')
     let selected = ids === undefined ? all : all.filter((broadcast) => ids.includes(broadcast.id))
@@ -380,7 +477,10 @@ export class FakeYouTubeApiServer {
       const allowed = LIFECYCLE_BY_FILTER[filter] ?? []
       selected = selected.filter((broadcast) => allowed.includes(broadcast.lifeCycleStatus))
     }
-    return page(selected.map(broadcastResource), query)
+    return page(
+      selected.map((broadcast) => broadcastResource(broadcast, parts)),
+      query,
+    )
   }
 
   #bind(query: Record<string, string>): FakeBroadcast {
@@ -448,8 +548,8 @@ function resolveMethod(httpMethod: string, pathname: string): FakeApiMethod | nu
   return null
 }
 
-function streamResource(stream: FakeStream): Record<string, unknown> {
-  return {
+function streamResource(stream: FakeStream, parts: readonly string[]): Record<string, unknown> {
+  return keepParts(parts, {
     kind: 'youtube#liveStream',
     id: stream.id,
     snippet: { title: stream.title },
@@ -474,11 +574,14 @@ function streamResource(stream: FakeStream): Record<string, unknown> {
         configurationIssues: stream.configurationIssues,
       },
     },
-  }
+  })
 }
 
-function broadcastResource(broadcast: FakeBroadcast): Record<string, unknown> {
-  return {
+function broadcastResource(
+  broadcast: FakeBroadcast,
+  parts: readonly string[],
+): Record<string, unknown> {
+  return keepParts(parts, {
     kind: 'youtube#liveBroadcast',
     id: broadcast.id,
     snippet: {
@@ -503,7 +606,53 @@ function broadcastResource(broadcast: FakeBroadcast): Record<string, unknown> {
       enableDvr: broadcast.enableDvr,
       monitorStream: { enableMonitorStream: broadcast.enableMonitorStream },
     },
+  })
+}
+
+/** Drops every part the request did not ask for. `kind` and `id` always travel. */
+function keepParts(
+  parts: readonly string[],
+  resource: Record<string, unknown>,
+): Record<string, unknown> {
+  const kept: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(resource)) {
+    if (key === 'kind' || key === 'id' || parts.includes(key)) {
+      kept[key] = value
+    }
   }
+  return kept
+}
+
+function requestedParts(part: string | undefined): readonly string[] {
+  return (part ?? '').split(',').filter((entry) => entry !== '')
+}
+
+/**
+ * `null` when the `part` value is acceptable, otherwise the documented reason:
+ * `unknownPart` for a name the resource does not have and `unexpectedPart` for one
+ * this method does not accept (https://developers.google.com/youtube/v3/docs/errors,
+ * checked 2026-08-17).
+ */
+function validateParts(method: FakeApiMethod, part: string | undefined): string | null {
+  const parts = requestedParts(part)
+  if (parts.length === 0) {
+    return 'missingRequiredParameter'
+  }
+  const resource = method.startsWith('liveStreams') ? 'liveStream' : 'liveBroadcast'
+  for (const entry of parts) {
+    if (!RESOURCE_PARTS[resource].includes(entry)) {
+      return 'unknownPart'
+    }
+    if (!ALLOWED_PARTS[method].includes(entry)) {
+      return 'unexpectedPart'
+    }
+  }
+  return null
+}
+
+interface InternalHold {
+  readonly signalApplied: () => void
+  readonly released: Promise<void>
 }
 
 function page(

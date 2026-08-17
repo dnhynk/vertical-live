@@ -2,13 +2,16 @@ import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { YouTubeApiCallError } from './api.js'
+import { FakeClock } from '../../testing/fake-clock.js'
+import { METHOD_ALLOWED_PARTS, YouTubeApiCallError } from './api.js'
 import {
   BroadcastLifecycle,
   BroadcastReconcileFailedError,
+  BroadcastReconcileInconclusiveError,
   BroadcastSafeStopRequiredError,
   BroadcastStreamInactiveError,
 } from './lifecycle.js'
+import { BroadcastHealthMonitor } from './health.js'
 import { createBroadcastHarness, type BroadcastHarness } from './test-support.js'
 
 /**
@@ -28,6 +31,26 @@ afterEach(async () => {
 async function setUp(...args: Parameters<typeof createBroadcastHarness>) {
   harness = await createBroadcastHarness(...args)
   return harness
+}
+
+/**
+ * Runs `work` with one call of `method` applied at YouTube but never answered, and
+ * the client's timeout fired from the injected clock (review round 1, M2). Nothing
+ * here depends on wall-clock ordering: the server states that it applied the request
+ * before the abort is triggered.
+ */
+async function withAppliedButUnknown<T>(
+  h: BroadcastHarness,
+  clock: FakeClock,
+  method: Parameters<BroadcastHarness['server']['holdApplied']>[0],
+  work: () => Promise<T>,
+): Promise<T> {
+  const hold = h.server.holdApplied(method)
+  const running = work()
+  await hold.applied
+  await clock.advance(h.config.requestTimeoutMs)
+  hold.release()
+  return running
 }
 
 describe('normal path', () => {
@@ -124,12 +147,15 @@ describe('normal path', () => {
 
 describe('uncertain results are reconciled, never retried blindly', () => {
   it('reconciles a timed-out liveBroadcasts.insert instead of creating a second broadcast', async () => {
-    const h = await setUp({ config: { requestTimeoutMs: 60 } })
-    // The delayed request is still applied: the broadcast exists, the caller times
-    // out before it hears so (spec §9.1).
-    h.server.queueDelay('liveBroadcasts.insert', 400)
+    const clock = new FakeClock()
+    const h = await setUp({ clock })
+    // The held request is applied and then left unanswered: the broadcast exists, the
+    // caller times out before it hears so (spec §9.1).
+    const lifecycle = h.lifecycle()
 
-    const target = await h.lifecycle().ensureLive()
+    const target = await withAppliedButUnknown(h, clock, 'liveBroadcasts.insert', () =>
+      lifecycle.ensureLive(),
+    )
 
     expect(h.server.requestsFor('liveBroadcasts.insert')).toHaveLength(1)
     expect(h.server.broadcasts.size).toBe(1)
@@ -139,10 +165,13 @@ describe('uncertain results are reconciled, never retried blindly', () => {
   })
 
   it('reconciles a timed-out liveStreams.insert and still stores the key in the vault', async () => {
-    const h = await setUp({ config: { requestTimeoutMs: 60 } })
-    h.server.queueDelay('liveStreams.insert', 400)
+    const clock = new FakeClock()
+    const h = await setUp({ clock })
+    const lifecycle = h.lifecycle()
 
-    const target = await h.lifecycle().ensureLive()
+    const target = await withAppliedButUnknown(h, clock, 'liveStreams.insert', () =>
+      lifecycle.ensureLive(),
+    )
 
     expect(h.server.requestsFor('liveStreams.insert')).toHaveLength(1)
     expect(h.server.streams.size).toBe(1)
@@ -159,6 +188,70 @@ describe('uncertain results are reconciled, never retried blindly', () => {
     expect(h.server.requestsFor('liveBroadcasts.bind')).toHaveLength(2)
     expect(h.alerts.ofKind('call_reconciled').map((alert) => alert.reason)).toContain('not_applied')
     expect(target.stage).toBe('live')
+  })
+
+  it('never retries an insert when the reconcile list was truncated', async () => {
+    // Review round 1 (B2) reproduction: with more upcoming broadcasts than the page
+    // bound covers, "absent from the list" used to clear the pending call and
+    // authorize a second insert — two broadcasts for one attempt.
+    const clock = new FakeClock()
+    const h = await setUp({ clock })
+    for (let index = 0; index < 200; index += 1) {
+      h.server.seedBroadcast({
+        title: `synthetic-unrelated-broadcast-${String(index)}`,
+        lifeCycleStatus: 'ready',
+        scheduledStartTime: `2026-01-02T00:${String(index % 60).padStart(2, '0')}:00.000Z`,
+      })
+    }
+    const lifecycle = h.lifecycle()
+
+    const error = await withAppliedButUnknown(h, clock, 'liveBroadcasts.insert', () =>
+      lifecycle.ensureBound().catch((caught: unknown) => caught),
+    )
+
+    expect(error).toBeInstanceOf(BroadcastReconcileInconclusiveError)
+    expect((error as BroadcastReconcileInconclusiveError).detail).toBe('broadcast_list_truncated')
+    // Exactly one insert, and exactly one broadcast carrying this attempt's key.
+    expect(h.server.requestsFor('liveBroadcasts.insert')).toHaveLength(1)
+    const attempt = h.temp.store.findOpenBroadcastAttempt()
+    const sameKey = [...h.server.broadcasts.values()].filter(
+      (broadcast) => broadcast.scheduledStartTime === attempt?.scheduledStartTime,
+    )
+    expect(sameKey).toHaveLength(1)
+    // The uncertainty is still on the row, so the next resume asks again.
+    expect(attempt?.pendingCall).toBe('liveBroadcasts.insert')
+    expect(attempt?.lastErrorReason).toBe('reconcile_inconclusive:broadcast_list_truncated')
+    expect(h.logger.dump()).toContain('list truncated at the page bound')
+  })
+
+  it('resumes an inconclusive reconcile and adopts the broadcast once the list covers it', async () => {
+    const clock = new FakeClock()
+    const h = await setUp({ clock })
+    for (let index = 0; index < 200; index += 1) {
+      h.server.seedBroadcast({
+        title: `synthetic-unrelated-broadcast-${String(index)}`,
+        lifeCycleStatus: 'ready',
+        scheduledStartTime: `2026-01-02T00:${String(index % 60).padStart(2, '0')}:00.000Z`,
+      })
+    }
+    const lifecycle = h.lifecycle()
+    await withAppliedButUnknown(h, clock, 'liveBroadcasts.insert', () =>
+      lifecycle.ensureBound().catch(() => undefined),
+    )
+    const attempt = h.temp.store.findOpenBroadcastAttempt()
+    expect(attempt?.pendingCall).toBe('liveBroadcasts.insert')
+
+    // The unrelated broadcasts end; the list now fits inside the page bound.
+    for (const broadcast of h.server.broadcasts.values()) {
+      if (broadcast.title.startsWith('synthetic-unrelated-broadcast-')) {
+        broadcast.lifeCycleStatus = 'complete'
+      }
+    }
+    const resumed = await h.restart().resume()
+
+    expect(resumed?.pendingCall).toBeNull()
+    expect(resumed?.broadcastId).not.toBeNull()
+    expect(h.server.requestsFor('liveBroadcasts.insert')).toHaveLength(1)
   })
 
   it('gives up with a reconcile error when the outcome never becomes known', async () => {
@@ -203,7 +296,11 @@ describe('restart', () => {
     if (broadcast !== undefined) {
       broadcast.lifeCycleStatus = 'live'
     }
-    h.temp.store.markBroadcastCallPending(attempt?.attemptId ?? '', 'liveBroadcasts.transition')
+    h.temp.store.markBroadcastCallPending(
+      attempt?.attemptId ?? '',
+      'liveBroadcasts.transition',
+      'live',
+    )
 
     const restarted = h.restart()
     const resumed = await restarted.resume()
@@ -322,9 +419,11 @@ describe('channel limits', () => {
 
   it('recovers the live broadcast on concurrentBroadcastsExceedLimit', async () => {
     const h = await setUp()
+    const otherStream = h.server.seedStream({ title: 'synthetic-other-ingest' })
     const other = h.server.seedBroadcast({
       title: h.config.title,
       lifeCycleStatus: 'live',
+      boundStreamId: otherStream.id,
     })
     h.server.queueFailure('liveBroadcasts.transition', {
       status: 403,
@@ -338,6 +437,60 @@ describe('channel limits', () => {
     expect(h.alerts.ofKind('broadcast_limit').map((alert) => alert.detail['limit'])).toEqual([
       'concurrent_broadcasts',
     ])
+  })
+
+  it('adopts the candidate’s real binding and its vaulted key, not the one it had selected', async () => {
+    // Review round 1 (B3) reproduction: recovery used to report our own stream while
+    // YouTube was bound to another, leaving the wrong key in the vault (BOARD A-16).
+    const h = await setUp()
+    const otherStream = h.server.seedStream({ title: 'synthetic-other-ingest' })
+    const candidate = h.server.seedBroadcast({
+      title: h.config.title,
+      lifeCycleStatus: 'live',
+      boundStreamId: otherStream.id,
+    })
+    h.server.queueFailure('liveBroadcasts.insert', {
+      status: 403,
+      reason: 'userBroadcastsExceedLimit',
+    })
+
+    const target = await h.lifecycle().ensureLive()
+
+    expect(target.broadcastId).toBe(candidate.id)
+    // The returned target names the stream YouTube is actually bound to …
+    expect(target.streamId).toBe(otherStream.id)
+    expect(h.server.broadcasts.get(target.broadcastId)?.boundStreamId).toBe(target.streamId)
+    // … and the vault carries that stream's key, not the one this host had picked.
+    expect(await h.vault.get('youtube.streamKey')).toBe(otherStream.streamKey)
+    expect(h.custodian.stagedStreamIds).toEqual([])
+    const recovered = h.alerts.ofKind('broadcast_recovered')[0]
+    expect(recovered?.detail['reboundStream']).toBe(true)
+    // The row that had selected the other stream is closed, not silently repointed.
+    const rows = h.temp.store.listBroadcastAttempts()
+    expect(rows.some((row) => row.lastErrorReason === 'adopted_other_binding')).toBe(true)
+    expect(rows.filter((row) => row.closedAt === null)).toHaveLength(1)
+  })
+
+  it('refuses a candidate whose bound stream cannot be keyed', async () => {
+    const h = await setUp()
+    const candidate = h.server.seedBroadcast({
+      title: h.config.title,
+      lifeCycleStatus: 'live',
+      // Bound to a stream this channel does not expose: no key can be adopted, so
+      // adopting the broadcast would mean streaming to an unknown destination.
+      boundStreamId: 'synthetic-stream-not-listed',
+    })
+    h.server.queueFailure('liveBroadcasts.insert', {
+      status: 403,
+      reason: 'userBroadcastsExceedLimit',
+    })
+
+    await expect(h.lifecycle().ensureLive()).rejects.toThrow(BroadcastSafeStopRequiredError)
+
+    expect(h.safeStops[0]?.reason).toBe('bound_stream_key_unavailable')
+    expect(h.safeStops[0]?.detail['broadcastId']).toBe(candidate.id)
+    expect(h.alerts.ofKind('broadcast_recovered')).toHaveLength(0)
+    expect(h.custodian.stagedStreamIds).toEqual([])
   })
 
   it('asks for safe_stopped when a limit leaves nothing recoverable', async () => {
@@ -456,6 +609,113 @@ describe('rejections that need a human or another component', () => {
   })
 })
 
+describe('stopping a broadcast (review round 1, B4)', () => {
+  it('keeps the attempt open when completing it left the outcome unknown', async () => {
+    const h = await setUp({ maxAttempts: 1 })
+    await h.lifecycle().ensureLive()
+    const attempt = h.temp.store.findOpenBroadcastAttempt()
+    h.server.queueFailure('liveBroadcasts.transition', {
+      status: 503,
+      reason: 'serviceUnavailable',
+    })
+    const listsBefore = h.server.requestsFor('liveBroadcasts.list').length
+
+    await expect(
+      h.lifecycle().stopBroadcast(attempt as NonNullable<typeof attempt>),
+    ).rejects.toThrow(BroadcastReconcileFailedError)
+
+    // It reconciled (`list`) instead of assuming, and left the row open because
+    // YouTube still says the broadcast is live.
+    expect(h.server.requestsFor('liveBroadcasts.list').length).toBeGreaterThan(listsBefore)
+    expect(h.server.broadcasts.get(attempt?.broadcastId ?? '')?.lifeCycleStatus).toBe('live')
+    const after = h.temp.store.getBroadcastAttempt(attempt?.attemptId ?? '')
+    expect(after?.closedAt).toBeNull()
+    expect(after?.stage).toBe('live')
+    expect(after?.lastErrorReason).toBe('reconciled_not_applied:live')
+  })
+
+  it('closes the attempt when the reconcile finds the broadcast already complete', async () => {
+    const h = await setUp({ maxAttempts: 1 })
+    await h.lifecycle().ensureLive()
+    const attempt = h.temp.store.findOpenBroadcastAttempt()
+    // The transition is applied and then left unanswered, exactly like a timeout.
+    h.server.queueFailure('liveBroadcasts.transition', {
+      status: 503,
+      reason: 'serviceUnavailable',
+    })
+    h.server.onRequest = (request) => {
+      if (request.method === 'liveBroadcasts.transition') {
+        const broadcast = h.server.broadcasts.get(attempt?.broadcastId ?? '')
+        if (broadcast !== undefined) {
+          broadcast.lifeCycleStatus = 'complete'
+        }
+      }
+    }
+
+    const closed = await h.lifecycle().stopBroadcast(attempt as NonNullable<typeof attempt>)
+
+    expect(closed.stage).toBe('complete')
+    expect(closed.closedAt).not.toBeNull()
+    expect(closed.pendingCall).toBeNull()
+    expect(h.temp.store.findOpenBroadcastAttempt()).toBeNull()
+  })
+
+  it('records which transition was in flight so a restart can read the status', async () => {
+    const h = await setUp()
+    await h.lifecycle().ensureBound()
+    const attempt = h.temp.store.findOpenBroadcastAttempt()
+    h.temp.store.markBroadcastCallPending(
+      attempt?.attemptId ?? '',
+      'liveBroadcasts.transition',
+      'complete',
+    )
+    const broadcast = h.server.broadcasts.get(attempt?.broadcastId ?? '')
+    if (broadcast !== undefined) {
+      broadcast.lifeCycleStatus = 'complete'
+    }
+
+    const resumed = await h.restart().resume()
+
+    // A `complete` observation answers a stop, and would have been misread as
+    // "not applied" without the persisted target.
+    expect(resumed?.stage).toBe('complete')
+    expect(resumed?.closedAt).not.toBeNull()
+    expect(resumed?.pendingCall).toBeNull()
+  })
+})
+
+describe('request shapes (review round 1, B1)', () => {
+  it('only ever sends parts the method documents', async () => {
+    const h = await setUp()
+    await h.lifecycle().ensureLive()
+
+    expect(h.server.requests.length).toBeGreaterThan(0)
+    for (const request of h.server.requests) {
+      const allowed = METHOD_ALLOWED_PARTS[request.method] ?? []
+      const sent = (request.query['part'] ?? '').split(',').filter((part) => part !== '')
+      expect(sent.length).toBeGreaterThan(0)
+      expect(sent.filter((part) => !allowed.includes(part))).toEqual([])
+    }
+    // The specific regression: `liveStreams.list` does not accept contentDetails.
+    for (const request of h.server.requestsFor('liveStreams.list')) {
+      expect(request.query['part']).not.toContain('contentDetails')
+    }
+  })
+
+  it('is checked by a fake server that rejects an unsupported part', async () => {
+    const h = await setUp()
+    const url = new URL(`${h.server.baseUrl}/liveStreams`)
+    url.searchParams.set('mine', 'true')
+    url.searchParams.set('part', 'id,snippet,cdn,contentDetails,status')
+
+    const response = await fetch(url, { headers: { authorization: 'Bearer synthetic' } })
+    const body = (await response.json()) as { error: { errors: { reason: string }[] } }
+
+    expect(response.status).toBe(400)
+    expect(body.error.errors[0]?.reason).toBe('unexpectedPart')
+  })
+})
+
 describe('rolling experiment (spec §9.3, labelled)', () => {
   it('completes the current broadcast and brings up a new one with a new liveChatId', async () => {
     const h = await setUp({ config: { strategy: 'rolling-experiment' } })
@@ -511,6 +771,44 @@ describe('the stream key never leaves the vault (acceptance 2)', () => {
     expect(target.streamId).toBe(ours.id)
     expect(await h.vault.get('youtube.streamKey')).toBe(ours.streamKey)
     expect(await h.vault.get('youtube.streamKey')).not.toBe(other.streamKey)
+  })
+
+  it('is not even requested by the status poll (review round 1, M1)', async () => {
+    const h = await setUp()
+    const target = await h.lifecycle().ensureLive()
+    expect(h.custodian.stagedStreamIds).toEqual([])
+
+    const monitor = new BroadcastHealthMonitor({
+      api: h.api,
+      config: h.config,
+      onSignal: () => {},
+      resources: () => ({ streamId: target.streamId, broadcastId: target.broadcastId }),
+      clock: h.temp.clock,
+    })
+    await monitor.poll()
+    await monitor.poll()
+
+    // The poll asks for `id,status` only, so no key ever enters the process and
+    // nothing can be left staged outside the vault.
+    const polls = h.server
+      .requestsFor('liveStreams.list')
+      .filter((request) => request.query['part'] === 'id,status')
+    expect(polls).toHaveLength(2)
+    expect(polls.every((request) => !(request.query['part'] ?? '').includes('cdn'))).toBe(true)
+    expect(h.custodian.stagedStreamIds).toEqual([])
+  })
+
+  it('leaves nothing staged when the stream lookup finds no match', async () => {
+    const h = await setUp()
+    h.server.seedStream({ title: 'synthetic-someone-elses-stream' })
+    h.server.queueFailure('liveStreams.insert', { status: 403, reason: 'liveStreamingNotEnabled' })
+
+    await expect(h.lifecycle().ensureBound()).rejects.toThrow(YouTubeApiCallError)
+
+    // The list carried another stream's key; the failed insert must not leave it
+    // staged (review round 1, M1).
+    expect(h.custodian.stagedStreamIds).toEqual([])
+    expect(await h.vault.get('youtube.streamKey')).toBeUndefined()
   })
 
   it('masks a stream key that reaches a logger through the shared redactor', async () => {

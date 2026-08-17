@@ -220,6 +220,13 @@ export type BroadcastMutatingCall =
   | 'liveBroadcasts.bind'
   | 'liveBroadcasts.transition'
 
+/**
+ * `liveBroadcasts.transition` targets. Persisted with the pending call because the
+ * observed `lifeCycleStatus` alone does not say whether a transition was applied:
+ * `complete` confirms a stop and refutes a go-live (review round 1, B4).
+ */
+export type BroadcastTransitionTarget = 'testing' | 'live' | 'complete'
+
 export interface BroadcastAttemptInput {
   /** Locally generated: the YouTube write methods carry no idempotency key. */
   readonly attemptId: string
@@ -235,6 +242,8 @@ export interface BroadcastAttemptRecord extends BroadcastAttemptInput {
   readonly stage: BroadcastStage
   /** Non-null means the result of that call is unknown (spec §9.1). */
   readonly pendingCall: BroadcastMutatingCall | null
+  /** Set exactly when `pendingCall` is the transition. */
+  readonly pendingTransition: BroadcastTransitionTarget | null
   readonly pendingSince: string | null
   readonly streamId: string | null
   readonly broadcastId: string | null

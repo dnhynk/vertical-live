@@ -200,10 +200,18 @@ export class BroadcastHealthMonitor {
     return signals
   }
 
+  /**
+   * Status only: `listLiveStreamStatuses` asks for `part=id,status`, so the response
+   * carries no `cdn.ingestionInfo.streamName` at all. Review round 1 (M1) found the
+   * previous full `listLiveStreams()` call staging the stream key in
+   * `StreamKeyCustodian` on **every poll** without ever committing or discarding it —
+   * a key retained outside the vault, against BOARD A-16. A poll cannot leak what it
+   * never requested.
+   */
   async #readStream(streamId: string): Promise<LiveStreamStatus | null> {
     try {
-      const streams = await this.#api.listLiveStreams({ ids: [streamId] }, { maxPages: 1 })
-      return streams[0]?.status ?? null
+      const page = await this.#api.listLiveStreamStatuses({ ids: [streamId] }, { maxPages: 1 })
+      return page.items[0]?.status ?? null
     } catch (error) {
       // Quota, network and 5xx all mean "not observed"; they do not mean "bad".
       this.#swallow(error)
@@ -213,8 +221,8 @@ export class BroadcastHealthMonitor {
 
   async #readLifeCycle(broadcastId: string): Promise<string | null> {
     try {
-      const broadcasts = await this.#api.listBroadcasts({ ids: [broadcastId] }, { maxPages: 1 })
-      return broadcasts[0]?.lifeCycleStatus ?? null
+      const page = await this.#api.listBroadcasts({ ids: [broadcastId] }, { maxPages: 1 })
+      return page.items[0]?.lifeCycleStatus ?? null
     } catch (error) {
       this.#swallow(error)
       return null

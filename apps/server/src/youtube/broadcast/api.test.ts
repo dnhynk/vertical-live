@@ -3,7 +3,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { systemClock } from '../../clock.js'
+import { systemClock, type Clock } from '../../clock.js'
+import { FakeClock } from '../../testing/fake-clock.js'
 import { SecretRedactor } from '../../secrets/redaction.js'
 import { FakeYouTubeApiServer } from '../../testing/fake-youtube-api-server.js'
 import { AuthConfigError } from '../auth/config.js'
@@ -39,6 +40,7 @@ interface Harness {
 
 async function harness(
   options: {
+    readonly clock?: Clock
     readonly requestTimeoutMs?: number
     readonly maxPages?: number
     readonly reserveUnits?: number
@@ -48,10 +50,11 @@ async function harness(
   } = {},
 ): Promise<Harness> {
   server = await FakeYouTubeApiServer.start()
+  const clock = options.clock ?? systemClock
   const logger = new RecordingLogger()
   const redactor = new SecretRedactor()
   const quota = new QuotaTracker({
-    clock: systemClock,
+    clock,
     dailyUnits: options.dailyUnits ?? 10_000,
     reserveUnits: options.reserveUnits ?? 0,
     logger,
@@ -59,7 +62,7 @@ async function harness(
   const keys: { streamId: string; streamKey: string }[] = []
   const api = new YouTubeLiveApi({
     tokens: staticTokens,
-    clock: systemClock,
+    clock,
     requestTimeoutMs: options.requestTimeoutMs ?? 2_000,
     streamKeySink: async (streamId, streamKey) => {
       keys.push({ streamId, streamKey })
@@ -111,7 +114,8 @@ describe('requests', () => {
 
     const streams = await h.api.listLiveStreams({ mine: true })
 
-    expect(streams).toHaveLength(51)
+    expect(streams.items).toHaveLength(51)
+    expect(streams.complete).toBe(true)
     expect(server?.requestsFor('liveStreams.list')).toHaveLength(2)
     expect(h.quota.snapshot().byMethod['liveStreams.list']).toBe(2)
   })
@@ -124,7 +128,10 @@ describe('requests', () => {
 
     const streams = await h.api.listLiveStreams({ mine: true })
 
-    expect(streams).toHaveLength(50)
+    expect(streams.items).toHaveLength(50)
+    // The caller is told, not just the log: "absent from a truncated list" is not
+    // evidence of absence (review round 1, B2).
+    expect(streams.complete).toBe(false)
     expect(h.logger.dump()).toContain('list truncated at the page bound')
   })
 })
@@ -160,15 +167,25 @@ describe('failure outcomes', () => {
   })
 
   it('treats a client-side timeout as possibly applied', async () => {
-    const h = await harness({ requestTimeoutMs: 50 })
-    server?.queueDelay('liveBroadcasts.insert', 400)
+    // No wall clock anywhere in this test (review round 1, M2). The server tells us
+    // the insert has been *applied*, and only then does the injected clock fire the
+    // abort — so "applied but unknown" is a fact, not a race the CI can lose.
+    const clock = new FakeClock()
+    const h = await harness({ requestTimeoutMs: 5_000, clock })
+    const hold = server?.holdApplied('liveBroadcasts.insert')
 
-    const error = await insertBroadcast(h).catch((caught: unknown) => caught)
+    const pending = insertBroadcast(h).catch((caught: unknown) => caught)
+    await hold?.applied
+    expect(server?.broadcasts.size).toBe(1)
+
+    await clock.advance(5_000)
+    const error = await pending
+    hold?.release()
 
     expect((error as YouTubeApiCallError).outcome).toBe('uncertain')
     expect((error as YouTubeApiCallError).classification.kind).toBe('network')
-    expect((error as YouTubeApiCallError).message).toContain('timed out after 50ms')
-    // The delayed request still landed: that is what makes a reconcile necessary.
+    expect((error as YouTubeApiCallError).message).toContain('timed out after 5000ms')
+    // The applied insert is still there: that is what makes a reconcile necessary.
     expect(server?.broadcasts.size).toBe(1)
   })
 
@@ -189,7 +206,10 @@ describe('failure outcomes', () => {
     expect((error as YouTubeApiCallError).outcome).toBe('not_attempted')
     expect(server?.requests).toHaveLength(0)
     // The reserve is what keeps recovery possible on a heavy day.
-    await expect(h.api.listBroadcasts({ broadcastStatus: 'active' })).resolves.toEqual([])
+    await expect(h.api.listBroadcasts({ broadcastStatus: 'active' })).resolves.toEqual({
+      items: [],
+      complete: true,
+    })
   })
 
   it('never attempts a call when the access token cannot be produced', async () => {

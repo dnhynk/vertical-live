@@ -36,6 +36,53 @@ import type {
 /** https://developers.google.com/youtube/v3 (checked 2026-08-17). */
 export const YOUTUBE_API_BASE_URL = 'https://www.googleapis.com/youtube/v3'
 
+/**
+ * The `part` names each method's reference page enumerates (all checked
+ * 2026-08-17). These sets are not interchangeable — review round 1 (B1) found
+ * `liveStreams.list` being sent `contentDetails`, which that method does not accept
+ * (`badRequest/unexpectedPart`), so every production stream lookup would have
+ * failed while the tests stayed green. `#requestedParts` below refuses to build a
+ * request that asks for a part the method does not list, and the fake server
+ * rejects one too, so a wrong set fails a test instead of only production.
+ *
+ * - liveStreams.insert   — id, snippet, cdn, contentDetails, status
+ *   https://developers.google.com/youtube/v3/live/docs/liveStreams/insert
+ * - liveStreams.list     — "The part names that you can include in the parameter
+ *   value are id, snippet, cdn, and status." (no contentDetails)
+ *   https://developers.google.com/youtube/v3/live/docs/liveStreams/list
+ * - liveBroadcasts.insert / bind / transition — id, snippet, contentDetails, status
+ *   https://developers.google.com/youtube/v3/live/docs/liveBroadcasts/insert
+ *   https://developers.google.com/youtube/v3/live/docs/liveBroadcasts/bind
+ *   https://developers.google.com/youtube/v3/live/docs/liveBroadcasts/transition
+ * - liveBroadcasts.list  — id, snippet, contentDetails, monetizationDetails, status
+ *   https://developers.google.com/youtube/v3/live/docs/liveBroadcasts/list
+ */
+export const METHOD_ALLOWED_PARTS: Readonly<Partial<Record<PlannedMethod, readonly string[]>>> =
+  Object.freeze({
+    'liveStreams.insert': Object.freeze(['id', 'snippet', 'cdn', 'contentDetails', 'status']),
+    'liveStreams.list': Object.freeze(['id', 'snippet', 'cdn', 'status']),
+    'liveBroadcasts.insert': Object.freeze(['id', 'snippet', 'contentDetails', 'status']),
+    'liveBroadcasts.bind': Object.freeze(['id', 'snippet', 'contentDetails', 'status']),
+    'liveBroadcasts.transition': Object.freeze(['id', 'snippet', 'contentDetails', 'status']),
+    'liveBroadcasts.list': Object.freeze([
+      'id',
+      'snippet',
+      'contentDetails',
+      'monetizationDetails',
+      'status',
+    ]),
+  })
+
+/** Thrown before a request leaves the process, so a bad part set cannot ship. */
+export class YouTubePartError extends Error {
+  constructor(method: PlannedMethod, unsupported: readonly string[]) {
+    super(
+      `${method} does not accept part(s) ${unsupported.join(', ')}; allowed: ${(METHOD_ALLOWED_PARTS[method] ?? []).join(', ')}`,
+    )
+    this.name = 'YouTubePartError'
+  }
+}
+
 /** What is known about whether a failed call took effect at YouTube. */
 export type ApiCallOutcome =
   /** The request never left this process (quota gate, revoked grant). */
@@ -106,10 +153,32 @@ export interface LiveStreamStatus {
   readonly configurationIssues: readonly ConfigurationIssue[]
 }
 
+/**
+ * The outcome of a `list`, with the one fact a reconcile cannot do without: did
+ * this result cover *every* matching resource, or did the page bound cut it short?
+ * Review round 1 (B2): a truncated list was being read as "the resource does not
+ * exist", which cleared the pending call and authorized a second insert.
+ */
+export interface ListResult<T> {
+  readonly items: readonly T[]
+  /** false when the page bound was reached with a `nextPageToken` still pending. */
+  readonly complete: boolean
+}
+
+/** `part=id,status` only: no `cdn`, so no stream key is in the response at all. */
+export interface LiveStreamStatusSummary {
+  readonly id: string
+  readonly status: LiveStreamStatus
+}
+
 /** A `liveStream` with the stream key removed. */
 export interface LiveStreamSummary {
   readonly id: string
   readonly title: string | null
+  /**
+   * Only ever known from `insert`: `liveStreams.list` does not accept the
+   * `contentDetails` part, so a listed stream reports `null` here.
+   */
   readonly isReusable: boolean | null
   /** True when this response carried a key and it was handed to the sink. */
   readonly streamKeyStored: boolean
@@ -222,7 +291,15 @@ export class YouTubeLiveApi {
     const parsed = await this.#request('liveStreams.insert', {
       httpMethod: 'POST',
       path: '/liveStreams',
-      query: { part: 'id,snippet,cdn,contentDetails,status' },
+      query: {
+        part: requestedParts('liveStreams.insert', [
+          'id',
+          'snippet',
+          'cdn',
+          'contentDetails',
+          'status',
+        ]),
+      },
       body: {
         snippet: { title: input.title },
         cdn: {
@@ -236,28 +313,60 @@ export class YouTubeLiveApi {
     return this.#toLiveStream(parsed)
   }
 
-  /** Streams owned by the authorized channel, or specific ids. */
+  /**
+   * Streams owned by the authorized channel, or specific ids. Requests `cdn`, so
+   * **every** stream in the response hands its key to the sink: the caller owes the
+   * custodian a `commit`/`discard` for the one it selected (review round 1, M1).
+   * Use `listLiveStreamStatuses` when only the status is needed.
+   */
   async listLiveStreams(
     filter: StreamListFilter,
     options: { readonly maxPages?: number } = {},
-  ): Promise<LiveStreamSummary[]> {
-    const query: Record<string, string> =
-      'ids' in filter ? { id: filter.ids.join(',') } : { mine: 'true' }
-    const items = await this.#listAll(
+  ): Promise<ListResult<LiveStreamSummary>> {
+    const page = await this.#listAll(
       'liveStreams.list',
       '/liveStreams',
       {
-        ...query,
-        part: 'id,snippet,cdn,contentDetails,status',
+        ...streamListQuery(filter),
+        part: requestedParts('liveStreams.list', ['id', 'snippet', 'cdn', 'status']),
         maxResults: '50',
       },
       options.maxPages,
     )
     const summaries: LiveStreamSummary[] = []
-    for (const item of items) {
+    for (const item of page.items) {
       summaries.push(await this.#toLiveStream(item))
     }
-    return summaries
+    return { items: summaries, complete: page.complete }
+  }
+
+  /**
+   * Status without custody: `part=id,status` carries no `cdn`, so no stream key
+   * exists in the response and nothing can be staged. The health poll uses this —
+   * a poll every `statusPollIntervalMs` must not keep re-staging the key
+   * (review round 1, M1).
+   */
+  async listLiveStreamStatuses(
+    filter: StreamListFilter,
+    options: { readonly maxPages?: number } = {},
+  ): Promise<ListResult<LiveStreamStatusSummary>> {
+    const page = await this.#listAll(
+      'liveStreams.list',
+      '/liveStreams',
+      {
+        ...streamListQuery(filter),
+        part: requestedParts('liveStreams.list', ['id', 'status']),
+        maxResults: '50',
+      },
+      options.maxPages,
+    )
+    return {
+      items: page.items.map((item) => ({
+        id: requireString(item, 'id', 'liveStream.id'),
+        status: toLiveStreamStatus(optionalRecord(item, 'status')),
+      })),
+      complete: page.complete,
+    }
   }
 
   // ----------------------------------------------------------- liveBroadcasts
@@ -266,7 +375,14 @@ export class YouTubeLiveApi {
     const parsed = await this.#request('liveBroadcasts.insert', {
       httpMethod: 'POST',
       path: '/liveBroadcasts',
-      query: { part: 'id,snippet,contentDetails,status' },
+      query: {
+        part: requestedParts('liveBroadcasts.insert', [
+          'id',
+          'snippet',
+          'contentDetails',
+          'status',
+        ]),
+      },
       body: {
         snippet: {
           title: input.title,
@@ -301,7 +417,7 @@ export class YouTubeLiveApi {
       query: {
         id: input.broadcastId,
         streamId: input.streamId,
-        part: 'id,snippet,contentDetails,status',
+        part: requestedParts('liveBroadcasts.bind', ['id', 'snippet', 'contentDetails', 'status']),
       },
     })
     return toLiveBroadcast(parsed)
@@ -317,7 +433,12 @@ export class YouTubeLiveApi {
       query: {
         id: input.broadcastId,
         broadcastStatus: input.broadcastStatus,
-        part: 'id,snippet,contentDetails,status',
+        part: requestedParts('liveBroadcasts.transition', [
+          'id',
+          'snippet',
+          'contentDetails',
+          'status',
+        ]),
       },
     })
     return toLiveBroadcast(parsed)
@@ -333,21 +454,21 @@ export class YouTubeLiveApi {
   async listBroadcasts(
     filter: BroadcastListFilter,
     options: { readonly maxPages?: number } = {},
-  ): Promise<LiveBroadcastSummary[]> {
+  ): Promise<ListResult<LiveBroadcastSummary>> {
     const query: Record<string, string> =
       'ids' in filter ? { id: filter.ids.join(',') } : { broadcastStatus: filter.broadcastStatus }
-    const items = await this.#listAll(
+    const page = await this.#listAll(
       'liveBroadcasts.list',
       '/liveBroadcasts',
       {
         ...query,
         broadcastType: 'all',
-        part: 'id,snippet,contentDetails,status',
+        part: requestedParts('liveBroadcasts.list', ['id', 'snippet', 'contentDetails', 'status']),
         maxResults: '50',
       },
       options.maxPages,
     )
-    return items.map(toLiveBroadcast)
+    return { items: page.items.map(toLiveBroadcast), complete: page.complete }
   }
 
   // ------------------------------------------------------------------ internals
@@ -357,7 +478,7 @@ export class YouTubeLiveApi {
     path: string,
     query: Record<string, string>,
     maxPages = this.#maxPages,
-  ): Promise<Record<string, unknown>[]> {
+  ): Promise<ListResult<Record<string, unknown>>> {
     const collected: Record<string, unknown>[] = []
     let pageToken: string | undefined
     for (let page = 0; page < maxPages; page += 1) {
@@ -371,14 +492,15 @@ export class YouTubeLiveApi {
       }
       const next = readOptionalString(parsed, 'nextPageToken')
       if (next === undefined) {
-        return collected
+        return { items: collected, complete: true }
       }
       pageToken = next
     }
-    // Bounded on purpose, and said out loud: a silent truncation would read as
-    // "there is no such broadcast" during a reconcile.
+    // Bounded on purpose, and said out loud twice: in the log for an operator and in
+    // `complete: false` for the caller. "Absent from a truncated list" is not
+    // evidence of absence, and callers must not treat it as such (spec §9.1).
     this.#logger.warn('list truncated at the page bound', { method, maxPages })
-    return collected
+    return { items: collected, complete: false }
   }
 
   async #request(
@@ -559,6 +681,24 @@ export class YouTubeLiveApi {
       status: toLiveStreamStatus(optionalRecord(item, 'status')),
     }
   }
+}
+
+/**
+ * Builds the `part` value and refuses one the method does not document. The list is
+ * spelled out at each call site rather than derived from the allowed set, so asking
+ * for less than everything stays possible (the status-only poll depends on it).
+ */
+function requestedParts(method: PlannedMethod, parts: readonly string[]): string {
+  const allowed = METHOD_ALLOWED_PARTS[method] ?? []
+  const unsupported = parts.filter((part) => !allowed.includes(part))
+  if (unsupported.length > 0) {
+    throw new YouTubePartError(method, unsupported)
+  }
+  return parts.join(',')
+}
+
+function streamListQuery(filter: StreamListFilter): Record<string, string> {
+  return 'ids' in filter ? { id: filter.ids.join(',') } : { mine: 'true' }
 }
 
 function toLiveStreamStatus(status: Record<string, unknown> | undefined): LiveStreamStatus {
