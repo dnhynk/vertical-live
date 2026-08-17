@@ -11,7 +11,7 @@
 |---|---|---|---|---|---|---|---|
 | T0 | 모노레포 스캐폴드·CI | — | — | merged | t0-scaffold | #1 | `task_658a82e9f356` |
 | T1 | 정규 이벤트·snapshot·effect 계약과 fixture | T0 | ✔ | merged | t1-contract | #2 | `task_1acc78f93775` |
-| T1b | [contract] Effect 원인 확장(causedByEventKey nullable + cause 판별자; T7 발견) | T1 | ✔ | in_review | t1b-effect-cause | #7 | `task_0a64fcaaae4a` |
+| T1b | [contract] Effect 원인 확장(causedByEventKey nullable + cause 판별자; T7 발견) | T1 | ✔ | merged | t1b-effect-cause | #7 | `task_0a64fcaaae4a` |
 | T2 | obs-websocket 5 감시·제어 + OBS 프로파일 | T0 | — | merged | t2-obs-monitor | #3 | `task_6e0c43d6b74c` |
 | T3 | OAuth·비밀정보 vault·quota | T0 | — | changes_requested | t3-auth-vault | #4 | `task_62829ec3ab8b` |
 | T4 | SQLite 영속층(inbox·checkpoint·snapshot·outbox·deadline) | T1 | — | changes_requested | t4-persistence | #5 | `task_6bb9ff9f79c8` |
@@ -109,3 +109,4 @@
 | 2026-08-17 08:50 | F-T3-1 완료(8건 수정: vault 기본화·redactor 전체 마스킹·in-memory 격리·google-auth-library 직접 의존·auth_revoked 선행·IPv6·성공 페이지 지연; streamList scope는 공식 문서상 확인 불가로 정직 표기, force-ssl은 최소권한 판단으로 재기술). T5 디스패치 `ctx_6c476a54cd69`. 리뷰 대기열: R-T4-1(진행) → R-T1b-1 → R-T7-1 → R-T3-2 |
 | 2026-08-17 09:20 | R-T4-1 verdict **request_changes**(blocker 2: processedSeq 전진이 처리 기록으로 증명되지 않아 미처리 inbox가 복구 커서 아래로 묻힘; 이 Windows 호스트에서 clean `npm ci`가 better-sqlite3 node-gyp rebuild로 실패(prebuild 존재하나 미사용) — T5 worktree setup 실패와 같은 원인 가능성; major 1: 삭제된 마이그레이션 파일 검출 안 됨). F-T4-1 `task_1a6ff0a2a2e1` → T4 터미널 `ctx_7f66d3e1035d`. R-T1b-1 `task_08760cd14f5d` → `ctx_523f03d2d553`. 리뷰 대기열: R-T1b-1(진행) → R-T7-1 → R-T3-2 |
 | 2026-08-17 09:00 | T5 질문(CTA 명령 출처가 계약에 없음) → 답 A(선택창/집계창 우선, fallback §7.1 allowlist 표시; interactionEnabled=false면 숨김). display.cta 필드는 필요 시 T14에서 [contract] 후속 |
+| 2026-08-17 09:45 | R-T1b-1 verdict **approve**(7/7, 495 tests). 최종 게이트 통과 → **PR #7 squash merge**(main 6efc9b5). T1b worker release·worktree 제거. R-T7-1 `task_f31e681919dc` → `ctx_754ab822962b`. 리뷰 대기열: R-T7-1(진행) → R-T3-2 → (F-T4-1 후) R-T4-2 |
