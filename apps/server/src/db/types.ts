@@ -149,7 +149,8 @@ export interface PersistedEffect {
   readonly expiredAt: string | null
 }
 
-export type EffectMarkResult = 'recorded' | 'already_published' | 'already_acked' | 'already_expired'
+export type EffectMarkResult =
+  'recorded' | 'already_published' | 'already_acked' | 'already_expired'
 
 /** What a restart needs before it resumes source reception (spec §7.3(3), §11). */
 export interface RecoveryState {

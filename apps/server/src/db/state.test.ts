@@ -132,7 +132,12 @@ describe('commitStateTransition', () => {
         transition({
           revision: 2,
           transitions: [
-            { revision: 3, causedByEventKey: null, kind: 'test_tick', at: '2026-08-16T00:05:00.000Z' },
+            {
+              revision: 3,
+              causedByEventKey: null,
+              kind: 'test_tick',
+              at: '2026-08-16T00:05:00.000Z',
+            },
           ],
         }),
       ),
@@ -143,7 +148,9 @@ describe('commitStateTransition', () => {
   it('rejects an inbox row it cannot mark as processed', () => {
     const { store } = open()
     expect(() =>
-      store.commitStateTransition(transition({ processed: [{ ingestSeq: 42, result: 'applied' }] })),
+      store.commitStateTransition(
+        transition({ processed: [{ ingestSeq: 42, result: 'applied' }] }),
+      ),
     ).toThrow(PersistenceInvariantError)
     expect(store.loadRecoveryState().snapshot).toBeNull()
   })

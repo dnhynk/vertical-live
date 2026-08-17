@@ -318,7 +318,9 @@ export class PersistenceStore {
       )
       .get(input.sourceKey, input.liveChatId, input.nextPageToken, batchMaxSeq, updatedAt)
     if (row === undefined) {
-      throw new PersistenceInvariantError(`checkpoint upsert for ${input.sourceKey} returned no row`)
+      throw new PersistenceInvariantError(
+        `checkpoint upsert for ${input.sourceKey} returned no row`,
+      )
     }
     return toCheckpoint(row)
   }
@@ -425,13 +427,7 @@ export class PersistenceStore {
            snapshot_json = excluded.snapshot_json,
            updated_at = excluded.updated_at`,
       )
-      .run(
-        this.#worldId,
-        revision,
-        processedSeq,
-        JSON.stringify(snapshot),
-        this.#clock.nowUtcIso(),
-      )
+      .run(this.#worldId, revision, processedSeq, JSON.stringify(snapshot), this.#clock.nowUtcIso())
   }
 
   #writeTransitions(transitions: readonly StateTransitionRecord[]): void {
@@ -640,7 +636,9 @@ export class PersistenceStore {
       const row = this.#requireEffectRow(effectId)
       if (row.published_at === null) throw new EffectNotPublishedError(effectId)
       if (row.acked_at !== null) return 'already_acked'
-      this.#db.prepare('UPDATE effect_outbox SET acked_at = ? WHERE effect_id = ?').run(at, effectId)
+      this.#db
+        .prepare('UPDATE effect_outbox SET acked_at = ? WHERE effect_id = ?')
+        .run(at, effectId)
       return 'recorded'
     })
     return mark.immediate()

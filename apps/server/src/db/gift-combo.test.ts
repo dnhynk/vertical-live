@@ -80,13 +80,16 @@ describe('upsertGiftMax', () => {
   it('derives the same effective counts from the committed gift fixtures', () => {
     // Guards the assumption the delta sequence above rests on: the contract
     // fixtures for comboCount 0 and 1 both mean "the first gift".
-    const counts = ['gift-event-combo-0', 'gift-event-combo-1', 'gift-event-combo-3', 'gift-event-combo-5'].map(
-      (name) => {
-        const envelope = grpcEnvelope(name)
-        if (envelope.validationStatus !== 'valid') throw new Error(`${name} did not validate`)
-        return effectiveGiftCount(envelope.payment?.comboCount ?? null)
-      },
-    )
+    const counts = [
+      'gift-event-combo-0',
+      'gift-event-combo-1',
+      'gift-event-combo-3',
+      'gift-event-combo-5',
+    ].map((name) => {
+      const envelope = grpcEnvelope(name)
+      if (envelope.validationStatus !== 'valid') throw new Error(`${name} did not validate`)
+      return effectiveGiftCount(envelope.payment?.comboCount ?? null)
+    })
     expect(counts).toEqual([1, 1, 3, 5])
   })
 })

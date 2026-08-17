@@ -127,12 +127,7 @@ export function migrate(database: Database.Database, options: MigrateOptions): M
     // failure half way through leaves no partially created schema.
     const apply = database.transaction(() => {
       database.exec(migration.sql)
-      record.run(
-        migration.version,
-        migration.name,
-        migration.checksum,
-        options.clock.nowUtcIso(),
-      )
+      record.run(migration.version, migration.name, migration.checksum, options.clock.nowUtcIso())
     })
     try {
       apply()
@@ -147,9 +142,7 @@ export function migrate(database: Database.Database, options: MigrateOptions): M
 
 export function listAppliedMigrations(database: Database.Database): AppliedMigration[] {
   const rows = database
-    .prepare(
-      'SELECT version, name, checksum, applied_at FROM schema_migrations ORDER BY version',
-    )
+    .prepare('SELECT version, name, checksum, applied_at FROM schema_migrations ORDER BY version')
     .all() as { version: number; name: string; checksum: string; applied_at: string }[]
   return rows.map((row) => ({
     version: row.version,
