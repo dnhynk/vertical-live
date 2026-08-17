@@ -55,18 +55,21 @@ export interface ChatReconnectObservation {
   readonly gapMs: number | null
   /** Whether the last (re)connect presented a resume token (spec §11). */
   readonly resumedWithToken: boolean | null
-  /** The server refused our token, so the resume point was lost. */
+  /** The server refused our token at least once, so a resume point was lost. */
   readonly tokenRejected: boolean
+  /** Reconnects that had no token to present — each one an unbounded gap. */
+  readonly reconnectsWithoutToken: number
   /**
-   * Messages the inbox already had after the last reconnect — measured, not
-   * guessed: `commitIngestBatch` reports a duplicate per event key (spec §11).
+   * Messages the inbox already had on the connection that last delivered
+   * anything — measured, not guessed: `commitIngestBatch` reports a duplicate
+   * per event key (spec §11).
    */
   readonly estimatedDuplicates: number
   /**
-   * Messages the reconnect may have skipped. `0` when the stream resumed from
-   * our token (or started cold, where nothing preceded us), `null` when the
-   * token was lost or refused — the size of that gap is genuinely unknown and
-   * is not invented here.
+   * Messages the **last** reconnect may have skipped. `0` when it resumed from
+   * our token (or started cold, where nothing preceded us), `null` when there
+   * was no token to present — the size of that gap is genuinely unknown and is
+   * not invented here.
    */
   readonly estimatedLostMessages: number | null
 }
@@ -173,6 +176,7 @@ function reconnect(observation: ChatObservation): SignalBody {
     lastAt: observation.reconnect.lastAt,
     gapMs: observation.reconnect.gapMs,
     resumedWithToken: observation.reconnect.resumedWithToken,
+    reconnectsWithoutToken: observation.reconnect.reconnectsWithoutToken,
     estimatedDuplicates: observation.reconnect.estimatedDuplicates,
     estimatedLostMessages: observation.reconnect.estimatedLostMessages,
     // The reconnect cursor §9.4(3) asks to record. It authorizes nothing: it

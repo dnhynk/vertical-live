@@ -37,7 +37,9 @@ export class ChatSourceState {
   #reconnectGapMs: number | null = null
   #resumedWithToken: boolean | null = null
   #tokenRejected = false
+  #reconnectsWithoutToken = 0
   #duplicatesSinceReconnect = 0
+  #duplicateResetPending = false
   #estimatedLostMessages: number | null = 0
 
   #userEventLastAtUtc: string | null = null
@@ -78,7 +80,11 @@ export class ChatSourceState {
    */
   connectAttempt(withToken: boolean): void {
     this.#resumedWithToken = withToken
-    this.#duplicatesSinceReconnect = 0
+    // The duplicate estimate belongs to the connection that actually delivers
+    // something, so it is reset when the first response of the new connection
+    // arrives — not here, where three failed dials in a row would erase the
+    // measurement taken by the connection before them.
+    this.#duplicateResetPending = true
     if (this.#reconnectCount > 0 || this.#disconnectedAtMonotonicMs !== null) {
       this.#reconnectCount += 1
       this.#reconnectLastAt = this.#clock.nowUtcIso()
@@ -89,11 +95,16 @@ export class ChatSourceState {
       // A reconnect that could present the token resumes where it left off;
       // one that could not may have skipped an unknown number of messages.
       this.#estimatedLostMessages = withToken ? 0 : null
+      if (!withToken) this.#reconnectsWithoutToken += 1
     }
   }
 
   /** The connection is live: a response arrived (possibly with zero items). */
   recordResponse(): void {
+    if (this.#duplicateResetPending) {
+      this.#duplicatesSinceReconnect = 0
+      this.#duplicateResetPending = false
+    }
     this.#connected = true
     this.#consecutiveFailures = 0
     this.#retryBudgetExhausted = false
@@ -164,6 +175,7 @@ export class ChatSourceState {
       gapMs: this.#reconnectGapMs,
       resumedWithToken: this.#resumedWithToken,
       tokenRejected: this.#tokenRejected,
+      reconnectsWithoutToken: this.#reconnectsWithoutToken,
       estimatedDuplicates: this.#duplicatesSinceReconnect,
       estimatedLostMessages: this.#estimatedLostMessages,
     }

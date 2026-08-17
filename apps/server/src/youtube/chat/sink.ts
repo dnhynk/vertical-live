@@ -75,6 +75,51 @@ export interface ChatBatchOutcome {
   readonly userEventAt: string | null
 }
 
+/** One item of an API response, as its shape's adapter reads it. */
+export type ChatItemAdapter = (item: unknown, context: IngestAdapterContext) => IngestEnvelope
+
+export interface NormalizedChatItems {
+  readonly envelopes: IngestEnvelope[]
+  /** Items no envelope could be made of. Reported, never silently swallowed. */
+  readonly dropped: number
+  /** Valid (supported) events among them. */
+  readonly userEvents: number
+}
+
+/**
+ * Items → envelopes, with the two guards that keep one bad item from stopping
+ * the stream: a throwing adapter and an envelope the contract schema would
+ * reject inside `commitIngestBatch`'s transaction. Neither should ever happen —
+ * the adapters are written to return a minimal `invalid` envelope instead — and
+ * that is exactly why the failure mode has to be "drop and count", not "retry
+ * this response forever" (spec §7.3(2)).
+ */
+export function normalizeChatItems(
+  items: readonly unknown[],
+  adapt: ChatItemAdapter,
+  context: IngestAdapterContext,
+): NormalizedChatItems {
+  const envelopes: IngestEnvelope[] = []
+  let dropped = 0
+  let userEvents = 0
+  for (const item of items) {
+    let envelope: IngestEnvelope
+    try {
+      envelope = adapt(item, context)
+    } catch {
+      dropped += 1
+      continue
+    }
+    if (!IngestEnvelopeSchema.safeParse(envelope).success) {
+      dropped += 1
+      continue
+    }
+    if (envelope.validationStatus === 'valid') userEvents += 1
+    envelopes.push(envelope)
+  }
+  return { envelopes, dropped, userEvents }
+}
+
 export class ChatIngestSink {
   readonly #options: ChatIngestSinkOptions
   #pageToken: string | null
@@ -113,27 +158,7 @@ export class ChatIngestSink {
       parseCommand: this.#options.parseCommand,
     }
     const adapt = batch.sourceShape === 'grpc' ? fromGrpcStreamListItem : fromRestListItem
-
-    const envelopes: IngestEnvelope[] = []
-    let dropped = 0
-    let userEvents = 0
-    for (const item of batch.items) {
-      let envelope: IngestEnvelope
-      try {
-        envelope = adapt(item, context)
-      } catch {
-        // An adapter that throws is a bug, not an input shape; the batch must
-        // still commit so the checkpoint advances past this response.
-        dropped += 1
-        continue
-      }
-      if (!IngestEnvelopeSchema.safeParse(envelope).success) {
-        dropped += 1
-        continue
-      }
-      if (envelope.validationStatus === 'valid') userEvents += 1
-      envelopes.push(envelope)
-    }
+    const { envelopes, dropped, userEvents } = normalizeChatItems(batch.items, adapt, context)
 
     // Committed even when `envelopes` is empty: a heartbeat response with a new
     // token still has to move the checkpoint, or a reconnect would replay from
