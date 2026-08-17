@@ -1,0 +1,21 @@
+{
+  "kind": "youtube#liveChatMessage",
+  "id": "msg_test_0004",
+  "snippet": {
+    "type": "superStickerEvent",
+    "liveChatId": "chat_test_0001",
+    "publishedAt": "2026-08-16T00:01:30.000Z",
+    "hasDisplayContent": true,
+    "superStickerDetails": {
+      "amountMicros": "1200000",
+      "currency": "JPY",
+      "amountDisplayString": "¥1,200",
+      "tier": 3,
+      "superStickerMetadata": {
+        "stickerId": "sticker_test_0001",
+        "altText": "test sticker",
+        "altTextLanguage": "ja"
+      }
+    }
+  }
+}

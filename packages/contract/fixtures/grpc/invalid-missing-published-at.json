@@ -1,0 +1,11 @@
+{
+  "kind": "youtube#liveChatMessage",
+  "id": "msg_test_0011",
+  "snippet": {
+    "type": "TEXT_MESSAGE_EVENT",
+    "live_chat_id": "chat_test_0001",
+    "text_message_details": {
+      "message_text": "あそぶ"
+    }
+  }
+}

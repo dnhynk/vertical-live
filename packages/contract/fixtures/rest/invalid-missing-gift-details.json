@@ -1,0 +1,10 @@
+{
+  "kind": "youtube#liveChatMessage",
+  "id": "msg_test_0014",
+  "snippet": {
+    "type": "giftEvent",
+    "liveChatId": "chat_test_0001",
+    "publishedAt": "2026-08-16T00:08:30.000Z",
+    "hasDisplayContent": true
+  }
+}

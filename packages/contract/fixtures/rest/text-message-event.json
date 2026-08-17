@@ -1,0 +1,26 @@
+{
+  "kind": "youtube#liveChatMessage",
+  "etag": "etag_test_0001",
+  "id": "msg_test_0001",
+  "snippet": {
+    "type": "textMessageEvent",
+    "liveChatId": "chat_test_0001",
+    "authorChannelId": "UC_TEST_SYNTHETIC_0001",
+    "publishedAt": "2026-08-16T00:00:00.000Z",
+    "hasDisplayContent": true,
+    "displayMessage": "ごはん",
+    "textMessageDetails": {
+      "messageText": "ごはん"
+    }
+  },
+  "authorDetails": {
+    "channelId": "UC_TEST_SYNTHETIC_0001",
+    "channelUrl": "https://example.invalid/channel/test",
+    "displayName": "TEST SYNTHETIC AUTHOR",
+    "profileImageUrl": "https://example.invalid/avatar.png",
+    "isVerified": false,
+    "isChatOwner": false,
+    "isChatSponsor": false,
+    "isChatModerator": false
+  }
+}
