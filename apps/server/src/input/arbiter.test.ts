@@ -2,7 +2,12 @@ import type { CommandName, CommandRef } from '@vl/contract'
 import { describe, expect, it } from 'vitest'
 
 import { FakeClock } from '../testing/fake-clock.js'
-import { InputArbiter, InputArbiterConfigError, type InputWindowConfig } from './arbiter.js'
+import {
+  InputArbiter,
+  InputArbiterConfigError,
+  type CommandWindowTally,
+  type InputWindowConfig,
+} from './arbiter.js'
 
 const CONFIG: InputWindowConfig = {
   windowMs: 5000,
@@ -22,6 +27,13 @@ function makeArbiter(config: Partial<InputWindowConfig> = {}) {
 /** Advances the fake clock without letting a timer fire; the arbiter has none. */
 async function advance(clock: FakeClock, ms: number): Promise<void> {
   await clock.advance(ms)
+}
+
+function sumTallies(
+  counts: Readonly<Record<CommandName, CommandWindowTally>> | undefined,
+  field: keyof CommandWindowTally,
+): number {
+  return Object.values(counts ?? {}).reduce((total, tally) => total + tally[field], 0)
 }
 
 describe('config validation', () => {
@@ -81,8 +93,39 @@ describe('direct mode', () => {
       acceptedCount: 9,
       directAppliedCount: 6,
       aggregatedCount: 3,
-      counts: { FEED: 9, PLAY: 0, PET: 0, VOTE_A: 0, VOTE_B: 0, VOTE_C: 0 },
+      counts: {
+        FEED: { directApplied: 6, aggregatedOnly: 3 },
+        PLAY: { directApplied: 0, aggregatedOnly: 0 },
+      },
     })
+  })
+
+  /**
+   * R-T6-1 blocker 2: with one scalar pair for the whole window, a caller that
+   * applied the direct commands as they arrived could not tell which
+   * contributions were still outstanding — applying `counts` replayed FEED,
+   * skipping it lost PLAY.
+   */
+  it('splits a mixed window per command into applied and outstanding', async () => {
+    const { clock, arbiter } = makeArbiter({ maxDirectPerWindow: 1 })
+    expect(arbiter.admit(command('FEED')).disposition).toBe('direct')
+    expect(arbiter.admit(command('PLAY')).disposition).toBe('aggregated')
+    await advance(clock, CONFIG.windowMs)
+
+    const [window] = arbiter.drainClosedWindows()
+    expect(window?.counts).toEqual({
+      FEED: { directApplied: 1, aggregatedOnly: 0 },
+      PLAY: { directApplied: 0, aggregatedOnly: 1 },
+      PET: { directApplied: 0, aggregatedOnly: 0 },
+      VOTE_A: { directApplied: 0, aggregatedOnly: 0 },
+      VOTE_B: { directApplied: 0, aggregatedOnly: 0 },
+      VOTE_C: { directApplied: 0, aggregatedOnly: 0 },
+    })
+    // Applying only `aggregatedOnly` neither replays FEED nor loses PLAY, and
+    // the two halves still add up to every accepted command.
+    expect(window?.acceptedCount).toBe(2)
+    expect(sumTallies(window?.counts, 'directApplied')).toBe(window?.directAppliedCount)
+    expect(sumTallies(window?.counts, 'aggregatedOnly')).toBe(window?.aggregatedCount)
   })
 })
 
@@ -189,7 +232,14 @@ describe('closed windows', () => {
     arbiter.admit(command('PET'))
     await advance(clock, CONFIG.windowMs)
     const [window] = arbiter.drainClosedWindows()
-    expect(window?.counts).toEqual({ FEED: 1, PLAY: 2, PET: 1, VOTE_A: 0, VOTE_B: 0, VOTE_C: 0 })
+    expect(window?.counts).toEqual({
+      FEED: { directApplied: 1, aggregatedOnly: 0 },
+      PLAY: { directApplied: 2, aggregatedOnly: 0 },
+      PET: { directApplied: 1, aggregatedOnly: 0 },
+      VOTE_A: { directApplied: 0, aggregatedOnly: 0 },
+      VOTE_B: { directApplied: 0, aggregatedOnly: 0 },
+      VOTE_C: { directApplied: 0, aggregatedOnly: 0 },
+    })
     expect(window?.acceptedCount).toBe(4)
   })
 })

@@ -23,10 +23,10 @@ describe('accepted commands', () => {
     })
   })
 
-  it('accepts one short token as an argument', () => {
-    expect(parse('play tag-game')).toEqual({
+  it('accepts one short word as an argument', () => {
+    expect(parse('play round2')).toEqual({
       status: 'accepted',
-      command: { name: 'PLAY', argument: 'tag-game' },
+      command: { name: 'PLAY', argument: 'round2' },
       commandLike: true,
     })
   })
@@ -81,6 +81,13 @@ describe('shape rules', () => {
   it('rejects an argument outside the contract token charset', () => {
     expect(parse('ごはん りんご')).toMatchObject({ reason: 'invalid_argument' })
     expect(parse(`feed ${'a'.repeat(33)}`)).toMatchObject({ reason: 'invalid_argument' })
+  })
+
+  it('rejects a separator inside an argument (R-T6-1 blocker 1)', () => {
+    // The contract charset allows `-` and `_`; the parser does not, because a
+    // separator is how a host or an address gets spelled as one token.
+    expect(parse('play tag-game')).toMatchObject({ reason: 'invalid_argument' })
+    expect(parse('play snack_time')).toMatchObject({ reason: 'invalid_argument' })
   })
 
   it('rejects a message that is not a command at all', () => {

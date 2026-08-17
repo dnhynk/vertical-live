@@ -55,16 +55,34 @@ const COMPILED_TERMS: readonly CompiledTerms[] = CATEGORY_ORDER.map((category) =
 }))
 
 /**
- * `example(dot)com` and `example dot com` → `example.com`, and the same for
- * `(at)` → `@`. A delimiter is required on at least one side so that ordinary
+ * Characters used to hold a host or an address apart so it stops looking like
+ * one. Whitespace and brackets are the obvious ones; `-` and `_` matter because
+ * they are legal `CommandRef.argument` characters, which is how
+ * `someone-at-example-dot-com` survived as one accepted token (R-T6-1
+ * blocker 1). The class is shared by every de-obfuscation rule below so a new
+ * separator cannot be handled in one rule and missed in another.
+ */
+const INNER_SEPARATOR_CLASS = '\\-_+*~|/\\\\([{<)\\]}>'
+const SEP = `[\\s${INNER_SEPARATOR_CLASS}]`
+
+/**
+ * `example(dot)com`, `example dot com`, `example-dot-com` → `example.com`, and
+ * the same for `at` → `@`. A separator is required on both sides so ordinary
  * words containing `dot` or `at` (`anecdote`, `water`) are left alone.
  */
+const WORD_DOT = new RegExp(`(?<=[a-z0-9])${SEP}+(?:dot|どっと)${SEP}+(?=[a-z0-9])`, 'g')
+const WORD_AT = new RegExp(`(?<=[a-z0-9])${SEP}+(?:at|あっと)${SEP}+(?=[a-z0-9])`, 'g')
+/** Bracketed forms need no preceding character: `example(dot)com` at a boundary. */
 const BRACKETED_DOT = /\s*[([{<]\s*(?:dot|どっと)\s*[)\]}>]\s*/g
-const SPACED_WORD_DOT = /(?<=[a-z0-9])\s+(?:dot|どっと)\s+(?=[a-z0-9])/g
 const BRACKETED_AT = /\s*[([{<]\s*(?:at|あっと)\s*[)\]}>]\s*/g
-const SPACED_WORD_AT = /(?<=[a-z0-9])\s+(?:at|あっと)\s+(?=[a-z0-9])/g
 const SPACED_DOT = /\s*\.\s*/g
 const SCHEME_TYPO = /h[x*]{2}p/g
+/**
+ * The CJK full stop is the separator browsers themselves accept in an IDN
+ * label, so it is folded to `.` rather than treated as sentence punctuation.
+ * The half-width form arrives here already folded by NFKC.
+ */
+const IDEOGRAPHIC_STOP = /。/g
 
 /**
  * A link is a scheme, a `www.` host, or any two labels joined by a dot. The
@@ -99,15 +117,38 @@ const LONG_DIGIT_RUN = /\d{9,}/
 export function buildLinkProbe(folded: string): string {
   return folded
     .replace(SCHEME_TYPO, 'http')
+    .replace(IDEOGRAPHIC_STOP, '.')
     .replace(BRACKETED_DOT, '.')
-    .replace(SPACED_WORD_DOT, '.')
+    .replace(WORD_DOT, '.')
     .replace(BRACKETED_AT, '@')
-    .replace(SPACED_WORD_AT, '@')
+    .replace(WORD_AT, '@')
     .replace(SPACED_DOT, '.')
 }
 
+/**
+ * A token whose separators stand in for dots: `www-example-com`,
+ * `www_example_com`, `www|example|com`. Only tokens that already read as a host
+ * are collapsed — three or more segments, or a leading `www` — because two
+ * hyphenated words (`tag-game`) are ordinary wording, not a spelling of
+ * `tag.game`. The separator set is the same one the `dot`/`at` rules use, minus
+ * whitespace, which is what splits tokens in the first place.
+ */
+const INNER_SEP = `[${INNER_SEPARATOR_CLASS}]`
+const HOST_SHAPED_TOKEN = new RegExp(
+  `^(?:www${INNER_SEP}\\S+|[a-z0-9]+(?:${INNER_SEP}[a-z0-9]+){2,})$`,
+)
+const TOKEN_SEPARATORS = new RegExp(`${INNER_SEP}+`, 'g')
+
+function collapseHostShapedTokens(probe: string): string {
+  return probe
+    .split(' ')
+    .map((token) => (HOST_SHAPED_TOKEN.test(token) ? token.replace(TOKEN_SEPARATORS, '.') : token))
+    .join(' ')
+}
+
 function containsLink(probe: string): boolean {
-  return URL_PATTERNS.some((pattern) => pattern.test(probe))
+  const collapsed = collapseHostShapedTokens(probe)
+  return URL_PATTERNS.some((pattern) => pattern.test(probe) || pattern.test(collapsed))
 }
 
 /** Personal data other than an address, which `moderate` checks first. */

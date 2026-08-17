@@ -9,6 +9,7 @@ export {
   InputArbiter,
   InputArbiterConfigError,
   type AggregateWindowResult,
+  type CommandWindowTally,
   type ArbiterAdmission,
   type InputArbiterOptions,
   type InputWindowConfig,

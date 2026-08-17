@@ -52,16 +52,37 @@ export interface ArbiterAdmission {
   readonly windowSequence: number
 }
 
+/**
+ * One command's share of a window, split by what the consumer still owes.
+ *
+ * The split is the whole point of the payload. `directApplied` was already
+ * returned to the caller with `disposition: 'direct'` and acted on as it
+ * arrived; `aggregatedOnly` never was. A single total cannot express that: a
+ * caller applying it would replay the direct commands, and a caller skipping it
+ * would lose the aggregated ones (R-T6-1 blocker 2). Adding the two back
+ * together gives the contribution count spec §6.4 requires be preserved, which
+ * is what the on-screen tally shows.
+ */
+export interface CommandWindowTally {
+  readonly directApplied: number
+  readonly aggregatedOnly: number
+}
+
 /** A closed window. Every accepted command in it is represented in `counts`. */
 export interface AggregateWindowResult {
   readonly sequence: number
   readonly mode: InputMode
   readonly startedAtUtc: string
   readonly endedAtUtc: string
-  /** Per-command contribution counts. Sums to `acceptedCount`. */
-  readonly counts: Readonly<Record<CommandName, number>>
+  /**
+   * Per-command split. Apply `aggregatedOnly`; `directApplied` is already done.
+   * Every tally summed over both fields equals `acceptedCount`.
+   */
+  readonly counts: Readonly<Record<CommandName, CommandWindowTally>>
   readonly acceptedCount: number
+  /** Sum of every `counts[*].directApplied`. */
   readonly directAppliedCount: number
+  /** Sum of every `counts[*].aggregatedOnly`. */
   readonly aggregatedCount: number
   /** Mode the next window runs in, derived from `acceptedCount`. */
   readonly nextMode: InputMode
@@ -85,12 +106,27 @@ export class InputArbiterConfigError extends Error {
   }
 }
 
-function emptyCounts(): Record<CommandName, number> {
-  const counts = {} as Record<CommandName, number>
+interface MutableTally {
+  directApplied: number
+  aggregatedOnly: number
+}
+
+function emptyCounts(): Record<CommandName, MutableTally> {
+  const counts = {} as Record<CommandName, MutableTally>
   for (const name of CommandNameSchema.options) {
-    counts[name] = 0
+    counts[name] = { directApplied: 0, aggregatedOnly: 0 }
   }
   return counts
+}
+
+function freezeCounts(
+  counts: Record<CommandName, MutableTally>,
+): Record<CommandName, CommandWindowTally> {
+  const copy = {} as Record<CommandName, CommandWindowTally>
+  for (const name of CommandNameSchema.options) {
+    copy[name] = { ...counts[name] }
+  }
+  return copy
 }
 
 export class InputArbiter {
@@ -144,14 +180,15 @@ export class InputArbiter {
    */
   admit(command: CommandRef): ArbiterAdmission {
     this.#sync()
-    this.#counts[command.name] += 1
     this.#accepted += 1
 
     const applyDirectly =
       this.#mode === 'direct' && this.#directApplied < this.#config.maxDirectPerWindow
     if (applyDirectly) {
+      this.#counts[command.name].directApplied += 1
       this.#directApplied += 1
     } else {
+      this.#counts[command.name].aggregatedOnly += 1
       this.#aggregated += 1
     }
     return {
@@ -180,12 +217,16 @@ export class InputArbiter {
    */
   currentWindow(): AggregateWindow {
     this.#sync()
+    // The screen shows contributions, not bookkeeping: both halves are summed
+    // so a viewer sees everything the window received (spec §5.2, §6.4).
+    const contributions = (name: CommandName): number =>
+      this.#counts[name].directApplied + this.#counts[name].aggregatedOnly
     return {
       mode: this.#mode,
       endsAt: this.#instantAt(this.#windowEndMonotonicMs()),
       tallies: CommandNameSchema.options
-        .filter((name) => this.#counts[name] > 0)
-        .map((name) => ({ commandName: name, count: this.#counts[name] })),
+        .filter((name) => contributions(name) > 0)
+        .map((name) => ({ commandName: name, count: contributions(name) })),
     }
   }
 
@@ -221,7 +262,7 @@ export class InputArbiter {
         mode: this.#mode,
         startedAtUtc: this.#instantAt(startMs),
         endedAtUtc: this.#instantAt(startMs + this.#config.windowMs),
-        counts: { ...this.#counts },
+        counts: freezeCounts(this.#counts),
         acceptedCount: this.#accepted,
         directAppliedCount: this.#directApplied,
         aggregatedCount: this.#aggregated,

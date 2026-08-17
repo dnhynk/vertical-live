@@ -18,8 +18,22 @@ describe('link rules', () => {
     ['confusable host', 'ехample.com'],
     ['zero width inside host', 'exam​ple.com'],
     ['ip address', '192.0.2.10'],
+    // R-T6-1 blocker 1: separators that are legal argument characters.
+    ['hyphen separated host', 'www-example-com'],
+    ['underscore separated host', 'www_example_com'],
+    ['hyphen dot word', 'example-dot-com'],
+    ['underscore dot word', 'example_dot_com'],
+    ['pipe separated host', 'www|example|com'],
+    ['ideographic full stop', 'example。com'],
+    ['halfwidth ideographic stop', 'example｡com'],
   ])('rejects a %s as url', (_name, text) => {
     expect(check(text)).toBe('url')
+  })
+
+  it('leaves an ordinary hyphenated word alone', () => {
+    // Two segments are wording, not a host; three or a leading `www` are not.
+    expect(check('tag-game')).toBeNull()
+    expect(check('snack_time')).toBeNull()
   })
 
   it('leaves ordinary text alone', () => {
@@ -41,6 +55,9 @@ describe('personal data rules', () => {
     ['card-length digits', '4111 1111 1111 1111'],
     ['social handle', '@synthetic_handle'],
     ['japanese postal code', '〒123-4567'],
+    // R-T6-1 blocker 1: the form that survived as one accepted argument token.
+    ['hyphen separated address', 'someone-at-example-dot-com'],
+    ['underscore separated address', 'someone_at_example_dot_com'],
   ])('rejects %s as personal data', (_name, text) => {
     expect(check(text)).toBe('personal_data')
   })
