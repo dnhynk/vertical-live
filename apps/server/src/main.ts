@@ -12,9 +12,12 @@ import { createServer, DEFAULT_HOST, resolvePort } from './server.js'
  * Process entry point: one store, one engine, one renderer hub, one HTTP
  * surface, all on loopback (spec §10.2, TASK_SPECS 공통 규약).
  *
- * The engine is started after the listener is up so a renderer that reconnects
- * during start-up finds the socket and receives the recovery snapshot rather
- * than a connection error.
+ * The three collaborators are mutually referential — the hub needs the HTTP
+ * server, the engine publishes through the hub, and both HTTP and the hub call
+ * back into the engine — so the references are taken inside callbacks that only
+ * run once every binding exists. The engine is started after the listener is up,
+ * so a renderer reconnecting during start-up finds the socket and gets the
+ * recovery snapshot instead of a connection error.
  */
 
 const config = loadEngineConfig()
@@ -28,48 +31,45 @@ const simulatorToken = config.simulator.enabled
   ? ((await defaultSecretProvider().get('server.simulatorToken')) ?? null)
   : null
 
-let engine: StateEngine | undefined
-let hub: RendererHub | undefined
-
 const ingest = new SimulatorIngestEndpoint({
   store,
   enabled: config.simulator.enabled,
   token: simulatorToken,
   onIngested: () => {
-    engine?.notifyIngest()
-    engine?.runPending()
+    engine.notifyIngest()
+    engine.runPending()
   },
 })
 
 const httpServer = createServer({
   engine: {
-    health: () => requireEngine().health(),
-    metrics: () => requireEngine().metrics(),
+    health: () => engine.health(),
+    metrics: () => engine.metrics(),
   },
   ingest,
-  rendererHealth: () => hub?.lastHealth ?? null,
+  rendererHealth: () => hub.lastHealth,
 })
 
-hub = new RendererHub({
+const hub = new RendererHub({
   server: httpServer,
   clock: systemClock,
   events: {
     onHello: (lastAppliedStateRevision) => {
-      requireEngine().onRendererHello(lastAppliedStateRevision)
+      engine.onRendererHello(lastAppliedStateRevision)
     },
     onAckState: (stateRevision, appliedAt) => {
-      requireEngine().onAckState(stateRevision, appliedAt)
+      engine.onAckState(stateRevision, appliedAt)
     },
     onAckEffect: (effectId, appliedAt) => {
-      requireEngine().onAckEffect(effectId, appliedAt)
+      engine.onAckEffect(effectId, appliedAt)
     },
     onHealth: () => {
-      // Recorded by the hub; the supervisor (T12) aggregates it.
+      // Recorded by the hub and read through `/health`; T12 aggregates it.
     },
   },
 })
 
-engine = new StateEngine({
+const engine = new StateEngine({
   store,
   clock: systemClock,
   config,
@@ -78,11 +78,6 @@ engine = new StateEngine({
 })
 
 httpServer.listen(port, DEFAULT_HOST, () => {
-  requireEngine().start()
+  engine.start()
   process.stdout.write(`@vl/server listening on http://${DEFAULT_HOST}:${port}\n`)
 })
-
-function requireEngine(): StateEngine {
-  if (engine === undefined) throw new Error('engine is not constructed yet')
-  return engine
-}

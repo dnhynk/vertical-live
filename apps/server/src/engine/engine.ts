@@ -101,6 +101,13 @@ export interface StateEngineOptions {
   readonly inputConfig?: InputConfig
   readonly publisher?: EnginePublisher
   readonly logger?: Logger
+  /**
+   * Schedule the periodic wake-up on `start()`. `false` leaves the loop entirely
+   * in the caller's hands, which is what the tests and T11's virtual clock need:
+   * a timer that fires inside a fake clock's `advance()` would interleave with
+   * the assertions it is being measured by.
+   */
+  readonly autoTick?: boolean
 }
 
 export interface EngineHealth {
@@ -173,6 +180,7 @@ export class StateEngine {
   #inputHealth: InputHealth = 'ok'
   #interactionEnabled = false
   #timer: TimerHandle | null = null
+  readonly #autoTick: boolean
 
   constructor(options: StateEngineOptions) {
     this.#store = options.store
@@ -181,6 +189,7 @@ export class StateEngine {
     this.#inputConfig = options.inputConfig ?? loadInputConfig()
     this.#publisher = options.publisher ?? nullPublisher
     this.#logger = options.logger ?? silentLogger
+    this.#autoTick = options.autoTick !== false
     this.#metrics = new EngineMetrics(this.#config.engine.metricsSampleSize)
     this.#world = initialWorldState({
       seed: this.#config.engine.worldSeed,
@@ -355,6 +364,9 @@ export class StateEngine {
     // simulator endpoint, T9's adapter) between two ticks must not wait for a
     // `notifyIngest` that a future caller might forget.
     this.#inboxExhausted = false
+    // Reconciled before the loop as well as after it: an event must never be
+    // applied while the published snapshot still says interaction is suspended.
+    commits += this.#reconcileInteraction(this.#clock.nowUtcIso())
     for (let iteration = 0; ; iteration += 1) {
       if (iteration >= MAX_STEPS_PER_PASS) {
         // A timer that never leaves the due set would spin here. Stopping and
@@ -399,7 +411,7 @@ export class StateEngine {
   }
 
   #scheduleTick(): void {
-    if (!this.#started) return
+    if (!this.#started || !this.#autoTick) return
     this.#timer = this.#clock.setTimeout(() => {
       this.#timer = null
       try {
