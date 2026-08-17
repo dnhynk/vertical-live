@@ -138,7 +138,15 @@ $ npm run build          -> contract, renderer(vite ✓ built), server(copied 2 
 
 round 1 수정 후 재실행(base `44fefaa`로 rebase): 위 5개 게이트 모두 통과, 테스트 **1129 passed | 1 skipped (1130)**, `copied 2 migration(s)`(003 재번호 후 dist 정리 확인).
 
-round 2 수정 후 재실행(`git fetch && git rebase origin/main`): format `All matched files use Prettier code style!` · lint 0 problems · typecheck 무출력 · test **1141 passed | 1 skipped (1142)** · build `copied 2 migration(s)`. 리뷰어가 관측한 `api.test.ts:162` flake는 M2의 배리어로 원인 자체를 제거했다(벽시계 의존 삭제).
+round 2 수정 후 재실행(`git fetch && git rebase origin/main`): format `All matched files use Prettier code style!` · lint 0 problems · typecheck 무출력 · test **1141 passed | 1 skipped (1142)** · build `copied 2 migration(s)`.
+
+그 뒤 **T13(PR #10)이 main에 머지되어 다시 rebase**했고(base `5457ac4`), 마이그레이션 번호와 T13의 데이터 맵에서 통합 충돌이 나왔다. 처리:
+
+1. T13이 `002_retention-ledger.sql`을 가져왔으므로 이 브랜치의 마이그레이션은 rebase 중 **003**으로 유지하고 `migrate.test.ts` 기대치를 `['001_initial.sql','002_retention-ledger.sql','003_broadcast-resources.sql']`·버전 `[1,2,3]`으로 갱신했다.
+2. T13의 `config/retention.json`은 `broadcast_resources`의 컬럼을 **001 skeleton 기준**으로 선언하고 있었고("columns fixed by T10"), 스키마 드리프트 검사가 이를 실패로 잡았다(`storedColumns does not match the live schema`). 선언을 migration 003의 실제 17개 컬럼으로 갱신하고 `npm run data-map:generate -w @vl/server`로 `docs/ops/data-map.md`를 재생성했다(손으로 고치지 않음). 드리프트 검사는 테이블당 field group 하나만 허용하므로(각 group을 전체 컬럼 집합과 대조) attempt 운영 컬럼도 같은 group에 들어가며, 그 결과 행 전체가 더 **엄격한** authorized-API-data 규칙(30일 delete)을 받는다 — 약한 쪽으로 재분류하지 않았다는 사실을 `purpose`에 적었다.
+3. T13 테스트 하네스(`privacy/testing/harness.ts`)의 `broadcast_resources` raw insert를 003 컬럼으로 고쳤다(sweep 테스트는 과거 시각 `updated_at`이 필요해 store writer를 쓸 수 없다). 이 하네스는 T13 소유지만 스키마를 바꾼 쪽이 고치는 것이 맞다.
+
+통합 후 게이트: format pass · lint pass · typecheck pass · test **1235 passed | 1 skipped (1236)**(T13 privacy 47건 포함) · build pass(`copied 3 migration(s)`, data-map `--check` 통과). 리뷰어가 관측한 `api.test.ts:162` flake는 M2의 배리어로 원인 자체를 제거했다(벽시계 의존 삭제).
 
 위 게이트는 `git fetch && git rebase origin/main`(base `751126f`) 뒤에 돌렸다. rebase 직후 `npm run test`가 renderer 3파일에서 `Cannot find package 'jsdom'`로 실패했는데, 원인은 T5(PR #9)가 추가한 devDependency가 이 worktree의 `node_modules`에 없던 것이었다 — `npm install`(lockfile 변경 없음) 후 재실행하여 위 결과를 얻었다.
 
