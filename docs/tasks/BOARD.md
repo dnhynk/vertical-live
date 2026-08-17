@@ -20,7 +20,7 @@
 | T7 | 콘텐츠 디렉터·크리처 상태 모델(순수 도메인) | T1 | — | merged | t7-content-director | #6 | `task_e1e7531798ad` |
 | T8 | 상태 엔진(단일 writer·outbox·WS·ACK·유료 멱등) | T1b, T4, T6, T7 | — | dispatched | t8-state-engine | | `task_0aadf1c96dcf` |
 | T9 | YouTube source adapter(gRPC streamList + REST fallback) | T3, T4, T8 | — | pending | t9-youtube-adapter | | `task_ec3d66a159bd` |
-| T10 | broadcast lifecycle·reconcile·한도 | T3, T4 | — | in_review | t10-broadcast-lifecycle | #11 | `task_41769f69d4b7` |
+| T10 | broadcast lifecycle·reconcile·한도 | T3, T4 | — | changes_requested | t10-broadcast-lifecycle | #11 | `task_41769f69d4b7` |
 | T11 | 로컬 시뮬레이터·replay·지연 계측 | T5, T8 | — | pending | t11-simulator-replay | | `task_9470df5be9b8` |
 | T12 | supervisor 상태기계·건강 집계·kill switch·알림·dead-man | T2, T8, T9, T10 | — | pending | t12-supervisor | | `task_560530cfb813` |
 | T13 | 데이터 보존·삭제·철회 자동화 | T3, T4 | — | changes_requested | t13-data-policy | #10 | `task_15cd2ae24e82` |
@@ -127,3 +127,4 @@
 | 2026-08-17 15:30 | T8 질문(도메인 상태를 snapshot과 같은 트랜잭션으로 영속 — T4 store 확장) → A 승인(새 마이그레이션, 선택 필드, 원자성 테스트). T13 worker_done(succeeded, PR #10: retention.json·002 마이그레이션·sweeper·revocation·derived-metric 가드·data-map, 1107 tests). T8에 마이그레이션 번호 **003** 사용 지시(002는 T13). R-T13-1 `task_4ceb16bbaa80` → `ctx_3062b29c2793`(review). T14 디스패치 `ctx_a4ea3cc17273`(활성: T10·T8·T14 + 리뷰어 1) |
 | 2026-08-17 15:55 | T10 worker_done(succeeded, PR #11: persist-before-call lifecycle, reconcile, 한도 복구, StreamKeyCustodian, 1117 tests). **마이그레이션 번호 충돌**: PR #10(T13) 002 ↔ PR #11(T10) 002 → PR #10을 002로 먼저 머지, T10은 003으로 재번호, T8은 004(지시 완료). R-T10-1 `task_2d764d8e1765` → `ctx_46b1ede26188`(review2). 활성: T8·T14 worker + 리뷰어 2 |
 | 2026-08-17 16:20 | R-T13-1 verdict **request_changes**(blocker 2: 삭제 배치와 ledger 감사가 비원자, 무음 기본 sink; major 2: retention.json ingest_seq 누락·커버리지 검사 약함, derived-metric 가드 제외 범위; minor 1) → F-T13-1 `task_e016470f4c9f` → T13 터미널 `ctx_e9f2bb405ea1`. R-T10-1 진행 중(review2). 활성: T8·T14·F-T13-1 + 리뷰어 1 |
+| 2026-08-17 16:45 | R-T10-1 verdict **request_changes**(blocker 4: liveStreams.list 미지원 part(contentDetails), 부분 목록으로 insert 재시도, 한도 복구 시 stream/vault 불일치, stopBroadcast의 비-reconcile complete; major 2: health poll이 cdn 키 보관, 타임아웃 테스트 flaky; minor 2 incl. 003 재번호) → F-T10-1 `task_5c16b67e5fb2` → T10 터미널 `ctx_26bc18cc3661`. 활성: T8·T14·F-T13-1·F-T10-1(4 worker — fix 2건 포함, 리뷰어 0) |
