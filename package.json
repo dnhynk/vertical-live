@@ -18,7 +18,8 @@
     "lint": "eslint . && node scripts/check-no-legacy-imports.mjs",
     "typecheck": "tsc --build tsconfig.json",
     "test": "vitest run",
-    "build": "npm run build --workspaces --if-present"
+    "build": "npm run build --workspaces --if-present",
+    "obs:probe": "npm run obs:probe -w @vl/server --"
   },
   "devDependencies": {
     "@eslint/js": "9.39.1",
