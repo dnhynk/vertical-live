@@ -12,7 +12,7 @@
 | T0 | 모노레포 스캐폴드·CI | — | — | merged | t0-scaffold | #1 | `task_658a82e9f356` |
 | T1 | 정규 이벤트·snapshot·effect 계약과 fixture | T0 | ✔ | merged | t1-contract | #2 | `task_1acc78f93775` |
 | T1b | [contract] Effect 원인 확장(causedByEventKey nullable + cause 판별자; T7 발견) | T1 | ✔ | ready | t1b-effect-cause | | `task_0a64fcaaae4a` |
-| T2 | obs-websocket 5 감시·제어 + OBS 프로파일 | T0 | — | changes_requested | t2-obs-monitor | #3 | `task_6e0c43d6b74c` |
+| T2 | obs-websocket 5 감시·제어 + OBS 프로파일 | T0 | — | merged | t2-obs-monitor | #3 | `task_6e0c43d6b74c` |
 | T3 | OAuth·비밀정보 vault·quota | T0 | — | in_review | t3-auth-vault | #4 | `task_62829ec3ab8b` |
 | T4 | SQLite 영속층(inbox·checkpoint·snapshot·outbox·deadline) | T1 | — | dispatched | t4-persistence | | `task_6bb9ff9f79c8` |
 | T5 | 렌더러 read model(snapshot 복구·effect 멱등·ACK·건강) | T1 | — | ready | t5-renderer-readmodel | | `task_6ba022bb6151` |
@@ -65,7 +65,11 @@
 
 ## 4. 에스컬레이션 대기
 
-(없음)
+| # | 항목 | 필요한 결정 | 관련 |
+|---|---|---|---|
+| E-1 | 호스트 BSOD 0x00000050 2회(2026-08-16 14:47 UTC, 2026-08-17 03:24 UTC; minidump `081626-14718-01.dmp`, `081726-14937-01.dmp`) | 사용자가 minidump 분석(WinDbg `!analyze -v`)·메모리 진단·드라이버 갱신을 수행할지, 동시 에이전트 상한을 D-4(2+1)에서 낮출지 | 런북 2.8 |
+| E-2 | OBS 32.0.2 / obs-websocket 5.6.3을 고정 버전으로 승인 | 승인 시 docs/ops/obs-setup.md의 '후보' 표기 제거 | T2, T17 |
+| E-3 | 실제 OBS 스모크(`npm run obs:probe`) — 사용자가 OBS WebSocket 서버(loopback·비밀번호)를 켠 뒤 실행 | Gate 2 호스트 검증 항목 | T2 |
 
 ## 5. 이력
 
@@ -95,3 +99,5 @@
 | 2026-08-17 06:10 | F-T1-2 완료(384 tests). R-T1-3 verdict **approve**. 코디네이터 최종 게이트 통과(범위 밖 변경 .prettierignore/eslint.config.js는 생성물·lint 범위 근거 있음) → **PR #2 squash merge**(main b760ed5). T1 worker release, t1 worktree 제거 |
 | 2026-08-17 06:15 | F-T2-2 완료(A-16 문구 테스트로 강제, 110 tests). R-T2-3 `task_4584777af58c` → `ctx_0ee73d302cd5`. T4 디스패치 `ctx_b455135e621e`, T7 디스패치 `ctx_f38356ff64be`(T5·T6은 ready 대기, 동시 worker 2). 리뷰 대기열: R-T2-3(진행) → R-T3-1(PR #4, #3 머지 후 rebase 필요) |
 | 2026-08-17 06:30 | T7 질문: 타이머 유래 effect vs EffectSchema.causedByEventKey 필수 충돌 → 답 A(T7은 EffectDraft+cause 판별자, 조립은 T8) + [contract] 후속 **T1b** `task_0a64fcaaae4a` 등록(A-17). T8은 T1b 머지 후 디스패치. 대기열: T1b → T6 → T5 |
+| 2026-08-17 06:50 | R-T2-3 verdict **approve**. 최종 게이트 통과(contract 미변경, service.json에 key 없음, deps exact) → **PR #3 squash merge**(main 7842a2b). T2 worker release, worktree 제거. 사용자 결정 대기 항목(BOARD §4에 추가): OBS 32.0.2/obs-websocket 5.6.3 버전 고정 승인, 실제 OBS 스모크(WebSocket 서버 활성화 후) |
+| 2026-08-17 06:55 | PR #4(T3) mergeStateStatus DIRTY(#3과 중복 파일) → F-T3-0 rebase task `task_3d2ac48f0034` → T3 터미널 `ctx_153cfdeffe35`. 이후 R-T3-1 |
