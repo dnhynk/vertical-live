@@ -343,3 +343,61 @@ describe('supervisor routes', () => {
     expect(killed).toHaveLength(0)
   })
 })
+
+/**
+ * `POST /admin/kill` reads its body the same way `POST /ingest/simulator` does,
+ * so it had the same hang: a throw inside the `.then()` handler rejected a
+ * promise nobody held, and the response was never written (T8b). The kill switch
+ * reaches the supervisor, so `onKill` failing is not hypothetical — and an
+ * operator killing a wedged broadcast is exactly who must not be left waiting.
+ */
+describe('/admin/kill when the kill itself fails', () => {
+  let server: Server
+  let baseUrl: string
+  const leaked: unknown[] = []
+  const recordLeak = (reason: unknown): void => {
+    leaked.push(reason)
+  }
+
+  beforeEach(async () => {
+    leaked.length = 0
+    process.on('unhandledRejection', recordLeak)
+    server = createServer({
+      adminKill: new AdminKillEndpoint({
+        token: 'synthetic-admin-token',
+        onKill: () => {
+          throw new Error('supervisor refused the stop')
+        },
+      }),
+    })
+    await new Promise<void>((resolve) => {
+      server.listen(0, '127.0.0.1', resolve)
+    })
+    baseUrl = `http://127.0.0.1:${String((server.address() as AddressInfo).port)}`
+  })
+
+  afterEach(async () => {
+    process.off('unhandledRejection', recordLeak)
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => (error ? reject(error) : resolve()))
+    })
+  })
+
+  it('answers 500 instead of leaving the operator waiting', async () => {
+    const response = await fetch(`${baseUrl}/admin/kill`, {
+      method: 'POST',
+      headers: { authorization: 'Bearer synthetic-admin-token' },
+      body: JSON.stringify({ reason: 'operator' }),
+      signal: AbortSignal.timeout(2_000),
+    })
+    for (let index = 0; index < 3; index += 1) {
+      await new Promise<void>((resolve) => {
+        setImmediate(resolve)
+      })
+    }
+
+    expect(response.status).toBe(500)
+    await expect(response.json()).resolves.toEqual({ error: 'internal_error' })
+    expect(leaked).toEqual([])
+  })
+})
