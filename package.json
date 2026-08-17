@@ -15,7 +15,7 @@
     "dev": "npm run dev -w @vl/renderer",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "lint": "eslint . && node scripts/check-no-legacy-imports.mjs",
+    "lint": "eslint . && node scripts/check-no-legacy-imports.mjs && node scripts/check-install-scripts.mjs",
     "typecheck": "tsc --build tsconfig.json",
     "test": "vitest run",
     "build": "npm run build --workspaces --if-present",

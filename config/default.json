@@ -1,4 +1,9 @@
 {
+  "db": {
+    "file": "data/vertical-live.db",
+    "busyTimeoutMs": 5000,
+    "provisional": ["busyTimeoutMs"]
+  },
   "obs": {
     "url": "ws://127.0.0.1:4455",
     "connectTimeoutMs": 5000,
