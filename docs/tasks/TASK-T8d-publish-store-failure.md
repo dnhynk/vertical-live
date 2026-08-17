@@ -43,7 +43,7 @@ for (const effect of effects) {
 
 1. 티켓(이 파일) 커밋·push.
 2. **재현 테스트 먼저**(수정 전 실패) — `apps/server/src/engine/publish-store-failure.test.ts` 신설. T8c `ack-store-failure.test.ts`와 같은 방법으로 프로덕션 커넥션을 잡고(`vi.mock('../db/open.js')`) `VACUUM` + `max_page_count = page_count`로 실제 `SQLITE_FULL`을 만든다.
-   - (A) 라이브 commit 경로: 커밋과 mark 사이에 파일이 차는 순간(= 프로덕션의 실제 레이스). 무료·유료 effect 각각에 대해 uncaught 0 · row `published_at NULL` · 렌더러 미전송 · health `writer_failing` → 공간 확보 후 **다음 pass**가 발행 → 렌더러 ACK가 `acked_at` 기록 → health 0.
+   - (A) 라이브 commit 경로: 커밋과 mark 사이에 store가 쓰기를 거부하는 순간(= 프로덕션의 실제 레이스). 무료·유료 effect 각각에 대해 uncaught 0 · row `published_at NULL` · 렌더러 미전송 · health `writer_failing` → 공간 확보 후 **다음 pass**가 발행 → 렌더러 ACK가 `acked_at` 기록 → health 0. **정정(측정 후, 아래 "재현 관측 (2) 왜 라이브 경로는 disk-full로 재현되지 않는가")**: 이 자리의 거부는 `SQLITE_FULL`로 만들 수 없어 §11 fault matrix의 다른 쓰기 거부 행인 **"DB lock"**(두 번째 커넥션이 write lock 보유 → `SQLITE_BUSY`)으로 만든다. disk-full은 (B)가 담당한다.
    - (B) 복구 경로: 커밋 뒤 발행 전에 죽은 뒤 남는 durable 상태(미발행 row)에서 가득 찬 파일로 `start()` — 던지지 않고, 전송하지 않고, latch에 남고, 공간 확보 후 다음 pass가 발행한다.
    - (C) e2e: 실제 HTTP 서버 + 실제 `/ws/renderer` 클라이언트. `uncaughtException` 0, `/health`가 계속 응답하며 실패를 말한다, 렌더러는 미발행 effect를 받지 않는다, 공간 확보 후 받고 ACK하면 `acked_at`이 기록된다(= mark-first가 `markEffectAcked`의 "미발행 ACK 거부" 계약을 지킨다).
 3. **수정 — `apps/server/src/engine/engine.ts` 발행 경로만**: 코디네이터 권고안 **mark-first**.
@@ -85,12 +85,114 @@ for (const effect of effects) {
 
 ## Result
 
-<!-- 구현 후 채운다 -->
+### 재현 관측 (1) — 가설 확인 (수정 전, 2026-08-18)
+
+`apps/server/src/engine/publish-store-failure.test.ts`(4건)를 먼저 쓰고 **수정 전** 엔진(`git checkout HEAD~1 -- apps/server/src/engine/engine.ts`)에서 실행했다.
+
+```text
+$ npx vitest run apps/server/src/engine/publish-store-failure.test.ts
+ ❯ apps/server/src/engine/publish-store-failure.test.ts (4 tests | 4 failed)
+     × keeps a paid effect retriable, off the wire and on the health surface
+     × keeps a free effect retriable too
+     × starts, reports the fault and publishes when space comes back
+     × shows the renderer nothing until the row is written, then everything
+
+ FAIL  … > keeps a paid effect retriable …
+AssertionError: expected 1 to be 2      // openEffectCount vs listUnackedEffects().length
+ ❯ publish-store-failure.test.ts:254  expect(degraded.openEffectCount).toBe(harness.store.listUnackedEffects().length)
+
+ FAIL  … > keeps a free effect retriable too
+AssertionError: expected [ 'e2_0', 'e2_1' ] to have a length of +0 but got 2   // 공간이 돌아와도 발행되지 않음
+
+ FAIL  … > starts, reports the fault and publishes when space comes back
+SqliteError: database or disk is full
+ ❯ PersistenceStore.markEffectPublished apps/server/src/db/store.ts:823:17
+ ❯ StateEngine.#adoptRecoveredEffect apps/server/src/engine/engine.ts:1144:48
+ ❯ StateEngine.start apps/server/src/engine/engine.ts:317:54
+
+ FAIL  … > shows the renderer nothing until the row is written, then everything
+Error: timed out waiting for a condition   // 렌더러가 그 effect를 끝내 받지 못함
+```
+
+가설이 그대로 확인됐다: (1) `markEffectPublished`가 실제 store 실패로 거부되면 outbox row는 커밋된 채 `published_at NULL`로 남고 **in-memory 어디에도 없다**(`openEffectCount 1` vs 미결 row 2건), (2) 무관한 pass 하나가 완료되면 `consecutiveFailures`가 0으로 돌아가 건강 표면에서도 사라진다, (3) 공간·락이 풀려도 그 row는 발행되지 않는다(재시작 전까지), (4) 미발행 row가 있는 상태로 가득 찬 파일에서 재시작하면 `#adoptRecoveredEffect`가 `start()` 밖으로 던진다 — A-19가 이 결함에 붙이는 engine restart가 매번 같은 자리에서 죽는다. 반증(거부돼도 어딘가가 그 row를 줍는다)은 관측되지 않았다.
+
+수정 후 같은 파일: `Test Files 1 passed (1) / Tests 4 passed (4)`.
+
+### 재현 관측 (2) — 왜 라이브 경로는 disk-full로 재현되지 않는가 (측정)
+
+코디네이터 명세의 재현 레시피는 "`max_page_count`로 프로덕션 연결을 채운 뒤 유료/무료 effect를 낳는 전이 commit → mark 거부"였다. **그 순서로는 mark가 거부되지 않는다.** 테스트를 쓰기 전에 실제로 측정했다(스크래치 테스트, 커밋하지 않음):
+
+| 픽스처 | 관측 |
+|---|---|
+| `VACUUM` 후 `max_page_count = page_count + slack`(slack 0·1·2·4·8·16·32·40·60·80·120·200·400), 유료 이벤트 60~300건 | 예산 안에서 **커밋된 effect row 223건 전부** `published_at` 기록 성공, mark 거부 **0건**. 예산이 닿으면 거부되는 것은 항상 *commit*(pass 실패)이고 mark는 아예 실행되지 않는다 |
+| outbox에 200건이 이미 있는 상태에서 **커밋이 반환하는 순간** `VACUUM`+cap | 그 커밋의 mark도 기록 성공(거부 0건) |
+| 같은 가득 찬 파일에서 **이미 packed된** row 201건의 `published_at`을 갱신 | **133건 실제 `SQLITE_FULL` 거부**, 68건 성공 |
+
+이유는 스키마에 있다: `published_at`은 방금 자기 commit이 insert한 row의 in-place 갱신이고, 그 row는 테이블 b-tree의 **마지막** 자리(= `VACUUM`이 남긴 여유 있는 leaf)에 있다. `max_page_count`가 거부할 수 있는 것은 **새 페이지 할당**뿐인데, 그 갱신은 새 페이지를 필요로 하지 않는다(형제 leaf가 모두 꽉 찼을 때만 필요하다). T8c의 ACK 거부가 통했던 것은 그 row들이 이미 packed된 오래된 row였기 때문이다.
+
+그래서 테스트는 §11 fault matrix의 **쓰기 거부 두 행을 각각 통하는 자리에** 쓴다:
+
+- **"DB lock"** — 두 번째 커넥션이 `BEGIN IMMEDIATE`로 write lock을 잡아 프로덕션 연결의 다음 쓰기가 `busy_timeout`(250ms) 뒤 `SQLITE_BUSY`가 된다. 라이브 `#publish` 경로는 이걸로 몬다(어떤 쓰기든 거부되므로 결정적).
+- **"disk-full"** — packed된 미발행 row를 재시작이 다시 읽는 자리(`#adoptRecoveredEffect`·pass 재시도)는 실제 `SQLITE_FULL`(`max_page_count`) 그대로다.
+
+`classifySqliteError`가 둘을 `busy`/`disk_full`로 분류하고 엔진은 둘을 같은 경로로 처리하므로(= store가 단일 writer의 쓰기를 거부했다), 두 테스트는 같은 결함의 두 진입점을 덮는다. 어느 쪽도 예외를 흉내 내지 않는다 — 실제 store, 실제 트랜잭션, 실제 SQLite 오류다.
+
+### 수정 (`b26040f`, `58d391a`)
+
+`apps/server/src/engine/engine.ts`만 바꿨다(supervisor 프로덕션 코드 변경 0, `packages/contract` 변경 0).
+
+| 자리 | 변경 |
+|---|---|
+| `#publish()` | effect를 `#openEffects`에 `published:false`·`committedAt`과 함께 **먼저** 담고 `#sendEffect()`에 넘긴다 |
+| `#sendEffect()` (신설) | `markEffectPublished` → 성공해야만 `published=true`·latch 해제·`publishEffect()`·`recordPublish` 계측·`effect_published`. `UnknownEffectError`는 갚을 쓰기가 없으므로 드롭·카운트(`effect_publish_unknown`), 그 외는 `#recordPublishFailure()` 후 **보내지 않는다** |
+| `#recordPublishFailure()` (신설) | `#unrecordedEffects` latch에 싣고 `lastFailure`·`/metrics` `effect_publish_store_failed`·로그 `engine.publish_store_failed`(kind·code·retryable) |
+| `#sweepEffects()` | 만료 분기 다음에 "미발행이면 mark 재시도" 분기 추가 = **pass마다 재시도**. 렌더러 유무와 무관하게 시도한다(row가 있어야 ACK가 가능하므로) |
+| `#adoptRecoveredEffect()` | 같은 store-first 경로를 쓴다 → 가득 찬 디스크에서 `start()`가 더 이상 던지지 않는다(A-19 재시작이 예산을 정상적으로 쓴다) |
+| `onRendererHello()` | 미발행 effect는 재전송하지 않는다 |
+
+새 `EngineHealth` 필드도 새 degraded 토큰도 없다. `#unrecordedEffects`가 "publish·ACK·expiry 중 store가 아직 받지 않은 쓰기를 진 열린 effect"로 확장됐고, `consecutiveFailures`는 그대로 그 합이다 → `supervisor/*` 0줄 변경, A-19 정책 그대로.
+
+### Acceptance criteria
+
+| # | 기준 | 상태 | 근거 |
+|---|---|---|---|
+| 1 | 재현 테스트가 수정 전 실패·수정 후 통과 | met | 위 "재현 관측 (1)": 수정 전 4/4 실패(각 실패 지점 인용), 수정 후 `Tests 4 passed (4)` |
+| 2 | 실제 SQLITE_FULL로 `markEffectPublished` 거부 | met | `unpublished rows read back on a full disk (§11 "disk-full")`: `PRAGMA max_page_count`로 프로덕션 커넥션을 채워 201건 중 다수가 실제 `SQLITE_FULL`로 거부됨(테스트가 "거부 ≥1 & 기록 ≥1"을 스스로 단언). 라이브 commit 경로는 disk-full로 재현 불가(측정: 위 (2)) → §11 "DB lock"(`SQLITE_BUSY`)로 같은 자리를 몬다 |
+| 3 | uncaught 0 | met | `a refused publish mark, over /ws/renderer`: 실제 HTTP 서버 + 실제 `/ws/renderer` 클라이언트, `process.on('uncaughtException')` 수집 **0건**(거부 시점과 복구 후 두 번 단언), `GET /health`가 계속 응답 |
+| 4 | row `published_at NULL` · 렌더러 미전송 | met | 같은 파일 4개 테스트 전부: `listUnackedEffects().filter(publishedAt === null)`이 거부분과 일치하고, `publisher.uniqueEffectIds`(엔진 단위)·렌더러가 실제로 받은 `seen`(WS)에 그 id가 **없다** |
+| 5 | health degraded | met | `openEffectCount === listUnackedEffects().length`(수정 전 1 vs 2로 실패), `consecutiveFailures ≥ 거부 건수`, `degradedReasons`에 `writer_failing`, 실제 `HealthAggregator`(T12) 판정 `{degraded, writer_failing}`, `/metrics` `effect_publish_store_failed`. **무관한 성공 pass 뒤에도 유지**된다(R-T8c-1과 같은 진동 검사) |
+| 6 | 공간(락) 확보 후 다음 pass에서 발행·ACK·해제 | met | 재시작·재수신 없이 다음 `pump()`가 `published_at`을 기록하고 effect가 전송된다 → 렌더러 ACK가 `acked_at`을 기록(그 전 ACK는 거부되는 것도 단언 = mark-first가 필요한 이유) → `consecutiveFailures 0`·`writer_failing` 해제·coordinator `ok` |
+| 7 | 기존 T8/T11/T15/T8c 테스트 회귀 없음 | met | `npm run test` → 138 files, 1884 passed, 1 skipped(기존 skip). 이전 main은 137 files/1880 passed — 늘어난 4건이 이 티켓의 테스트다 |
+| 8 | (선택 b) F-12 drill의 `pauseEffectAcks` 제거 | met (제거함, `dc28e54`) | 디스크가 찬 동안에도 ACK가 흐르는 상태로 F-12가 그대로 `degraded`·safe-stop 없음·공간 확보 후 `live` 복귀. `npx vitest run tools/soak/src/matrix/matrix.test.ts` → 20 passed, `npm run soak:ci` → `verdict: PASS`. 다른 호출자가 없어 `pauseEffectAcks`/`resumeEffectAcks`와 플래그도 함께 제거했다 |
+| 9 | 게이트 5개 로컬 통과 | met | 아래 Gates. CI는 BOARD **E-5**(GitHub Actions 결제 차단)로 실행 불가 |
+
+### Gates (executed)
+
+`git fetch origin && git rebase origin/main`(389fde6 = T8c 머지 후 BOARD 커밋 포함) 후 실행:
+
+```text
+npm run format:check -> All matched files use Prettier code style!
+npm run lint         -> eslint 0 problems; check-no-legacy-imports: ok (0 legacy imports);
+                        check-install-scripts: ok (4 reviewed, better-sqlite3 binding loads)
+npm run typecheck    -> tsc --build tsconfig.json (오류 없음)
+npm run test         -> Test Files 138 passed (138) / Tests 1884 passed | 1 skipped (1885)
+npm run build        -> contract·renderer·server·simulator·soak 빌드 성공,
+                        copied 5 migration(s) to dist/db/migrations, docs/ops/data-map.md up to date
+npm run soak:ci      -> verdict: PASS (freezeEvents=5, 전부 주입된 drill 중;
+                        invariants 5/5 ok, finalState=live)  [선택 b 검증용]
+```
+
+CI: **실행하지 않았음 — BOARD E-5**(GitHub Actions 결제 차단으로 모든 run이 2초 만에 실패). 위 로컬 결과가 근거다.
 
 ## Not done / out of scope
 
-<!-- 구현 후 채운다 -->
+- `apps/server/src/supervisor/*`는 한 줄도 바꾸지 않았다. A-19가 이 실패 부류의 정책을 이미 정했고, 새 `EngineHealth` 필드나 새 degraded 토큰은 T12 계약 변경이다. T8c가 A-19 정책을 실제 `Supervisor`로 e2e 검증해 두었고(같은 latch·같은 필드), 이번 변경은 그 latch에 세 번째 종류의 미기록 쓰기를 더할 뿐이라 그 e2e를 복제하지 않았다.
+- `packages/contract` 변경 0(`[contract]` task 아님). DB 스키마·마이그레이션 변경 0.
+- 라이브 `#publish` 경로를 `SQLITE_FULL`로 모는 테스트는 **만들 수 없다**(위 측정). 만들려면 방금 insert된 row가 packed된 leaf에 놓이도록 픽스처가 페이지 내부 바이트를 조작해야 하는데, 그건 실제 결함보다 SQLite 내부 사정을 시험하는 테스트가 된다.
+- 미발행 effect의 재시도 창을 effect 창 밖으로 늘리지 않았다(Assumptions 표). 창이 지나면 기존 만료 분기가 §7.3(7)대로 `expired`를 기록하고 §9.2 대체 감사 연출이 그 경로를 맡는다 — 지난 연출을 뒤늦게 내보내지 않는다.
+- 렌더러 hub(`publisher.ts`)는 건드리지 않았다. T8c가 이미 프레임 핸들러 백스톱을 넣었고, 이 결함은 writer pass 안에서 일어나 `pump()` 아래에 있다.
 
 ## Follow-ups
 
-<!-- 구현 후 채운다 -->
+- `#reconcileInteraction()`은 커밋이 실패해도 `#interactionEnabled`를 먼저 바꾼다(`engine.ts:1240` 부근). 그래서 store가 거부하는 동안 CTA 스위치가 in-memory에서만 뒤집히고 snapshot은 갱신되지 않은 상태가 생긴다 — T8 때부터 있던 동작이고 이 티켓 범위 밖이라 손대지 않았다. 고치려면 "커밋 성공 후에만 플래그 전환"으로 뒤집어야 하는데, 그 pass가 실패로 끝나는 경로와 함께 봐야 해서 T8 소유의 별도 판단이 필요하다.
+- `#unrecordedEffects` latch의 나머지 절반(writer pass 실패의 진동)은 T8c `## Follow-ups`에 적힌 대로 여전히 남아 있다(pass 실패는 다음 pass가 성공하면 사라지는 것이 정의). 이번 변경은 publish 실패를 sticky한 절반에 넣었을 뿐이다.
