@@ -102,7 +102,12 @@ describe('fixed thanks staging (spec §8.4)', () => {
     const at = addMillis(START, 60_000)
     const effect = apply(state, { kind: 'event', event: paidEvent(at, 'MEMBERSHIP') }, at)
       .effects[0] as PaidThanksDraft
-    expect(Object.keys(effect.payload).sort()).toEqual(['fallback', 'iconId', 'paidEventKind', 'tier'])
+    expect(Object.keys(effect.payload).sort()).toEqual([
+      'fallback',
+      'iconId',
+      'paidEventKind',
+      'tier',
+    ])
   })
 })
 

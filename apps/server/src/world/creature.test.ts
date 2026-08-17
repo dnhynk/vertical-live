@@ -57,7 +57,10 @@ describe('need pressure (spec §6.3)', () => {
   })
 
   it('relieves pressure by itself while in a crisis (zero-viewer recovery)', () => {
-    const distressed = creature({ needs: { hungry: 0.95, play: 0.3, affection: 0.3, rest: 0.3 }, crisis: 'tired' })
+    const distressed = creature({
+      needs: { hungry: 0.95, play: 0.3, affection: 0.3, rest: 0.3 },
+      crisis: 'tired',
+    })
     const after = integrateNeeds(distressed, hoursLater(2), tuning)
     expect(after.needs.hungry).toBeLessThan(distressed.needs.hungry)
   })
@@ -100,7 +103,9 @@ describe('crisis states (spec §6.3)', () => {
     expect(deriveEmotion(calm, 'tired')).toBe('weary')
     expect(deriveEmotion(calm, 'needs_help')).toBe('worried')
     expect(deriveEmotion(calm, null)).toBe('joyful')
-    expect(deriveEmotion({ hungry: 0.2, play: 0.2, affection: 0.7, rest: 0.2 }, null)).toBe('lonely')
+    expect(deriveEmotion({ hungry: 0.2, play: 0.2, affection: 0.7, rest: 0.2 }, null)).toBe(
+      'lonely',
+    )
   })
 })
 

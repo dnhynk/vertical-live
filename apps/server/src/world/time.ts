@@ -91,7 +91,10 @@ export function nextWorldPhaseAt(instant: IsoUtcInstant): IsoUtcInstant {
   let next: IsoUtcInstant | null = null
   for (const entry of WORLD_PHASE_START_HOURS_JST) {
     const candidate = jstHourOn(instant, entry.hour)
-    if (toMillis(candidate) > toMillis(instant) && (next === null || toMillis(candidate) < toMillis(next))) {
+    if (
+      toMillis(candidate) > toMillis(instant) &&
+      (next === null || toMillis(candidate) < toMillis(next))
+    ) {
       next = candidate
     }
   }

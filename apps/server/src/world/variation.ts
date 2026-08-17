@@ -30,7 +30,9 @@ export function selectVariant<T extends Variant>(
   const eligible = candidates.filter((candidate) => matchesCondition(candidate.when, context))
   if (eligible.length === 0) return null
 
-  const fresh = eligible.filter((candidate) => !variation.recentVariantIds.includes(candidate.variantId))
+  const fresh = eligible.filter(
+    (candidate) => !variation.recentVariantIds.includes(candidate.variantId),
+  )
   // Falling back to the eligible set matters: with a small catalogue for a rare
   // context, "never repeat" would otherwise mean "stage nothing".
   const pool = fresh.length > 0 ? fresh : eligible

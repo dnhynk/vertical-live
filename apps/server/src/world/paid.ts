@@ -105,10 +105,7 @@ export function applyPaidEvent(
     cause,
     variantId: iconId,
     startsAt: now,
-    endsAt: addMillis(
-      now,
-      late ? tuning.paid.fallbackDurationMs : tuning.paid.thanksDurationMs,
-    ),
+    endsAt: addMillis(now, late ? tuning.paid.fallbackDurationMs : tuning.paid.thanksDurationMs),
     payload: { paidEventKind, iconId, tier, fallback: late },
   }
 

@@ -153,7 +153,12 @@ function stage(
   return sceneKey
 }
 
-function reject(draft: Draft, reason: RejectionReason, event: CanonicalEvent | null, now: IsoUtcInstant): void {
+function reject(
+  draft: Draft,
+  reason: RejectionReason,
+  event: CanonicalEvent | null,
+  now: IsoUtcInstant,
+): void {
   draft.rejections.push({ reason, eventKey: event?.eventKey ?? null, at: now })
 }
 
@@ -310,8 +315,7 @@ function startMission(
 ): void {
   const context = contextOf(draft.world)
   const bias = draft.world.chapter.branchChoiceId === null ? null : missionBiasOf(draft.world)
-  const variant =
-    selectMissionVariant(context, draft, rng, bias) ?? MISSION_VARIANTS[0] ?? null
+  const variant = selectMissionVariant(context, draft, rng, bias) ?? MISSION_VARIANTS[0] ?? null
   if (variant === null) return
   const mission: MissionDomainState = {
     missionId: variant.missionId,
@@ -798,7 +802,7 @@ function applyChoiceClose(draft: Draft, now: IsoUtcInstant, rng: Rng, tuning: Wo
     deadlines: removeDeadline(draft.world.deadlines, 'choice_close'),
   }
   if (choice === null) return
-  const resolution = resolveChoice(choice, contextOf(draft.world), rng)
+  const resolution = resolveChoice(choice, contextOf(draft.world), rng, tuning)
   if (resolution === null) return
 
   const chapter = chapterDefinition(choice.choiceSetId)
@@ -866,7 +870,12 @@ function applyWorldPhase(draft: Draft, now: IsoUtcInstant, rng: Rng, tuning: Wor
 
 function applyWeatherChange(draft: Draft, now: IsoUtcInstant, rng: Rng, tuning: WorldTuning): void {
   const before = draft.world.environment.weatherId
-  const variant = selectVariant(WEATHER_VARIANTS, contextOf(draft.world), draft.world.variation, rng)
+  const variant = selectVariant(
+    WEATHER_VARIANTS,
+    contextOf(draft.world),
+    draft.world.variation,
+    rng,
+  )
   if (variant !== null && variant.weatherId !== before) {
     draft.world = {
       ...draft.world,
@@ -922,7 +931,12 @@ function applyVisitor(draft: Draft, now: IsoUtcInstant, rng: Rng, tuning: WorldT
     })
     return
   }
-  const variant = selectVariant(VISITOR_VARIANTS, contextOf(draft.world), draft.world.variation, rng)
+  const variant = selectVariant(
+    VISITOR_VARIANTS,
+    contextOf(draft.world),
+    draft.world.variation,
+    rng,
+  )
   if (variant !== null) {
     draft.world = {
       ...draft.world,
@@ -1057,7 +1071,8 @@ export function initialWorldState(options: InitialWorldOptions): WorldState {
   const tuning = options.tuning ?? DEFAULT_WORLD_TUNING
   const now = options.startedAt
   const rng = createRng(`${options.seed}#init`)
-  const chapterId = rng.pickWeighted(CHAPTER_DEFINITIONS, (it) => it.weight)?.chapterId ?? 'gathering'
+  const chapterId =
+    rng.pickWeighted(CHAPTER_DEFINITIONS, (it) => it.weight)?.chapterId ?? 'gathering'
   const weather = rng.pick(WEATHER_VARIANTS)?.weatherId ?? 'clear'
 
   const world: GameState = {

@@ -32,9 +32,7 @@ describe('free care commands (spec §7.1, §6.3)', () => {
     const at = addMillis(START, 60_000)
     const result = apply(state, { kind: 'event', event: commandEvent(at, 'FEED') }, at)
 
-    expect(result.state.world.creature.needs.hungry).toBeLessThan(
-      state.world.creature.needs.hungry,
-    )
+    expect(result.state.world.creature.needs.hungry).toBeLessThan(state.world.creature.needs.hungry)
     const reaction = result.effects.find((effect) => effect.kind === 'ACTION_REACTION')
     expect(reaction).toBeDefined()
     expect(reaction?.payload).toMatchObject({ commandName: 'FEED', contributionCount: 1 })
@@ -113,7 +111,10 @@ describe('branch votes (spec §6.4, BOARD A-1, A-9)', () => {
 
   it('opens a vote window with A/B/C commands when the gate is open', () => {
     // The turn beat opens the window 35% into the 24h chapter; 8h30m is inside it.
-    const run = runWorld({ to: addMillis(START, 8.5 * MILLIS_PER_HOUR), state: fresh({ gateOpen: true }) })
+    const run = runWorld({
+      to: addMillis(START, 8.5 * MILLIS_PER_HOUR),
+      state: fresh({ gateOpen: true }),
+    })
     const choice = run.state.world.choice
     expect(choice?.mode).toBe('vote')
     expect(choice?.options.map((option) => option.commandName)).toEqual([
@@ -189,7 +190,10 @@ describe('determinism (TASK_SPECS §T7 acceptance 2)', () => {
   const events = [
     { at: addMillis(START, 5 * 60_000), event: commandEvent(addMillis(START, 5 * 60_000), 'FEED') },
     { at: addMillis(START, 9 * 60_000), event: commandEvent(addMillis(START, 9 * 60_000), 'PLAY') },
-    { at: addMillis(START, 40 * 60_000), event: commandEvent(addMillis(START, 40 * 60_000), 'PET') },
+    {
+      at: addMillis(START, 40 * 60_000),
+      event: commandEvent(addMillis(START, 40 * 60_000), 'PET'),
+    },
   ]
 
   it('produces the same state and transitions for the same seed and inputs', () => {

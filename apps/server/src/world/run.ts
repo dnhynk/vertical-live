@@ -119,7 +119,10 @@ export function runWorld(options: RunOptions): RunReport {
 
 /** Cold-starts a world and runs it for a window, in one call. */
 export function runFreshWorld(
-  options: InitialWorldOptions & { readonly to: IsoUtcInstant; readonly events?: readonly ScheduledEvent[] },
+  options: InitialWorldOptions & {
+    readonly to: IsoUtcInstant
+    readonly events?: readonly ScheduledEvent[]
+  },
 ): RunReport {
   const state = initialWorldState(options)
   return runWorld({

@@ -100,7 +100,10 @@ describe('downtime recovery policies (spec §10.2)', () => {
   })
 
   it('expires a skip kind instead of staging it late', () => {
-    const pending = [scheduleDeadline('visitor_arrival', at(1)), scheduleDeadline('idle_beat', at(2))]
+    const pending = [
+      scheduleDeadline('visitor_arrival', at(1)),
+      scheduleDeadline('idle_beat', at(2)),
+    ]
     const plan = planDeadlineRecovery(pending, at(10))
     expect(plan.deliver).toHaveLength(0)
     expect(plan.expired.map((it) => it.kind)).toEqual(['visitor_arrival', 'idle_beat'])

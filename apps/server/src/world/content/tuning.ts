@@ -77,6 +77,13 @@ export interface WorldTuning {
     readonly windowMs: number
     /** How long before it opens the screen previews "next choice" (spec §5.2). */
     readonly previewLeadMs: number
+    /**
+     * Largest weight the room's free-command total may add to one branch while
+     * the identity gate is closed. Spec §6.4 allows a *non-competitive* tally
+     * there; letting a raw count decide outright would turn it back into a vote
+     * — and one without per-user fairness — so the signal is damped and capped.
+     */
+    readonly contributionWeightCap: number
   }
 
   readonly chapter: {
@@ -158,7 +165,7 @@ export const DEFAULT_WORLD_TUNING: WorldTuning = {
     bondOnCompleted: 6,
   },
 
-  choice: { windowMs: 20 * 60_000, previewLeadMs: 30 * 60_000 },
+  choice: { windowMs: 20 * 60_000, previewLeadMs: 30 * 60_000, contributionWeightCap: 6 },
 
   chapter: {
     anchorHourJst: 6,

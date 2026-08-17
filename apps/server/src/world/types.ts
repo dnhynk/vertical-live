@@ -75,7 +75,12 @@ export type WorldPhaseId = (typeof WORLD_PHASE_IDS)[number]
 export const WEATHER_IDS = ['clear', 'cloudy', 'rain', 'wind', 'starry'] as const
 export type WeatherId = (typeof WEATHER_IDS)[number]
 
-export const VISITOR_IDS = ['postal_bird', 'lantern_moth', 'garden_cat', 'wandering_tinker'] as const
+export const VISITOR_IDS = [
+  'postal_bird',
+  'lantern_moth',
+  'garden_cat',
+  'wandering_tinker',
+] as const
 export type VisitorId = (typeof VISITOR_IDS)[number]
 
 export const MISSION_IDS = [

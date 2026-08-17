@@ -1,7 +1,7 @@
 import type { IsoUtcInstant } from '@vl/contract'
 
 import { chapterDefinition, DIRECTOR_RULES, type ChapterDefinition } from './content/chapters.js'
-import type { WorldTuning } from './content/tuning.js'
+import { DEFAULT_WORLD_TUNING, type WorldTuning } from './content/tuning.js'
 import { matchesCondition, type ContentContext } from './content/variants.js'
 import type { Rng } from './rng.js'
 import { addMillis } from './time.js'
@@ -108,6 +108,7 @@ function resolveByDirector(
   choice: ChoiceDomainState,
   context: ContentContext,
   rng: Rng,
+  tuning: WorldTuning,
 ): ChoiceResolution | null {
   const matching = DIRECTOR_RULES.filter((rule) => matchesCondition(rule.when, context))
   const scored = choice.options.map((option) => {
@@ -119,9 +120,12 @@ function resolveByDirector(
     return {
       option,
       rules,
-      // Base 1 keeps every approved combination reachable; the room's totals and
-      // the director rules only tilt the draw.
-      weight: 1 + rules.reduce((sum, rule) => sum + rule.weight, 0) + contributions,
+      // Base 1 keeps every approved combination reachable; the director rules and
+      // the room's damped, capped total only tilt the draw (see the tuning note).
+      weight:
+        1 +
+        rules.reduce((sum, rule) => sum + rule.weight, 0) +
+        Math.min(tuning.choice.contributionWeightCap, Math.sqrt(contributions)),
     }
   })
   const winner = rng.pickWeighted(scored, (entry) => entry.weight)
@@ -138,6 +142,9 @@ export function resolveChoice(
   choice: ChoiceDomainState,
   context: ContentContext,
   rng: Rng,
+  tuning: WorldTuning = DEFAULT_WORLD_TUNING,
 ): ChoiceResolution | null {
-  return choice.mode === 'vote' ? resolveByVote(choice, rng) : resolveByDirector(choice, context, rng)
+  return choice.mode === 'vote'
+    ? resolveByVote(choice, rng)
+    : resolveByDirector(choice, context, rng, tuning)
 }
