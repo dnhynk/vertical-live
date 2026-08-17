@@ -11,7 +11,7 @@
 |---|---|---|---|---|---|---|---|
 | T0 | 모노레포 스캐폴드·CI | — | — | merged | t0-scaffold | #1 | `task_658a82e9f356` |
 | T1 | 정규 이벤트·snapshot·effect 계약과 fixture | T0 | ✔ | changes_requested | t1-contract | #2 | `task_1acc78f93775` |
-| T2 | obs-websocket 5 감시·제어 + OBS 프로파일 | T0 | — | in_review | t2-obs-monitor | #3 | `task_6e0c43d6b74c` |
+| T2 | obs-websocket 5 감시·제어 + OBS 프로파일 | T0 | — | changes_requested | t2-obs-monitor | #3 | `task_6e0c43d6b74c` |
 | T3 | OAuth·비밀정보 vault·quota | T0 | — | dispatched | t3-auth-vault | | `task_62829ec3ab8b` |
 | T4 | SQLite 영속층(inbox·checkpoint·snapshot·outbox·deadline) | T1 | — | pending | t4-persistence | | `task_6bb9ff9f79c8` |
 | T5 | 렌더러 read model(snapshot 복구·effect 멱등·ACK·건강) | T1 | — | pending | t5-renderer-readmodel | | `task_6ba022bb6151` |
@@ -59,6 +59,7 @@
 | A-13 | 리뷰어 codex는 `--dangerously-bypass-approvals-and-sandbox`로 기동(무인·review 전용·`gh` 네트워크 필요; claude worker의 skip-permissions와 같은 신뢰 수준) | 런북 0장 | 리뷰 |
 | A-14 | 공용 규격: 서버 `127.0.0.1:8787`, WS `/ws/renderer`, `/health`, `/metrics`, `/ingest/simulator`, `/admin/kill`; DB `data/vertical-live.db`; 패키지명 `@vl/*` | TASK_SPECS 공통 규약 | 전체 |
 | A-15 | 합격선 숫자(soak 중단·복구 허용치, freeze 허용치, p95 합격선, 신선도 최소치)는 코드에 하드코딩하지 않고 `provisional` config로 두며 Gate 0/2 승인값으로 교체 | 스펙 §7.5, §11 | T7, T11, T15 |
+| A-16 | stream key는 vault(SecretProvider)가 정본. 서버가 StartStream 전 obs-websocket `SetStreamServiceSettings`로 런타임 주입하고 운영자는 OBS UI에 키를 입력하지 않는다. OBS가 서비스 설정을 프로파일 디렉터리(service.json)에 저장하는 사실은 문서에 명시(저장소·DB·로그·화면 밖), 정지 시 제거·디렉터리 ACL은 T17 | 스펙 §10.2, R-T2-1 리뷰 finding | T2, T12, T17 |
 
 ## 4. 에스컬레이션 대기
 
@@ -85,3 +86,4 @@
 | 2026-08-17 03:50 | T2 worker_done(succeeded, PR #3, 101 tests, CI pass; 실제 OBS 스모크는 결정 B대로 '실행하지 않았음'). T3 디스패치 `ctx_11b8639abb3c`(term_892c841f…) |
 | 2026-08-17 03:58 | R-T1-1(재시도) verdict **request_changes**: blocker 1(형식 오류 숫자에서 ZodError throw → 최소 envelope 위반 §7.3(1)), major 3(Date.parse 비-ISO 수용, CanonicalEvent eventKey 관계 미강제 §7.4, NormalizedItemFacts.commandText raw-text TS 타입 노출). 리뷰 https://github.com/dnhynk/vertical-live/pull/2#pullrequestreview-4948249749. F-T1-1 `task_df3f5c1e4034` → 새 worker `ctx_457f6a165433`(t1-contract worktree, 원 터미널은 크래시로 소실) |
 | 2026-08-17 04:05 | R-T2-1 `task_58284055fd87` → `ctx_100e479d4623`(잔여 유휴 codex 터미널 재사용). 활성 에이전트 3(T3, F-T1-1, 리뷰어) = D-4 상한 |
+| 2026-08-17 04:40 | R-T2-1 verdict **request_changes**: blocker 2(allowUnauthenticated 인증 우회; obs-setup.md가 stream key를 OBS UI에 입력하라고 안내 → OBS가 service.json에 평문 저장), major 3(connect timeout ghost 소켓, reconnectCount 증가 전 connected 신호, OUTPUT_RECONNECTING을 ok로 보고). 리뷰 https://github.com/dnhynk/vertical-live/pull/3#pullrequestreview-4948338037. **코디네이터 결정(A-16)**: stream key는 vault가 정본, 서버가 obs-websocket `SetStreamServiceSettings`로 런타임 주입, 운영자 UI 입력 금지, OBS 프로파일 디렉터리 캐시는 사실대로 문서화하고 정지 시 제거·ACL은 T17 후속. F-T2-1 `task_b718432af852` → 같은 T2 터미널 `ctx_064407a13ffb`. 활성 에이전트 3(T3, F-T1-1, F-T2-1) |
