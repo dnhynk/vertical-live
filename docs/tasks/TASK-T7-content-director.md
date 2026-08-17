@@ -165,3 +165,33 @@ $ npm run test           -> Test Files 27 passed (27) / Tests 615 passed (615)
                             (apps/server/src/world/: 9 files / 120 tests)
 $ npm run build          -> @vl/contract, @vl/server, @vl/simulator (오류 없음)
 ```
+
+## Rebase (round 2 approve 후, F-T7-2)
+
+리뷰 round 2 `approve` 뒤 `main`이 PR #4(T3 auth)·PR #5(T4 db)로 전진해 PR #6이 `DIRTY`가 됐다.
+`git fetch origin && git rebase origin/main`(`d914f6a`)로 재정렬했고 **T7 소유 소스는 한 줄도 바뀌지 않았다**:
+`git diff 2e145d0 HEAD -- apps/server/src/world/` → 빈 diff(2e145d0 = rebase 직전 head).
+
+충돌 3건은 모두 소유자가 다른 파일의 union이고 기능 변경이 아니다.
+
+| 파일 | 충돌 | 해소 |
+|---|---|---|
+| `apps/server/src/index.ts` | T3가 `clock`·`db`·`secrets`·`youtube` re-export를 추가, T7은 `world` | 다섯 줄 모두 유지(알파벳 순으로 `world`를 `secrets`와 `youtube` 사이에) |
+| `apps/server/package.json` | T3/T4가 `@napi-rs/keyring`·`better-sqlite3`·`google-auth-library`·`googleapis` 추가, T7은 `@vl/contract` | dependencies union(키 정렬 유지). T7이 추가한 외부 의존성은 여전히 0 |
+| `package-lock.json` | 양쪽 dependency 블록 | `git checkout --ours`(= origin/main) 후 `npm install`로 재생성. 결과 diff는 `@vl/server → @vl/contract` 1줄뿐 |
+
+T4가 추가한 `.npmrc`(`ignore-scripts=true`)와 `scripts/check-install-scripts.mjs`가 lint에 들어왔고,
+재생성한 lockfile로 `check-install-scripts: ok (3 reviewed, better-sqlite3 binding loads)`를 확인했다.
+
+### Gates (rebase 후 재실행)
+
+```text
+$ git fetch origin && git rebase origin/main        # d914f6a, 충돌 3건(위 표) 해소
+$ npm run format:check   -> All matched files use Prettier code style!
+$ npm run lint           -> eslint 통과, check-no-legacy-imports: ok (0 legacy imports),
+                            check-install-scripts: ok (3 reviewed, better-sqlite3 binding loads)
+$ npm run typecheck      -> tsc --build tsconfig.json (오류 없음)
+$ npm run test           -> Test Files 43 passed (43) / Tests 785 passed | 1 skipped (786)
+                            (apps/server/src/world/: 9 files / 120 tests, skip 0 — 건너뛴 1건은 T3/T4 소유)
+$ npm run build          -> @vl/contract, @vl/server(+migrations 복사), @vl/simulator (오류 없음)
+```
