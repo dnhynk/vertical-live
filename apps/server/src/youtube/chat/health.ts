@@ -47,29 +47,37 @@ export interface ChatErrorObservation {
   readonly reason: string | null
 }
 
+/**
+ * What the source has actually observed about losing and regaining its input.
+ *
+ * A reconnect here means "a path that was delivering stopped, and a later
+ * response proved it recovered". Dial attempts, retries inside one outage and
+ * ordinary REST polls are none of those, so they change nothing (review round 1,
+ * M3). The four per-reconnect fields below stay `null` until the first one
+ * happens; `count === 0` is what says "nothing to report yet".
+ */
 export interface ChatReconnectObservation {
-  /** How many times a stream/poll had to be re-established (spec §9.4(3)). */
+  /** Proven recoveries of a delivering path (spec §9.4(3)). */
   readonly count: number
   readonly lastAt: string | null
-  /** Monotonic milliseconds between losing the stream and receiving again. */
+  /** Measured monotonic milliseconds from the loss to the response that ended it. */
   readonly gapMs: number | null
-  /** Whether the last (re)connect presented a resume token (spec §11). */
+  /** Whether the attempt that recovered presented a resume token (spec §11). */
   readonly resumedWithToken: boolean | null
   /** The server refused our token at least once, so a resume point was lost. */
   readonly tokenRejected: boolean
-  /** Reconnects that had no token to present — each one an unbounded gap. */
+  /** Recoveries that had no token to present — each one an unbounded gap. */
   readonly reconnectsWithoutToken: number
   /**
-   * Messages the inbox already had on the connection that last delivered
-   * anything — measured, not guessed: `commitIngestBatch` reports a duplicate
-   * per event key (spec §11).
+   * Messages the inbox already had since the last recovery — measured, not
+   * guessed: `commitIngestBatch` reports a duplicate per event key (spec §11).
    */
   readonly estimatedDuplicates: number
   /**
-   * Messages the **last** reconnect may have skipped. `0` when it resumed from
-   * our token (or started cold, where nothing preceded us), `null` when there
-   * was no token to present — the size of that gap is genuinely unknown and is
-   * not invented here.
+   * Messages the **last** reconnect may have skipped. `0` only once a response
+   * has proved the stream resumed from our token; `null` when the recovering
+   * attempt had none (the gap is genuinely unbounded) and before any reconnect
+   * has happened. No number here is ever inferred from an attempt alone.
    */
   readonly estimatedLostMessages: number | null
 }

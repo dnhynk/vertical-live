@@ -271,7 +271,7 @@ describe('GrpcChatSource', () => {
     expect(result.reason).toBe('failedPrecondition')
   })
 
-  it('drops a refused resume token and reports the gap as unknown', async () => {
+  it('drops a resume token the server refuses and says the resume point is gone', async () => {
     const h = await harness(
       [
         { end: { errorCode: status.INVALID_ARGUMENT } },
@@ -287,11 +287,15 @@ describe('GrpcChatSource', () => {
     expect(h.server.requests[0]?.pageToken).toBe('token_stale')
     expect(h.server.requests[1]?.pageToken).toBeUndefined()
     const observation = h.state.observe(h.sink.pageToken, null)
+    // The stored resume point is gone: whatever was posted between it and the
+    // fresh stream cannot be recovered, and `tokenRejected` is the sticky fact
+    // that says so (the reconnect signal reads `degraded / resumed_without_token`
+    // off it).
     expect(observation.reconnect.tokenRejected).toBe(true)
-    // One reconnect had nothing to present, so that gap is unbounded. The
-    // *latest* estimate is 0 again because the stream resumed from the fresh
-    // token the server then sent — both facts are reported, neither invented.
-    expect(observation.reconnect.reconnectsWithoutToken).toBe(1)
+    // No reconnect is counted, and that is the point of the round-1 fix: this
+    // run never received anything before the refusal, so there was no live path
+    // to recover. Counting it would be an inferred number, not a measured one.
+    expect(observation.reconnect.count).toBe(0)
   })
 
   it('stops when it is asked to', async () => {

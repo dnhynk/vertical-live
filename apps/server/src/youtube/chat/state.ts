@@ -16,6 +16,25 @@ import type {
  * REST are two shapes of one source, and the reconnect count, the resume token
  * and the last user event have to be continuous across a fallback switch —
  * otherwise a switch would look like a fresh, healthy start.
+ *
+ * **Every reconnect number is measured, never inferred** (§9.4(3), §11), which
+ * fixes what review round 1 found. The rules, in one place:
+ *
+ * - An *outage* starts only when a source that had been receiving stops
+ *   receiving (`recordDisconnect`). A cold start that dials three times before
+ *   its first response is not an outage: there was no working path to lose, and
+ *   `transport` already reports that state as `unknown / reconnecting`.
+ * - A *reconnect* is counted when a response actually arrives during an outage —
+ *   not when a dial is attempted, and not once per REST poll. An attempt that
+ *   fails proves nothing, so it changes nothing.
+ * - `gapMs` is the measured interval between the loss and the response that
+ *   ended it, and the outage clock is cleared there rather than left running.
+ * - `resumedWithToken` and `estimatedLostMessages` are set from the attempt that
+ *   produced that response, so "resumed from our token, therefore nothing was
+ *   skipped" is only ever claimed after the server has answered it. Without a
+ *   token the gap is unbounded and the estimate stays `null`.
+ * - Before the first reconnect, all four are `null`: there is nothing to report,
+ *   and `count === 0` says so.
  */
 export class ChatSourceState {
   readonly #clock: Clock
@@ -29,7 +48,12 @@ export class ChatSourceState {
   #retryBudgetExhausted = false
   #lastError: ChatErrorObservation | null = null
   #stopped: { reason: string; at: string } | null = null
-  #disconnectedAtMonotonicMs: number | null = null
+  /** Monotonic start of the current outage; `null` while none is in progress. */
+  #outageSinceMonotonicMs: number | null = null
+  /** A response has arrived at some point, so there is a path that can be lost. */
+  #everReceived = false
+  /** Whether the attempt now in flight presented a resume token. */
+  #attemptWithToken: boolean | null = null
   #offlineAt: string | null = null
 
   #reconnectCount = 0
@@ -39,8 +63,7 @@ export class ChatSourceState {
   #tokenRejected = false
   #reconnectsWithoutToken = 0
   #duplicatesSinceReconnect = 0
-  #duplicateResetPending = false
-  #estimatedLostMessages: number | null = 0
+  #estimatedLostMessages: number | null = null
 
   #userEventLastAtUtc: string | null = null
   #userEventLastAtMonotonicMs: number | null = null
@@ -74,42 +97,47 @@ export class ChatSourceState {
   }
 
   /**
-   * A (re)connect is about to be attempted. `withToken` records whether a
-   * resume token was presented, which is what decides whether a gap can be
-   * bounded at all (spec §11).
+   * A request is about to be sent — one gRPC stream, or one REST poll.
+   *
+   * It only remembers whether this attempt carries a resume token. Nothing is
+   * counted here: an attempt is not a reconnect until the server answers it,
+   * and the REST poller calls this on every poll (review round 1, M3).
    */
   connectAttempt(withToken: boolean): void {
-    this.#resumedWithToken = withToken
-    // The duplicate estimate belongs to the connection that actually delivers
-    // something, so it is reset when the first response of the new connection
-    // arrives — not here, where three failed dials in a row would erase the
-    // measurement taken by the connection before them.
-    this.#duplicateResetPending = true
-    if (this.#reconnectCount > 0 || this.#disconnectedAtMonotonicMs !== null) {
-      this.#reconnectCount += 1
-      this.#reconnectLastAt = this.#clock.nowUtcIso()
-      this.#reconnectGapMs =
-        this.#disconnectedAtMonotonicMs === null
-          ? null
-          : this.#clock.monotonicMs() - this.#disconnectedAtMonotonicMs
-      // A reconnect that could present the token resumes where it left off;
-      // one that could not may have skipped an unknown number of messages.
-      this.#estimatedLostMessages = withToken ? 0 : null
-      if (!withToken) this.#reconnectsWithoutToken += 1
-    }
+    this.#attemptWithToken = withToken
   }
 
   /** The connection is live: a response arrived (possibly with zero items). */
   recordResponse(): void {
-    if (this.#duplicateResetPending) {
-      this.#duplicatesSinceReconnect = 0
-      this.#duplicateResetPending = false
-    }
+    if (this.#outageSinceMonotonicMs !== null) this.#endOutage()
+    this.#everReceived = true
     this.#connected = true
     this.#consecutiveFailures = 0
     this.#retryBudgetExhausted = false
     this.#lastResponseAtUtc = this.#clock.nowUtcIso()
     this.#lastResponseAtMonotonicMs = this.#clock.monotonicMs()
+  }
+
+  /**
+   * A response ended an outage, so — and only so — a reconnect happened. Every
+   * number below is read off that fact rather than assumed at dial time.
+   */
+  #endOutage(): void {
+    const startedAtMs = this.#outageSinceMonotonicMs
+    this.#outageSinceMonotonicMs = null
+    this.#reconnectCount += 1
+    this.#reconnectLastAt = this.#clock.nowUtcIso()
+    this.#reconnectGapMs = startedAtMs === null ? null : this.#clock.monotonicMs() - startedAtMs
+    const withToken = this.#attemptWithToken === true
+    this.#resumedWithToken = withToken
+    // Resumed from our token: the server continues where we left off, so the
+    // skipped count is a measured 0. Without one, the gap is unbounded and no
+    // number here would be anything but invention.
+    this.#estimatedLostMessages = withToken ? 0 : null
+    if (!withToken) this.#reconnectsWithoutToken += 1
+    // The duplicate estimate belongs to the connection that recovered, so it
+    // starts again here — after the failed dials in between, not during them.
+    this.#duplicatesSinceReconnect = 0
   }
 
   recordCommit(outcome: {
@@ -127,9 +155,18 @@ export class ChatSourceState {
     }
   }
 
+  /**
+   * The source stopped receiving: a gRPC stream ended or failed, or a REST poll
+   * failed. It starts the outage clock **once**, and only for a path that had
+   * been delivering: repeated failures inside one outage keep the original
+   * start, so the gap that is finally reported is the real one rather than the
+   * time since the most recent retry.
+   */
   recordDisconnect(): void {
     this.#connected = false
-    this.#disconnectedAtMonotonicMs = this.#clock.monotonicMs()
+    if (this.#everReceived && this.#outageSinceMonotonicMs === null) {
+      this.#outageSinceMonotonicMs = this.#clock.monotonicMs()
+    }
   }
 
   recordFailure(classification: ApiErrorClassification, maxAttempts: number): void {

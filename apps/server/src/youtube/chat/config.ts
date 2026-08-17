@@ -53,10 +53,13 @@ export interface ChatGrpcConfig {
 
 export interface ChatRestConfig {
   readonly baseUrl: string
-  /** Floor for a poll interval, including when the server names none. */
+  /**
+   * Floor for a poll interval, used when the server names none and when it asks
+   * for less. There is deliberately **no ceiling**: a local maximum would make
+   * us poll sooner than the server instructed, which is the documented cause of
+   * `rateLimitExceeded` ([S3], review round 1 M1).
+   */
   readonly minPollIntervalMs: number
-  /** Ceiling, so a nonsense server value cannot stall ingestion for an hour. */
-  readonly maxPollIntervalMs: number
   readonly requestTimeoutMs: number
 }
 
@@ -114,13 +117,6 @@ export function loadChatConfig(options: LoadAuthConfigOptions = {}): ChatConfig 
     rest['minPollIntervalMs'],
     'youtube.chat.rest.minPollIntervalMs',
   )
-  const maxPollIntervalMs = readPositiveInt(
-    rest['maxPollIntervalMs'],
-    'youtube.chat.rest.maxPollIntervalMs',
-  )
-  if (maxPollIntervalMs < minPollIntervalMs) {
-    throw new ChatConfigError('rest.maxPollIntervalMs must be >= rest.minPollIntervalMs')
-  }
   const initialDelayMs = readPositiveInt(
     reconnect['initialDelayMs'],
     'youtube.chat.reconnect.initialDelayMs',
@@ -162,7 +158,6 @@ export function loadChatConfig(options: LoadAuthConfigOptions = {}): ChatConfig 
     rest: Object.freeze({
       baseUrl: readString(rest['baseUrl'], 'youtube.chat.rest.baseUrl'),
       minPollIntervalMs,
-      maxPollIntervalMs,
       requestTimeoutMs: readPositiveInt(
         rest['requestTimeoutMs'],
         'youtube.chat.rest.requestTimeoutMs',
@@ -193,11 +188,15 @@ export function loadChatConfig(options: LoadAuthConfigOptions = {}): ChatConfig 
   })
 }
 
+/**
+ * `parts` must be exactly `id,snippet` — not a subset of it (review round 1,
+ * M2). Spec §7.2 states the request part list, and dropping `id` would be worse
+ * than a style problem: without a message id there is no dedupe key and no
+ * minimal envelope (§7.3(1)(4)). Duplicates are refused too, because the value
+ * is sent verbatim on the wire.
+ */
 function readParts(value: unknown): string[] {
   const parts = readStringArray(value, 'youtube.chat.parts')
-  if (parts.length === 0) {
-    throw new ChatConfigError('parts must not be empty')
-  }
   if (parts.includes(IDENTITY_PART)) {
     throw new ChatConfigError(
       `parts must not contain ${IDENTITY_PART}: the identity gate is closed in V1, so no author identity may be requested (spec §7.2, §7.4, BOARD A-1)`,
@@ -208,6 +207,12 @@ function readParts(value: unknown): string[] {
   )
   if (unknown.length > 0) {
     throw new ChatConfigError(`parts contains unsupported value(s): ${unknown.join(', ')}`)
+  }
+  const missing = ALLOWED_PARTS.filter((part) => !parts.includes(part))
+  if (missing.length > 0 || parts.length !== ALLOWED_PARTS.length) {
+    throw new ChatConfigError(
+      `parts must be exactly ${ALLOWED_PARTS.join(',')} (spec §7.2), got ${parts.join(',') || '(empty)'}`,
+    )
   }
   return parts
 }

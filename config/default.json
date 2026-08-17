@@ -203,7 +203,6 @@
       "rest": {
         "baseUrl": "https://www.googleapis.com/youtube/v3/liveChat/messages",
         "minPollIntervalMs": 2000,
-        "maxPollIntervalMs": 60000,
         "requestTimeoutMs": 20000
       },
       "reconnect": {
@@ -221,7 +220,6 @@
         "readyPollIntervalMs",
         "grpc.keepalive",
         "rest.minPollIntervalMs",
-        "rest.maxPollIntervalMs",
         "rest.requestTimeoutMs",
         "reconnect",
         "fallback"

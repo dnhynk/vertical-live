@@ -211,24 +211,119 @@ describe('buildChatHealthSignals', () => {
 })
 
 describe('ChatSourceState', () => {
-  it('counts reconnects only after the first connection', () => {
+  it('counts a reconnect only when a response proves the path recovered', () => {
     const clock = new FakeClock()
     const state = new ChatSourceState(clock, KEEPALIVE)
 
     state.connectAttempt(false)
     state.recordResponse()
-    expect(state.observe(null, null).reconnect.count).toBe(0)
+    const first = state.observe(null, null).reconnect
+    expect(first.count).toBe(0)
+    // Nothing has been reconnected, so nothing is claimed about a reconnect.
+    expect(first.gapMs).toBeNull()
+    expect(first.resumedWithToken).toBeNull()
+    expect(first.estimatedLostMessages).toBeNull()
 
     state.recordDisconnect()
     clock.advance(250)
     state.connectAttempt(true)
-    const observed = state.observe('token_x', 'READY')
-    expect(observed.reconnect.count).toBe(1)
-    expect(observed.reconnect.gapMs).toBe(250)
-    expect(observed.reconnect.resumedWithToken).toBe(true)
+    // Review round 1 (M3): the dial alone used to count. It proves nothing yet.
+    expect(state.observe('token_x', null).reconnect.count).toBe(0)
+
+    state.recordResponse()
+    const recovered = state.observe('token_x', 'READY').reconnect
+    expect(recovered.count).toBe(1)
+    expect(recovered.gapMs).toBe(250)
+    expect(recovered.resumedWithToken).toBe(true)
+    expect(recovered.estimatedLostMessages).toBe(0)
   })
 
-  it('keeps the duplicate estimate of the last connection that delivered data', () => {
+  it('measures the whole outage once, however many dials failed inside it', () => {
+    const clock = new FakeClock()
+    const state = new ChatSourceState(clock, KEEPALIVE)
+
+    state.connectAttempt(true)
+    state.recordResponse()
+    state.recordDisconnect()
+    clock.advance(100)
+    // Three failed dials in the same outage: the clock must keep running from
+    // the loss, not restart at the most recent retry (round 1, M3).
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      state.connectAttempt(true)
+      state.recordFailure({ kind: 'serverError', action: 'retry', retryable: true }, 8)
+      state.recordDisconnect()
+      clock.advance(100)
+    }
+    state.connectAttempt(true)
+    state.recordResponse()
+
+    const observed = state.observe('token_x', 'READY').reconnect
+    expect(observed.count).toBe(1)
+    expect(observed.gapMs).toBe(400)
+  })
+
+  it('does not count a cold start that took several dials', () => {
+    const state = new ChatSourceState(new FakeClock(), KEEPALIVE)
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      state.connectAttempt(false)
+      state.recordFailure({ kind: 'network', action: 'retry', retryable: true }, 8)
+      state.recordDisconnect()
+    }
+    state.connectAttempt(false)
+    state.recordResponse()
+
+    // There was no working path to lose, so there is no reconnect to report.
+    // `transport` covers that state as `unknown / reconnecting`.
+    expect(state.observe(null, null).reconnect.count).toBe(0)
+  })
+
+  it('counts one recovery across a gRPC break and the REST polls that follow', () => {
+    const clock = new FakeClock()
+    const state = new ChatSourceState(clock, KEEPALIVE)
+
+    // gRPC delivering, then the stream is cut.
+    state.setMode('grpc')
+    state.connectAttempt(true)
+    state.recordResponse()
+    state.recordDisconnect()
+    clock.advance(500)
+
+    // The fallback takes over: two successful polls. A poll is not a reconnect,
+    // and the REST loop calls `connectAttempt` on every one of them — the exact
+    // shape that inflated the count in review round 1 (M3).
+    state.setMode('rest')
+    state.connectAttempt(true)
+    state.recordResponse()
+    clock.advance(2000)
+    state.connectAttempt(true)
+    state.recordResponse()
+
+    const observed = state.observe('token_x', null).reconnect
+    expect(observed.count).toBe(1)
+    expect(observed.gapMs).toBe(500)
+    expect(observed.resumedWithToken).toBe(true)
+    expect(observed.estimatedLostMessages).toBe(0)
+  })
+
+  it('reports an unknown loss when the recovering attempt had no token', () => {
+    const state = new ChatSourceState(new FakeClock(), KEEPALIVE)
+
+    state.connectAttempt(true)
+    state.recordResponse()
+    state.recordDisconnect()
+    state.recordTokenRejected()
+    state.connectAttempt(false)
+    state.recordResponse()
+
+    const observed = state.observe(null, null).reconnect
+    expect(observed.count).toBe(1)
+    expect(observed.resumedWithToken).toBe(false)
+    expect(observed.reconnectsWithoutToken).toBe(1)
+    expect(observed.estimatedLostMessages).toBeNull()
+  })
+
+  it('keeps the duplicate estimate of the connection that recovered', () => {
     const state = new ChatSourceState(new FakeClock(), KEEPALIVE)
 
     state.connectAttempt(false)
@@ -241,5 +336,11 @@ describe('ChatSourceState', () => {
     state.connectAttempt(true)
 
     expect(state.observe(null, null).reconnect.estimatedDuplicates).toBe(2)
+
+    // …and the recovering response starts the next measurement.
+    state.recordResponse()
+    expect(state.observe(null, null).reconnect.estimatedDuplicates).toBe(0)
+    state.recordCommit({ duplicates: 3, dropped: 0, userEvents: 0, userEventAt: null })
+    expect(state.observe(null, null).reconnect.estimatedDuplicates).toBe(3)
   })
 })

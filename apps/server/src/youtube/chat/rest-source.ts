@@ -22,11 +22,12 @@ import type { ChatSourceState } from './state.js'
  *
  * 1. **The server sets the pace.** `pollingIntervalMillis` is "the amount of
  *    time, in milliseconds, that the client should wait before polling again"
- *    ([S3], checked 2026-08-17) and is obeyed as given, only clamped into
- *    `[minPollIntervalMs, maxPollIntervalMs]` so a missing or absurd value
- *    cannot turn into a hot loop or an hour of silence. Polling faster is what
- *    earns `rateLimitExceeded` ("The request was sent too quickly after the
- *    previous request").
+ *    ([S3], checked 2026-08-17) and is obeyed as given. The local
+ *    `minPollIntervalMs` only ever lengthens the wait — for a response that
+ *    names no interval, and for one that asks for less than the floor. Nothing
+ *    shortens it: polling faster than instructed is what earns
+ *    `rateLimitExceeded` ("The request was sent too quickly after the previous
+ *    request").
  * 2. **The checkpoint is shared.** It reads and writes the same
  *    `youtube:{liveChatId}` row through the same sink as the gRPC path, so a
  *    switch in either direction resumes where the other left off (§7.3(2)).
@@ -156,6 +157,10 @@ export class RestChatSource {
         classifyYouTubeApiError({ errorCode: code }),
         config.reconnect.maxAttempts,
       )
+      // The poller has stopped receiving, exactly as a dropped gRPC stream has;
+      // the outage clock has to run on this path too or a REST recovery would
+      // report no gap at all (review round 1, M3).
+      state.recordDisconnect()
       await this.#backoff()
       return null
     } finally {
@@ -199,9 +204,24 @@ export class RestChatSource {
     return null
   }
 
-  /** The server's interval, clamped into the configured bounds (spec §4). */
+  /**
+   * How long to wait before the next poll.
+   *
+   * The server's `pollingIntervalMillis` is obeyed as an instruction, and the
+   * local `minPollIntervalMs` can only ever make the wait **longer** — there is
+   * deliberately no upper clamp. Review round 1 (M1) caught the earlier version
+   * shortening a requested hour to a minute: waiting less than the server asked
+   * is exactly what [S3] describes as `rateLimitExceeded` ("The request was sent
+   * too quickly after the previous request"), so a defensive ceiling would trade
+   * a documented API contract for a guess about what a sane interval is. A long
+   * interval is visible on `/health` through `msSinceLastResponse` instead, and
+   * T12 decides what it means.
+   *
+   * A missing, non-finite or negative value is not an instruction at all, so the
+   * local floor applies.
+   */
   pollDelayMs(serverIntervalMs: number | undefined): number {
-    const { minPollIntervalMs, maxPollIntervalMs } = this.#options.config.rest
+    const { minPollIntervalMs } = this.#options.config.rest
     if (
       serverIntervalMs === undefined ||
       !Number.isFinite(serverIntervalMs) ||
@@ -209,7 +229,7 @@ export class RestChatSource {
     ) {
       return minPollIntervalMs
     }
-    return Math.min(maxPollIntervalMs, Math.max(minPollIntervalMs, Math.round(serverIntervalMs)))
+    return Math.max(minPollIntervalMs, Math.round(serverIntervalMs))
   }
 
   async #handleError(
@@ -225,6 +245,8 @@ export class RestChatSource {
       nowMs: Date.parse(this.#options.clock.nowUtcIso()),
     })
     state.recordFailure(classification, config.reconnect.maxAttempts)
+    // A refused poll is a lost path just like a dropped stream (round 1, M3).
+    state.recordDisconnect()
 
     if (
       (classification.kind === 'invalidRequest' || classification.kind === 'notFound') &&

@@ -126,29 +126,29 @@ describe('RestChatSource', () => {
     expect(h.server.requests[1]?.pageToken).toBe('rest_token_2')
   })
 
-  it('obeys the server-supplied polling interval, clamped to the configured bounds', () => {
+  it('never waits less than the interval the server asked for', () => {
     const config = testChatConfig()
     const source = new RestChatSource({
       sink: {} as unknown as ChatIngestSink,
       state: new ChatSourceState(new FakeClock(), config.grpc.keepalive),
       clock: new FakeClock(),
-      config: {
-        ...config,
-        rest: { ...config.rest, minPollIntervalMs: 1000, maxPollIntervalMs: 10_000 },
-      },
+      config: { ...config, rest: { ...config.rest, minPollIntervalMs: 1000 } },
       auth: fixedTokens(),
       liveChatId: TEST_LIVE_CHAT_ID,
     })
 
     expect(source.pollDelayMs(5000)).toBe(5000)
-    // A server that asks for less than the floor still gets the floor; asking
-    // for more than the ceiling cannot stall ingestion for an hour.
+    // Regression, review round 1 (M1): an hour used to become a minute. Waiting
+    // less than instructed is the documented cause of `rateLimitExceeded`, so no
+    // configured value may shorten the server's interval — however large it is.
+    expect(source.pollDelayMs(3_600_000)).toBe(3_600_000)
+    expect(source.pollDelayMs(Number.MAX_SAFE_INTEGER)).toBe(Number.MAX_SAFE_INTEGER)
+    // The local floor only ever lengthens the wait.
     expect(source.pollDelayMs(10)).toBe(1000)
-    expect(source.pollDelayMs(3_600_000)).toBe(10_000)
-    // No value at all: the configured floor, never zero (which would be the
-    // "sent too quickly" error the reference warns about).
+    // No usable instruction at all: the configured floor, never zero.
     expect(source.pollDelayMs(undefined)).toBe(1000)
     expect(source.pollDelayMs(Number.NaN)).toBe(1000)
+    expect(source.pollDelayMs(-5)).toBe(1000)
   })
 
   it('waits the interval the server asked for between polls', async () => {

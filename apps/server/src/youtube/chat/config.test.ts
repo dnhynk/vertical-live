@@ -49,6 +49,20 @@ describe('loadChatConfig', () => {
     expect(() => loadChatConfig({ configPath: path })).toThrow(/unsupported value/)
   })
 
+  it('refuses any parts list that is not exactly id,snippet', () => {
+    // Review round 1 (M2): a subset was accepted. Dropping `id` would leave the
+    // envelope without a message id, i.e. without a dedupe key (§7.3(1)(4)).
+    for (const parts of [['snippet'], ['id'], [], ['id', 'snippet', 'snippet']]) {
+      expect(() => loadChatConfig({ configPath: withChatSection({ parts }) })).toThrow(
+        /parts must be exactly id,snippet/,
+      )
+    }
+    // The correct list still loads, in either order.
+    expect(
+      loadChatConfig({ configPath: withChatSection({ parts: ['snippet', 'id'] }) }).parts,
+    ).toEqual(['snippet', 'id'])
+  })
+
   it('refuses a maxResults outside the documented 200–2000 range', () => {
     expect(() => loadChatConfig({ configPath: withChatSection({ maxResults: 50 }) })).toThrow(
       /between 200 and 2000/,
@@ -58,15 +72,20 @@ describe('loadChatConfig', () => {
     )
   })
 
-  it('refuses inverted interval bounds', () => {
+  it('refuses a non-positive poll floor', () => {
     const path = withChatSection({
       rest: {
         baseUrl: 'https://example.invalid/messages',
-        minPollIntervalMs: 5000,
-        maxPollIntervalMs: 1000,
+        minPollIntervalMs: 0,
         requestTimeoutMs: 1000,
       },
     })
-    expect(() => loadChatConfig({ configPath: path })).toThrow(/maxPollIntervalMs/)
+    expect(() => loadChatConfig({ configPath: path })).toThrow(/minPollIntervalMs/)
+  })
+
+  it('has no upper bound on the poll interval to clamp the server with', () => {
+    // Round 1 (M1): a ceiling would make us poll sooner than the server asked.
+    const config = loadChatConfig()
+    expect(Object.keys(config.rest)).toEqual(['baseUrl', 'minPollIntervalMs', 'requestTimeoutMs'])
   })
 })

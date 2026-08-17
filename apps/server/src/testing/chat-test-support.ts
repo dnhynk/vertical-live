@@ -38,7 +38,6 @@ export function testChatConfig(overrides: Partial<ChatConfig> = {}): ChatConfig 
     rest: {
       baseUrl: 'http://127.0.0.1:1/youtube/v3/liveChat/messages',
       minPollIntervalMs: 1,
-      maxPollIntervalMs: 50,
       requestTimeoutMs: 5000,
     },
     reconnect: { initialDelayMs: 1, maxDelayMs: 5, factor: 2, jitterRatio: 0, maxAttempts: 8 },

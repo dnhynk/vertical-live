@@ -71,7 +71,7 @@ reconnect 횟수·마지막 token·마지막 사용자 이벤트 시각)와 재�
 | `youtube.chat.maxResults` | `500` | 확정(문서 기본값) | [S4] 레퍼런스 "The default value is 500", 허용 200–2000 |
 | `youtube.chat.grpc.keepalive.*` | time 300000ms / timeout 20000ms / permitWithoutCalls false | provisional | 공식 keepalive 가이드의 "5분 미만 ping 금지" 권고 안쪽. YouTube가 공표한 값은 없음 |
 | `youtube.chat.reconnect.*` | initial 1000ms / max 60000ms / factor 2 / jitter 0.2 / maxAttempts 8 | provisional | 스펙 §11 "backoff로 재연결"만 요구. `maxAttempts`는 **포기 횟수가 아니라 degraded 보고 임계값**이다 — 소진 뒤에도 `maxDelayMs` 간격으로 계속 재연결한다(§2.1 무인성). 판정은 T12 |
-| `youtube.chat.rest.minPollIntervalMs` / `maxPollIntervalMs` / `requestTimeoutMs` | 2000 / 60000 / 20000 | provisional | 서버가 준 `pollingIntervalMillis`를 이 범위로만 clamp한다(주지 않으면 하한). 문서에 기본값·상한 없음 |
+| `youtube.chat.rest.minPollIntervalMs` / `requestTimeoutMs` | 2000 / 20000 | provisional | 서버가 준 `pollingIntervalMillis`를 **늘리기만** 하는 하한(주지 않거나 하한 미만일 때만 적용). 상한은 두지 않는다 — 서버가 요청한 것보다 빨리 폴링하는 것이 `rateLimitExceeded`의 문서화된 원인이다(round 1 M1) |
 | `youtube.chat.readyPollIntervalMs` | `250` | provisional | 엔진 `ready`를 기다리는 폴링 간격. 스펙은 순서만 정한다(§7.3(3)) |
 | `youtube.chat.fallback.*` | gRPC 연속 실패 3회 → REST, `retryPrimaryAfterMs` 300000 | provisional | 스펙은 "REST는 fallback"만 정함 |
 | `liveChatId` 출처 | config `youtube.chat.liveChatId`(기본 `null`) 또는 주입된 resolver | — | T10 `broadcast_resources`는 아직 main에 없다(PR #11 리뷰 중). 명세 §T9가 허용한 config 주입 + resolver 포트로 두어 T10/T12가 배선한다 |
@@ -93,7 +93,7 @@ fake-live-chat-rest-server·tcp-breaker·chat-test-support), 운영 문서
 | # | 기준 | 상태 | 근거 |
 |---|---|---|---|
 | 1 | 가짜 gRPC 서버(같은 proto)로 스트림 수신·token 재개·중간 끊김·poison item·REST 전환 테스트 통과 | met | `apps/server/src/youtube/chat/grpc-source.test.ts`(12), `rest-source.test.ts`(9), `chat-source.test.ts`(5), `sink.test.ts`(9). 끊김은 실제 소켓 절단(`testing/tcp-breaker.ts`) — grpc-js 서버의 `call.destroy()`는 클라이언트가 관측할 수 있는 것을 보내지 않음을 실험으로 확인하고 relay 방식으로 바꿨다. 전환은 `chat-source.test.ts > falls back to REST and keeps the same checkpoint`(REST 첫 요청의 `pageToken`이 gRPC가 저장한 token) |
-| 2 | 요청 parts에 `authorDetails`가 없음을 테스트로 고정 | met | 3중으로 고정: (a) config 로더가 `authorDetails`를 거부(`config.test.ts`), (b) 실제 wire에 도착한 요청을 검사(`grpc-source.test.ts > requests id,snippet only — never authorDetails`, `rest-source.test.ts > requests id,snippet only …`), (c) proto에 `author_details`가 존재함을 확인해 "요청하지 않는다"가 공허한 주장이 아님을 보임(`proto.test.ts`) |
+| 2 | 요청 parts에 `authorDetails`가 없음을 테스트로 고정 | met | 3중으로 고정: (a) config 로더가 `parts`를 **정확히 `id,snippet`**으로만 받는다 — `authorDetails`는 물론 부분집합·중복도 거부(`config.test.ts`; round 1 M2에서 부분집합 허용을 고침), (b) 실제 wire에 도착한 요청을 검사(`grpc-source.test.ts > requests id,snippet only — never authorDetails`, `rest-source.test.ts > requests id,snippet only …`), (c) proto에 `author_details`가 존재함을 확인해 "요청하지 않는다"가 공허한 주장이 아님을 보임(`proto.test.ts`) |
 | 3 | 실계정 없이 완료 판정 가능한 범위를 티켓에 명시하고 실계정 절차는 T16으로 | met | 아래 "Not done" + `docs/ops/youtube-chat-source.md` §4 |
 
 추가로 구현·검증한 명세 항목:
@@ -101,9 +101,9 @@ fake-live-chat-rest-server·tcp-breaker·chat-test-support), 운영 문서
 - `next_page_token` checkpoint 복원·전진과 **같은 트랜잭션** 커밋(§7.3(2)): `sink.test.ts`(빈 응답도 전진, token 없는 응답은 이전 token 유지, 중복은 오류가 아니라 카운트).
 - poison item에도 checkpoint 전진: `sink.test.ts > drops an item whose adapter throws …`, `> drops an envelope the contract schema would refuse`, `grpc-source.test.ts > commits a poison item as a minimal envelope and keeps going`.
 - gRPC status별 처리: UNAVAILABLE 재시도, UNAUTHENTICATED/PERMISSION_DENIED는 T3 갱신 1회 후 중단(`AuthRevokedError`면 `auth_revoked`), FAILED_PRECONDITION/NOT_FOUND 중단, INVALID_ARGUMENT는 token 폐기 후 재연결 — `grpc-source.test.ts` 6개 케이스.
-- REST `pollingIntervalMillis` 준수와 clamp: `rest-source.test.ts > obeys the server-supplied polling interval …`, `> waits the interval the server asked for between polls`.
+- REST `pollingIntervalMillis` 준수: 서버가 준 값보다 **짧게 기다리지 않는다**(로컬 하한은 늘리기만 한다). `rest-source.test.ts > never waits less than the interval the server asked for`(1시간 요청이 1시간 그대로), `> waits the interval the server asked for between polls`. round 1 M1에서 상한 절단을 제거했다.
 - 건강 신호(§9.4(3)) 4종과 "무수신은 degraded가 아니다": `health.test.ts`(6시간 무수신에도 `ok`), `chat-source.test.ts > publishes the four health signals …`.
-- 재연결 중복·손실 추정(§11): 중복은 `commitIngestBatch`가 돌려주는 실측값, 손실은 token으로 재개했으면 0, token이 없었으면 `null`(모름). `grpc-source.test.ts`, `health.test.ts`.
+- 재연결 중복·손실 추정(§11): **관측된 것만** 센다. 재연결 = 수신 중이던 경로가 끊겼다가 응답이 실제로 다시 도착한 사건이며, 시도·재시도·평범한 REST 폴은 아무것도 바꾸지 않는다(round 1 M3에서 시도마다 세고 gap이 누적되던 것을 고쳤다). 중복은 `commitIngestBatch`의 실측값, 손실은 복구 응답을 만든 시도가 token을 제시했을 때만 0, 아니면 `null`. `health.test.ts`(cold start 미집계, outage 1회 gap 400ms, gRPC 끊김 1회 + REST 폴 2회 → count 1), `grpc-source.test.ts`.
 - `engine.ready` 이전에는 수신하지 않음(§7.3(3)): `chat-source.test.ts > waits for the engine to finish its recovery drain before connecting`.
 
 ### Gates (executed)
