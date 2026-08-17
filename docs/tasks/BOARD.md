@@ -54,7 +54,7 @@
 | A-7 | `sourceDataExpiresAt = receivedAt + 30일`(기본), field별 세부는 T13 retention.json | 스펙 §12.4 | T1, T13 |
 | A-8 | `CanonicalEvent.payment.giftName` 필드 추가(§7.4 예시 JSON에는 없으나 §7.4 본문이 giftName 정규화를 요구) | 스펙 §7.4 | T1 |
 | A-9 | A/B/C 분기 투표는 identity gate 열림 시에만; 닫힘 시 디렉터가 승인 사건 조합으로 분기 진행 + 비경쟁 집계. 두 경로 모두 플래그로 구현 | 스펙 §6.4, §7.1 | T6, T7, T14 |
-| A-10 | `public/pet.glb`는 개발 placeholder, production 자산 아님 | 스펙 §16 | T5, T14 |
+| A-10 | ~~`public/pet.glb`는 개발 placeholder~~ → **정정(2026-08-17, T5 발견)**: `pet.glb`는 Pokémon(피카츄) 실루엣으로 확인되어 §12.1·CLAUDE.md §3 금지 자산. T5에서 `legacy/renderer-prototype/`로 격리하고 렌더러는 코드 생성 primitive placeholder 사용, `ASSETS.md` 신설. T14가 원본 크리처 자산으로 대체 | 스펙 §12.1, §16 | T5, T14 |
 | A-11 | 일본어 문구는 i18n 파일에 `nativeReview: pending`; 원어민 sign-off는 Gate 3 | 스펙 §5.3 | T5, T14, T16 |
 | A-12 | 프로토타입은 초기 커밋에 보존, T0에서 `legacy/`로 이동(production import 금지) | 스펙 §10.4, §16 | T0 |
 | A-13 | 리뷰어 codex는 `--dangerously-bypass-approvals-and-sandbox`로 기동(무인·review 전용·`gh` 네트워크 필요; claude worker의 skip-permissions와 같은 신뢰 수준) | 런북 0장 | 리뷰 |
@@ -112,3 +112,4 @@
 | 2026-08-17 09:45 | R-T1b-1 verdict **approve**(7/7, 495 tests). 최종 게이트 통과 → **PR #7 squash merge**(main 6efc9b5). T1b worker release·worktree 제거. R-T7-1 `task_f31e681919dc` → `ctx_754ab822962b`. 리뷰 대기열: R-T7-1(진행) → R-T3-2 → (F-T4-1 후) R-T4-2 |
 | 2026-08-17 10:00 | T6 worker_done(succeeded, PR #8: normalize→allowlist 파서, §12.3 거부 규칙 ja/en, §6.4 arbiter, 원문 미노출 테스트; .gitignore `data/`가 apps/server/src/input/data를 숨긴 문제 발견 → 파일 이동, 규칙 `/data/`로 좁히기는 T8 명세에 포함 예정). 리뷰 대기열: R-T7-1(진행) → R-T3-2 → R-T6-1 → R-T4-2 |
 | 2026-08-17 10:25 | R-T7-1 verdict **request_changes**(blocker 2: skip 정책이 반복 deadline 후속을 만들지 않아 무입력 진행 단절; 무료 명령으로 동기 완료된 mission effect가 deadline cause로 오표기(A-17 위반); major 1: deadlineId에 beat 라벨; minor 1: literal NUL 구분자). F-T7-1 `task_da44c70877ec` → T7 터미널 `ctx_6e08a6061e08`(rebase 포함). R-T3-2 `task_df2e3eeada0d` → `ctx_7e725f235839`. 리뷰 대기열: R-T3-2(진행) → R-T6-1 → R-T4-2 → R-T7-2 |
+| 2026-08-17 10:40 | T5 질문: `apps/renderer/public/pet.glb`가 피카츄 실루엣(뾰족 귀·번개 꼬리)임을 발견 → 답 A(legacy 격리 + primitive placeholder + ASSETS.md 신설). **A-10 정정** |
