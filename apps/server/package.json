@@ -14,10 +14,15 @@
   "scripts": {
     "build": "tsc --build && node scripts/copy-migrations.mjs",
     "start": "node dist/main.js",
-    "obs:probe": "tsc --build && node dist/obs/probe.js"
+    "obs:probe": "tsc --build && node dist/obs/probe.js",
+    "auth:login": "npm run build && node dist/bin/auth-login.js",
+    "secrets": "npm run build && node dist/bin/secrets.js"
   },
   "dependencies": {
+    "@napi-rs/keyring": "1.3.0",
     "better-sqlite3": "13.0.3",
+    "google-auth-library": "10.5.0",
+    "googleapis": "174.0.1",
     "obs-websocket-js": "5.0.8"
   },
   "devDependencies": {

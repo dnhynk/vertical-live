@@ -6,8 +6,7 @@ import OBSWebSocket, {
 
 import { systemClock, type Clock, type TimerHandle } from '../clock.js'
 import type { HealthSignal, HealthSignalSink } from '../health/types.js'
-import { requireSecret, type SecretProvider } from '../secrets/index.js'
-import { EnvSecretProvider } from '../secrets/env.js'
+import { defaultSecretProvider, requireSecret, type SecretProvider } from '../secrets/index.js'
 import { assertWebSocketUrl, type ObsConfig } from './config.js'
 import { OBS_EVENT_SUBSCRIPTIONS, RPC_VERSION } from './protocol.js'
 
@@ -69,7 +68,9 @@ export class ObsClient {
 
   constructor(options: ObsClientOptions) {
     this.#config = options.config
-    this.#secrets = options.secrets ?? new EnvSecretProvider()
+    // Default is the OS credential vault (spec §10.2). `EnvSecretProvider` is a
+    // development/test provider now and has to be injected on purpose.
+    this.#secrets = options.secrets ?? defaultSecretProvider()
     this.#clock = options.clock ?? systemClock
     this.#onSignal = options.onSignal
     assertWebSocketUrl(this.#config.url, options.allowNonLoopback === true)
@@ -165,7 +166,7 @@ export class ObsClient {
     const password = await requireSecret(
       this.#secrets,
       'obs.websocketPassword',
-      `set ${EnvSecretProvider.envVarFor('obs.websocketPassword')} (spec §10.2 requires authentication on obs-websocket)`,
+      'store it with "npm run secrets -w @vl/server -- set obs.websocketPassword" (or set VL_OBS_PASSWORD and inject EnvSecretProvider for development). Spec §10.2 requires authentication on obs-websocket',
     )
 
     this.#connectInFlight = true

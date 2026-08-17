@@ -4,7 +4,7 @@ import { pathToFileURL } from 'node:url'
 
 import { systemClock } from '../clock.js'
 import type { HealthSignal } from '../health/types.js'
-import { EnvSecretProvider } from '../secrets/index.js'
+import { EnvSecretProvider, defaultSecretProvider } from '../secrets/index.js'
 import { ObsClient } from './client.js'
 import { loadObsConfig, type ObsConfig } from './config.js'
 import { ObsHealthMonitor } from './health.js'
@@ -32,12 +32,13 @@ const USAGE = `Usage: npm run obs:probe -- [--url ws://127.0.0.1:4455] [--json] 
   --json          Print one JSON document instead of a human-readable report.
   --fake          Probe an in-process fake obs-websocket v5 server instead of
                   OBS. Verifies the probe itself; it is NOT an OBS smoke test.
-                  It mints its own synthetic password, so VL_OBS_PASSWORD is
-                  not needed and authentication still happens.
+                  It mints its own synthetic password, so no stored secret is
+                  needed and authentication still happens.
 
-Reads the obs-websocket password from VL_OBS_PASSWORD (T3 replaces this with the
-OS credential vault). The password is never printed. Authentication is always
-required (spec §10.2); there is no unauthenticated mode.
+Reads the obs-websocket password from the Windows Credential Manager; store it
+with "npm run secrets -w @vl/server -- set obs.websocketPassword". The password
+is never printed. Authentication is always required (spec §10.2); there is no
+unauthenticated mode.
 `
 
 export function parseProbeArgs(argv: readonly string[]): ProbeArgs {
@@ -266,8 +267,11 @@ async function main(): Promise<number> {
     config,
     secrets:
       fakeServer === undefined
-        ? new EnvSecretProvider()
-        : new EnvSecretProvider({ ...process.env, VL_OBS_PASSWORD: fakePassword }),
+        ? // Real OBS: the password comes from the OS credential vault (spec §10.2).
+          defaultSecretProvider()
+        : // --fake mints its own synthetic password and hands it to both sides,
+          // so the env provider here never reads an operational secret.
+          new EnvSecretProvider({ VL_OBS_PASSWORD: fakePassword }),
   })
 
   try {

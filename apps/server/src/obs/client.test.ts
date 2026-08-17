@@ -120,6 +120,28 @@ describe('ObsClient handshake and authentication', () => {
     expect(server.identifyLog).toEqual([])
   })
 
+  it('does not read the environment when no provider is injected', async () => {
+    // Review round 1, B1: the operational default is the OS credential vault
+    // (spec §10.2), so `VL_OBS_PASSWORD` no longer authenticates a client that
+    // was constructed without an explicit provider.
+    const envPassword = 'synthetic-env-password-must-not-be-used'
+    process.env['VL_OBS_PASSWORD'] = envPassword
+    try {
+      const server = await startServer({ password: envPassword })
+      const client = track(
+        new ObsClient({ config: testObsConfig(server.url), clock: new FakeClock() }),
+      )
+
+      const error = await client.connect().catch((caught: unknown) => caught)
+
+      expect(error).toBeInstanceOf(Error)
+      expect((error as Error).message).not.toContain(envPassword)
+      expect(server.identifyLog).toEqual([])
+    } finally {
+      delete process.env['VL_OBS_PASSWORD']
+    }
+  })
+
   it('has no unauthenticated path: a default fake server still challenges', async () => {
     // Review round 1 finding 1. There is no `allowUnauthenticated` escape hatch
     // any more, and the double cannot model an auth-disabled OBS either — so a

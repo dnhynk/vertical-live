@@ -37,3 +37,6 @@ data/
 .env
 .env.*
 !.env.example
+# OAuth client secrets downloaded from Google Cloud console (spec §10.2)
+client_secret*.json
+config/*.local.json

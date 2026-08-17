@@ -8,7 +8,7 @@ OBS는 **합성·인코딩 장치**이며 게임 상태를 소유하지 않는�
 
 - OBS 프로세스 자동 시작·재시작, Windows 로그온 세션, sleep/GPU reset 대응 → **T17**
 - supervisor 상태기계와 건강 신호 집계·알림 → **T12**
-- Windows Credential Manager 기반 비밀정보 저장 → **T3**. T2까지는 env `VL_OBS_PASSWORD`가 임시 구현이다.
+- Windows Credential Manager 기반 비밀정보 저장 → **T3에서 완료**. 운영 경로의 기본 저장소는 이제 Credential Manager이고, env(`VL_OBS_PASSWORD`)는 개발·테스트에서 `EnvSecretProvider`를 명시적으로 주입할 때만 쓰인다(`docs/ops/youtube-auth-setup.md` 4장).
 - 아카이브(녹화) 정책 → **T17**. `recordEncoder.json`은 형식을 맞추기 위해 들어 있고 V1에서는 쓰이지 않는다(`[AdvOut] RecEncoder=none`).
 
 ## 1. 버전 고정
@@ -39,21 +39,16 @@ OBS는 **합성·인코딩 장치**이며 게임 상태를 소유하지 않는�
 
 ### 비밀번호 전달
 
-T3 전까지는 프로세스 환경변수로 전달한다. 저장소·DB·로그·화면에 넣지 않는다(스펙 §10.2, CLAUDE.md §3).
+**Windows Credential Manager에 넣는다**(T3). 저장소·DB·로그·화면에 넣지 않는다(스펙 §10.2, CLAUDE.md §3). 값은 stdin으로만 전달한다 — 명령행에 쓰면 셸 히스토리와 프로세스 목록에 남는다.
 
 ```powershell
-# 현재 PowerShell 세션에만 적용 (영구 저장하지 않는다)
-$env:VL_OBS_PASSWORD = '<OBS가 생성한 비밀번호>'
+'<OBS가 생성한 비밀번호>' | npm run secrets -w @vl/server -- set obs.websocketPassword
+npm run secrets -w @vl/server -- list   # 이름과 설정 여부만 출력, 값은 절대 출력하지 않는다
 ```
 
-```bash
-# Git Bash
-export VL_OBS_PASSWORD='<OBS가 생성한 비밀번호>'
-```
+비밀번호가 없으면 서버는 연결을 시도하지 않고 `MissingSecretError: secret not configured: obs.websocketPassword`로 멈춘다. 에러 메시지·로그·건강 신호 어디에도 값은 찍히지 않는다.
 
-비밀번호가 없으면 서버는 연결을 시도하지 않고 `MissingSecretError: secret not configured: obs.websocketPassword (provider: env)`로 멈춘다. 에러 메시지·로그·건강 신호 어디에도 값은 찍히지 않는다.
-
-T3가 `SecretProvider`를 Windows Credential Manager 구현으로 교체하면 `obs.websocketPassword`라는 이름은 그대로 두고 저장 위치만 바뀐다.
+개발·테스트에서는 `EnvSecretProvider`를 **직접 주입**할 때만 env가 쓰인다(`new ObsClient({ config, secrets: new EnvSecretProvider({ VL_OBS_PASSWORD: '...' }) })`). 주입하지 않은 클라이언트는 env를 읽지 않는다(`client.test.ts` "does not read the environment when no provider is injected").
 
 ## 3. 프로파일·씬 컬렉션 가져오기
 
@@ -94,13 +89,13 @@ streamServiceSettings { server: <obs.streamIngestUrl>, key: <vault: youtube.stre
 
 `server`는 `config/default.json`의 `obs.streamIngestUrl`(기본값 `rtmps://a.rtmps.youtube.com:443/live2`)이고, `key`만 vault에서 온다. 주입 후 서버는 `GetStreamServiceSettings`로 되읽어 검증하되 **키 값 자체는 비교하지도 반환하지도 않는다**(타입·server 일치와 키가 비어 있지 않은지만 확인). 명령의 반환값은 `{streamServiceType, server, keyConfigured}`뿐이라 그대로 로그에 남겨도 안전하다.
 
-T3 전까지 vault 임시 구현은 env다:
+스트림 키도 Credential Manager에 넣는다(T3):
 
 ```powershell
-$env:VL_YOUTUBE_STREAM_KEY = '<Live Control Room에서 받은 스트림 키>'
+'<Live Control Room에서 받은 스트림 키>' | npm run secrets -w @vl/server -- set youtube.streamKey
 ```
 
-키가 없으면 명령은 OBS에 아무것도 보내지 않고 `MissingSecretError: secret not configured: youtube.streamKey (provider: env)`로 거부한다. 값은 메시지에 들어가지 않는다.
+키가 없으면 명령은 OBS에 아무것도 보내지 않고 `MissingSecretError: secret not configured: youtube.streamKey`로 거부한다. 값은 메시지에 들어가지 않는다.
 
 **저장소에는 스트림 키가 없다.** `ops/obs/.../service.json`에 `key` 필드를 두지 않으며, `ops/obs/`의 모든 json을 재귀 탐색해 비어 있지 않은 `key`를 금지하는 테스트가 이를 강제한다(`apps/server/src/obs/profile.test.ts`).
 

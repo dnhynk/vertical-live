@@ -198,6 +198,31 @@ describe('ObsControl stream service injection', () => {
     expect(requestTypes()).not.toContain('SetStreamServiceSettings')
   })
 
+  it('does not read the environment when no provider is injected', async () => {
+    // Review round 1, B1: T2's env provider was still the operational default
+    // after T3, so `VL_YOUTUBE_STREAM_KEY` could stand in for the vault. The
+    // default is `defaultSecretProvider()` (Windows Credential Manager) now, so
+    // this call must fail — with the vault missing the key on Windows, or with
+    // the vault being unavailable elsewhere — and never return the env value.
+    const envKey = 'synthetic-env-stream-key-must-not-be-used'
+    process.env['VL_YOUTUBE_STREAM_KEY'] = envKey
+    try {
+      const commands = new ObsControl({
+        source: client,
+        config: testObsConfig(server.url, { streamIngestUrl: TEST_INGEST_URL }),
+        clock: new FakeClock({ autoAdvance: true }),
+      })
+
+      const error = await commands.setStreamServiceFromVault().catch((caught: unknown) => caught)
+
+      expect(error).toBeInstanceOf(Error)
+      expect((error as Error).message).not.toContain(envKey)
+      expect(requestTypes()).not.toContain('SetStreamServiceSettings')
+    } finally {
+      delete process.env['VL_YOUTUBE_STREAM_KEY']
+    }
+  })
+
   it('keeps the key out of the missing-secret error message', async () => {
     const commands = control({ streamIngestUrl: TEST_INGEST_URL }, new EnvSecretProvider({}))
 
