@@ -57,8 +57,10 @@ try {
 
 명세는 "writer failure/`lastFailure` 또는 별도 ack failure 카운터"를 허용한다. **기존 `lastFailure`/`consecutiveFailures`를 쓴다**:
 
-- T12 `supervisor/signals.ts:309`의 `coordinatorSignal`이 이미 `engine.consecutiveFailures > 0`을 `degraded('writer_failing')`으로 읽는다. 같은 필드에 실으면 **T12를 한 줄도 고치지 않고** 같은 tick에 supervisor 판정에 반영된다. 새 degraded 토큰을 만들면 `signals.ts`가 그것을 모르므로 표면화만 되고 판정에는 쓰이지 않는다(= 명세 (b) 미충족). T12 파일 수정은 이 task 범위 밖이다.
+- T12 `supervisor/signals.ts:309`의 `coordinatorSignal`이 이미 `engine.consecutiveFailures > 0`을 `degraded('writer_failing')`으로 읽는다. 같은 필드에 실으면 **T12를 한 줄도 고치지 않고** supervisor 판정에 반영된다. 새 degraded 토큰을 만들면 `signals.ts`가 그것을 모르므로 표면화만 되고 판정에는 쓰이지 않는다(= 명세 (b) 미충족). T12 파일 수정은 이 task 범위 밖이다.
 - 원인 구분은 `/metrics` 카운터 `ack_effect_store_failed`와 로그 이벤트 `engine.ack_store_failed`(kind·code)로 남긴다 — 이것이 명세가 말한 "별도 ack failure 카운터"다. `EngineHealth`에 아무도 읽지 않는 필드를 새로 만들지 않는다(`CLAUDE.md` §4 "사용하지 않는 추상화 금지").
+
+**정정 (review round 1, B1)**: *어느 필드에 싣는가*는 위 판단대로였지만 *얼마나 오래 남는가*가 틀렸다. `#consecutiveFailures`는 writer **pass** 스트릭이고 `runPending()`이 pass 완료마다 0으로 되돌린다. 엔진 pass는 250ms(`engine.tickIntervalMs`), T12 평가는 2000ms(`supervisor.evaluateIntervalMs`)이므로, 같은 ACK 경로가 여전히 깨져 있어도 커밋할 것이 없는 pass 하나가 신호를 지워 aggregator가 아예 못 볼 수 있었다. round 1 수정(`765ef36`)은 ACK-store 실패를 별도 상태 `#unrecordedAcks`(아직 열려 있는 effect id 집합)로 옮기고 `EngineHealth.consecutiveFailures`를 **두 값의 합**으로 보고한다 — T12는 그대로 두고, 각 절반은 자기 증거(pass 완료 / ACK 기록)로만 지워진다. 자세한 내용은 `## Review round 1`.
 
 ## Sources consulted (official docs)
 
@@ -109,7 +111,7 @@ AssertionError: expected [ …(1) ] to have a length of +0 but got 1
 
 가설이 그대로 확인됐다: (1) `markEffectAcked`의 `UPDATE`가 실제 `SQLITE_FULL`("database or disk is full")로 실패하고, (2) 그 예외가 `StateEngine.onAckEffect`(engine.ts:406)에서 그대로 올라가며, (3) 실제 `/ws/renderer` 소켓으로 보냈을 때 `uncaughtException`이 **1건** 잡혔다 — 테스트가 리스너를 달지 않았다면 그 자리에서 프로세스가 끝난다. 반증(예외 0건·다른 위치에서 처리)은 관측되지 않았다.
 
-수정 후 같은 파일: `Test Files 1 passed (1) / Tests 4 passed (4)`(허브 백스톱 테스트 1건 추가).
+수정 후 같은 파일: `Test Files 1 passed (1) / Tests 4 passed (4)`(허브 백스톱 테스트 1건 추가). review round 1에서 2건이 더 붙어 지금은 6건이다.
 
 ### 재현 방법에 대한 메모 (왜 200건인가)
 
@@ -121,7 +123,7 @@ AssertionError: expected [ …(1) ] to have a length of +0 but got 1
 |---|---|---|---|
 | 1 | 재현 테스트가 수정 전 실패, 수정 후 통과 | met | 위 "재현 관측"(수정 전 2건 실패) / 수정 후 `Tests 4 passed (4)` |
 | 2 | (a) store 실패로 프로세스가 죽지 않는다 | met | `ack-store-failure.test.ts` "survives an ack_effect frame the store cannot record": 실제 WS로 201건 ACK 전송, `process.on('uncaughtException')` 수집 0건, 이후 `GET /health`가 응답. 허브 백스톱은 "renderer hub, when a handler throws" |
-| 3 | (b) 실패가 엔진 건강으로 표면화되고 T12가 degraded 판정에 쓸 수 있다 | met | 같은 파일: `health.consecutiveFailures > 0`, `lastFailure.error =~ /database or disk is full/`, `degradedReasons`에 `writer_failing`. 이 두 필드가 T12 `supervisor/signals.ts:309` coordinator signal의 입력이다(`degraded`, reason `writer_failing`). `/metrics`에 `ack_effect_store_failed` 카운터, 로그 `engine.ack_store_failed`(kind·code) |
+| 3 | (b) 실패가 엔진 건강으로 표면화되고 T12가 degraded 판정에 쓸 수 있다 | met (round 1 수정 후) | 실제 `HealthAggregator`로 검증한다 — `health()` 필드가 움직였다는 것과 supervisor 판정이 움직였다는 것은 다른 주장이고, round 1이 그 틈을 찾아냈다. `ack-store-failure.test.ts` "stays degraded across successful writer passes and clears when the ACK lands": ACK 실패 → 공간 확보 → **성공한 pass 16회**(250ms 간격, T12 평가 주기 2회분) 이후에도 `families.coordinator = {status:'degraded', reason:'writer_failing'}`이고 `consecutiveFailures === 거부 건수`, 재ACK 성공 후 `ok`. 같은 파일의 disk-full 테스트가 `lastFailure.error =~ /database or disk is full/`, `/metrics` `ack_effect_store_failed`, 로그 `engine.ack_store_failed`(kind·code)를 함께 단언한다 |
 | 4 | (c) 해당 ACK는 재시도 대상으로 남는다 | met | 거부된 effect는 `acked_at` NULL이고 `openEffectCount == 거부 건수`, `listUnackedEffects()`에 그대로 있다. 공간 확보 후 §7.3(7) 재전송 → 렌더러 재ACK → `listUnackedEffects()` 0건(엔진 API·실제 WS 두 경로 모두 단언) |
 | 5 | 기존 T8/T11/T15 테스트 회귀 없음 | met | `npm run test` → 137 files, 1875 passed, 1 skipped (skip은 기존 것) |
 | 6 | 게이트 5개 로컬 통과 | met | 아래 Gates. CI는 BOARD **E-5**(GitHub Actions 결제 차단)로 실행 불가 |
@@ -145,11 +147,56 @@ CI: **실행하지 않았음 — BOARD E-5**(GitHub Actions 결제 차단으로 
 ## Not done / out of scope
 
 - T15의 `tools/soak/src/injection/renderer.ts`(`pauseEffectAcks`)는 건드리지 않았다(명세 지시).
-- `apps/server/src/supervisor/*`는 고치지 않았다(위 "설계 판단" 참조). 새 degraded 토큰을 만들지 않았으므로 T12는 수정 없이 같은 tick에 판정한다.
+- `apps/server/src/supervisor/*`는 고치지 않았다(위 "설계 판단" 참조). 새 degraded 토큰도 새 `EngineHealth` 필드도 만들지 않고 기존 `consecutiveFailures`에 합산했으므로, T12는 round 1 수정 뒤에도 한 줄도 바뀌지 않았다. supervisor가 실제로 그렇게 판정하는지는 `HealthAggregator`를 직접 돌려 단언한다(합격 기준 3).
 - 테스트의 `fillDisk`/`freeDisk`는 T15 `tools/soak/src/injection/storage.ts`와 같은 방법이지만 재사용하지 않고 6줄을 다시 썼다: `tools/soak`가 `@vl/server`에 의존하므로 반대 방향 의존은 순환이 된다. 출처(같은 SQLite 문서)는 주석에 적었다.
 - `markEffectExpired`(`#sweepEffects`)·`markEffectPublished`도 같은 store 예외를 낼 수 있지만 그 둘은 이미 writer pass 안에서 돌아 `pump()`가 잡는다 — 범위 밖이고 결함도 아니다.
 
 ## Follow-ups
 
 - T15 F-12 drill에서 `pauseEffectAcks()`를 빼고(이제 gap이 닫혔다) disk-full 중에도 ACK가 흐르는 상태로 drill을 돌릴 수 있는지 재검토 — `tools/soak/src/injection/renderer.ts`의 주석이 이 티켓을 가리킨다(T15 소유).
-- disk-full이 지속되는 동안 `#reconcileInteraction`이 커밋을 시도했다 실패하며 `consecutiveFailures`가 0↔1을 오가는 진동은 T8 때부터 있던 동작이다(idle pass가 카운터를 0으로 되돌린다). ACK 실패도 같은 필드를 쓰므로 같은 진동을 공유한다. 표면을 sticky하게 바꾸는 것은 T8/T12 공동 결정이 필요해 이 티켓에서 하지 않았다.
+- ~~disk-full이 지속되는 동안 `#reconcileInteraction`이 커밋을 시도했다 실패하며 `consecutiveFailures`가 0↔1을 오가는 진동은 T8 때부터 있던 동작이다(idle pass가 카운터를 0으로 되돌린다). ACK 실패도 같은 필드를 쓰므로 같은 진동을 공유한다. 표면을 sticky하게 바꾸는 것은 T8/T12 공동 결정이 필요해 이 티켓에서 하지 않았다.~~ → **round 1 B1에서 고쳤다.** ACK-store 실패 절반은 더 이상 진동하지 않는다(`#unrecordedAcks`). **writer pass 실패 절반의 진동은 그대로 남아 있다** — pass 실패는 다음 pass가 성공하면 사라지는 것이 정의이고, 이를 sticky하게 바꾸는 것은 여전히 T8/T12 공동 결정이다. 이 티켓의 범위는 ACK 경로다.
+
+## Review round 1
+
+리뷰: PR #21, verdict `request_changes`(blocker 1). 게이트 5개와 합격 기준 1·2·4·5·6은 리뷰어가 직접 실행해 통과 확인했고, 기준 3만 미충족이었다. 지적이 정확하며 반박하지 않는다 — 티켓 스스로 이 진동을 `## Follow-ups`에 적어두고도 "명세 (b) 충족"이라고 썼던 것이 잘못이다. 수정은 한 커밋(`765ef36`).
+
+- Orca: task `task_33718e078e54` · dispatch `ctx_582591b5e760`
+
+| finding | 처리(고침 SHA / 반박 근거) |
+|---|---|
+| [blocker] `engine.ts:341` — `#recordAckFailure()`가 writer의 공유 `consecutiveFailures`를 올리지만 `runPending()` 완료마다 그 값이 무조건 0이 되어, 같은 ACK 경로가 깨져 있어도(effect open, `markEffectAcked` 여전히 실패) 신호가 사라진다. 리뷰어 관측: `afterAckFailure={1,degraded,open 2}` → 무관한 pass 1회 → `{0,false,2}` → 같은 ACK 재실패 `{1,true,2}`. 엔진 pass 250ms(`config/default.json:33`) vs T12 평가 2000ms(`:140`, `supervisor.ts:803`)라 `signals.ts:309`가 읽는 시점에 실패가 안 보일 수 있음 → 기준 (b) 미충족 | **고침 `765ef36`.** ACK-store 실패의 **수명**을 writer pass에서 떼어냈다. 새 상태 `#unrecordedAcks: Set<string>` — store가 그 effect의 ACK를 거부하면 id가 들어가고, **그 effect가 열린 집합을 떠날 때만** 나온다(ACK가 마침내 기록됨, 또는 §7.3(7)이 창을 닫아 재전송 자체가 사라짐). `runPending()`은 이제 writer 카운터만 0으로 되돌린다. `EngineHealth.consecutiveFailures`는 **두 값의 합**을 보고하므로 `signals.ts`도 `supervisor/*`도 한 줄도 바뀌지 않았고, 두 절반은 각자의 증거로만 지워진다. 열려 있지 않은 effect의 ACK 실패는 집합에 넣지 않는다 — 재전송이 없어 어떤 미래의 ACK도 그것을 지울 수 없으므로 영구 degraded가 된다(그런 실패도 `lastFailure`·`/metrics`·로그에는 그대로 남는다). |
+| ↳ 요구된 타이밍/통합 테스트 | **추가 `765ef36`.** `ack-store-failure.test.ts`에 실제 `HealthAggregator`(T12)로 판정을 읽는 헬퍼 `coordinatorVerdict()`를 두고 2건: (1) "stays degraded across successful writer passes and clears when the ACK lands" — 실제 `SQLITE_FULL`로 ACK 94건 거부 → 공간 확보 → **250ms 간격 성공 pass 16회**(= T12 평가 주기 2회분, `runPending()`이라 pass가 실패하면 테스트가 실패한다) → `families.coordinator={degraded, writer_failing}` · `consecutiveFailures === 94` · `openEffectCount === 94` → 렌더러 재ACK → `consecutiveFailures === 0` · `coordinator = ok`(false-degraded 고착 없음). 수정 전 코드에서 이 테스트는 `expected +0 to be 94`로 실패한다(아래 반증 실행). (2) "stops reporting a fault that no ACK can clear any more" — 지속 가능한 상태는 고착도 가능하므로, effect 창이 닫히면(§7.3(7) expiry) 신호가 스스로 풀리는 것을 단언한다. |
+| [minor] 티켓 `## Result` 기준 3의 "같은 tick" 서술이 250ms 리셋 대 2000ms pull이 보장할 수 있는 것을 넘어선다 | **고침 `765ef36`.** "같은 tick" 표현을 지우고(설계 판단 절·Not done 절), 기준 3의 근거를 실제 aggregator 판정으로 바꿔 적었다. `## Follow-ups`의 진동 항목도 "ACK 절반은 고쳤고 writer pass 절반은 그대로"로 정정했다. |
+
+### 반증 실행 (수정이 실제로 그 결함을 고치는가)
+
+```text
+$ git stash push -- apps/server/src/engine/engine.ts   # 수정 전 engine.ts로 되돌림
+$ npx vitest run apps/server/src/engine/ack-store-failure.test.ts
+ ❯ apps/server/src/engine/ack-store-failure.test.ts (6 tests | 1 failed)
+     × stays degraded across successful writer passes and clears when the ACK lands
+AssertionError: expected +0 to be 94 // Object.is equality
+ ❯ apps/server/src/engine/ack-store-failure.test.ts:292:42
+     expect(degraded.consecutiveFailures).toBe(refused.length)
+$ git stash pop
+$ npx vitest run apps/server/src/engine/ack-store-failure.test.ts
+ Test Files  1 passed (1) / Tests  6 passed (6)
+```
+
+리뷰어가 본 그 값(성공 pass 뒤 `0`)이 그대로 재현됐고, 수정 후에는 94가 유지된다.
+
+### Gates (round 1 fix, 로컬)
+
+`git fetch origin && git rebase origin/main`(cbb7cba 기준) 후 실행:
+
+```text
+npm run format:check -> All matched files use Prettier code style!
+npm run lint         -> eslint 0 problems; check-no-legacy-imports: ok (0 legacy imports);
+                        check-install-scripts: ok (4 reviewed, better-sqlite3 binding loads)
+npm run typecheck    -> tsc --build tsconfig.json (오류 없음)
+npm run test         -> Test Files 137 passed (137) / Tests 1877 passed | 1 skipped (1878)
+npm run build        -> contract·renderer·server·simulator·soak 빌드 성공,
+                        copied 5 migration(s) to dist/db/migrations, docs/ops/data-map.md up to date
+```
+
+CI: **실행하지 않았음 — BOARD E-5**(GitHub Actions 결제 차단). 위 로컬 결과가 근거다.
