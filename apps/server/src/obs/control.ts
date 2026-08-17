@@ -104,7 +104,7 @@ export class ObsControl {
     const key = await requireSecret(
       this.#secrets,
       'youtube.streamKey',
-      `set ${EnvSecretProvider.envVarFor('youtube.streamKey')} (spec §10.2: the stream key lives in the vault, not in OBS or the repository)`,
+      `set ${EnvSecretProvider.envVarFor('youtube.streamKey')} (spec §10.2, BOARD A-16: the vault is the stream key's system of record — it is never in the repository, the game DB, logs, or on screen. Once injected, OBS caches it in the active profile's service.json; clearing that on stop is T17)`,
     )
     const server = this.#config.streamIngestUrl
 

@@ -206,6 +206,22 @@ describe('ObsControl stream service injection', () => {
     )
   })
 
+  it('describes the vault as system of record without claiming OBS never holds the key', async () => {
+    // Review round 2 finding 1. This message is operator-visible, so BOARD A-16
+    // governs its wording: the vault is the system of record and the repository
+    // is excluded, but OBS caching the injected key in the active profile's
+    // service.json must be acknowledged rather than denied.
+    const commands = control({ streamIngestUrl: TEST_INGEST_URL }, new EnvSecretProvider({}))
+
+    const error = await commands.setStreamServiceFromVault().catch((caught: unknown) => caught)
+    const message = (error as Error).message
+
+    expect(message).toContain('VL_YOUTUBE_STREAM_KEY')
+    expect(message).toContain('system of record')
+    expect(message).toContain('service.json')
+    expect(message).not.toMatch(/not in OBS|only in the vault/)
+  })
+
   it('fails when OBS did not apply the service, and the error carries no key', async () => {
     // OBS acknowledges the write but reports something else back.
     const commands = control({ streamIngestUrl: TEST_INGEST_URL })

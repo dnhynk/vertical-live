@@ -191,7 +191,9 @@ npm error code 1
 
 ## Review round 1
 
-리뷰: [PR #3 review 4948338037](https://github.com/dnhynk/vertical-live/pull/3#pullrequestreview-4948338037) · verdict `request_changes` · blocker 2 + major 3. 반박 없음 — 5개 모두 재현했고 모두 고쳤다.
+리뷰: [PR #3 review 4948338037](https://github.com/dnhynk/vertical-live/pull/3#pullrequestreview-4948338037) · verdict `request_changes` · blocker 2 + major 3. 반박 없음 — 5개 모두 재현했다.
+
+> **정정 (round 2)**: 이 절은 원래 "5개 모두 고쳤다"라고 썼지만 그 진술은 너무 넓었다. finding 2의 **기능 경로**는 round 1에서 닫혔으나, 운영자에게 보이는 문자열 2개(`control.ts`의 `MissingSecretError` hint, `config.ts`의 `streamIngestUrl` 주석)에 A-16이 금지한 vault-only 주장이 남아 있었다. round 2에서 닫았다(아래 `## Review round 2` finding 1). 나머지 4개는 round 2 리뷰의 replay에서 **resolved**로 확인됐다.
 
 | # | 심각도 | 위치 | finding | 처리 |
 |---|---|---|---|---|
@@ -217,5 +219,3 @@ npm error code 1
 - T3가 `EnvSecretProvider`를 vault 구현으로 교체할 때 `obs.websocketPassword`·`youtube.streamKey` 이름을 그대로 쓴다.
 - **T17 (BOARD 후보, review round 1 finding 2에서 파생)**: `setStreamServiceFromVault()`로 주입한 스트림 키는 OBS가 활성 프로파일의 `service.json`에 영속시킨다. 남은 노출을 닫으려면 (1) `StopStream` 후 `SetStreamServiceSettings`로 `key`를 비워 프로파일에서 제거하고, (2) `%APPDATA%\obs-studio\basic\profiles\vertical-live\` 디렉터리 ACL을 서비스 계정으로 제한한다. 근거·링크는 `docs/ops/obs-setup.md` §3 "정직하게: 주입 후 키는 호스트 OBS 프로파일에도 남는다".
 - **T12**: go-live 시퀀스에서 `startStream()` **앞에** `setStreamServiceFromVault()`를 호출한다. T2는 명령만 제공하고 시퀀스를 엮지 않는다(`startStream()`은 암묵적으로 주입하지 않는다 — 그러면 모든 시작이 스트림 키를 요구하고 idempotent 조기 반환이 깨진다).
-</content>
-</invoke>

@@ -32,8 +32,10 @@ export interface ObsConfig {
   readonly browserSourceName: string
   /**
    * RTMPS ingestion URL the server injects with the vault's stream key before
-   * going live. The key itself never appears in config — only in the vault
-   * (spec §10.2).
+   * going live. The key itself never appears in config: the vault is its system
+   * of record (spec §10.2, BOARD A-16), and it stays out of the repository, the
+   * game DB, logs, and the screen. Once injected, OBS caches it in the active
+   * profile's `service.json`; clearing that on stop is T17.
    */
   readonly streamIngestUrl: string
   readonly reconnect: ObsReconnectConfig
