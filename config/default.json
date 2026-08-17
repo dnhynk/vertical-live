@@ -97,6 +97,10 @@
     "startup": {
       "maxAttempts": 5
     },
+    "chatStart": {
+      "timeoutMs": 30000,
+      "pollIntervalMs": 250
+    },
     "integrations": {
       "obs": false,
       "broadcast": false
@@ -160,6 +164,7 @@
       "requiredFamilies",
       "renderer",
       "startup.maxAttempts",
+      "chatStart",
       "restart",
       "alerts.suppressWindowMs",
       "alerts.deliveryTimeoutMs",

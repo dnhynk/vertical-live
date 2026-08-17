@@ -111,6 +111,7 @@ degraded family → 컴포넌트 대응은 `componentsToRestart()`에 있다. �
 
 1. **침묵은 고장이 아니다.** 채팅 메시지가 없다고 degraded가 되지 않는다(§9.4(3)). 조용한 채팅에서도 T9는 `youtube.chat.user_events=ok`를 계속 보고한다.
 2. **보고가 전혀 없는 것은 침묵이 아니라 producer 부재다.** 1번이 보호하는 것은 "메시지가 없다"이지 "전송 계층이 아무 말도 안 한다"가 아니다. `supervisor.requiredFamilies`(= coordinator·state_commit·**chat_transport**·renderer·obs_output·youtube_broadcast)에 있는 family가 `unobservableGraceMs`를 넘겨 계속 관측 불가면 degraded로 올린다(리뷰 round 1 B2).
+   - **family를 `ok`로 만들 수 있는 신호는 정해져 있다**(`FAMILY_READINESS_SIGNALS`, 리뷰 round 2). chat의 `reconnect`·`user_events`는 구조상 거의 항상 `ok`다 — 전자는 "거부된 resume token이 없다", 후자는 §9.4(3)의 침묵 — 이라서 **읽기 전용 부기(bookkeeping)**로 분류하고, `chat_transport`는 `youtube.chat.transport`(= 어느 경로든 *연결됨*)만이 `ok`로 올릴 수 있다. `keepalive`는 아직 dialing 중인 채널에도 `ok`를 주므로 readiness에서 빼되, **degrade는 할 수 있다**(`channel_transient_failure`). 나머지 family는 모든 신호가 readiness다.
 3. **`live`는 required family가 전부 `ok`일 때만이다.** degraded가 0이어도 required 중 확인되지 않은 것이 있으면 `live`가 아니다 — §9.2의 live는 "송출·chat listener·상태 tick·렌더러 heartbeat가 **모두 정상**"이다.
 4. **screenshot은 판정에 쓰지 않는다**(§9.4). 4.4 참조.
 
@@ -118,7 +119,7 @@ degraded family → 컴포넌트 대응은 `componentsToRestart()`에 있다. �
 
 입력 경로(chat transport)나 모더레이션 제어가 불건전하면 supervisor가 엔진에 `reportInputHealth('degraded')`로 알리고, 엔진이 published read model의 `interactionEnabled`를 끈다. 화면 CTA는 그 값을 따른다. supervisor가 두 번째 답을 계산하지 않는 이유는 렌더러가 재접속해도 서버 snapshot과 같은 값을 봐야 하기 때문이다(§10.2).
 
-CTA를 켜려면 `chat_transport`가 **`ok`여야 한다** — "degraded가 아니다"로는 부족하다. 아무 보고도 없는 전송 계층은 건전하다는 증거가 아니기 때문이다(4장 규칙 2).
+CTA를 켜려면 `chat_transport`가 **`ok`여야 한다** — "degraded가 아니다"로는 부족하다. 아무 보고도 없는 전송 계층은 건전하다는 증거가 아니기 때문이다(4장 규칙 2). 그리고 그 `ok`는 **연결된 transport 신호에서만** 나온다: idle source가 내는 `reconnect=ok`·`user_events=ok`로는 CTA가 켜지지 않는다(리뷰 round 2 재현).
 
 ### 4.2 알림 (BOARD D-3)
 
@@ -174,7 +175,7 @@ npm run secrets -w @vl/server -- set monitoring.deadManPushUrl
 | 5 | `streamService` | vault의 stream key를 obs-websocket으로 주입(A-16) |
 | 6 | `startStream` | 인코더 출력 시작 |
 | 7 | `goLive` | auto-start 대기 후 필요하면 transition(§4 `invalidAutoStart`) |
-| 8 | `chatSource` | `liveChatId`로 chat listener 시작. **source가 실제로 시작됐을 때만 성공**(리뷰 round 1 B2) |
+| 8 | `chatSource` | `liveChatId`로 chat listener 시작. **listener가 실제로 돌기 시작할 때까지 기다렸다가**(`supervisor.chatStart.timeoutMs`) 성공한다 — 객체 존재가 아니라 경로 선택(`mode≠idle`)+미정지 상태로 판정(리뷰 round 1 B2, round 2) |
 | 9 | `publish` | 마커 제거 확인 후 공개 전환(A-18). `privacyStatus=private`이면 하지 않는다 |
 
 7번(`goLive`)은 TASK_SPECS 목록에 없지만 8·9번이 그것을 필요로 해서 추가했다(방송이 live가 되어야 `liveChatId`가 생기고, auto-start가 거부될 수 있다).

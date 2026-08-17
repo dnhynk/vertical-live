@@ -1,3 +1,4 @@
+import type { Clock } from '../clock.js'
 import type { EngineHealth } from '../engine/engine.js'
 import { silentLogger, type Logger } from '../secrets/redaction.js'
 import type { SecretName, SecretProvider } from '../secrets/types.js'
@@ -50,12 +51,18 @@ export interface ObsPort {
 
 export interface ChatPort {
   start(): void
-  /** True once a real source object exists and has been started. */
+  /**
+   * True once the listener is **running** — a path selected and not stopped —
+   * not merely once the object exists (review round 2). It flips
+   * asynchronously, so the start-up step polls it.
+   */
   started(): boolean
 }
 
 export interface RuntimeDeps {
   readonly config: SupervisorConfig
+  /** Injected so the chat step's bounded wait is testable (spec §10.2). */
+  readonly clock: Clock
   readonly engine: EnginePort
   /** Opens the database and applies migrations; throws when it cannot. */
   readonly openStore: () => void
@@ -120,20 +127,26 @@ export function buildStartupSteps(deps: RuntimeDeps): StartupSteps {
       }
       await deps.broadcast.goLive()
     },
-    chatSource: () => {
+    chatSource: async () => {
       if (deps.chat === null) {
         skip('chatSource', 'not_configured')
         return
       }
       deps.chat.start()
       // A step that "succeeded" without a source running is what let a
-      // configured chat disappear silently (review round 1, B2): the port
-      // reports whether the listener really exists, and a `false` here fails the
-      // sequence instead of letting the run go live without an input path.
-      if (!deps.chat.started()) {
-        throw new Error(
-          'chat source did not start; the configured input path (spec §9.4(3)) is not running',
-        )
+      // configured chat disappear silently (review round 1, B2). Round 2 found
+      // the check too weak: it asked whether the *object* existed. Starting is a
+      // background job — resolve the `liveChatId`, dial gRPC, fall back to REST —
+      // so the step waits for the listener to report that it is actually running
+      // and fails the sequence if it never does.
+      const deadlineMs = deps.clock.monotonicMs() + deps.config.chatStart.timeoutMs
+      while (!deps.chat.started()) {
+        if (deps.clock.monotonicMs() >= deadlineMs) {
+          throw new Error(
+            `chat source did not start within ${deps.config.chatStart.timeoutMs}ms; the configured input path (spec §9.4(3)) is not running`,
+          )
+        }
+        await sleep(deps.clock, deps.config.chatStart.pollIntervalMs)
       }
     },
     publish: async () => {
@@ -216,6 +229,12 @@ export function buildPreflightProbes(deps: PreflightDeps): PreflightProbes {
       return deps.obs.connected() ? PREFLIGHT_OK : { passed: false, reason: 'obs_not_connected' }
     },
   }
+}
+
+async function sleep(clock: Clock, delayMs: number): Promise<void> {
+  await new Promise<void>((resolve) => {
+    clock.setTimeout(resolve, delayMs)
+  })
 }
 
 function notConfigured(what: string): PreflightOutcome {

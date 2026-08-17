@@ -35,6 +35,9 @@ function deps(overrides: Partial<RuntimeDeps> = {}): RuntimeDeps & { readonly ca
   return {
     calls,
     config: loadSupervisorConfig(),
+    // Auto-advancing: the chat step sleeps in a loop until the listener reports
+    // it is running, which is exactly what this mode is for.
+    clock: new FakeClock({ autoAdvance: true }),
     engine: {
       start: () => {
         calls.push('engine.start')
@@ -141,13 +144,14 @@ describe('buildStartupSteps', () => {
     expect(runtime.calls).not.toContain('broadcast.publish')
   })
 
-  it('fails the chat step when the configured source is not running (review round 1, B2)', async () => {
-    // A step that succeeded while no listener existed is what let the run go
-    // live without an input path.
+  it('fails the chat step when the configured source never starts (round 1 B2, round 2)', async () => {
+    // A step that succeeded while no listener was running is what let the run go
+    // live without an input path. Starting is asynchronous, so the step waits —
+    // and gives up at `supervisor.chatStart.timeoutMs`.
     const runtime = deps({
       chat: {
         start: () => {
-          /* a source that silently is not there */
+          /* a source that never leaves idle */
         },
         started: () => false,
       },
@@ -161,6 +165,29 @@ describe('buildStartupSteps', () => {
     expect(result.completed).toBe(false)
     expect(result.failedStep).toBe('chatSource')
     expect(result.error).toContain('chat source did not start')
+  })
+
+  it('waits for the listener to report that it is really running (round 2)', async () => {
+    // `started()` flips only after the background loop has selected a path, so
+    // the step polls instead of accepting the object the moment it exists.
+    let polls = 0
+    const runtime = deps({
+      chat: {
+        start: () => {},
+        started: () => {
+          polls += 1
+          return polls > 3
+        },
+      },
+    })
+
+    const result = await runStartupSequence({
+      steps: buildStartupSteps(runtime),
+      clock: new FakeClock(),
+    })
+
+    expect(result.completed).toBe(true)
+    expect(polls).toBeGreaterThan(3)
   })
 
   it('skips an integration this deployment has not configured', async () => {

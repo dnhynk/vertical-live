@@ -31,6 +31,18 @@ export interface SupervisorRestartConfig {
   readonly maxAttempts: Readonly<Record<SupervisedComponent, number>>
 }
 
+export interface ChatStartConfig {
+  /**
+   * How long the `chatSource` start-up step waits for the listener to report
+   * that it is actually running before it fails the sequence. Dialling gRPC,
+   * falling back to REST and resolving the `liveChatId` all happen in the
+   * background, so "started" is a state to wait for, not a call that returns
+   * (review round 2).
+   */
+  readonly timeoutMs: number
+  readonly pollIntervalMs: number
+}
+
 export interface SupervisorStartupConfig {
   /**
    * Attempts at the whole §7.3(3) start-up sequence before `safe_stopped`.
@@ -124,6 +136,7 @@ export interface SupervisorConfig {
   readonly requiredFamilies: readonly HealthFamily[]
   readonly renderer: SupervisorRendererConfig
   readonly startup: SupervisorStartupConfig
+  readonly chatStart: ChatStartConfig
   readonly integrations: SupervisorIntegrationConfig
   readonly restart: SupervisorRestartConfig
   readonly alerts: SupervisorAlertConfig
@@ -166,6 +179,7 @@ export function loadSupervisorConfig(options: LoadSupervisorConfigOptions = {}):
   const section = readObject(root['supervisor'], 'supervisor')
   const renderer = readObject(section['renderer'], 'supervisor.renderer')
   const startup = readObject(section['startup'], 'supervisor.startup')
+  const chatStart = readObject(section['chatStart'], 'supervisor.chatStart')
   const integrations = readObject(section['integrations'], 'supervisor.integrations')
   const restart = readObject(section['restart'], 'supervisor.restart')
   const maxAttempts = readObject(restart['maxAttempts'], 'supervisor.restart.maxAttempts')
@@ -213,6 +227,13 @@ export function loadSupervisorConfig(options: LoadSupervisorConfigOptions = {}):
     }),
     startup: Object.freeze({
       maxAttempts: readPositiveInt(startup['maxAttempts'], 'supervisor.startup.maxAttempts'),
+    }),
+    chatStart: Object.freeze({
+      timeoutMs: readPositiveInt(chatStart['timeoutMs'], 'supervisor.chatStart.timeoutMs'),
+      pollIntervalMs: readPositiveInt(
+        chatStart['pollIntervalMs'],
+        'supervisor.chatStart.pollIntervalMs',
+      ),
     }),
     integrations: Object.freeze({
       obs: readBoolean(env['VL_OBS_ENABLED'] ?? integrations['obs'], 'supervisor.integrations.obs'),

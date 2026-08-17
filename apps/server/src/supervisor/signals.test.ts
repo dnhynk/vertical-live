@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest'
 
+import type { HealthSignal } from '../health/types.js'
 import { OBS_HEALTH_SIGNAL_NAMES } from '../obs/health.js'
+import { testChatConfig } from '../testing/chat-test-support.js'
 import { FakeClock } from '../testing/fake-clock.js'
 import { YOUTUBE_BROADCAST_HEALTH_SIGNAL_NAMES } from '../youtube/broadcast/health.js'
-import { CHAT_HEALTH_SIGNAL_NAMES } from '../youtube/chat/health.js'
+import { buildChatHealthSignals, CHAT_HEALTH_SIGNAL_NAMES } from '../youtube/chat/health.js'
+import { ChatSourceState } from '../youtube/chat/state.js'
 import { loadSupervisorConfig } from './config.js'
 import { HealthAggregator, MODERATION_HEALTHY, type AggregatorReadings } from './signals.js'
 import { BASE_ENGINE_HEALTH, HEALTHY_RENDERER, healthySignals, signal } from './testing/harness.js'
@@ -132,6 +135,113 @@ describe('health aggregator (spec §9.4)', () => {
     expect(later.families.chat_transport.status).toBe('degraded')
     expect(later.degradedFamilies).toContain('chat_transport')
     expect(config.requiredFamilies).toContain('chat_transport')
+  })
+
+  describe('chat readiness comes from the transport, not from its bookkeeping (round 2)', () => {
+    /** The signals T9's own state machine emits, not a hand-written stand-in. */
+    function realChatSignals(mutate: (state: ChatSourceState) => void = () => {}): HealthSignal[] {
+      const clock = new FakeClock()
+      const state = new ChatSourceState(clock, testChatConfig().grpc.keepalive)
+      mutate(state)
+      const channelState = state.mode === 'grpc' ? 'READY' : null
+      return buildChatHealthSignals(state.observe(null, channelState), clock)
+    }
+
+    it('does not call an idle source healthy (reviewer reproduction)', () => {
+      // An idle `ChatSourceState` reports `transport=unknown:not_started`,
+      // `keepalive=unknown:no_grpc_channel`, `reconnect=ok`, `user_events=ok`.
+      // The last two are `ok` by construction — §9.4(3) silence and "no token
+      // was rejected" — and folding them in with "any ok wins" made a listener
+      // that never connected look like a working one.
+      const idle = realChatSignals()
+      expect(idle.map((item) => `${item.name}=${item.status}`)).toEqual([
+        'youtube.chat.transport=unknown',
+        'youtube.chat.keepalive=unknown',
+        'youtube.chat.reconnect=ok',
+        'youtube.chat.user_events=ok',
+      ])
+
+      const aggregator = new HealthAggregator(config)
+      for (const item of healthySignals().filter(
+        (entry) => !entry.name.startsWith('youtube.chat.'),
+      )) {
+        aggregator.report(item)
+      }
+      for (const item of idle) aggregator.report(item)
+
+      const result = aggregator.evaluate(readings())
+
+      expect(result.families.chat_transport.status).toBe('unknown')
+      expect(result.families.chat_transport.reason).toBe('not_started')
+      expect(result.inputHealthy).toBe(false)
+      expect(result.requiredNotOk).toEqual(['chat_transport'])
+    })
+
+    it('accepts a connected REST path, where keepalive never applies', () => {
+      // Mode-aware readiness: `youtube.chat.transport` is `ok` exactly when a
+      // path is connected, and the REST path has no gRPC channel to keep alive.
+      const rest = realChatSignals((state) => {
+        state.setMode('rest')
+        state.recordResponse()
+      })
+      expect(rest[0]?.status).toBe('ok')
+      expect(rest[1]?.reason).toBe('no_grpc_channel')
+
+      const aggregator = new HealthAggregator(config)
+      for (const item of rest) aggregator.report(item)
+
+      const result = aggregator.evaluate(readings())
+
+      expect(result.families.chat_transport.status).toBe('ok')
+      expect(result.inputHealthy).toBe(true)
+    })
+
+    it('accepts a connected gRPC path', () => {
+      const grpc = realChatSignals((state) => {
+        state.setMode('grpc')
+        state.recordResponse()
+      })
+
+      const aggregator = new HealthAggregator(config)
+      for (const item of grpc) aggregator.report(item)
+
+      expect(aggregator.evaluate(readings()).families.chat_transport.status).toBe('ok')
+    })
+
+    it('does not let a channel that is still dialling count as delivering', () => {
+      // `keepalive` is `ok` for any channel state that is not a failure —
+      // including one that has never delivered a message — so it stays out of
+      // the readiness set and can only degrade the family.
+      const aggregator = new HealthAggregator(config)
+      aggregator.report(
+        signal('youtube.chat.transport', 'unknown', {
+          component: 'youtube-chat',
+          reason: 'reconnecting',
+        }),
+      )
+      aggregator.report(signal('youtube.chat.keepalive', 'ok', { component: 'youtube-chat' }))
+
+      const result = aggregator.evaluate(readings())
+
+      expect(result.families.chat_transport.status).toBe('unknown')
+      expect(result.inputHealthy).toBe(false)
+    })
+
+    it('still lets keepalive degrade the family', () => {
+      const aggregator = new HealthAggregator(config)
+      aggregator.report(signal('youtube.chat.transport', 'ok', { component: 'youtube-chat' }))
+      aggregator.report(
+        signal('youtube.chat.keepalive', 'degraded', {
+          component: 'youtube-chat',
+          reason: 'channel_transient_failure',
+        }),
+      )
+
+      const result = aggregator.evaluate(readings())
+
+      expect(result.families.chat_transport.status).toBe('degraded')
+      expect(result.families.chat_transport.reason).toBe('channel_transient_failure')
+    })
   })
 
   it('keeps a silent but reporting chat healthy for the CTA (spec §9.4(3))', () => {

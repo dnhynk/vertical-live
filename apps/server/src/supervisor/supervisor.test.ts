@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
 
+import { testChatConfig } from '../testing/chat-test-support.js'
+import { buildChatHealthSignals } from '../youtube/chat/health.js'
+import { ChatSourceState } from '../youtube/chat/state.js'
 import { SUPERVISED_COMPONENTS } from './types.js'
 import {
   BASE_ENGINE_HEALTH,
@@ -216,6 +219,50 @@ describe('supervisor state machine', () => {
       expect(harness.supervisor.state).toBe('safe_stopped')
       expect(harness.supervisor.health().safeStop?.kind).toBe('moderation_unhealthy')
       expect(harness.inputHealth).toBe('degraded')
+    })
+
+    it('will not go live for an idle chat source that only reports bookkeeping (round 2)', async () => {
+      // The reviewer's reproduction: not *absent* signals — a real idle
+      // `ChatSourceState`, which reports `transport=unknown:not_started`,
+      // `keepalive=unknown:no_grpc_channel`, and `reconnect`/`user_events=ok`.
+      // Round 1 folded those together and the run went live with the CTA on.
+      const harness = createSupervisorHarness({ preflight: passingPreflight() })
+      const chatNames = [
+        'youtube.chat.transport',
+        'youtube.chat.keepalive',
+        'youtube.chat.reconnect',
+        'youtube.chat.user_events',
+      ]
+      const pushIdleChat = (): void => {
+        harness.pushHealthy(chatNames)
+        const state = new ChatSourceState(harness.clock, testChatConfig().grpc.keepalive)
+        for (const item of buildChatHealthSignals(state.observe(null, null), harness.clock)) {
+          harness.push(item)
+        }
+      }
+
+      pushIdleChat()
+      await harness.supervisor.start()
+
+      expect(harness.supervisor.state).not.toBe('live')
+      expect(harness.inputHealth).toBe('degraded')
+      expect(harness.supervisor.health().interactionEnabled).toBe(false)
+      expect(harness.supervisor.aggregate?.families.chat_transport.status).toBe('unknown')
+      expect(harness.supervisor.aggregate?.requiredNotOk).toContain('chat_transport')
+
+      // A source that really connects — on either path — lifts it.
+      await harness.clock.advance(1000)
+      harness.pushHealthy(chatNames)
+      const connected = new ChatSourceState(harness.clock, testChatConfig().grpc.keepalive)
+      connected.setMode('rest')
+      connected.recordResponse()
+      for (const item of buildChatHealthSignals(connected.observe(null, null), harness.clock)) {
+        harness.push(item)
+      }
+      await harness.supervisor.evaluate()
+
+      expect(harness.supervisor.state).toBe('live')
+      expect(harness.inputHealth).toBe('ok')
     })
 
     it('will not go live while the chat producer is absent (review round 1, B2)', async () => {

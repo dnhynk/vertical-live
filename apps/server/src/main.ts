@@ -439,6 +439,7 @@ const screenshots =
 
 const runtimeDeps = {
   config: supervisorConfig,
+  clock: systemClock,
   engine: {
     start: () => {
       engine.start()
@@ -487,7 +488,15 @@ const runtimeDeps = {
           }
           chatSource.start()
         },
-        started: () => chatSource !== null,
+        // Running, not merely constructed (review round 2): a path has been
+        // selected (`mode` left `idle`) and the loop has not given up. Both are
+        // T9's own state, so this cannot drift from what the source reports on
+        // `/health`.
+        started: () => {
+          if (chatSource === null) return false
+          const observation = chatSource.observe()
+          return observation.stopped === null && observation.mode !== 'idle'
+        },
       }
     : null,
   logger: stdoutLogger,

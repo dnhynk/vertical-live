@@ -60,6 +60,48 @@ const PUSHED_SIGNAL_FAMILY: Readonly<Record<string, HealthFamily>> = Object.free
   [YOUTUBE_BROADCAST_LIFECYCLE_SIGNAL]: 'youtube_broadcast',
 })
 
+/**
+ * Which of a family's signals can prove it is *working* (review round 2).
+ *
+ * The distinction exists because two of the chat signals are `ok` by
+ * construction: `youtube.chat.user_events` is always `ok` — that is §9.4(3)'s
+ * "무수신만으로 degraded 판정하지 않음" — and `youtube.chat.reconnect` is `ok`
+ * whenever no resume token has been rejected, including before anything has ever
+ * connected. An idle source reports exactly that: `transport=unknown:not_started`,
+ * `keepalive=unknown:no_grpc_channel`, `reconnect=ok`, `user_events=ok`. Folding
+ * those together with "any `ok` wins" made a listener that had never connected
+ * look like a healthy one, which is what round 2 found.
+ *
+ * So `chat_transport` may only be lifted to `ok` by the transport signal itself
+ * — `youtube.chat.transport` is `ok` exactly when a path is *connected*, on gRPC
+ * and on REST alike, which is the mode-aware readiness the review asked for.
+ * `keepalive` stays outside this set on purpose: a gRPC channel that is still
+ * dialling reports `ok` there before anything has been delivered. It can still
+ * *degrade* the family (`channel_transient_failure`), because degradation is
+ * decided before readiness.
+ *
+ * Every other family lists all of its signals: each of those producers only
+ * reports `ok` when it has observed the thing working.
+ */
+const FAMILY_READINESS_SIGNALS: Readonly<Record<HealthFamily, readonly string[]>> = Object.freeze({
+  coordinator: ['supervisor.coordinator'],
+  state_commit: ['engine.state_commit'],
+  chat_transport: [CHAT_TRANSPORT_SIGNAL],
+  renderer: ['renderer.health'],
+  obs_output: [OBS_STREAM_SIGNAL, OBS_OUTPUT_PROGRESS_SIGNAL],
+  youtube_broadcast: [
+    YOUTUBE_STREAM_STATUS_SIGNAL,
+    YOUTUBE_STREAM_HEALTH_SIGNAL,
+    YOUTUBE_BROADCAST_LIFECYCLE_SIGNAL,
+  ],
+  frame_loss: [OBS_FRAMES_SIGNAL, OBS_CONGESTION_SIGNAL],
+  dead_man: ['supervisor.dead_man'],
+})
+
+function isReadinessSignal(family: HealthFamily, name: string): boolean {
+  return FAMILY_READINESS_SIGNALS[family].includes(name)
+}
+
 export const SUPERVISOR_COORDINATOR_SIGNAL = 'supervisor.coordinator'
 export const ENGINE_STATE_COMMIT_SIGNAL = 'engine.state_commit'
 export const RENDERER_HEALTH_SIGNAL = 'renderer.health'
@@ -195,7 +237,10 @@ export class HealthAggregator {
       }
     }
 
-    if (ok.length > 0) {
+    // Only a *readiness* signal can say a family is healthy (review round 2).
+    // The rest of a family's signals describe what has happened to it; they can
+    // degrade it, and they add detail, but they are not evidence that it works.
+    if (ok.some((signal) => isReadinessSignal(family, signal.name))) {
       this.#unknownSince.delete(family)
       return {
         family,
@@ -208,15 +253,17 @@ export class HealthAggregator {
       }
     }
 
-    // Nothing observable. How long that has been true decides whether it is a
-    // fault: a producer that has *never* been reachable for a required family is
-    // not "quiet", it is an encoder or an API this run cannot see (spec §9.2).
+    // Nothing observable — or nothing that *proves* readiness. How long that has
+    // been true decides whether it is a fault: a producer that has never been
+    // reachable for a required family is not "quiet", it is an encoder or an API
+    // this run cannot see (spec §9.2).
     const since = this.#unknownSince.get(family) ?? readings.nowMonotonicMs
     this.#unknownSince.set(family, since)
     const unknownForMs = readings.nowMonotonicMs - since
     const required = this.#config.requiredFamilies.includes(family)
     const escalate = required && unknownForMs >= this.#config.unobservableGraceMs
-    const reason = unknown[0]?.reason ?? 'no_observation'
+    const notReady = unknown.find((signal) => isReadinessSignal(family, signal.name))
+    const reason = notReady?.reason ?? unknown[0]?.reason ?? 'no_observation'
 
     return {
       family,
