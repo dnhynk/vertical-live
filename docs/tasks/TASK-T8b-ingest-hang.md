@@ -1,7 +1,7 @@
 # TASK-T8b-ingest-hang
 
 - Task: T8b 엔진 버그픽스 — `POST /ingest/simulator`가 inbox write 예외 시 응답 없이 hang (`docs/tasks/TASK_SPECS.md` §T8, 공통 규약)
-- Branch: `dnhynk/t8b-ingest-hang` · PR: #<n>
+- Branch: `dnhynk/t8b-ingest-hang` · PR: #20
 - Orca: task `task_f1aeb51337bf` · dispatch `ctx_8691c39fdcf8`
 - Spec sections read: §7.3(2), §9.2, §10.2, §11("DB lock"), §12.3
 - BOARD decisions/assumptions relied on: A-5(SQLite 단일 파일·WAL), A-14(공용 규격), E-5(GitHub Actions 결제 차단 → CI 실행 불가)
@@ -158,7 +158,7 @@ $ npm run build          -> @vl/contract·@vl/renderer(vite ✓ built in 10.02s)
 $ git fetch origin && git rebase origin/main -> Successfully rebased (base 4b280ed)
 ```
 
-CI: **실행하지 않았음 — BOARD E-5**(GitHub Actions 결제 차단으로 모든 run이 2초 만에 실패). 위 로컬 게이트가 E-5 정책상의 대체 근거다.
+CI: **실행하지 않았음 — BOARD E-5**(GitHub Actions 결제 차단). PR #20의 run `32055799408`도 2초 만에 실패했고 annotation은 `The job was not started because recent account payments have failed or your spending limit needs to be increased.`로 코드와 무관하다. 위 로컬 게이트가 E-5 정책상의 대체 근거다.
 
 ## Not done / out of scope
 
