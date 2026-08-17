@@ -161,3 +161,4 @@
 | 2026-08-17 14:52 | T12 worker escalation: **GitHub Actions 결제 차단**(13:45 UTC~ 모든 CI 2초 실패, main 포함; 마지막 성공 13:42 f35df65). T12 로컬 게이트 전부 통과(1689 tests). → **E-5 등록**, 정책: 로컬 게이트를 CI 대체 근거로 리뷰·머지 계속, 결제 복구 후 main CI 재검증. GitHub API/Actions 부분 장애도 동시 진행 중(status page: degraded) |
 | 2026-08-17 15:05 | T12 worker_done(succeeded, PR #16: supervisor 상태기계·8신호 집계·restart supervisor·kill 3경로·Discord alert·dead-man·시작 순서 9단계 배선, 1689 tests 로컬; CI는 E-5로 실행 불가). R-T12-1 `task_61b74cae659b` → `ctx_d85278c8b875`(review; CI 대신 로컬 게이트 근거 지시). GitHub API 503 간헐 |
 | 2026-08-17 15:19 | R-T12-1 verdict request_changes(blocker 3: safe_stopped 후 예약 restart 실행, chat producer 부재를 live/CTA-on 판정, obs-connection→obs-process 승격 예산 미소진; major 3: preflight 실패 캐시 고착, moderation safe-stop 미배선, DB corruption data_integrity 미배선) → F-T12-1 `task_8aaca7930fe5` → T12 터미널 |
+| 2026-08-17 15:41 | F-T12-1 완료(6건, 1708 tests 로컬). R-T12-2 `task_60811f7134df` → `ctx_58553ce04460`(review) |
