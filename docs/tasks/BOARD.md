@@ -21,7 +21,7 @@
 | T8 | 상태 엔진(단일 writer·outbox·WS·ACK·유료 멱등) | T1b, T4, T6, T7 | — | merged | t8-state-engine | #12 | `task_0aadf1c96dcf` |
 | T9 | YouTube source adapter(gRPC streamList + REST fallback) | T3, T4, T8 | — | changes_requested | t9-youtube-adapter | #14 | `task_ec3d66a159bd` |
 | T10 | broadcast lifecycle·reconcile·한도 | T3, T4 | — | changes_requested | t10-broadcast-lifecycle | #11 | `task_41769f69d4b7` |
-| T11 | 로컬 시뮬레이터·replay·지연 계측 | T5, T8 | — | in_review | t11-simulator-replay | #15 | `task_9470df5be9b8` |
+| T11 | 로컬 시뮬레이터·replay·지연 계측 | T5, T8 | — | changes_requested | t11-simulator-replay | #15 | `task_9470df5be9b8` |
 | T12 | supervisor 상태기계·건강 집계·kill switch·알림·dead-man | T2, T8, T9, T10 | — | pending | t12-supervisor | | `task_560530cfb813` |
 | T13 | 데이터 보존·삭제·철회 자동화 | T3, T4 | — | merged | t13-data-policy | #10 | `task_15cd2ae24e82` |
 | T14 | 렌더러 화면 완성(5초 무음·감사 연출·i18n) | T5, T7 | — | merged | t14-renderer-screen | #13 | `task_82f32652b3cf` |
@@ -150,3 +150,4 @@
 | 2026-08-18 00:55 | T9 worker_done(succeeded, PR #14: [S4] proto verbatim(+import 1줄 표기), grpc-js 클라이언트 id,snippet만, 재연결·REST fallback·checkpoint 동일 트랜잭션·poison 전진, §9.4(3) 신호, 1354 tests; 실계정 필요 5항목 unverifiable 표기). R-T9-1 `task_dd6ff56bb263` → `ctx_d916a3197476`(review2). 진행: T11, F-T10-5 |
 | 2026-08-18 01:15 | T11 worker_done(succeeded, PR #15: 시나리오 7종·VirtualClock 러너·test:replay(§11 3행)·sim:report·dev 패널 주입, e2e p95 75ms 측정 기록). R-T11-1 `task_fa3ddc437095` → `ctx_3fc5bcf8739f`(review). 진행: R-T9-1(review2), F-T10-5. 다음: T12(PR #11·#14 머지 후) |
 | 2026-08-18 01:45 | F-T10-5 완료(liveStreams attempt 마커, #findInsertedStream). R-T9-1 verdict request_changes(major 3: pollingIntervalMillis 상한 절단, parts 정확 집합 미강제, reconnect/loss 계측 왜곡; minor proto provenance) → F-T9-1 `task_cf08276f2fe1` → T9 터미널. R-T10-6 `task_e508bdc836c5` → `ctx_1474dfecf147`(review2). 진행: R-T11-1(review) |
+| 2026-08-18 02:10 | R-T11-1 verdict request_changes(major 3: paid-ledger 테스트 false-positive, 재전송 검증이 stub Set, dev 패널 잔여 wait 생략) → F-T11-1 `task_edc8abe328d9` → T11 터미널. 진행: R-T10-6(review2), F-T9-1 |
