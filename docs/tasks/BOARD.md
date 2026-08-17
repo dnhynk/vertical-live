@@ -22,7 +22,7 @@
 | T9 | YouTube source adapter(gRPC streamList + REST fallback) | T3, T4, T8 | — | merged | t9-youtube-adapter | #14 | `task_ec3d66a159bd` |
 | T10 | broadcast lifecycle·reconcile·한도 | T3, T4 | — | merged | t10-broadcast-lifecycle | #11 | `task_41769f69d4b7` |
 | T11 | 로컬 시뮬레이터·replay·지연 계측 | T5, T8 | — | merged | t11-simulator-replay | #15 | `task_9470df5be9b8` |
-| T12 | supervisor 상태기계·건강 집계·kill switch·알림·dead-man | T2, T8, T9, T10 | — | in_review | t12-supervisor | #16 | `task_560530cfb813` |
+| T12 | supervisor 상태기계·건강 집계·kill switch·알림·dead-man | T2, T8, T9, T10 | — | changes_requested | t12-supervisor | #16 | `task_560530cfb813` |
 | T13 | 데이터 보존·삭제·철회 자동화 | T3, T4 | — | merged | t13-data-policy | #10 | `task_15cd2ae24e82` |
 | T14 | 렌더러 화면 완성(5초 무음·감사 연출·i18n) | T5, T7 | — | merged | t14-renderer-screen | #13 | `task_82f32652b3cf` |
 | T15 | fault matrix·72h soak harness | T11, T12, T13 | — | pending | t15-fault-soak | | `task_f32603eaee51` |
@@ -160,3 +160,4 @@
 | 2026-08-17 14:52 (실측) | **타임스탬프 정정**: 위 이력 중 '2026-08-17 12:55' 이후 항목의 시각은 코디네이터 추정치로 실제보다 앞서 기록됨(마지막 항목 실제 시각 2026-08-17 14:52 UTC). 이후 항목은 `date -u` 실측값 사용 |
 | 2026-08-17 14:52 | T12 worker escalation: **GitHub Actions 결제 차단**(13:45 UTC~ 모든 CI 2초 실패, main 포함; 마지막 성공 13:42 f35df65). T12 로컬 게이트 전부 통과(1689 tests). → **E-5 등록**, 정책: 로컬 게이트를 CI 대체 근거로 리뷰·머지 계속, 결제 복구 후 main CI 재검증. GitHub API/Actions 부분 장애도 동시 진행 중(status page: degraded) |
 | 2026-08-17 15:05 | T12 worker_done(succeeded, PR #16: supervisor 상태기계·8신호 집계·restart supervisor·kill 3경로·Discord alert·dead-man·시작 순서 9단계 배선, 1689 tests 로컬; CI는 E-5로 실행 불가). R-T12-1 `task_61b74cae659b` → `ctx_d85278c8b875`(review; CI 대신 로컬 게이트 근거 지시). GitHub API 503 간헐 |
+| 2026-08-17 15:19 | R-T12-1 verdict request_changes(blocker 3: safe_stopped 후 예약 restart 실행, chat producer 부재를 live/CTA-on 판정, obs-connection→obs-process 승격 예산 미소진; major 3: preflight 실패 캐시 고착, moderation safe-stop 미배선, DB corruption data_integrity 미배선) → F-T12-1 `task_8aaca7930fe5` → T12 터미널 |
