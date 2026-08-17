@@ -20,7 +20,13 @@ import {
   CHAT_USER_EVENTS_SIGNAL,
 } from '../youtube/chat/health.js'
 import type { SupervisorConfig } from './config.js'
-import { HEALTH_FAMILIES, type DeadManStatus, type FamilyVerdict, type HealthAggregate, type HealthFamily } from './types.js'
+import {
+  HEALTH_FAMILIES,
+  type DeadManStatus,
+  type FamilyVerdict,
+  type HealthAggregate,
+  type HealthFamily,
+} from './types.js'
 
 /**
  * The one aggregator of spec §9.4 (TASK_SPECS §T12: "하나의 집계기로 모아 §9.2
@@ -118,7 +124,10 @@ export class HealthAggregator {
       const family = PUSHED_SIGNAL_FAMILY[signal.name]
       if (family === undefined) continue
       // A report nobody refreshed is not an observation any more.
-      if (readings.nowMonotonicMs - signal.observedAtMonotonicMs > this.#config.signalStaleAfterMs) {
+      if (
+        readings.nowMonotonicMs - signal.observedAtMonotonicMs >
+        this.#config.signalStaleAfterMs
+      ) {
         continue
       }
       byFamily.get(family)?.push(signal)

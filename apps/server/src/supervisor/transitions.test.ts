@@ -17,7 +17,11 @@ import {
  * change a row rather than hide in a branch.
  */
 
-function verdict(family: HealthFamily, status: FamilyVerdict['status'], reason?: string): FamilyVerdict {
+function verdict(
+  family: HealthFamily,
+  status: FamilyVerdict['status'],
+  reason?: string,
+): FamilyVerdict {
   return {
     family,
     status,
@@ -88,11 +92,26 @@ function input(overrides: Partial<TransitionInput> = {}): TransitionInput {
 
 describe('supervisor transition table (spec §9.2)', () => {
   const rows: readonly (readonly [string, SupervisorState, TransitionInput, SupervisorState])[] = [
-    ['offline stays offline until start is requested', 'offline', input({ startRequested: false }), 'offline'],
+    [
+      'offline stays offline until start is requested',
+      'offline',
+      input({ startRequested: false }),
+      'offline',
+    ],
     ['offline → starting on start', 'offline', input({ startRequested: true }), 'starting'],
     ['starting waits for the pre-checks', 'starting', input({ preflight: null }), 'starting'],
-    ['starting retries while a pre-check fails', 'starting', input({ preflight: failedPreflight }), 'starting'],
-    ['starting → live when the pre-checks pass and every family is ok', 'starting', input(), 'live'],
+    [
+      'starting retries while a pre-check fails',
+      'starting',
+      input({ preflight: failedPreflight }),
+      'starting',
+    ],
+    [
+      'starting → live when the pre-checks pass and every family is ok',
+      'starting',
+      input(),
+      'live',
+    ],
     [
       'starting → degraded when the pre-checks pass but a family is not ok',
       'starting',
@@ -126,7 +145,12 @@ describe('supervisor transition table (spec §9.2)', () => {
       input({ aggregate: aggregate({ obs_output: 'output_inactive' }) }),
       'degraded',
     ],
-    ['live → safe_stopped on a policy trigger', 'live', input({ safeStop: policyStop }), 'safe_stopped'],
+    [
+      'live → safe_stopped on a policy trigger',
+      'live',
+      input({ safeStop: policyStop }),
+      'safe_stopped',
+    ],
     [
       'starting → safe_stopped on a policy trigger',
       'starting',
@@ -164,18 +188,22 @@ describe('supervisor transition table (spec §9.2)', () => {
 describe('recovery plan (spec §10.2)', () => {
   it('maps each degraded family to the component that owns the fix', () => {
     expect(componentsToRestart(aggregate({ coordinator: 'writer_failing' }))).toEqual(['engine'])
-    expect(componentsToRestart(aggregate({ state_commit: 'state_commit_stale' }))).toEqual(['engine'])
+    expect(componentsToRestart(aggregate({ state_commit: 'state_commit_stale' }))).toEqual([
+      'engine',
+    ])
     expect(componentsToRestart(aggregate({ renderer: 'no_renderer' }))).toEqual(['renderer-source'])
     expect(componentsToRestart(aggregate({ chat_transport: 'retry_budget_exhausted' }))).toEqual([
       'chat-source',
     ])
-    expect(componentsToRestart(aggregate({ obs_output: 'output_inactive' }))).toEqual(['obs-stream'])
+    expect(componentsToRestart(aggregate({ obs_output: 'output_inactive' }))).toEqual([
+      'obs-stream',
+    ])
   })
 
   it('treats an unreachable OBS as a connection problem, not an output one', () => {
-    expect(componentsToRestart(aggregate({ obs_output: 'unobservable:obs_not_connected' }))).toEqual(
-      ['obs-connection'],
-    )
+    expect(
+      componentsToRestart(aggregate({ obs_output: 'unobservable:obs_not_connected' })),
+    ).toEqual(['obs-connection'])
   })
 
   it('restarts the encoder output when YouTube reports no ingest', () => {

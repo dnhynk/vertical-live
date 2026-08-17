@@ -19,12 +19,7 @@ export type HealthStatus =
  * pulled rather than pushed (spec §9.4(1)(2)(4)(8)).
  */
 export type HealthComponent =
-  | 'obs'
-  | 'youtube'
-  | 'youtube-chat'
-  | 'engine'
-  | 'renderer'
-  | 'supervisor'
+  'obs' | 'youtube' | 'youtube-chat' | 'engine' | 'renderer' | 'supervisor'
 
 /** Detail values stay primitive so signals can be serialized to `/health` as-is. */
 export type HealthDetailValue = string | number | boolean | null

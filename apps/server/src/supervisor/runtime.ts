@@ -156,9 +156,7 @@ export function buildPreflightProbes(deps: PreflightDeps): PreflightProbes {
       // The broadcast port only answers `bound()` after a call that needed a
       // token, so a binding is proof the grant worked. A revoked grant surfaces
       // through T3's `AuthEventSink`, which stops the run on its own.
-      return deps.broadcast.bound()
-        ? PREFLIGHT_OK
-        : { passed: false, reason: 'no_binding_yet' }
+      return deps.broadcast.bound() ? PREFLIGHT_OK : { passed: false, reason: 'no_binding_yet' }
     },
     secrets: async () => {
       const required: SecretName[] = ['server.rendererToken', 'server.adminToken']
@@ -176,8 +174,7 @@ export function buildPreflightProbes(deps: PreflightDeps): PreflightProbes {
         ? PREFLIGHT_OK
         : { passed: false, reason: `missing:${missing.join('+')}` }
     },
-    state: () =>
-      deps.engine.ready ? PREFLIGHT_OK : { passed: false, reason: 'engine_not_ready' },
+    state: () => (deps.engine.ready ? PREFLIGHT_OK : { passed: false, reason: 'engine_not_ready' }),
     api: () => {
       if (deps.broadcast === null) return notConfigured('broadcast')
       return deps.broadcast.bound() ? PREFLIGHT_OK : { passed: false, reason: 'not_bound' }

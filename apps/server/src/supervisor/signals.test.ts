@@ -91,9 +91,7 @@ describe('health aggregator (spec §9.4)', () => {
     const aggregator = new HealthAggregator(config)
     for (const item of healthySignals()) aggregator.report(item)
 
-    const stale = aggregator.evaluate(
-      readings({ nowMonotonicMs: config.signalStaleAfterMs + 1 }),
-    )
+    const stale = aggregator.evaluate(readings({ nowMonotonicMs: config.signalStaleAfterMs + 1 }))
 
     // Stale is not degraded — it is "not observed" — but a required family that
     // stays unobservable past the grace *is* degraded.
@@ -206,9 +204,8 @@ describe('health aggregator (spec §9.4)', () => {
       expect(aggregator.evaluate(readings()).families.renderer.status).toBe('ok')
 
       expect(
-        aggregator.evaluate(
-          readings({ renderer: { ...HEALTHY_RENDERER, webglContextLost: true } }),
-        ).families.renderer.reason,
+        aggregator.evaluate(readings({ renderer: { ...HEALTHY_RENDERER, webglContextLost: true } }))
+          .families.renderer.reason,
       ).toBe('webgl_context_lost')
 
       expect(

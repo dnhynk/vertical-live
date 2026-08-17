@@ -30,12 +30,12 @@ function memoryFs(initial: readonly string[] = []): ScreenshotFs & { readonly fi
   }
 }
 
-function requester(call = vi.fn(async () => undefined)): ObsRequester & { call: typeof call } {
+function requester(call = vi.fn(async () => undefined)): ObsRequester {
   return {
     call: call as unknown as ObsRequester['call'],
     on: () => {},
     off: () => {},
-  } as ObsRequester & { call: typeof call }
+  }
 }
 
 describe('DiagnosticScreenshotRecorder', () => {

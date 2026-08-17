@@ -74,9 +74,9 @@ describe('start-up sequence', () => {
     expect(result.completed).toBe(false)
     expect(result.failedStep).toBe('broadcast')
     expect(result.error).toBe('broadcast failed')
-    expect(result.steps.filter((step) => step.status === 'skipped').map((step) => step.step)).toEqual(
-      ['streamService', 'startStream', 'goLive', 'chatSource', 'publish'],
-    )
+    expect(
+      result.steps.filter((step) => step.status === 'skipped').map((step) => step.step),
+    ).toEqual(['streamService', 'startStream', 'goLive', 'chatSource', 'publish'])
   })
 
   it('reports every step so an operator sees what did and did not run', async () => {

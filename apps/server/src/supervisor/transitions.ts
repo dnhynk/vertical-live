@@ -43,10 +43,7 @@ export interface Transition {
   readonly changed: boolean
 }
 
-export function nextSupervisorState(
-  from: SupervisorState,
-  input: TransitionInput,
-): Transition {
+export function nextSupervisorState(from: SupervisorState, input: TransitionInput): Transition {
   const to = decide(from, input)
   return {
     from,

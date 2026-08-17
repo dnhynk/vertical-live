@@ -145,9 +145,7 @@ export interface LoadSupervisorConfigOptions {
   readonly env?: NodeJS.ProcessEnv
 }
 
-export function loadSupervisorConfig(
-  options: LoadSupervisorConfigOptions = {},
-): SupervisorConfig {
+export function loadSupervisorConfig(options: LoadSupervisorConfigOptions = {}): SupervisorConfig {
   const configPath = options.configPath ?? DEFAULT_CONFIG_PATH
   const env = options.env ?? process.env
 
@@ -314,9 +312,7 @@ export function loadSupervisorConfig(
 /** Thrown by `assertModerationCallTableApproved` while Gate 0 has not signed off. */
 export class ModerationCallTableNotApprovedError extends Error {
   constructor(missing: readonly string[]) {
-    super(
-      `moderation call table not approved (spec §12.3, Gate 0); missing: ${missing.join(', ')}`,
-    )
+    super(`moderation call table not approved (spec §12.3, Gate 0); missing: ${missing.join(', ')}`)
     this.name = 'ModerationCallTableNotApprovedError'
   }
 }

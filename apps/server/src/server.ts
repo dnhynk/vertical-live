@@ -74,10 +74,7 @@ export interface ServerOptions {
  * for a rights or policy reason must not answer `ok` because the writer inside
  * it happens to be fine.
  */
-function statusLine(
-  engine: EngineHealth,
-  supervisor: SupervisorHealthSummary | null,
-): string {
+function statusLine(engine: EngineHealth, supervisor: SupervisorHealthSummary | null): string {
   if (supervisor === null) return engine.degraded ? 'degraded' : 'ok'
   switch (supervisor.state) {
     case 'safe_stopped':

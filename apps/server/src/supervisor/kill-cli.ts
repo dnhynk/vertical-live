@@ -1,6 +1,11 @@
 import { systemClock, type Clock } from '../clock.js'
 import type { SupervisorConfig } from './config.js'
-import { clearKillSwitchFlag, nodeKillSwitchFs, writeKillSwitchFlag, type KillSwitchFs } from './kill-switch.js'
+import {
+  clearKillSwitchFlag,
+  nodeKillSwitchFs,
+  writeKillSwitchFlag,
+  type KillSwitchFs,
+} from './kill-switch.js'
 
 /**
  * `kill` CLI — path 3 of the kill switch (spec §9.1 "비상 중지 권한", §11).

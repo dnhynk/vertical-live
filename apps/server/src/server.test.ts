@@ -6,6 +6,8 @@ import { createServer, DEFAULT_PORT, resolvePort, type ServerOptions } from './s
 import type { EngineHealth } from './engine/engine.js'
 import type { EngineMetricsSnapshot } from './engine/metrics.js'
 import type { HealthSignal } from './health/types.js'
+import { AdminKillEndpoint, type KillSwitchRequest } from './supervisor/kill-switch.js'
+import type { SupervisorHealthSummary } from './supervisor/types.js'
 
 describe('resolvePort', () => {
   it('falls back to the shared default', () => {
@@ -185,5 +187,159 @@ describe('engine-backed routes', () => {
 
   it('rejects a non-GET method on /metrics', async () => {
     expect((await fetch(`${baseUrl}/metrics`, { method: 'POST' })).status).toBe(405)
+  })
+
+  it('has no /admin/kill until something can be stopped', async () => {
+    expect((await fetch(`${baseUrl}/admin/kill`, { method: 'POST' })).status).toBe(404)
+  })
+})
+
+/**
+ * The supervisor surface of TASK_SPECS §T12: the state machine and its §9.4
+ * family summary on `/health`, and the kill switch on `POST /admin/kill`
+ * (loopback + `server.adminToken`, spec §10.2).
+ */
+describe('supervisor routes', () => {
+  const health: EngineHealth = {
+    ready: true,
+    degraded: false,
+    degradedReasons: [],
+    interactionEnabled: true,
+    stateRevision: 3,
+    processedIngestSeq: 9,
+    lastCommittedAt: '2026-01-01T00:00:00.000Z',
+    openEffectCount: 0,
+    rendererCount: 1,
+    lastAckedStateRevision: 3,
+    inputMode: 'direct',
+    broadcastLifecycle: 'live',
+    lastFailure: null,
+    consecutiveFailures: 0,
+  }
+
+  const summary: SupervisorHealthSummary = {
+    state: 'live',
+    since: '2026-01-01T00:00:00.000Z',
+    lastTransitionReason: 'signals:all_families_ok',
+    safeStop: null,
+    interactionEnabled: true,
+    families: [
+      {
+        family: 'obs_output',
+        specItem: 5,
+        status: 'ok',
+        reason: null,
+        sources: ['obs.stream'],
+        observedAtUtc: '2026-01-01T00:00:00.000Z',
+        unknownForMs: null,
+        unobservableEscalated: false,
+      },
+    ],
+    components: [],
+    preflight: [],
+    deadMan: {
+      enabled: false,
+      lastPushAt: null,
+      lastPushOk: null,
+      consecutiveFailures: 0,
+      lastError: null,
+    },
+  }
+
+  const killed: KillSwitchRequest[] = []
+  let state: SupervisorHealthSummary = summary
+  let server: Server
+  let baseUrl: string
+
+  beforeEach(async () => {
+    killed.length = 0
+    state = summary
+    server = createServer({
+      engine: { health: () => health, metrics: () => ({}) as EngineMetricsSnapshot },
+      supervisorHealth: () => state,
+      adminKill: new AdminKillEndpoint({
+        token: 'synthetic-admin-token',
+        onKill: (request) => killed.push(request),
+      }),
+    })
+    await new Promise<void>((resolve) => {
+      server.listen(0, '127.0.0.1', resolve)
+    })
+    baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
+  })
+
+  afterEach(async () => {
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => (error ? reject(error) : resolve()))
+    })
+  })
+
+  it('reports the state machine and the family summary under /health', async () => {
+    const body = (await (await fetch(`${baseUrl}/health`)).json()) as {
+      status: string
+      supervisor: SupervisorHealthSummary
+    }
+
+    expect(body.status).toBe('ok')
+    expect(body.supervisor.state).toBe('live')
+    expect(body.supervisor.families[0]?.specItem).toBe(5)
+  })
+
+  it('lets the supervisor, not the engine, decide the status line', async () => {
+    state = {
+      ...summary,
+      state: 'safe_stopped',
+      safeStop: {
+        kind: 'rights_or_policy',
+        at: '2026-01-01T00:00:00.000Z',
+        reason: 'broadcast_limit_unrecoverable',
+        detail: {},
+      },
+    }
+
+    const body = (await (await fetch(`${baseUrl}/health`)).json()) as { status: string }
+
+    // The writer inside a stopped run being fine does not make the run `ok`.
+    expect(body.status).toBe('safe_stopped')
+  })
+
+  it('accepts POST /admin/kill from loopback with the token', async () => {
+    const response = await fetch(`${baseUrl}/admin/kill`, {
+      method: 'POST',
+      headers: { authorization: 'Bearer synthetic-admin-token' },
+      body: JSON.stringify({ reason: 'operator' }),
+    })
+
+    expect(response.status).toBe(202)
+    expect(killed).toHaveLength(1)
+    expect(killed[0]?.source).toBe('http')
+  })
+
+  it('accepts an empty body: a kill switch must not require valid JSON', async () => {
+    const response = await fetch(`${baseUrl}/admin/kill`, {
+      method: 'POST',
+      headers: { authorization: 'Bearer synthetic-admin-token' },
+    })
+
+    expect(response.status).toBe(202)
+    expect(killed[0]?.reason).toBe('admin_http')
+  })
+
+  it('refuses a request with no or a wrong token', async () => {
+    expect((await fetch(`${baseUrl}/admin/kill`, { method: 'POST' })).status).toBe(401)
+    expect(
+      (
+        await fetch(`${baseUrl}/admin/kill`, {
+          method: 'POST',
+          headers: { authorization: 'Bearer nope' },
+        })
+      ).status,
+    ).toBe(401)
+    expect(killed).toHaveLength(0)
+  })
+
+  it('rejects a non-POST method on /admin/kill', async () => {
+    expect((await fetch(`${baseUrl}/admin/kill`)).status).toBe(405)
+    expect(killed).toHaveLength(0)
   })
 })
