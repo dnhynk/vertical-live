@@ -25,7 +25,7 @@ import type {
 import { InputArbiter } from '../input/arbiter.js'
 import { loadInputConfig, type InputConfig } from '../input/config.js'
 import { silentLogger, type Logger } from '../secrets/redaction.js'
-import { paidEventKindOf } from '../world/paid.js'
+import { markThanksDelivered, paidEventKindOf } from '../world/paid.js'
 import {
   initialWorldState,
   pendingDeadlines,
@@ -175,6 +175,8 @@ export class StateEngine {
   #held: HeldCommand[] = []
 
   #openEffects = new Map<string, OpenEffect>()
+  /** Paid events the renderer confirmed; the next commit clears the obligation. */
+  #thanksToClear: string[] = []
   #lastAckedRevision = 0
   #lastPublishAt: string | null = null
   #inputHealth: InputHealth = 'ok'
@@ -306,6 +308,13 @@ export class StateEngine {
   }
 
   onAckEffect(effectId: string, appliedAt: string): void {
+    const open = this.#openEffects.get(effectId)
+    if (open?.effect.paid === true && open.effect.causedByEventKey !== null) {
+      // The original thanks reached a frame, so the substitute of spec §9.2 is
+      // no longer owed. The world owns that bookkeeping; the next commit applies
+      // it, because the audit state may only change inside a transaction.
+      this.#thanksToClear.push(open.effect.causedByEventKey)
+    }
     this.#openEffects.delete(effectId)
     this.#metrics.recordEffectAck(effectId, appliedAt)
     try {
@@ -388,6 +397,7 @@ export class StateEngine {
     this.#sweepEffects(now)
     return commits
   }
+
 
   /**
    * One merged input. `consumed` means the input was resolved without a state
@@ -650,6 +660,13 @@ export class StateEngine {
       for (const rejection of result.rejections) this.#metrics.count(`rejected_${rejection.reason}`)
     }
 
+    // Confirmed acknowledgements clear their substitute obligation in the same
+    // transaction as everything else (spec §9.2 "대체 감사 연출 1회").
+    const clearedThanks = [...this.#thanksToClear]
+    for (const eventKey of clearedThanks) {
+      state = { world: state.world, audit: markThanksDelivered(state.audit, eventKey) }
+    }
+
     const effects = drafts.map((entry, index) =>
       assembleEffect(
         entry.draft,
@@ -689,6 +706,7 @@ export class StateEngine {
     this.#revision = revision
     this.#processedSeq = plan.processedSeq
     this.#resolved = this.#resolved.slice(plan.records.length)
+    this.#thanksToClear = this.#thanksToClear.slice(clearedThanks.length)
     const committedAt = this.#clock.nowUtcIso()
     this.#lastCommittedAt = committedAt
     const receivedAt = steps.find((it) => it.event !== undefined)?.event?.receivedAt ?? null
@@ -724,9 +742,12 @@ export class StateEngine {
     this.#resolved.push({ ingestSeq, result, at: this.#clock.nowUtcIso() })
   }
 
-  /** Commits resolved rows that produced no state change, so the cursor moves. */
+  /**
+   * Commits what has no step of its own: resolved rows that produced no state
+   * change (so the cursor moves) and paid obligations the renderer has confirmed.
+   */
   #flushResolved(now: string): number {
-    return this.#applySteps([], now) ? 1 : 0
+    return this.#applySteps([], now, this.#thanksToClear.length > 0) ? 1 : 0
   }
 
   #paidLedgerFor(
