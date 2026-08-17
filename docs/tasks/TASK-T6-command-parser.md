@@ -112,7 +112,12 @@ $ npm run build
 @vl/renderer vite build -> built in 12.99s
 @vl/server  tsc --build -> ok
 @vl/simulator tsc --build -> ok
+
+$ gh pr checks 8 --watch          (after the .gitignore fix commit 909a4f6)
+ci  pass  45s  https://github.com/dnhynk/vertical-live/actions/runs/32003004280
 ```
+
+첫 CI(run 32002801241)는 `TS2307`로 실패했다. 원인은 아래 Follow-up의 `.gitignore` `data/` 규칙이며, 로컬에는 파일이 있어 같은 게이트가 통과했다. 파일을 옮긴 뒤 CI가 통과했다.
 
 ## Not done / out of scope
 
