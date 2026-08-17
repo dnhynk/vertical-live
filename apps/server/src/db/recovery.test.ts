@@ -48,6 +48,7 @@ describe('loadRecoveryState', () => {
       snapshot: null,
       stateRevision: 0,
       processedIngestSeq: 0,
+      engineState: null,
       unackedEffects: [],
       dueDeadlines: [],
       checkpoints: [],
@@ -146,6 +147,28 @@ describe('loadRecoveryState', () => {
       deadlines: [deadline({ id: 'dl_test_once', status: 'fired' })],
     })
     expect(store.listPendingDeadlines()).toEqual([])
+  })
+
+  it('returns the writer domain state it was given, and null when it was not', () => {
+    const { store } = open()
+    // A commit from a caller that owns no domain state (every pre-T8 caller).
+    store.commitStateTransition({
+      snapshot: makeSnapshot({ stateRevision: 1, processedIngestSeq: 0 }),
+      revision: 1,
+      processedSeq: 0,
+    })
+    expect(store.loadRecoveryState().engineState).toBeNull()
+
+    const engineState = { version: 1, inputMode: 'aggregate', world: { seed: 'seed_test' } }
+    store.commitStateTransition({
+      snapshot: makeSnapshot({ stateRevision: 2, processedIngestSeq: 0 }),
+      revision: 2,
+      processedSeq: 0,
+      engineState,
+    })
+
+    // Opaque to the store: it is handed back exactly as it went in.
+    expect(store.loadRecoveryState().engineState).toEqual(engineState)
   })
 
   it('keeps a second world independent', () => {

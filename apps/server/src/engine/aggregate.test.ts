@@ -71,7 +71,8 @@ describe('aggregate windows', () => {
     expect(harness.engine.health().processedIngestSeq).toBe(window.maxDirectPerWindow + overflow)
     expect(harness.engine.metrics().counters['aggregate_window_closed']).toBeGreaterThan(0)
     const aggregated = harness.publisher.effects.filter(
-      (effect) => effect.kind === 'ACTION_REACTION' && effect.payload.contributionCount === overflow,
+      (effect) =>
+        effect.kind === 'ACTION_REACTION' && effect.payload.contributionCount === overflow,
     )
     expect(aggregated).toHaveLength(1)
     // Carried by a real message, not by an invented one (spec §2.6).
@@ -113,9 +114,7 @@ describe('aggregate windows', () => {
     // The restart drains them as ordinary direct commands: the window they
     // belonged to died with the process, and the contributions did not.
     expect(restarted.store.drainUnprocessed(0, 100)).toHaveLength(0)
-    expect(restarted.engine.health().processedIngestSeq).toBe(
-      window.maxDirectPerWindow + overflow,
-    )
+    expect(restarted.engine.health().processedIngestSeq).toBe(window.maxDirectPerWindow + overflow)
     restarted.engine.stop()
   })
 

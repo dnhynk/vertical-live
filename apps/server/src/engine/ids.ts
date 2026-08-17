@@ -38,6 +38,7 @@ export function effectIdFor(revision: number, index: number): EffectId {
  * stored in the row's payload, so nothing is lost by not being able to invert it.
  */
 export function deadlineRowIdFor(kind: string, key: string | null): DeadlineId {
-  const suffix = key === null ? '' : `_${createHash('sha256').update(key).digest('hex').slice(0, 16)}`
+  const suffix =
+    key === null ? '' : `_${createHash('sha256').update(key).digest('hex').slice(0, 16)}`
   return DeadlineIdSchema.parse(`${kind}${suffix}`)
 }

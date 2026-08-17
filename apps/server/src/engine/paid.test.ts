@@ -56,9 +56,7 @@ describe('paid integrity', () => {
         messageId: 'msg_test_sc_dup',
       }),
     )
-    expect(
-      harness.store.hasPaidLedgerEntry(paidEffects[0]?.causedByEventKey as string),
-    ).toBe(true)
+    expect(harness.store.hasPaidLedgerEntry(paidEffects[0]?.causedByEventKey as string)).toBe(true)
   })
 
   it('never stages an event the ledger already holds, whatever wrote it', async () => {

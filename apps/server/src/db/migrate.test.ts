@@ -135,11 +135,12 @@ describe('migrate', () => {
     const file = join(tempDir(), 'db.sqlite')
     const database = openDatabase({ file, busyTimeoutMs: BUSY_TIMEOUT_MS })
     try {
+      const versions = loadMigrations().map((migration) => migration.version)
       migrate(database, { clock: new FakeClock() })
       const second = migrate(database, { clock: new FakeClock() })
       expect(second.applied).toEqual([])
-      expect(second.alreadyApplied.map((row) => row.version)).toEqual([1, 2])
-      expect(listAppliedMigrations(database)).toHaveLength(2)
+      expect(second.alreadyApplied.map((row) => row.version)).toEqual(versions)
+      expect(listAppliedMigrations(database)).toHaveLength(versions.length)
     } finally {
       database.close()
     }

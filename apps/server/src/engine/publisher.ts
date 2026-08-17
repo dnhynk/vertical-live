@@ -161,8 +161,13 @@ export class RendererHub implements EnginePublisher {
         this.#events.onAckEffect(message.data.effectId, message.data.appliedAt)
         return
       case 'renderer_health': {
-        const { frameCounter, fps, webglContextLost, lastAppliedStateRevision, lastAppliedEffectId } =
-          message.data
+        const {
+          frameCounter,
+          fps,
+          webglContextLost,
+          lastAppliedStateRevision,
+          lastAppliedEffectId,
+        } = message.data
         this.#lastHealth = {
           frameCounter,
           fps,

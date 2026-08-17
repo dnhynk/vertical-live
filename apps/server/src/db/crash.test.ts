@@ -109,6 +109,26 @@ describe('process killed mid-transaction', () => {
   })
 })
 
+describe('process killed while writing the snapshot', () => {
+  it('leaves neither the snapshot nor the writer domain state behind', async () => {
+    const file = migratedFile()
+    await crashChild(file, 'state-with-engine-then-kill')
+
+    const database = openDatabase({ file, busyTimeoutMs: TEST_BUSY_TIMEOUT_MS })
+    try {
+      expect(database.prepare('SELECT COUNT(*) AS n FROM world_snapshot').get()).toEqual({ n: 0 })
+    } finally {
+      database.close()
+    }
+    // What the restarted engine sees: no snapshot and no domain state, so it
+    // cold-starts rather than resuming a world the cursor has passed (§T8).
+    const recovery = (temp as TempStore).reopen().loadRecoveryState()
+    expect(recovery.snapshot).toBeNull()
+    expect(recovery.engineState).toBeNull()
+    expect(recovery.processedIngestSeq).toBe(0)
+  })
+})
+
 describe('process killed right after a commit', () => {
   it('keeps the committed paid audit row (synchronous = FULL)', async () => {
     const file = migratedFile()

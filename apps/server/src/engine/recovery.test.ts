@@ -74,14 +74,14 @@ describe('restart recovery', () => {
       (effect) => effect.effectId === paidRow?.effect.effectId,
     )
     expect(republished).toHaveLength(1)
-    expect(restarted.store.getEffect(paidRow?.effect.effectId as string)?.publishedAt).not.toBeNull()
+    expect(
+      restarted.store.getEffect(paidRow?.effect.effectId as string)?.publishedAt,
+    ).not.toBeNull()
 
     // The renderer's view is coherent: the snapshot it gets is at least as new
     // as the effect it is being asked to play.
     const snapshot = restarted.publisher.lastSnapshot
-    expect(snapshot?.stateRevision).toBeGreaterThanOrEqual(
-      republished[0]?.stateRevision as number,
-    )
+    expect(snapshot?.stateRevision).toBeGreaterThanOrEqual(republished[0]?.stateRevision as number)
     expect(restarted.store.listUnackedEffects()).toHaveLength(openBefore.length)
     restarted.engine.stop()
   })
@@ -89,7 +89,9 @@ describe('restart recovery', () => {
   it('replays every open effect to a renderer that says hello', async () => {
     harness = createEngineHarness()
     harness.engine.start()
-    ingest(harness.store, [superChatEnvelope({ messageId: 'msg_test_hello', receivedAt: at(1_000) })])
+    ingest(harness.store, [
+      superChatEnvelope({ messageId: 'msg_test_hello', receivedAt: at(1_000) }),
+    ])
     await harness.clock.advance(1_000)
     harness.engine.runPending()
     const open = harness.store.listUnackedEffects()

@@ -29,8 +29,10 @@ coverage
 __pycache__/
 *.pyc
 
-# Local data / secrets
-data/
+# Local data / secrets — only the repository-root database directory. A bare
+# `data/` also hid source directories such as `apps/server/src/input/data`
+# (found in T6), so the rule is anchored to the root.
+/data/
 *.db
 *.db-wal
 *.db-shm

@@ -114,7 +114,7 @@ interface SnapshotColumns {
   readonly state_revision: number
   readonly processed_ingest_seq: number
   readonly snapshot_json: string
-  /** Opaque writer-owned domain state (migration 002); NULL before T8. */
+  /** Opaque writer-owned domain state (migration 003); NULL before T8. */
   readonly engine_state_json: string | null
 }
 
@@ -694,7 +694,9 @@ export class PersistenceStore {
    */
   hasPaidLedgerEntry(eventKey: string): boolean {
     const row = this.#db
-      .prepare<[string], { event_key: string }>('SELECT event_key FROM paid_ledger WHERE event_key = ?')
+      .prepare<[string], { event_key: string }>(
+        'SELECT event_key FROM paid_ledger WHERE event_key = ?',
+      )
       .get(eventKey)
     return row !== undefined
   }

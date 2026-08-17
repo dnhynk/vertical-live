@@ -31,7 +31,9 @@ export class LatencyHistogram {
 
   constructor(capacity: number) {
     if (!Number.isInteger(capacity) || capacity <= 0) {
-      throw new RangeError(`latency histogram capacity must be a positive integer: ${String(capacity)}`)
+      throw new RangeError(
+        `latency histogram capacity must be a positive integer: ${String(capacity)}`,
+      )
     }
     this.#capacity = capacity
   }
@@ -86,7 +88,7 @@ export class EngineMetrics {
   readonly #receivedToAcked: LatencyHistogram
   readonly #counters = new Map<string, number>()
   /** `receivedAt` of the event that caused a revision, for the ACK leg. */
-  readonly #revisionOrigin = new Map<number, { receivedAt: string; committedAt: string }>()
+  readonly #revisionOrigin = new Map<number, { receivedAt: string | null; committedAt: string }>()
   readonly #effectOrigin = new Map<string, { receivedAt: string | null; publishedAt: string }>()
 
   constructor(sampleSize: number) {
@@ -106,12 +108,9 @@ export class EngineMetrics {
    * would put a made-up number into the §7.5 report.
    */
   recordCommit(revision: number, receivedAt: string | null, committedAt: string): void {
-    if (receivedAt !== null) {
+    if (receivedAt !== null)
       this.#receivedToCommitted.record(millisBetween(receivedAt, committedAt))
-      this.#revisionOrigin.set(revision, { receivedAt, committedAt })
-    } else {
-      this.#revisionOrigin.set(revision, { receivedAt: committedAt, committedAt })
-    }
+    this.#revisionOrigin.set(revision, { receivedAt, committedAt })
     this.#trim(this.#revisionOrigin)
   }
 
@@ -130,7 +129,9 @@ export class EngineMetrics {
   /** `ack_state`: the renderer drew this revision (spec §7.3(7)). */
   recordStateAck(revision: number, appliedAt: string): void {
     const origin = this.#revisionOrigin.get(revision)
-    if (origin === undefined) return
+    // A timer-caused revision has no API reception to measure from, and putting
+    // the commit instant there would quietly deflate the §7.5 end-to-end p95.
+    if (origin?.receivedAt == null) return
     this.#receivedToAcked.record(millisBetween(origin.receivedAt, appliedAt))
   }
 

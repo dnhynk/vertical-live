@@ -3,7 +3,7 @@ import { InputModeSchema, type InputMode } from '@vl/contract'
 import type { WorldState } from '../world/types.js'
 
 /**
- * The writer's durable domain state (migration 002, `world_snapshot.engine_state_json`).
+ * The writer's durable domain state (migration 003, `world_snapshot.engine_state_json`).
  *
  * `WorldSnapshot` is the renderer's read model: it carries the four screen slots
  * and the current values, not the seed, the step counter, the need pressures,
@@ -34,7 +34,10 @@ export class EngineStateError extends Error {
   }
 }
 
-export function serializeEngineState(world: WorldState, inputMode: InputMode): PersistedEngineState {
+export function serializeEngineState(
+  world: WorldState,
+  inputMode: InputMode,
+): PersistedEngineState {
   return { version: ENGINE_STATE_VERSION, world, inputMode }
 }
 
@@ -68,7 +71,8 @@ export function parseEngineState(value: unknown): PersistedEngineState {
     throw new EngineStateError('world.world.worldTimeUtc is missing')
   }
   if (!isRecord(game['creature'])) throw new EngineStateError('world.world.creature is missing')
-  if (!Array.isArray(game['deadlines'])) throw new EngineStateError('world.world.deadlines is missing')
+  if (!Array.isArray(game['deadlines']))
+    throw new EngineStateError('world.world.deadlines is missing')
   if (!Array.isArray(audit['pendingThanks'])) {
     throw new EngineStateError('world.audit.pendingThanks is missing')
   }

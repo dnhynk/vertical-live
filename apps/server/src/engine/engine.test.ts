@@ -36,10 +36,13 @@ describe('StateEngine', () => {
     expect(harness.engine.ready).toBe(true)
     const snapshot = harness.publisher.lastSnapshot
     expect(snapshot).toBeDefined()
-    expect(snapshot?.stateRevision).toBeGreaterThan(0)
-    expect(snapshot?.creature.creatureId).toBe(testEngineConfig().engine.creatureId)
+    const published = snapshot as NonNullable<typeof snapshot>
+    expect(published.stateRevision).toBeGreaterThan(0)
+    expect(published.creature.creatureId).toBe(testEngineConfig().engine.creatureId)
     // Spec §2.1: content is already scheduled with no viewer and no input.
-    expect(snapshot?.nextTransitionAt > snapshot!.worldTimeUtc).toBe(true)
+    expect(Date.parse(published.nextTransitionAt)).toBeGreaterThan(
+      Date.parse(published.worldTimeUtc),
+    )
   })
 
   it('applies a free command and advances the recovery cursor', async () => {

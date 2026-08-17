@@ -398,7 +398,6 @@ export class StateEngine {
     return commits
   }
 
-
   /**
    * One merged input. `consumed` means the input was resolved without a state
    * change — an unsupported envelope, an expired command, a held aggregate —
@@ -412,7 +411,10 @@ export class StateEngine {
     // An event that arrived at or before a timer's due time wins the tie: the
     // room saw the input first, so the world applies it before the clock moves
     // on — the same rule `runWorld` (T7) uses, which keeps the two comparable.
-    if (deadline !== null && (row === null || toMillis(deadline.dueAt) < toMillis(row.receivedAt))) {
+    if (
+      deadline !== null &&
+      (row === null || toMillis(deadline.dueAt) < toMillis(row.receivedAt))
+    ) {
       return this.#applySteps([this.#prepareDeadline(deadline)], now) ? 'committed' : 'consumed'
     }
     const prepared = this.#prepareEvent(row as InboxRow, now)
@@ -497,7 +499,10 @@ export class StateEngine {
 
     if (row.envelope.validationStatus !== 'valid') {
       // Spec §7.3(3): an invalid or unsupported envelope advances with a reason.
-      this.#resolve(row.ingestSeq, `${row.envelope.validationStatus}:${row.envelope.validationError.code}`)
+      this.#resolve(
+        row.ingestSeq,
+        `${row.envelope.validationStatus}:${row.envelope.validationError.code}`,
+      )
       this.#metrics.count(`envelope_${row.envelope.validationStatus}`)
       return null
     }
@@ -538,10 +543,18 @@ export class StateEngine {
 
     this.#resolve(row.ingestSeq, 'applied')
     this.#metrics.count('command_direct')
-    return { input: { kind: 'event', event: this.#sanitizeArgument(event), contributions: 1 }, now: this.#advanceTo(event.receivedAt), event }
+    return {
+      input: { kind: 'event', event: this.#sanitizeArgument(event), contributions: 1 },
+      now: this.#advanceTo(event.receivedAt),
+      event,
+    }
   }
 
-  #preparePaidEvent(row: InboxRow, event: CanonicalEvent, paidKind: PaidEventKind): PreparedStep | null {
+  #preparePaidEvent(
+    row: InboxRow,
+    event: CanonicalEvent,
+    paidKind: PaidEventKind,
+  ): PreparedStep | null {
     // Idempotency unit 1: the ledger's primary key, which survives a restart and
     // any ring eviction in the world's audit state (spec §11 유료 무결성).
     if (this.#store.hasPaidLedgerEntry(event.eventKey)) {
@@ -653,7 +666,9 @@ export class StateEngine {
       state = result.state
       transitions.push(...result.transitions)
       for (const draft of result.effects) {
-        drafts.push(prepared.deadline === undefined ? { draft } : { draft, deadline: prepared.deadline })
+        drafts.push(
+          prepared.deadline === undefined ? { draft } : { draft, deadline: prepared.deadline },
+        )
       }
       fired.push(...(prepared.fired ?? []))
       if (prepared.event !== undefined) eventsByKey.set(prepared.event.eventKey, prepared.event)
@@ -892,7 +907,11 @@ export class StateEngine {
     return this.#degradedReasons(now).length > 0 ? 'degraded' : 'live'
   }
 
-  #buildSnapshot(revision: number, processedSeq: number, state: WorldState = this.#world): WorldSnapshot {
+  #buildSnapshot(
+    revision: number,
+    processedSeq: number,
+    state: WorldState = this.#world,
+  ): WorldSnapshot {
     const now = this.#clock.nowUtcIso()
     const window = this.#arbiter.currentWindow()
     const showWindow = window.mode === 'aggregate' || window.tallies.length > 0
@@ -930,9 +949,7 @@ export class StateEngine {
         snapshot,
         revision,
         processedSeq: this.#processedSeq,
-        transitions: [
-          { revision, causedByEventKey: null, kind: 'deadline_recovery', at: now },
-        ],
+        transitions: [{ revision, causedByEventKey: null, kind: 'deadline_recovery', at: now }],
         deadlines: deadlineTableDiff({
           previous: before,
           next: pendingDeadlines(this.#world),
