@@ -150,6 +150,9 @@ CI(.github/workflows/ci.yml)                      → 실행하지 않았음: BO
   찬 동안 그 쓰기가 `SQLITE_FULL`로 throw하면 잡는 곳이 없다. F-12 드릴에서 실제로
   관측했고(round 1 수정 중), 드릴은 `SoakRenderer.pauseEffectAcks()`로 그 창 동안 ACK를
   멈춰 writer pass 경로에 집중한다. 위의 `/ingest/simulator` 건과 같은 부류다.
+  → **해소됨(T8d, 2026-08-18).** T8c(PR #21)가 그 구멍을 닫아 F-12 드릴이 더 이상 ACK를
+  멈출 필요가 없어졌으므로 `pauseEffectAcks`/`resumeEffectAcks`와 드릴의 호출을 제거했다
+  (디스크가 찬 동안에도 ACK가 흐르고 F-12는 그대로 `degraded` → 공간 확보 후 `live`).
 - Gate 0/2 승인 후 `config/default.json`의 `soak.thresholds` 7개를 잠근다. 코드 변경은 필요 없다.
 - T17이 OBS 재기동 액션을 배선하면 fault matrix F-09(재기동 미배선 → `safe_stopped`)를
   갱신한다. F-08/F-09 두 행이 그 전환을 이미 문서화한다.

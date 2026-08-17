@@ -39,7 +39,6 @@ export class SoakRenderer {
   #lastAppliedEffectId: string | null = null
   #webglContextLost = false
   #frozen = false
-  #effectAcksPaused = false
   #seenEffectIds = new Set<string>()
 
   /** Effect frames received, including retransmissions (spec §11 유료 무결성). */
@@ -93,25 +92,6 @@ export class SoakRenderer {
 
   thaw(): void {
     this.#frozen = false
-  }
-
-  /**
-   * Stops sending effect ACKs, which is the only renderer message that reaches
-   * the store (`markEffectAcked`).
-   *
-   * The disk-full drill needs it: while the database cannot take a single new
-   * page, an arriving ACK makes `RendererHub`'s message handler write, and that
-   * write throws where nothing catches it (`publisher.ts` → `onAckEffect`). That
-   * is a production gap of its own — recorded in the ticket's Follow-ups — and
-   * stepping around it here keeps the drill on the writer-pass path it is
-   * actually about instead of dying in an unrelated unguarded one.
-   */
-  pauseEffectAcks(): void {
-    this.#effectAcksPaused = true
-  }
-
-  resumeEffectAcks(): void {
-    this.#effectAcksPaused = false
   }
 
   // -------------------------------------------------------------------- wire
@@ -218,7 +198,7 @@ export class SoakRenderer {
         this.effectFrames.push(effect)
         if (this.#seenEffectIds.has(effect.effectId)) this.repeatedEffectFrames += 1
         else this.#seenEffectIds.add(effect.effectId)
-        if (this.#webglContextLost || this.#effectAcksPaused) return
+        if (this.#webglContextLost) return
         this.#lastAppliedEffectId = effect.effectId
         this.#send({
           schemaVersion: CONTRACT_VERSION,

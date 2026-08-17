@@ -151,15 +151,15 @@ export interface EngineHealth {
   readonly lastFailure: { readonly at: string; readonly error: string } | null
   /**
    * Failed writes the single writer is still carrying: the current failed-pass
-   * streak **plus** every renderer ACK the store refused and has not recorded
-   * yet (T8c).
+   * streak **plus** every open effect whose publish, ACK or expiry the store
+   * refused and has not recorded yet (T8c, T8d).
    *
    * One number, because T12 reads exactly one (`supervisor/signals.ts`
    * coordinator signal: `> 0` → `degraded('writer_failing')`). The two halves
    * are counted separately inside the engine and each clears on its own
-   * evidence — a completed pass, a recorded ACK — so a pass that happens to
-   * succeed cannot wipe a still-broken ACK path out from under the supervisor
-   * (R-T8c-1 blocker 1).
+   * evidence — a completed pass, a recorded row — so a pass that happens to
+   * succeed cannot wipe a still-broken effect write out from under the
+   * supervisor (R-T8c-1 blocker 1).
    */
   readonly consecutiveFailures: number
 }
@@ -187,6 +187,20 @@ interface HeldCommand {
 interface OpenEffect {
   readonly effect: Effect
   lastSentAt: string
+  /**
+   * False while the outbox row still owes its `published_at` (T8d). Such an
+   * effect is **not** on the wire and must not be put there: `markEffectAcked`
+   * rejects an ACK for a row that was never published, so a frame sent ahead of
+   * its own row is an acknowledgement nothing could ever record.
+   */
+  published: boolean
+  /**
+   * Commit instant, kept so a publish the store refused can still report the
+   * real commit→publish latency when it finally lands (spec §7.3(8), §7.5).
+   * `null` for an effect recovered from the outbox, which has no commit in this
+   * process to measure from.
+   */
+  readonly committedAt: string | null
 }
 
 export class StateEngine {
@@ -229,8 +243,8 @@ export class StateEngine {
   #consecutiveFailures = 0
   /**
    * Open effects that still owe the outbox a row the store refused to write —
-   * the renderer's ACK, or §7.3(7)'s expiry (T8c, R-T8c-1 blocker 1, R-T8c-2
-   * blocker 1).
+   * the renderer's ACK, §7.3(7)'s expiry, or the `published_at` of the publish
+   * itself (T8c, R-T8c-1 blocker 1, R-T8c-2 blocker 1; T8d).
    *
    * This health cannot live on `#consecutiveFailures`: that is the *pass*
    * streak, and a completed pass clears it — which on this loop happens every
@@ -239,11 +253,12 @@ export class StateEngine {
    * row while a pass with nothing to commit writes nothing and succeeds, so the
    * fault was gone from the shared counter long before the supervisor read it.
    *
-   * An id enters when the store refuses one of those two writes and leaves only
-   * when the effect leaves the open set — which now happens only *after* a
-   * durable write succeeded, so the count is exactly the set of effects whose
-   * outcome the database has not taken yet. The condition outlives unrelated
-   * passes without being able to latch for the rest of the run.
+   * An id enters when the store refuses one of those writes and leaves only
+   * when the write it owes succeeds — the ACK or the expiry recorded, the effect
+   * published — so the count is exactly the set of effects whose outcome the
+   * database has not taken yet. The condition outlives unrelated passes without
+   * being able to latch for the rest of the run: every effect in it is open, and
+   * an open effect's window always closes (§7.3(7)).
    */
   #unrecordedEffects = new Set<string>()
   #timer: TimerHandle | null = null
@@ -410,6 +425,11 @@ export class StateEngine {
     this.#publishSnapshotOnly()
     const now = this.#clock.nowUtcIso()
     for (const open of this.#openEffects.values()) {
+      // An effect whose row does not say it was published is not sent to anyone
+      // (T8d): the renderer's ACK for it would be rejected by the store, so the
+      // frame would be one nothing could ever record. The next pass retries the
+      // mark and sends it then.
+      if (!open.published) continue
       open.lastSentAt = now
       this.#publisher.publishEffect(open.effect)
       this.#metrics.count('effect_republished')
@@ -528,8 +548,33 @@ export class StateEngine {
   }
 
   /**
-   * The one number T12 reads: failed writer passes plus open effects whose ACK
-   * or expiry the store refused (`EngineHealth.consecutiveFailures`).
+   * The §7.3(6) publish the store refused (T8d).
+   *
+   * Reported exactly like a refused ACK or expiry, and for the same reason: the
+   * effect is still open, its outbox row still has no `published_at`, and the
+   * single writer's database is what would not take the write. The next pass
+   * sweeps it and tries again, so the retry needs no state of its own.
+   */
+  #recordPublishFailure(effectId: string, error: unknown): void {
+    const failure = classifySqliteError(error)
+    const message = error instanceof Error ? error.message : String(error)
+    this.#lastFailure = { at: this.#clock.nowUtcIso(), error: `publish ${effectId}: ${message}` }
+    this.#unrecordedEffects.add(effectId)
+    this.#metrics.count('effect_publish_store_failed')
+    this.#logger.error('engine.publish_store_failed', {
+      effectId,
+      kind: failure.kind,
+      code: failure.code,
+      retryable: failure.retryable,
+      unrecordedEffects: this.#unrecordedEffects.size,
+      error: message,
+    })
+  }
+
+  /**
+   * The one number T12 reads: failed writer passes plus open effects whose
+   * publish, ACK or expiry the store refused
+   * (`EngineHealth.consecutiveFailures`).
    *
    * They are added rather than kept apart because they are the same fact for the
    * supervisor — the single writer's database would not take a write — and
@@ -1118,18 +1163,68 @@ export class StateEngine {
 
   // -------------------------------------------------------------- publishing
 
+  /**
+   * The effects of a committed transition, onto the wire (spec §7.3(6)).
+   *
+   * The effect joins the open set **before** the store is asked for anything,
+   * and `#sendEffect()` only sends it once `published_at` is written. The old
+   * order — mark, then remember, then send — lost the effect outright when that
+   * write was refused (T8d): `commitStateTransition` had already returned, so
+   * the row existed with `published_at NULL` while nothing in memory pointed at
+   * it, which left it out of §7.3(7)'s retransmit and expiry, out of the health
+   * surface, and off the renderer until a restart re-read the outbox. This is
+   * the same store-first ordering `onAckEffect()` and `#sweepEffects()` use, and
+   * for the same reason: nothing may be treated as delivered before the database
+   * has taken the write that says so.
+   */
   #publish(snapshot: WorldSnapshot, effects: readonly Effect[], committedAt: string): void {
     const publishedAt = this.#clock.nowUtcIso()
     this.#publisher.publishSnapshot(snapshot)
     this.#metrics.recordSnapshotPublish(snapshot.stateRevision, publishedAt)
     this.#lastPublishAt = publishedAt
     for (const effect of effects) {
-      this.#store.markEffectPublished(effect.effectId, publishedAt)
-      this.#openEffects.set(effect.effectId, { effect, lastSentAt: publishedAt })
-      this.#publisher.publishEffect(effect)
-      this.#metrics.recordPublish(effect.effectId, committedAt, publishedAt)
-      this.#metrics.count('effect_published')
+      this.#openEffects.set(effect.effectId, {
+        effect,
+        lastSentAt: publishedAt,
+        published: false,
+        committedAt,
+      })
+      this.#sendEffect(effect.effectId, publishedAt)
     }
+  }
+
+  /**
+   * Records `published_at` and, only if that succeeded, puts the effect on the
+   * wire. A refusal leaves the effect open and unpublished: the next pass sweeps
+   * it and tries again, and until one of those attempts lands — or §7.3(7)
+   * expires the effect — the failure stays on the health surface.
+   */
+  #sendEffect(effectId: string, now: string): void {
+    const open = this.#openEffects.get(effectId)
+    if (open === undefined || open.published) return
+    try {
+      this.#store.markEffectPublished(effectId, now)
+    } catch (error) {
+      // No row to publish: the outbox no longer holds this effect, so there is
+      // no write left owing and keeping it open would be a fault nothing could
+      // clear. It is dropped and counted, as an unknown ACK or expiry is.
+      if (error instanceof UnknownEffectError) {
+        this.#openEffects.delete(effectId)
+        this.#unrecordedEffects.delete(effectId)
+        this.#metrics.count('effect_publish_unknown')
+        return
+      }
+      this.#recordPublishFailure(effectId, error)
+      return
+    }
+    open.published = true
+    open.lastSentAt = now
+    this.#unrecordedEffects.delete(effectId)
+    this.#publisher.publishEffect(open.effect)
+    if (open.committedAt !== null) {
+      this.#metrics.recordPublish(effectId, open.committedAt, now)
+    }
+    this.#metrics.count('effect_published')
   }
 
   #publishSnapshotOnly(): void {
@@ -1138,10 +1233,28 @@ export class StateEngine {
     this.#lastPublishAt = this.#clock.nowUtcIso()
   }
 
-  /** Puts a recovered outbox row back on the wire (spec §7.3(7), §11 상태 복구). */
+  /**
+   * Puts a recovered outbox row back on the wire (spec §7.3(7), §11 상태 복구).
+   *
+   * A row with no `published_at` is one whose commit never reached its publish —
+   * the crash window T15's F-16/F-17 drills park in, and what T8d's refused mark
+   * leaves behind. It is published here rather than republished, through the
+   * same store-first path, so that a store that is *still* refusing the write
+   * cannot throw out of `start()`: BOARD A-19 answers this fault with an engine
+   * restart, and a restart that dies here would spend no budget and repair
+   * nothing.
+   */
   #adoptRecoveredEffect(open: PersistedEffect, now: string): void {
-    this.#openEffects.set(open.effect.effectId, { effect: open.effect, lastSentAt: now })
-    if (open.publishedAt === null) this.#store.markEffectPublished(open.effect.effectId, now)
+    this.#openEffects.set(open.effect.effectId, {
+      effect: open.effect,
+      lastSentAt: now,
+      published: open.publishedAt !== null,
+      committedAt: null,
+    })
+    if (open.publishedAt === null) {
+      this.#sendEffect(open.effect.effectId, now)
+      return
+    }
     this.#publisher.publishEffect(open.effect)
     this.#metrics.count('effect_republished')
   }
@@ -1182,10 +1295,17 @@ export class StateEngine {
           continue
         }
         this.#openEffects.delete(effectId)
-        // Nothing retransmits it any more, so a refused ACK for it has no repair
-        // left and must stop being reported as one (T8c).
+        // Nothing retransmits it any more, so a refused ACK, expiry or publish
+        // for it has no repair left and must stop being reported as one (T8c).
         this.#unrecordedEffects.delete(effectId)
         this.#metrics.count('effect_expired')
+        continue
+      }
+      if (!open.published) {
+        // The publish mark the store refused, retried on the pass after it
+        // (T8d). It is attempted whether or not a renderer is attached: the row
+        // is what makes the effect acknowledgeable, and it is owed either way.
+        this.#sendEffect(effectId, now)
         continue
       }
       if (this.#publisher.rendererCount === 0) continue

@@ -431,9 +431,6 @@ describe('F-12 disk-full', () => {
     const beforeToken =
       system.store.getSourceCheckpoint(CHECKPOINT.sourceKey)?.nextPageToken ?? null
 
-    // See `SoakRenderer.pauseEffectAcks`: an ACK arriving while the disk is full
-    // writes from an unguarded WS handler, which is a separate production gap.
-    system.renderer.pauseEffectAcks()
     fillDisk(connection as SqliteConnection)
 
     // A real production write path, on the real store, with the real disk full.
@@ -480,7 +477,6 @@ describe('F-12 disk-full', () => {
 
     // And it clears the way §9.1 says an operational condition clears.
     freeDisk(connection as SqliteConnection)
-    system.renderer.resumeEffectAcks()
     await tickUntil(system, live, 'recovery once space is free', 90)
   })
 })
