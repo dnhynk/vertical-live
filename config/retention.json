@@ -198,12 +198,13 @@
       "status": "present",
       "source": "internal",
       "dataClass": "derived_state",
-      "purpose": "current authoritative world state the renderer recovers from. Derived creature/environment/aggregate values only — the snapshot contract has no event key, broadcast id or identifier (spec §10.2, §12.4 장기 KPI는 개인 식별자가 없는 집계)",
+      "purpose": "current authoritative world state the renderer recovers from, plus the writer's own domain state (`engine_state_json`, T8: seed, step counter, need pressures, variation rings, schedule and the paid audit rings). Derived creature/environment/aggregate values only — neither the snapshot contract nor the engine state has a field for an author, a display name or a chat line; the paid rings hold event keys, which name a message and not a person (spec §10.2, §12.4 장기 KPI는 개인 식별자가 없는 집계)",
       "storedColumns": [
         "world_id",
         "state_revision",
         "processed_ingest_seq",
         "snapshot_json",
+        "engine_state_json",
         "updated_at"
       ],
       "personalIdentifiers": "none",
