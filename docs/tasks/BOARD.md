@@ -10,13 +10,13 @@
 | T-ID | 제목 | 의존 | [contract] | 상태 | 브랜치 slug | PR | Orca task |
 |---|---|---|---|---|---|---|---|
 | T0 | 모노레포 스캐폴드·CI | — | — | merged | t0-scaffold | #1 | `task_658a82e9f356` |
-| T1 | 정규 이벤트·snapshot·effect 계약과 fixture | T0 | ✔ | changes_requested | t1-contract | #2 | `task_1acc78f93775` |
+| T1 | 정규 이벤트·snapshot·effect 계약과 fixture | T0 | ✔ | merged | t1-contract | #2 | `task_1acc78f93775` |
 | T2 | obs-websocket 5 감시·제어 + OBS 프로파일 | T0 | — | changes_requested | t2-obs-monitor | #3 | `task_6e0c43d6b74c` |
 | T3 | OAuth·비밀정보 vault·quota | T0 | — | in_review | t3-auth-vault | #4 | `task_62829ec3ab8b` |
-| T4 | SQLite 영속층(inbox·checkpoint·snapshot·outbox·deadline) | T1 | — | pending | t4-persistence | | `task_6bb9ff9f79c8` |
-| T5 | 렌더러 read model(snapshot 복구·effect 멱등·ACK·건강) | T1 | — | pending | t5-renderer-readmodel | | `task_6ba022bb6151` |
-| T6 | 명령 파서·모더레이션·입력 arbiter | T1 | — | pending | t6-command-parser | | `task_a0f96dd7e038` |
-| T7 | 콘텐츠 디렉터·크리처 상태 모델(순수 도메인) | T1 | — | pending | t7-content-director | | `task_e1e7531798ad` |
+| T4 | SQLite 영속층(inbox·checkpoint·snapshot·outbox·deadline) | T1 | — | dispatched | t4-persistence | | `task_6bb9ff9f79c8` |
+| T5 | 렌더러 read model(snapshot 복구·effect 멱등·ACK·건강) | T1 | — | ready | t5-renderer-readmodel | | `task_6ba022bb6151` |
+| T6 | 명령 파서·모더레이션·입력 arbiter | T1 | — | ready | t6-command-parser | | `task_a0f96dd7e038` |
+| T7 | 콘텐츠 디렉터·크리처 상태 모델(순수 도메인) | T1 | — | dispatched | t7-content-director | | `task_e1e7531798ad` |
 | T8 | 상태 엔진(단일 writer·outbox·WS·ACK·유료 멱등) | T4, T6, T7 | — | pending | t8-state-engine | | `task_0aadf1c96dcf` |
 | T9 | YouTube source adapter(gRPC streamList + REST fallback) | T3, T4, T8 | — | pending | t9-youtube-adapter | | `task_ec3d66a159bd` |
 | T10 | broadcast lifecycle·reconcile·한도 | T3, T4 | — | pending | t10-broadcast-lifecycle | | `task_41769f69d4b7` |
@@ -90,3 +90,5 @@
 | 2026-08-17 05:20 | F-T1-1 완료(4건 수정 + MALFORMED_MESSAGE_ID 추가, 375 tests). R-T1-2 verdict **request_changes**(blocker 0, major 2: GIFT comboCount null/absent 시 접미사 미검증, EVENT_KEY_PATTERN 9자리 상한이 helper 출력 거부). F-T1-2 `task_adbc0c24547d` → 같은 터미널 `ctx_c54f829f9723`. 다음 리뷰(R-T1-3)도 request_changes면 런북 2.5(4) 에스컬레이션 |
 | 2026-08-17 05:20 | T3 worker_done(succeeded, PR #4: OAuth PKCE loopback, Credential Manager vault @napi-rs/keyring 1.3.0, quota 표 — Live Streaming 메서드별 공식 비용 없음을 documented:false로 표기). PR #4는 PR #3과 5개 파일 중복(clock.ts, secrets/*, fake-clock.ts, config/default.json) → #3 머지 후 rebase 필요. 리뷰 대기열: R-T2-2(진행) → R-T3-1 |
 | 2026-08-17 05:25 | F-T2-1 완료(5건 수정, 109 tests, setStreamServiceFromVault 추가; T12가 startStream 전에 호출해야 함 — T12 명세 반영 예정). R-T2-2 `task_e2c585a03d88` → `ctx_a815b8dd9c16` |
+| 2026-08-17 06:10 | F-T1-2 완료(384 tests). R-T1-3 verdict **approve**. 코디네이터 최종 게이트 통과(범위 밖 변경 .prettierignore/eslint.config.js는 생성물·lint 범위 근거 있음) → **PR #2 squash merge**(main b760ed5). T1 worker release, t1 worktree 제거 |
+| 2026-08-17 06:15 | F-T2-2 완료(A-16 문구 테스트로 강제, 110 tests). R-T2-3 `task_4584777af58c` → `ctx_0ee73d302cd5`. T4 디스패치 `ctx_b455135e621e`, T7 디스패치 `ctx_f38356ff64be`(T5·T6은 ready 대기, 동시 worker 2). 리뷰 대기열: R-T2-3(진행) → R-T3-1(PR #4, #3 머지 후 rebase 필요) |
