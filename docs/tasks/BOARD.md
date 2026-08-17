@@ -26,8 +26,8 @@
 | T13 | 데이터 보존·삭제·철회 자동화 | T3, T4 | — | merged | t13-data-policy | #10 | `task_15cd2ae24e82` |
 | T14 | 렌더러 화면 완성(5초 무음·감사 연출·i18n) | T5, T7 | — | merged | t14-renderer-screen | #13 | `task_82f32652b3cf` |
 | T15 | fault matrix·72h soak harness | T11, T12, T13 | — | dispatched | t15-fault-soak | | `task_f32603eaee51` |
-| T16 | 문서 정합화·운영 런북·Gate 체크리스트 | T12 | — | ready | t16-docs-alignment | | `task_60d68899d24c` |
-| T17 | Windows 운영 스크립트(자동시작·OBS·아카이브) | T2, T12 | — | dispatched | t17-windows-ops | | `task_e2466b978ebe` |
+| T16 | 문서 정합화·운영 런북·Gate 체크리스트 | T12 | — | dispatched | t16-docs-alignment | | `task_60d68899d24c` |
+| T17 | Windows 운영 스크립트(자동시작·OBS·아카이브) | T2, T12 | — | in_review | t17-windows-ops | #17 | `task_e2466b978ebe` |
 
 디스패치 순서 원칙: `ready` 중 T-ID 낮은 것부터, 동시 2, `[contract]`는 하나만. 리뷰 Task는 `R-<T-ID>-<round>`로 별도 등록하고 아래 이력에만 남긴다.
 
@@ -70,6 +70,7 @@
 |---|---|---|---|
 | E-1 | 호스트 BSOD 0x00000050 2회(2026-08-16 14:47 UTC, 2026-08-17 03:24 UTC; minidump `081626-14718-01.dmp`, `081726-14937-01.dmp`) | 사용자가 minidump 분석(WinDbg `!analyze -v`)·메모리 진단·드라이버 갱신을 수행할지, 동시 에이전트 상한을 D-4(2+1)에서 낮출지 | 런북 2.8 |
 | E-2 | OBS 32.0.2 / obs-websocket 5.6.3을 고정 버전으로 승인 | 승인 시 docs/ops/obs-setup.md의 '후보' 표기 제거 | T2, T17 |
+| E-7 | OBS 32.0.0부터 `--disable-shutdown-check`가 제거되어 비정상 종료 뒤 safe-mode 프롬프트를 공식 방법으로 끌 수 없음(T17 발견) — docs/ops/windows-host.md의 선택지 3개 중 사용자 결정 필요(E-2 버전 고정과 함께) | T17 | T17, T12 |
 | E-3 | 실제 OBS 스모크(`npm run obs:probe`) — 사용자가 OBS WebSocket 서버(loopback·비밀번호)를 켠 뒤 실행 | Gate 2 호스트 검증 항목 | T2 |
 | E-5 | **차단(2026-08-17 13:45 UTC~)**: GitHub Actions 결제 차단 — 모든 CI run이 2초 만에 실패, annotation: "The job was not started because recent account payments have failed or your spending limit needs to be increased. Please check the 'Billing & plans' section in your settings". **사용자 조치 필요**: GitHub Settings → Billing & plans에서 결제수단/지출 한도 복구. 그동안 코디네이터 정책: 리뷰어와 worker가 로컬에서 실행한 동일 게이트 5개(format/lint/typecheck/test/build) 결과를 CI 대신 최종 게이트 근거로 사용하고, 결제 복구 후 main CI를 재실행해 녹색을 확인한다(미확인 머지 목록: PR #14 이후) | 런북 2.5(6), 2.6(1) | 전체 |
 | E-6 | **해결**: PR #16 round 5 approve·머지. 원 항목: PR #16(T12 supervisor) 리뷰 round 4까지 request_changes(round마다 지적 해소, 잔존은 safe-stop 경로의 순서/취소 세부로 계속 좁아짐: 예약 restart→in-flight restart→시작 시퀀스 취소→alert await 순서). 코디네이터는 수렴 중으로 판단해 F-T12-4 진행 | 런북 2.5(4) | T12 |
@@ -170,3 +171,4 @@
 | 2026-08-17 16:41 | R-T12-4 verdict request_changes(잔존 blocker 1: safe_stopped 진입 시 alert await가 stopAll보다 앞서 in-flight restart가 완료됨) → F-T12-4 `task_e14fd128b4eb`. **E-6 보고 항목 등록** |
 | 2026-08-17 16:49 | F-T12-4 완료(#haltOutwardWork 선행, 1723 tests). R-T12-5 `task_9b8aecab4f8e` → `ctx_096dc3db9f85`(review) |
 | 2026-08-17 16:58 | R-T12-5 verdict **approve** → 최종 게이트(로컬 게이트 근거 E-5, deps 변경 없음, vault URL만) → **PR #16 squash merge**(main ade4bf9). T12 worker release·worktree 제거. E-6 해결. **T15 `ctx_394217ab9bcb`·T17 `ctx_f952a9dfbf9f` 디스패치**, T16은 다음 슬롯. 남은 미머지 task: T15·T16·T17 |
+| 2026-08-17 17:45 | T17 질문(schtasks 등록→해제 1사이클) → A 승인. T17 worker_done(succeeded, PR #17: 자동시작 XML·PS 스크립트, rolling archive dry-run/apply, windows-host.md, obs-process 실행기, 토큰·키 주입/제거; schtasks 사이클 로그 첨부, XML 결함 1건 실행으로 발견·수정; 1802 tests 로컬). **E-7 등록**(OBS 32 safe-mode 프롬프트). R-T17-1 `task_ffd6ba0dd481` → `ctx_8be4d490af8d`(review). **T16 디스패치**. 진행: T15 |
