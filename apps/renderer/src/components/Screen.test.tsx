@@ -14,11 +14,7 @@ import {
   sequenceRandom,
   type FakeSocketFactory,
 } from '../testing/fakes'
-import {
-  sampleActionEffect,
-  samplePaidThanksEffect,
-  sampleSnapshot,
-} from '../testing/fixtures'
+import { sampleActionEffect, samplePaidThanksEffect, sampleSnapshot } from '../testing/fixtures'
 import Screen from './Screen'
 
 /**
@@ -166,7 +162,8 @@ describe('Screen (spec §5.2, §6.4, §8.4, §9.2, §12.3)', () => {
     // Growth is a bar, not the `current / target` pair the world keeps: the
     // screen shows no internal value it was not asked for (spec §5.2).
     expect(
-      query(harness, 'slot-progress-bar')?.querySelector<HTMLElement>('.progress-fill')?.style.width,
+      query(harness, 'slot-progress-bar')?.querySelector<HTMLElement>('.progress-fill')?.style
+        .width,
     ).toBe('33.33333333333333%')
     expect(query(harness, 'slot-progress')?.textContent).not.toMatch(/\d/)
     const beats = query(harness, 'slot-progress-beats')?.querySelectorAll('li') ?? []

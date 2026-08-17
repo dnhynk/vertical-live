@@ -29,7 +29,10 @@ const STROKE = {
 const bowl: ReactElement = (
   <>
     <path d="M2.5 11h19a9.5 9.5 0 0 1-19 0z" fill="currentColor" />
-    <path d="M8 7.6c0-1.4 1.4-1.4 1.4-2.9M12 6.6c0-1.4 1.4-1.4 1.4-2.9M16 7.6c0-1.4 1.4-1.4 1.4-2.9" {...STROKE} />
+    <path
+      d="M8 7.6c0-1.4 1.4-1.4 1.4-2.9M12 6.6c0-1.4 1.4-1.4 1.4-2.9M16 7.6c0-1.4 1.4-1.4 1.4-2.9"
+      {...STROKE}
+    />
   </>
 )
 
@@ -70,7 +73,10 @@ const ICONS: Readonly<Record<string, ReactElement>> = {
   icon_crisis_tired: (
     <>
       <circle cx="12" cy="12" r="8.4" {...STROKE} />
-      <path d="M7.4 10.6c1-1 2.4-1 3.4 0M13.2 10.6c1-1 2.4-1 3.4 0M8.6 16.2c2-1.6 4.8-1.6 6.8 0" {...STROKE} />
+      <path
+        d="M7.4 10.6c1-1 2.4-1 3.4 0M13.2 10.6c1-1 2.4-1 3.4 0M8.6 16.2c2-1.6 4.8-1.6 6.8 0"
+        {...STROKE}
+      />
     </>
   ),
   icon_crisis_needs_help: (
@@ -90,14 +96,20 @@ const ICONS: Readonly<Record<string, ReactElement>> = {
   thanks_super_sticker: (
     <>
       <rect x="3.4" y="3.4" width="17.2" height="17.2" rx="4.6" {...STROKE} />
-      <path d="M12 7.4l1.5 2.9 3.1.6-2.3 2.2.5 3.1-2.8-1.5-2.8 1.5.5-3.1-2.3-2.2 3.1-.6z" fill="currentColor" />
+      <path
+        d="M12 7.4l1.5 2.9 3.1.6-2.3 2.2.5 3.1-2.8-1.5-2.8 1.5.5-3.1-2.3-2.2 3.1-.6z"
+        fill="currentColor"
+      />
     </>
   ),
   thanks_gift: (
     <>
       <path d="M2.6 6.6h18.8v3.6H2.6z" fill="currentColor" />
       <path d="M4.4 10.2h15.2v9.4a1 1 0 0 1-1 1H5.4a1 1 0 0 1-1-1z" {...STROKE} />
-      <path d="M12 6.6v14M12 6.6C10.4 3.9 6.6 3.1 7.1 6.6M12 6.6c1.6-2.7 5.4-3.5 4.9 0" {...STROKE} />
+      <path
+        d="M12 6.6v14M12 6.6C10.4 3.9 6.6 3.1 7.1 6.6M12 6.6c1.6-2.7 5.4-3.5 4.9 0"
+        {...STROKE}
+      />
     </>
   ),
   thanks_membership: (

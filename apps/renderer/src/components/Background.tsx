@@ -84,7 +84,10 @@ export default function Background({ palette }: BackgroundProps) {
   })
 
   return (
-    <mesh scale={[100, 100, 1]} position={[0, 0, -5]}>
+    // Sized to the camera frustum at this depth (9:16 at fov 75, camera z=5), so
+    // the whole gradient is on screen. A plane much larger than the view would
+    // show only a slice of it and read as a flat colour.
+    <mesh scale={[9.5, 16.2, 1]} position={[0, 0, -5]}>
       <planeGeometry args={[1, 1]} />
       <dynamicBackgroundMaterial ref={materialRef} />
     </mesh>

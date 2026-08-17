@@ -93,7 +93,9 @@ describe('renderer source invariants', () => {
   })
 
   it('keeps the synthetic fixtures out of the application', () => {
-    expect(offenders(APPLICATION_FILES, /testing\/(fixtures|fakes)/)).toEqual([])
+    // The whole `testing/` directory, so the preview states T14 added cannot
+    // reach the broadcast bundle either (spec §2.6).
+    expect(offenders(APPLICATION_FILES, /testing\//)).toEqual([])
   })
 
   it('marks every fixture value as synthetic', () => {

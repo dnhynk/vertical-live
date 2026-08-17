@@ -110,7 +110,11 @@ const MOOD_MOTION: Readonly<Record<string, MoodMotion>> = {
   worried: { bob: 0.04, speed: 0.9, tilt: -0.05 },
 }
 
-const BASE_Y = -1.15
+/**
+ * Where the creature stands in the 1080x1920 frame: the free band between the
+ * top slot and the lower three, so nothing it does is hidden behind a card.
+ */
+const BASE_Y = 0.36
 
 export interface PetProps {
   /** Growth ladder identifier from the snapshot (spec §6.3). */
@@ -130,43 +134,51 @@ export default function Pet({
 }: PetProps) {
   const group = useRef<THREE.Group>(null)
   const build = BUILDS[growthStage] ?? DEFAULT_BUILD
-  const mood = resting ? (MOOD_MOTION['sleepy'] ?? DEFAULT_MOOD) : (MOOD_MOTION[emotionId] ?? DEFAULT_MOOD)
+  const mood = resting
+    ? (MOOD_MOTION['sleepy'] ?? DEFAULT_MOOD)
+    : (MOOD_MOTION[emotionId] ?? DEFAULT_MOOD)
 
+  /**
+   * The creature keeps facing the room: it sways rather than spinning, so its
+   * eyes are always readable — the screen has to be understood in five seconds
+   * (spec §5.2), and a character turning its back is a second of that gone. Only
+   * the play reaction turns all the way around.
+   */
   useFrame((state, delta) => {
     const current = group.current
     if (current === null) return
     const time = state.clock.elapsedTime
 
     if (reaction === 'FEED') {
-      current.position.y = BASE_Y + Math.abs(Math.sin(time * 9)) * 0.14
+      current.position.y = BASE_Y + Math.abs(Math.sin(time * 9)) * 0.12
       current.rotation.z = Math.sin(time * 18) * 0.05
-      current.rotation.y += delta * 0.4
+      current.rotation.y = Math.sin(time * 3) * 0.12
       return
     }
     if (reaction === 'PLAY') {
-      current.position.y = BASE_Y + Math.abs(Math.sin(time * 4.5)) * 0.55
-      current.rotation.z = Math.sin(time * 4.5) * 0.16
+      current.position.y = BASE_Y + Math.abs(Math.sin(time * 4.5)) * 0.35
+      current.rotation.z = Math.sin(time * 4.5) * 0.14
       current.rotation.y += delta * 2.2
       return
     }
     if (reaction === 'PET') {
       current.position.y = BASE_Y + Math.sin(time * 2) * 0.04
-      current.rotation.z = THREE.MathUtils.lerp(current.rotation.z, 0.22, 0.06)
-      current.rotation.y += delta * 0.25
+      current.rotation.z = THREE.MathUtils.lerp(current.rotation.z, 0.2, 0.06)
+      current.rotation.y = Math.sin(time * 1.2) * 0.1
       return
     }
 
     current.position.y = BASE_Y + Math.sin(time * mood.speed) * mood.bob
     current.rotation.z = THREE.MathUtils.lerp(current.rotation.z, mood.tilt, 0.05)
-    current.rotation.y += delta * 0.25 * mood.speed
+    current.rotation.y = Math.sin(time * 0.4 * mood.speed) * 0.22
   })
 
   const eyeScale: [number, number, number] = resting ? [1, 0.18, 1] : [1, 1, 1]
-  const headY = build.bodyRadius + build.headRadius * 0.55
+  const headY = build.bodyRadius * 0.74 + build.headRadius * 0.42
 
   return (
     <group ref={group} scale={build.scale} position={[0, BASE_Y, 0]} dispose={null}>
-      <mesh position={[0, 0, 0]} scale={[1, build.hatched ? 0.88 : 1.22, 1]}>
+      <mesh position={[0, 0, 0]} scale={build.hatched ? [1.08, 0.92, 1] : [1, 1.24, 1]}>
         <sphereGeometry args={[build.bodyRadius, 40, 28]} />
         <meshStandardMaterial
           color={build.hatched ? BODY_COLOR : SHELL_COLOR}
@@ -189,43 +201,69 @@ export default function Pet({
             <meshStandardMaterial color={BODY_COLOR} roughness={0.62} metalness={0.04} />
           </mesh>
 
-          <mesh position={[-build.headRadius * 0.38, headY + 0.06, build.headRadius * 0.84]} scale={eyeScale}>
-            <sphereGeometry args={[0.062, 20, 16]} />
+          <mesh
+            position={[-build.headRadius * 0.36, headY + 0.04, build.headRadius * 0.86]}
+            scale={eyeScale}
+          >
+            <sphereGeometry args={[0.058, 20, 16]} />
             <meshStandardMaterial color={EYE_COLOR} roughness={0.3} />
           </mesh>
-          <mesh position={[build.headRadius * 0.38, headY + 0.06, build.headRadius * 0.84]} scale={eyeScale}>
-            <sphereGeometry args={[0.062, 20, 16]} />
+          <mesh
+            position={[build.headRadius * 0.36, headY + 0.04, build.headRadius * 0.86]}
+            scale={eyeScale}
+          >
+            <sphereGeometry args={[0.058, 20, 16]} />
             <meshStandardMaterial color={EYE_COLOR} roughness={0.3} />
           </mesh>
 
-          <mesh position={[0, build.bodyRadius * 0.1, build.bodyRadius * 0.92]} scale={[1, 0.7, 0.4]}>
-            <sphereGeometry args={[build.bodyRadius * 0.46, 24, 18]} />
+          <mesh
+            position={[0, -build.bodyRadius * 0.16, build.bodyRadius * 0.86]}
+            scale={[1, 0.78, 0.32]}
+          >
+            <sphereGeometry args={[build.bodyRadius * 0.5, 24, 18]} />
             <meshStandardMaterial color={MARK_COLOR} roughness={0.66} />
           </mesh>
         </>
       ) : null}
 
       {build.crest > 0 ? (
-        <mesh position={[0, headY + build.headRadius * 0.95, -0.02]} rotation={[-0.22, 0, 0]}>
-          <coneGeometry args={[build.headRadius * (build.crest === 2 ? 0.42 : 0.28), build.crest === 2 ? 0.44 : 0.26, 5]} />
+        <mesh position={[0, headY + build.headRadius * 0.88, -0.04]} rotation={[-0.3, 0, 0]}>
+          <coneGeometry
+            args={[
+              build.headRadius * (build.crest === 2 ? 0.62 : 0.44),
+              build.crest === 2 ? 0.56 : 0.36,
+              5,
+            ]}
+          />
           <meshStandardMaterial color={MARK_COLOR} roughness={0.5} />
         </mesh>
       ) : null}
 
       {build.tail ? (
-        <mesh position={[0, -build.bodyRadius * 0.25, -build.bodyRadius * 0.95]} rotation={[0.9, 0, 0]}>
-          <coneGeometry args={[0.13, 0.42, 6]} />
+        <mesh
+          position={[0, -build.bodyRadius * 0.32, -build.bodyRadius * 0.95]}
+          rotation={[1.05, 0, 0]}
+        >
+          <coneGeometry args={[0.15, 0.5, 6]} />
           <meshStandardMaterial color={MARK_COLOR} roughness={0.5} />
         </mesh>
       ) : null}
 
       {build.fins ? (
         <>
-          <mesh position={[-build.bodyRadius * 0.92, 0, 0]} rotation={[0, 0, -0.5]} scale={[0.5, 1, 0.25]}>
+          <mesh
+            position={[-build.bodyRadius * 0.92, 0, 0]}
+            rotation={[0, 0, -0.5]}
+            scale={[0.5, 1, 0.25]}
+          >
             <sphereGeometry args={[0.3, 20, 14]} />
             <meshStandardMaterial color={MARK_COLOR} roughness={0.5} />
           </mesh>
-          <mesh position={[build.bodyRadius * 0.92, 0, 0]} rotation={[0, 0, 0.5]} scale={[0.5, 1, 0.25]}>
+          <mesh
+            position={[build.bodyRadius * 0.92, 0, 0]}
+            rotation={[0, 0, 0.5]}
+            scale={[0.5, 1, 0.25]}
+          >
             <sphereGeometry args={[0.3, 20, 14]} />
             <meshStandardMaterial color={MARK_COLOR} roughness={0.5} />
           </mesh>

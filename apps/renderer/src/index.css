@@ -413,8 +413,9 @@ body {
   width: 620px;
   padding: 30px 36px 26px;
   border-radius: 36px;
-  background: rgba(9, 12, 15, 0.74);
+  background: rgba(9, 12, 15, 0.84);
   border: 2px solid rgba(255, 216, 77, 0.5);
+  backdrop-filter: blur(8px);
   text-align: center;
   animation: thanks-in 480ms cubic-bezier(0.2, 0.9, 0.25, 1.1) both;
 }
@@ -681,16 +682,13 @@ body {
   align-items: center;
   justify-content: center;
   gap: 12px;
-  padding: 14px 20px;
+  padding: 14px 12px;
   border-radius: 999px;
   background: rgba(247, 243, 234, 0.1);
   border: 2px solid var(--card-line);
   font-size: 38px;
   font-weight: 800;
-}
-
-.cta-command .icon {
-  font-size: 46px;
+  white-space: nowrap;
 }
 
 .cta-emoji {
@@ -727,13 +725,17 @@ body {
   color: var(--ink-dim);
 }
 
-/* `?mode=dev` only: never rendered in the broadcast mode OBS opens. */
+/*
+ * `?mode=dev` only: never rendered in the broadcast mode OBS opens. It sits in
+ * the middle band, over the creature rather than over the four fixed slots, so a
+ * dev screenshot still shows the whole screen it is documenting.
+ */
 .dev-panel {
   position: absolute;
-  top: 24px;
+  top: 470px;
   right: 24px;
-  width: 460px;
-  max-height: 900px;
+  width: 430px;
+  max-height: 620px;
   overflow: auto;
   background: rgba(4, 6, 8, 0.86);
   border: 2px solid rgba(247, 243, 234, 0.2);

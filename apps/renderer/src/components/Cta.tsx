@@ -1,6 +1,5 @@
 import type { Alias, Translate } from '../i18n/index'
 import { commandLabel, type CtaState } from '../read-model/cta'
-import Icon from '../visual/icons'
 
 /**
  * The free-command call to action (spec §5.2(3), §7.1) and the open decision
@@ -8,8 +7,10 @@ import Icon from '../visual/icons'
  *
  * Three things this component must keep saying:
  *
- * - what to type, in the three forms §7.1 accepts (Japanese, emoji, English), so
- *   a viewer can act without learning anything;
+ * - what to type, in the three forms §7.1 accepts (Japanese, emoji, English) and
+ *   in those forms only, so what the screen shows is literally what a viewer
+ *   sends — an icon of our own next to them would be a fourth thing that does
+ *   not work in chat;
  * - that everything is reachable for free (spec §8.5) — the note sits with the
  *   CTA, not only next to a paid surface, and nothing on this screen offers a
  *   paid alternative to it;
@@ -39,7 +40,11 @@ export default function Cta({ cta, translate, alias }: CtaProps) {
       {cta.choice === null ? null : (
         <ul className="cta-choices" data-testid="cta-choices">
           {cta.choice.options.map((option) => (
-            <li className="cta-choice" key={option.choiceId} data-testid={`choice-${option.choiceId}`}>
+            <li
+              className="cta-choice"
+              key={option.choiceId}
+              data-testid={`choice-${option.choiceId}`}
+            >
               {option.commandName === null ? null : (
                 <span className="cta-choice-key">{commandLabel(option.commandName).en}</span>
               )}
@@ -63,9 +68,6 @@ export default function Cta({ cta, translate, alias }: CtaProps) {
           const label = commandLabel(name)
           return (
             <li key={name} className="cta-command" data-testid={`cta-command-${name}`}>
-              {label.iconId === null ? null : (
-                <Icon iconId={label.iconId} className="icon-command" />
-              )}
               <span className="cta-text">{label.ja ?? label.en}</span>
               {label.emoji === null ? null : <span className="cta-emoji">{label.emoji}</span>}
               <span className="cta-en">{label.en}</span>

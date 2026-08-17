@@ -1,10 +1,11 @@
-import { Suspense, useEffect } from 'react'
+import { Suspense, useEffect, useMemo } from 'react'
 import { Canvas } from '@react-three/fiber'
 import type { CommandName, Effect } from '@vl/contract'
 
 import { useReadModel } from '../hooks'
 import type { RendererRuntime } from '../runtime'
 import { paletteFor } from '../visual/palette'
+import { createContactShadowTexture } from '../visual/shadow-texture'
 import Background from './Background'
 import Pet from './Pet'
 
@@ -36,6 +37,7 @@ export default function Scene({ runtime }: SceneProps) {
   const { snapshot, activeEffects } = useReadModel(runtime.model)
   const palette = paletteFor(snapshot)
   const resting = snapshot?.display.currentNeedOrMission.textKey.startsWith('crisis.') ?? false
+  const shadow = useMemo(() => createContactShadowTexture(), [])
 
   useEffect(() => {
     return () => {
@@ -67,9 +69,10 @@ export default function Scene({ runtime }: SceneProps) {
 
       <Background palette={palette} />
 
-      <mesh position={[0, -1.92, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-        <circleGeometry args={[2.4, 48]} />
-        <meshStandardMaterial color={palette.skyBottom} roughness={0.9} />
+      {/* Contact shadow: without it the creature floats in the gradient. */}
+      <mesh position={[0, -0.14, -0.3]} rotation={[-1.24, 0, 0]} scale={[1.5, 1.1, 1]}>
+        <planeGeometry args={[1.6, 1.6]} />
+        <meshBasicMaterial map={shadow} transparent depthWrite={false} />
       </mesh>
 
       <Suspense fallback={null}>

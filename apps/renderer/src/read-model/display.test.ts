@@ -78,7 +78,10 @@ describe('selectSlots', () => {
   it('reports no action and no next choice instead of inventing them', () => {
     const snapshot = sampleSnapshot()
     const slots = selectSlots(
-      { ...snapshot, display: { ...snapshot.display, lastAppliedAction: null, nextChoiceAt: null } },
+      {
+        ...snapshot,
+        display: { ...snapshot.display, lastAppliedAction: null, nextChoiceAt: null },
+      },
       NOW,
     )
 

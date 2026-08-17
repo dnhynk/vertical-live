@@ -109,9 +109,11 @@ const PHASE_TONES: Readonly<Record<string, PhaseTone>> = {
     skyMid: '#1c2647',
     skyBottom: '#2e2a4a',
     keyColor: '#c9d8ff',
-    keyIntensity: 0.6,
+    // Night is the low end of the range, but the creature still has to read on
+    // a phone at arm's length: dark is a mood here, not an absence of light.
+    keyIntensity: 0.85,
     ambientColor: '#8fa0c8',
-    ambientIntensity: 0.36,
+    ambientIntensity: 0.5,
   },
 }
 
@@ -152,7 +154,7 @@ const WEATHER_EFFECTS: Readonly<Record<string, WeatherEffect>> = {
   cloudy: { light: 0.82, motion: 0.75, wash: '#9aa4ad', washMix: 0.26 },
   rain: { light: 0.68, motion: 1.35, wash: '#5c7488', washMix: 0.34 },
   wind: { light: 0.95, motion: 1.8, wash: '#cfe3d8', washMix: 0.14 },
-  starry: { light: 0.55, motion: 0.45, wash: '#26325c', washMix: 0.3 },
+  starry: { light: 0.75, motion: 0.45, wash: '#26325c', washMix: 0.3 },
 }
 
 /** Chapter accent, used by the HUD rule and the rim light (spec §6.2 day scale). */
@@ -172,7 +174,7 @@ const MOOD_KEY_SCALES: Readonly<Record<string, number>> = {
   content: 1,
   curious: 1.06,
   lonely: 0.9,
-  sleepy: 0.78,
+  sleepy: 0.85,
   weary: 0.82,
   worried: 0.88,
 }
@@ -221,7 +223,7 @@ export function selectPalette(conditions: SceneConditions): ScenePalette {
   const weather = WEATHER_EFFECTS[conditions.weatherId] ?? WEATHER_DEFAULT
   const accent = CHAPTER_ACCENTS[conditions.chapterId] ?? CHAPTER_ACCENT_DEFAULT
   const mood = MOOD_KEY_SCALES[conditions.emotionId] ?? MOOD_KEY_SCALE_DEFAULT
-  const rest = conditions.resting ? 0.72 : 1
+  const rest = conditions.resting ? 0.85 : 1
 
   const wash = (color: string): string => mixColors(color, weather.wash, weather.washMix)
   const light = weather.light * rest

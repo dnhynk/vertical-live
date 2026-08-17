@@ -7,12 +7,20 @@
   "strings": {
     "ui.waiting": { "text": "接続中", "en": "CONNECTING", "nativeReview": "pending" },
     "ui.slot.needOrMission": { "text": "いまのおねがい", "en": "NOW", "nativeReview": "pending" },
-    "ui.slot.lastAction": { "text": "反映された行動", "en": "LAST ACTION", "nativeReview": "pending" },
+    "ui.slot.lastAction": {
+      "text": "反映された行動",
+      "en": "LAST ACTION",
+      "nativeReview": "pending"
+    },
     "ui.slot.progress": { "text": "成長と章", "en": "GROWTH", "nativeReview": "pending" },
     "ui.slot.nextChoice": { "text": "つぎの選択", "en": "NEXT", "nativeReview": "pending" },
 
     "ui.cta.title": { "text": "チャットで参加", "en": "JOIN IN CHAT", "nativeReview": "pending" },
-    "ui.cta.hint": { "text": "この言葉を送るだけ", "en": "JUST SEND IT", "nativeReview": "pending" },
+    "ui.cta.hint": {
+      "text": "この言葉を送るだけ",
+      "en": "JUST SEND IT",
+      "nativeReview": "pending"
+    },
     "ui.cta.freeNote": {
       "text": "無料でもすべて達成できます",
       "en": "EVERYTHING IS REACHABLE FOR FREE",
@@ -46,10 +54,22 @@
 
     "ui.mission.started": { "text": "新しい目標", "en": "NEW GOAL", "nativeReview": "pending" },
     "ui.mission.progress": { "text": "目標が進んだ", "en": "PROGRESS", "nativeReview": "pending" },
-    "ui.mission.completed": { "text": "目標を達成", "en": "GOAL REACHED", "nativeReview": "pending" },
+    "ui.mission.completed": {
+      "text": "目標を達成",
+      "en": "GOAL REACHED",
+      "nativeReview": "pending"
+    },
 
-    "ui.thanks.title": { "text": "ありがとうございます", "en": "THANK YOU", "nativeReview": "pending" },
-    "ui.thanks.later": { "text": "あらためてお礼", "en": "LATER THANKS", "nativeReview": "pending" },
+    "ui.thanks.title": {
+      "text": "ありがとうございます",
+      "en": "THANK YOU",
+      "nativeReview": "pending"
+    },
+    "ui.thanks.later": {
+      "text": "あらためてお礼",
+      "en": "LATER THANKS",
+      "nativeReview": "pending"
+    },
     "ui.thanks.SUPER_CHAT": {
       "text": "スーパーチャット",
       "en": "SUPER CHAT",
@@ -80,7 +100,11 @@
       "nativeReview": "pending"
     },
 
-    "mission.share_a_meal": { "text": "一緒に食事", "en": "SHARE A MEAL", "nativeReview": "pending" },
+    "mission.share_a_meal": {
+      "text": "一緒に食事",
+      "en": "SHARE A MEAL",
+      "nativeReview": "pending"
+    },
     "mission.chase_the_ribbon": {
       "text": "リボンを追いかける",
       "en": "CHASE THE RIBBON",

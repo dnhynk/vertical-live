@@ -71,7 +71,9 @@ export default function EffectLayer({ effects, translate, alias }: EffectLayerPr
             <span className="effect-mission-name">
               {translate(`mission.${effect.payload.missionId}`)}
             </span>
-            <span className="effect-mission-en">{alias(`mission.${effect.payload.missionId}`)}</span>
+            <span className="effect-mission-en">
+              {alias(`mission.${effect.payload.missionId}`)}
+            </span>
           </div>
         ))}
 
