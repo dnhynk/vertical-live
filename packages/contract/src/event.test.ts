@@ -180,6 +180,75 @@ describe('CanonicalEvent (spec §7.4)', () => {
     ).toBe(false)
   })
 
+  describe('enforces the §7.4 eventKey relation, not just its shape', () => {
+    const giftEvent = {
+      ...event,
+      kind: 'GIFT',
+      command: null,
+      eventKey: `youtube:${BROADCAST_ID}:msg_test_gift_0001:gift:3`,
+      payment: {
+        amountMicros: null,
+        currency: null,
+        tier: null,
+        jewels: 30,
+        comboCount: 3,
+        giftName: 'test_gift_lantern',
+      },
+    }
+
+    it('accepts a gift event whose key restates its own fields', () => {
+      expect(CanonicalEventSchema.parse(giftEvent)).toEqual(giftEvent)
+    })
+
+    it.each([
+      [
+        'a non-gift event carrying a gift suffix',
+        { ...event, eventKey: `youtube:${BROADCAST_ID}:msg_test_0001:gift:3` },
+      ],
+      [
+        'a gift event without the suffix',
+        { ...giftEvent, eventKey: `youtube:${BROADCAST_ID}:msg_test_gift_0001` },
+      ],
+      [
+        'a suffix that disagrees with the reported combo count',
+        { ...giftEvent, eventKey: `youtube:${BROADCAST_ID}:msg_test_gift_0001:gift:9` },
+      ],
+      [
+        'a key naming another source',
+        { ...event, eventKey: `simulator:${BROADCAST_ID}:msg_test_0001` },
+      ],
+      ['a key naming another broadcast', { ...event, eventKey: 'youtube:bcast_test_OTHER:msg_1' }],
+    ])('rejects %s', (_label, candidate) => {
+      const result = CanonicalEventSchema.safeParse(candidate)
+      expect(result.success).toBe(false)
+      expect(result.error?.issues[0]?.path).toEqual(['eventKey'])
+    })
+
+    it('accepts combo count 0 with the :gift:1 key the §7.4 rule produces', () => {
+      const firstGift = {
+        ...giftEvent,
+        eventKey: `youtube:${BROADCAST_ID}:msg_test_gift_0001:gift:1`,
+        payment: { ...giftEvent.payment, comboCount: 0 },
+      }
+      expect(CanonicalEventSchema.safeParse(firstGift).success).toBe(true)
+    })
+
+    it.each(SHAPES)('%s: keys built from a fixture envelope satisfy the relation', (shape) => {
+      for (const name of ['text-message-event', 'gift-event-combo-3', 'super-chat-event']) {
+        const envelope = validEnvelope(shape, name)
+        const candidate = {
+          ...event,
+          eventKey: eventKeyForEnvelope(envelope),
+          kind: envelope.kind,
+          command: envelope.command,
+          payment: envelope.payment,
+          occurredAt: envelope.occurredAt,
+        }
+        expect(CanonicalEventSchema.safeParse(candidate).success, `${shape}/${name}`).toBe(true)
+      }
+    })
+  })
+
   it('rejects a payment amount that is not a whole non-negative number', () => {
     for (const amountMicros of [-1, 1.5, '550000']) {
       expect(

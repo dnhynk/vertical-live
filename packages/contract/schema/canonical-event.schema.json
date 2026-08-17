@@ -11,7 +11,7 @@
     },
     "eventKey": {
       "type": "string",
-      "pattern": "^(youtube|simulator):[A-Za-z0-9_-]{1,128}:[A-Za-z0-9_-]{1,128}(:gift:[1-9][0-9]{0,8})?$"
+      "pattern": "^(youtube|simulator):([A-Za-z0-9_-]{1,128}):([A-Za-z0-9_-]{1,128})(?::gift:([1-9][0-9]{0,8}))?$"
     },
     "ingestSeq": {
       "type": "integer",

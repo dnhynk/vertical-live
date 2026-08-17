@@ -18,15 +18,38 @@ import { CONTRACT_VERSION } from './version.js'
  * `youtube:{broadcastId}:{messageId}`, with the `:gift:{effectiveCount}` suffix
  * for gift events (spec §7.4).
  */
+const EVENT_KEY_PATTERN =
+  /^(youtube|simulator):([A-Za-z0-9_-]{1,128}):([A-Za-z0-9_-]{1,128})(?::gift:([1-9][0-9]{0,8}))?$/
+
 export const EventKeySchema = z
   .string()
   .regex(
-    /^(youtube|simulator):[A-Za-z0-9_-]{1,128}:[A-Za-z0-9_-]{1,128}(:gift:[1-9][0-9]{0,8})?$/,
+    EVENT_KEY_PATTERN,
     'event key must be {source}:{broadcastId}:{messageId}[:gift:{effectiveCount}]',
   )
 export type EventKey = z.infer<typeof EventKeySchema>
 
-export const CanonicalEventSchema = z.strictObject({
+interface ParsedEventKey {
+  readonly source: string
+  readonly broadcastId: string
+  readonly messageId: string
+  /** Present only on a gift key; `null` on every other event. */
+  readonly effectiveCount: number | null
+}
+
+function parseEventKey(eventKey: string): ParsedEventKey | null {
+  const match = EVENT_KEY_PATTERN.exec(eventKey)
+  if (match === null) return null
+  const [, source, broadcastId, messageId, effectiveCount] = match
+  return {
+    source: source as string,
+    broadcastId: broadcastId as string,
+    messageId: messageId as string,
+    effectiveCount: effectiveCount === undefined ? null : Number(effectiveCount),
+  }
+}
+
+const canonicalEventShape = z.strictObject({
   schemaVersion: z.literal(CONTRACT_VERSION),
   eventKey: EventKeySchema,
   ingestSeq: z.int().positive(),
@@ -46,6 +69,52 @@ export const CanonicalEventSchema = z.strictObject({
    */
   sourceDataExpiresAt: IsoUtcInstantSchema,
 })
+
+/**
+ * The §7.4 key rule is a relation, not just a shape: the key restates the
+ * event's own `source` and `broadcastId`, and the `:gift:{effectiveCount}`
+ * suffix exists exactly for gift events. Without these checks a well-formed key
+ * could name another broadcast or another source, or a non-gift event could
+ * carry a combo suffix — and the key is the idempotency unit the inbox, the
+ * paid ledger and the effect outbox all deduplicate on (spec §7.3(2)(4)).
+ *
+ * JSON Schema draft 2020-12 cannot express an equality between two properties,
+ * so `schema/canonical-event.schema.json` still only carries the key pattern.
+ * The zod schema is the source of truth (CLAUDE.md §4) and is what the server
+ * validates with.
+ */
+export const CanonicalEventSchema = canonicalEventShape
+  .refine((event) => parseEventKey(event.eventKey)?.source === event.source, {
+    path: ['eventKey'],
+    error: 'eventKey source segment must equal source',
+  })
+  .refine((event) => parseEventKey(event.eventKey)?.broadcastId === event.broadcastId, {
+    path: ['eventKey'],
+    error: 'eventKey broadcast segment must equal broadcastId',
+  })
+  .refine(
+    (event) => (parseEventKey(event.eventKey)?.effectiveCount !== null) === (event.kind === 'GIFT'),
+    {
+      path: ['eventKey'],
+      error: 'only a GIFT event may carry the :gift:{effectiveCount} suffix, and it must carry one',
+    },
+  )
+  .refine(
+    (event) => {
+      const parsed = parseEventKey(event.eventKey)
+      if (parsed?.effectiveCount === null || parsed === null) return true
+      const comboCount = event.payment?.comboCount
+      // The engine (T8) may not have a combo count for a replayed gift; only a
+      // reported one is checked against the key.
+      return comboCount === undefined || comboCount === null
+        ? true
+        : parsed.effectiveCount === effectiveGiftCount(comboCount)
+    },
+    {
+      path: ['eventKey'],
+      error: 'gift eventKey suffix must equal effectiveCount = comboCount > 0 ? comboCount : 1',
+    },
+  )
 export type CanonicalEvent = z.infer<typeof CanonicalEventSchema>
 
 /**
