@@ -104,9 +104,13 @@ export function readInteger(
   if (typeof value === 'number') {
     return Number.isSafeInteger(value) && value >= minimum ? { status: 'ok', value } : MALFORMED
   }
-  if (typeof value === 'string' && /^[0-9]{1,15}$/.test(value)) {
+  if (typeof value === 'string' && /^[0-9]+$/.test(value)) {
+    // The string and number encodings are held to the same bound: anything the
+    // schema's `z.int()` could not hold is malformed, whichever way it arrived.
     const parsed = Number.parseInt(value, 10)
-    return parsed >= minimum ? { status: 'ok', value: parsed } : MALFORMED
+    return Number.isSafeInteger(parsed) && parsed >= minimum
+      ? { status: 'ok', value: parsed }
+      : MALFORMED
   }
   return MALFORMED
 }

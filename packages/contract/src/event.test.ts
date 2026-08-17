@@ -6,6 +6,7 @@ import type { IngestAdapterContext } from './adapters/shared.js'
 import {
   CanonicalEventSchema,
   EventKeySchema,
+  MAX_GIFT_EFFECTIVE_COUNT,
   SOURCE_DATA_RETENTION_DAYS,
   effectiveGiftCount,
   eventKeyFor,
@@ -268,6 +269,114 @@ describe('CanonicalEvent (spec §7.4)', () => {
         }
         expect(CanonicalEventSchema.safeParse(candidate).success, `${shape}/${name}`).toBe(true)
       }
+    })
+  })
+
+  /**
+   * The property the round 2 review found violated: whatever an adapter accepts,
+   * the key its own helper builds from it must be a key the schemas accept. A
+   * valid envelope that produces an unusable key would be a poison event — the
+   * inbox would hold it, and every attempt to turn it into a canonical event
+   * would fail (spec §7.3(2)(3)).
+   */
+  describe('every key an adapter can produce round-trips through the schemas', () => {
+    function giftItem(shape: 'grpc' | 'rest', comboCount: unknown): unknown {
+      return shape === 'grpc'
+        ? {
+            id: 'msg_test_gift_0001',
+            snippet: {
+              type: 'GIFT_EVENT',
+              live_chat_id: LIVE_CHAT_ID,
+              published_at: '2026-08-16T00:03:00.000Z',
+              gift_details: {
+                gift_name: 'test_gift_lantern',
+                jewels_amount: 30,
+                combo_count: comboCount,
+              },
+            },
+          }
+        : {
+            id: 'msg_test_gift_0001',
+            snippet: {
+              type: 'giftEvent',
+              liveChatId: LIVE_CHAT_ID,
+              publishedAt: '2026-08-16T00:03:00.000Z',
+              giftEventDetails: {
+                giftMetadata: {
+                  giftName: 'test_gift_lantern',
+                  jewelsAmount: 30,
+                  comboCount: comboCount,
+                },
+              },
+            },
+          }
+    }
+
+    /** Both JSON encodings of every interesting count, including the contract's ceiling. */
+    const COMBO_COUNTS: readonly unknown[] = [
+      0,
+      1,
+      3,
+      999_999_999,
+      1_000_000_000,
+      MAX_GIFT_EFFECTIVE_COUNT,
+      '0',
+      '1',
+      '999999999',
+      '1000000000',
+      String(MAX_GIFT_EFFECTIVE_COUNT),
+      undefined,
+    ]
+
+    it.each(SHAPES)('%s', (shape) => {
+      for (const comboCount of COMBO_COUNTS) {
+        const label = `${shape} comboCount=${String(comboCount)}`
+        const envelope = ADAPTERS[shape](giftItem(shape, comboCount), ctx)
+        expect(envelope.validationStatus, label).toBe('valid')
+        if (envelope.validationStatus !== 'valid') continue
+
+        const eventKey = eventKeyForEnvelope(envelope)
+        expect(EventKeySchema.safeParse(eventKey).success, `${label} → ${eventKey}`).toBe(true)
+        expect(
+          CanonicalEventSchema.safeParse({
+            ...event,
+            eventKey,
+            kind: 'GIFT',
+            command: null,
+            payment: envelope.payment,
+            occurredAt: envelope.occurredAt,
+          }).success,
+          `${label} → ${eventKey}`,
+        ).toBe(true)
+      }
+    })
+
+    it.each(SHAPES)('%s rejects a count past the ceiling instead of keying it', (shape) => {
+      // Beyond the safe-integer bound the item becomes a minimal invalid
+      // envelope, so it never reaches the key builder at all.
+      for (const comboCount of [MAX_GIFT_EFFECTIVE_COUNT + 2, '9007199254740993']) {
+        expect(ADAPTERS[shape](giftItem(shape, comboCount), ctx)).toMatchObject({
+          validationStatus: 'invalid',
+          validationError: { code: 'MALFORMED_COMBO_COUNT' },
+        })
+      }
+    })
+
+    it('spells the whole numeric range the contract admits', () => {
+      expect(MAX_GIFT_EFFECTIVE_COUNT).toBe(Number.MAX_SAFE_INTEGER)
+      expect(
+        EventKeySchema.safeParse(
+          `youtube:${BROADCAST_ID}:msg_1:gift:${String(MAX_GIFT_EFFECTIVE_COUNT)}`,
+        ).success,
+      ).toBe(true)
+      // One past the ceiling has the same digit count, so only the value check
+      // catches it.
+      expect(
+        EventKeySchema.safeParse(`youtube:${BROADCAST_ID}:msg_1:gift:9007199254740993`).success,
+      ).toBe(false)
+      expect(
+        EventKeySchema.safeParse(`youtube:${BROADCAST_ID}:msg_1:gift:99999999999999999`).success,
+      ).toBe(false)
     })
   })
 

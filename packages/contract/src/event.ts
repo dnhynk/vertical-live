@@ -15,11 +15,26 @@ import { CONTRACT_VERSION } from './version.js'
  */
 
 /**
+ * Largest gift count the contract can carry, and the one bound the key spelling
+ * is derived from.
+ *
+ * `PaymentDetailsSchema.comboCount` is a `z.int()`, which accepts exactly the
+ * JavaScript safe integers (the generated JSON Schema shows it as
+ * `maximum: 9007199254740991`), and both adapters normalize to the same range.
+ * Spec §7.4 fixes no ceiling of its own, so none is invented here: the key
+ * pattern and the value check below are both computed from this constant, and a
+ * count that an envelope can hold can therefore always be spelled in a key.
+ */
+export const MAX_GIFT_EFFECTIVE_COUNT = Number.MAX_SAFE_INTEGER
+
+/**
  * `youtube:{broadcastId}:{messageId}`, with the `:gift:{effectiveCount}` suffix
  * for gift events (spec §7.4).
  */
-const EVENT_KEY_PATTERN =
-  /^(youtube|simulator):([A-Za-z0-9_-]{1,128}):([A-Za-z0-9_-]{1,128})(?::gift:([1-9][0-9]{0,8}))?$/
+const EVENT_KEY_PATTERN = new RegExp(
+  '^(youtube|simulator):([A-Za-z0-9_-]{1,128}):([A-Za-z0-9_-]{1,128})' +
+    `(?::gift:([1-9][0-9]{0,${String(MAX_GIFT_EFFECTIVE_COUNT).length - 1}}))?$`,
+)
 
 export const EventKeySchema = z
   .string()
@@ -27,6 +42,11 @@ export const EventKeySchema = z
     EVENT_KEY_PATTERN,
     'event key must be {source}:{broadcastId}:{messageId}[:gift:{effectiveCount}]',
   )
+  // The pattern bounds the suffix by digit count; this bounds it by value, so a
+  // key can never name a count no `PaymentDetailsSchema.comboCount` could hold.
+  .refine((key) => (parseEventKey(key)?.effectiveCount ?? 0) <= MAX_GIFT_EFFECTIVE_COUNT, {
+    error: `gift effectiveCount must not exceed ${String(MAX_GIFT_EFFECTIVE_COUNT)}`,
+  })
 export type EventKey = z.infer<typeof EventKeySchema>
 
 interface ParsedEventKey {
