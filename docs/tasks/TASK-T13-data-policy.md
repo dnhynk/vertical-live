@@ -81,24 +81,25 @@ client-side 7일 / Google 측 30일 분기로 처리하고, 사용자 삭제 요
 
 | # | 기준 | 상태(met/unmet/unverifiable) | 근거(테스트 파일·명령·출력) |
 |---|---|---|---|
-| 1 | 가상 시계로 30일 경과 시 삭제·기록 | **met** | `apps/server/src/privacy/retention.test.ts` — "keeps source data until its allowed period has fully elapsed"(29일·정확히 30일 무삭제), "deletes and records once 30 days have passed"(30일+1ms에 3행 삭제, 원장 `outcome=deleted`·`rowsDeleted=3`·`cutoffAt=now-30d`·`deletedAt` 확인), "expires every table that carries source data"(inbox·checkpoint·transitions·deadlines·effect_outbox·paid_ledger·gift_combo·broadcast_resources 8개 테이블 0행), `scheduler.test.ts` — "deletes expired rows on the tick that crosses the 30-day line". 모두 `FakeClock.advance()`로만 시간을 움직인다 |
-| 1 | 철회 시 7일 내 삭제 | **met** | `apps/server/src/privacy/revocation.test.ts` — "leaves no usable grant and deletes the authorized data inside the window"(`operator_revoked` → 7개 authorized 테이블 0행, `deadlineAt = 철회+7일`, `withinDeadline=true`), "records every deletion against the 7-day deadline"(원장 `reason=consent_revoked`, `allowedPeriodDays=7`, `deletedAt <= deadline`), "applies the separate 30-day rule to an invalid_grant"(Google 측 30일 분기), "reports a deletion that finished after the deadline"(기한 초과를 숨기지 않음) |
+| 1 | 가상 시계로 30일 경과 시 삭제·기록 | **met** | `apps/server/src/privacy/retention.test.ts` — "keeps source data until its allowed period has fully elapsed"(29일·정확히 30일 무삭제), "deletes and records once 30 days have passed"(30일+1ms에 3행 삭제, 원장 `outcome=deleted`·`rowsDeleted=3`·`cutoffAt=now-30d`·`deletedAt` 확인), "expires every table that carries source data"(inbox·checkpoint·transitions·deadlines·effect_outbox·paid_ledger·gift_combo·broadcast_resources 8개 테이블 0행), `scheduler.test.ts` — "deletes expired rows on the tick that crosses the 30-day line". **기록 보장**(round 1 B1): 삭제와 원장 행이 같은 트랜잭션 — "keeps the data when the audit row cannot be written"(원장 insert 실패 시 삭제 롤백), "records one audit row per batch, each committed with its own deletion". 모두 `FakeClock.advance()`로만 시간을 움직인다 |
+| 1 | 철회 시 7일 내 삭제 | **met** | `apps/server/src/privacy/revocation.test.ts` — "leaves no usable grant and deletes the authorized data inside the window"(`operator_revoked` → 7개 authorized 테이블 0행, `deadlineAt = 철회+7일`, `withinDeadline=true`), "records every deletion against the 7-day deadline"(원장 `reason=consent_revoked`, `allowedPeriodDays=7`, `deletedAt <= deadline`), "applies the separate 30-day rule to an invalid_grant"(Google 측 30일 분기), "reports a deletion that finished after the deadline"(기한 초과를 숨기지 않음), "keeps the authorized data when the audit row cannot be written"(round 1 B1). **관측 보장**(round 1 B2): "refuses to be constructed without a result or error sink", "keeps recording failures when the error sink itself throws" — 배선 누락 시 실패가 사라지지 않는다 |
 | 2 | DB 스키마 전체에서 author/channel/hash 컬럼 부재 | **met** | `apps/server/src/privacy/schema-identity.test.ts` — 마이그레이션 적용된 실제 DB의 모든 테이블(11개 이상, 컬럼 50개 이상)에서 `findIdentityColumns` 0건, 인덱스·뷰 SQL(주석 제외)에서 0건, `author`/`channel`/`hash` 3개 이름이 목록에 있음, 양성 대조(`author_channel_id` 컬럼을 심으면 검출)까지 포함 |
-| 추가 | 승인 전 파생 지표 계산·저장 코드 부재 | **met** | `apps/server/src/privacy/derived-metrics.test.ts` — workspace 소스 파일 60개 이상 + 라이브 스키마 스캔 0건, 스캐너 양성 대조 포함 |
+| 추가 | 승인 전 파생 지표 계산·저장 코드 부재 | **met** | `apps/server/src/privacy/derived-metrics.test.ts` — workspace 소스 파일 60개 이상 + 라이브 스키마 스캔 0건, 스캐너 양성 대조 포함. round 1 M2 이후 제외는 저장소 상대 경로 2개뿐이며 "exempts exactly the two registry paths and nothing else"가 이를 고정한다 |
 
-### Gates (executed)
+### Gates (executed — review round 1 fix 후 재실행)
 
 ```text
 npm run format:check  -> All matched files use Prettier code style!
 npm run lint          -> eslint 통과 · check-no-legacy-imports: ok (0 legacy imports) · check-install-scripts: ok (3 reviewed, better-sqlite3 binding loads)
 npm run typecheck     -> tsc --build tsconfig.json (출력 없음 = 통과)
-npm run test          -> Test Files 67 passed (67) / Tests 1107 passed | 1 skipped (1108)
+npm run test          -> Test Files 67 passed (67) / Tests 1130 passed | 1 skipped (1131)
 npm run build         -> contract·renderer·server·simulator 통과; server: "copied 2 migration(s) to dist/db/migrations", "docs/ops/data-map.md up to date"
 ```
 
-`git fetch origin && git rebase origin/main`(#8·#9·T7 머지 반영) 후 위 5개 게이트를 모두 실행했다.
-rebase 직후 renderer 테스트가 `jsdom` 미설치로 실패했고 `npm install`(T5가 추가한 devDependency 반영)로 해결했다 —
-`package-lock.json`은 변경되지 않았다.
+`git fetch origin && git rebase origin/main`(round 1 fix 시점: BOARD 문서 커밋 3개) 후 위 5개 게이트를 모두 실행했다.
+round 1 이전 실행값은 1107 tests였고, fix에서 privacy 테스트가 67 → 90건으로 늘어 1130이 되었다.
+최초 구현 시 rebase 직후 renderer 테스트가 `jsdom` 미설치로 실패했고 `npm install`(T5가 추가한 devDependency 반영)로
+해결했다 — `package-lock.json`은 변경되지 않았다.
 
 ## Not done / out of scope
 
@@ -123,6 +124,7 @@ rebase 직후 renderer 테스트가 `jsdom` 미설치로 실패했고 `npm insta
 | `001_initial.sql`의 `retention_ledger`를 002에서 재정의 | 001 주석이 "T13 fills and enforces this"라고 명시. 001은 checksum이 기록되어 편집이 금지되므로 새 마이그레이션이 유일한 경로. 운영 DB 없음은 R-T4-2에서 확인됨 |
 | `apps/server/src/db/migrate.test.ts` 기대값 2건 수정 | 그 테스트가 "적용된 마이그레이션은 001뿐"을 단정하고 있어 002 추가 시 반드시 깨진다. 값만 갱신했고 단정의 정밀도는 유지했다 |
 | `apps/server/package.json` build에 `generate-data-map.mjs --check` 추가 | 생성물 드리프트 방지(CLAUDE.md §4). `packages/contract`의 `generate-schema.mjs --check`와 같은 패턴 |
+| `PersistenceStore.describeSchema()` 추가(round 1) | `assertSchemaCoverage`가 컬럼 집합까지 비교하려면 `table -> columns`가 필요하다(M1). SQL은 여전히 `db/retention.ts`에만 있다 |
 
 ## Follow-ups
 
@@ -134,3 +136,19 @@ rebase 직후 renderer 테스트가 `jsdom` 미설치로 실패했고 `npm insta
 - **T16**: `docs/ops/data-map.md`를 Gate 2 체크리스트와 연결하고 provisional 수치(§8) 확정.
 - 향후 새 테이블을 만드는 모든 task는 `config/retention.json`에 항목을 추가해야 한다 —
   누락하면 `RetentionSweeper` 생성이 `RetentionConfigError`로 실패한다(테스트로 고정).
+- **T12**: `RetentionScheduler.unhealthy`·`failures`, `RevocationAuthEventSink.failed`·`failures`를 건강 집계에 넣는다
+  (sink 호출과 별개로 상태에 남는 실패 — round 1 B2에서 추가).
+
+## Review round 1
+
+리뷰: <https://github.com/dnhynk/vertical-live/pull/10#pullrequestreview-4950197018> (verdict `request_changes`).
+모든 finding을 고쳤다(반박 0건). 수정 커밋: `8559e05`(rebase 후 SHA).
+
+| finding | 처리(고침 SHA / 반박 근거) |
+|---|---|
+| [blocker] `db/retention.ts:287` + `privacy/retention.ts:308`·`revocation.ts:219` — 삭제 배치가 자기 트랜잭션에서 커밋되고 감사 insert는 그 뒤에 일어나므로 크래시·원장 실패 시 "삭제됐는데 기록 없음"이 가능(리뷰어가 BEFORE INSERT 트리거로 `ingest_inbox=0, retention_ledger=0` 재현) | **고침 8559e05.** `runBatched`가 배치마다 `DELETE` + 그 배치의 `retention_ledger` insert를 **같은 IMMEDIATE 트랜잭션**에서 커밋한다(`db/retention.ts` `runBatched`, audit factory 필수). 원장 insert가 실패하면 그 배치의 삭제도 롤백되고, 원장을 아예 쓸 수 없으면 sweep은 `RetentionLedgerUnavailableError`로 중단해 error sink에 도달한다. 재현 테스트: `retention.test.ts` "keeps the data when the audit row cannot be written"(리뷰어와 같은 `BEFORE INSERT … RAISE(ABORT)` 트리거 → throw + `ingest_inbox=3` + `retention_ledger=0`), `revocation.test.ts` "keeps the authorized data when the audit row cannot be written". 배치별 증거: "records one audit row per batch, each committed with its own deletion". audit 미주입 방어: "refuses a batched deletion that was given no audit factory" |
+| [blocker] `privacy/revocation.ts:258`·`scheduler.ts:88` — `onError`/`onResult`가 optional + 무음 기본값이라 T12 배선 누락 시 실패한 삭제가 resolve된 Promise로 사라짐 | **고침 8559e05.** 두 sink를 **필수**로 바꾸고(타입 + 생성 시 `requireSink` 런타임 검증) 실패를 sink 호출과 **별도로 상태**에도 남긴다(`scheduler.failures`/`unhealthy`, `sink.failures`/`failed`) + `logger.error`. 테스트: `scheduler.test.ts` "refuses to be constructed without a result or error sink", "reports an unmet obligation through the result sink and its own state", `revocation.test.ts` "refuses to be constructed without a result or error sink", "keeps recording failures when the error sink itself throws". 기존 호출부 6곳이 타입 오류로 드러났고 모두 갱신 |
+| [major] `config/retention.json:40` — `ingest_inbox.storedColumns`에 실제 `ingest_seq` 누락, `assertSchemaCoverage`는 테이블 이름만 검사해 field map이 드리프트 가능 | **고침 8559e05.** `ingest_seq` 추가 + `assertSchemaCoverage(config, LiveSchema)`가 `present` field마다 `storedColumns`와 실제 컬럼 집합을 **양방향 정확 비교**한다(미선언 컬럼 / 없는 컬럼 모두 거부). `PersistenceStore.describeSchema()` 추가. 테스트: `config.test.ts` "assertSchemaCoverage (review round 1, M1)" 5건, `retention.test.ts` "refuses to run when a table gained an undeclared column"(실제 `ALTER TABLE ADD COLUMN`), "declares the inbox primary key the schema really has" |
+| [major] `privacy/derived-metrics.test.ts:48` — basename 제외라 향후 어느 경로의 `derived-metrics.ts`든 검사에서 빠짐 | **고침 8559e05.** 저장소 상대 경로 2개(`apps/server/src/privacy/derived-metrics.ts`, `…/derived-metrics.test.ts`)만 제외한다. 테스트: "exempts exactly the two registry paths and nothing else"(두 경로 실재 확인 + 스캔 목록에서 빠졌음 확인) |
+| [minor] `db/retention.ts:303` — 마지막 배치가 가득 찼으면 잔여 작업이 있다고 가정 | **고침 8559e05.** 예산 소진 후 victims 질의를 `LIMIT 1`로 다시 프로브해 정확 소진과 잔여를 구분한다. 테스트: `retention.test.ts` "does not claim remaining work when the last full batch emptied the table"(1행·`batchLimit=1`·`maxBatches=1` → `truncated=false`, `clean=true`), 기존 3행 케이스는 여전히 `truncated=true` |
+| [issue] 티켓 `## Result` 정직성 — "삭제 증거를 잃을 수 없다"·"field map이 exhaustive"라는 서술이 위 두 건과 모순 | **고침 8559e05.** 두 서술이 이제 코드와 테스트로 사실이 되었고, 위 표와 아래 Result 근거를 실제 테스트 이름으로 교체했다 |
