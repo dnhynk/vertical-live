@@ -54,21 +54,77 @@
 
 ## Result
 
+### 구현한 것
+
+| 파일 | 역할 |
+|---|---|
+| `apps/server/src/input/normalize.ts` | NFKC → 보이지 않는 문자·잔여 결합 문자 제거 → 소문자 → 공백 정리의 `normalized`, 혼동 문자·카나 접기의 `folded`, leet·문자 이외 제거의 `skeleton` 3형태 |
+| `apps/server/src/input/data/homoglyphs.ts` | Latin 혼동 문자·leet·카나 접기 데이터 (UTS #39 축약, 출처 주석) |
+| `apps/server/src/input/data/moderation-terms.ts` | ja/en 금칙어 seed 5범주 + 출처·라이선스·상태 주석 |
+| `apps/server/src/input/moderation.ts` | URL·개인정보·금칙어 규칙, 고정 평가 순서, 원문 미반환 |
+| `apps/server/src/input/aliases.ts` | T1 `COMMAND_ALIASES`를 같은 정규화로 통과시킨 allowlist, 충돌 시 로드 실패 |
+| `apps/server/src/input/parse.ts` | `parseMessage(raw, context, limits) → ParsedCommand \| Rejection` 순수 함수 |
+| `apps/server/src/input/arbiter.ts` | `direct`/`aggregate` 창, hysteresis 전환, 전역 flood control, 창 집계 |
+| `apps/server/src/input/metrics.ts` | `수락 / 명령처럼 보이는 메시지`(§14.1) + 거부 코드별 수 |
+| `apps/server/src/input/config.ts`, `config/default.json` | `input.*` provisional 설정 + env override |
+| `apps/server/src/input/fixtures/adversarial.ts` | 거부 33 벡터 + 수락 25 벡터 |
+
+설계상 중요한 두 결정:
+
+1. **접기(folding)는 거부 검사에만 쓴다.** 혼동 문자·leet·구분자 제거는 "더 많은 문자열을 같게 만드는" 허용 방향 변환이다. 명령 매칭에 쓰면 allowlist가 넓어져 우회 표면이 생기고, 거부 검사에만 쓰면 언제나 거부가 늘어나는 방향뿐이다. 그래서 Cyrillic `а`는 `VOTE_A`가 아니지만(`aliases.test.ts`), Cyrillic로 쓴 금칙어·호스트는 잡힌다(`moderation.test.ts`).
+2. **우회를 막는 1차 장벽은 금칙어 목록이 아니라 형태 규칙이다.** 수락되는 형태는 `명령` 또는 `명령 + 짧은 토큰 1개`(토큰 문자셋은 계약의 `CommandRefSchema`)뿐이고, 두 번째 토큰이 또 다른 명령이면 `extraneous_text`다. 임의 문장은 내용과 무관하게 거부된다. 금칙어·URL·PII 규칙은 (a) 거부 코드를 정하고 (b) 인자 토큰과 단독 금칙어를 잡는 2차 방어다. 그 결과 목록의 크기가 합격 여부를 결정하지 않는다.
+
 ### Acceptance criteria
 
-| # | 기준 | 상태(met/unmet/unverifiable) | 근거(테스트 파일·명령·출력) |
+| # | 기준 | 상태 | 근거 |
 |---|---|---|---|
+| 1 | adversarial fixture에서 우회 0건 | met | `apps/server/src/input/parse.adversarial.test.ts` — `REJECTED_VECTORS` 33건(URL 10변형·PII 6종·금칙어 5범주 난독화 8종·형태 위반 9종. 혼동 문자·전각/반각·zero-width·leet·구분자 삽입이 이 안에 섞여 있다)이 전부 `rejected`이고 각각 기대 코드와 일치. "lets no crafted vector through"가 통과한 벡터 목록을 빈 배열로 단언. 반복 flood는 `arbiter.test.ts`의 cap/집계 테스트 |
+| 1 | 정상 별칭 전부 매핑 | met | `aliases.test.ts` "maps every alias the contract declares" — `COMMAND_ALIASES`의 ja·icons·en·정규명 전수. §7.1의 `ごはん`/`🍙`/`FEED`/`feed` → `FEED` 별도 단언. `ACCEPTED_VECTORS` 25건(전각·수학 문자·ZWJ·결합 문자·`ごはん！`·`「あそぶ」`·이형 선택자 유무 `❤`)도 수락 |
+| 2 | 모드 전환과 창 집계가 시계 주입으로 결정적 | met | `arbiter.test.ts` — `FakeClock`으로 burst → 다음 창 `aggregate`, 유지, 조용한 창 후 `direct`, 완전 idle 구간 후 `direct`, 창 도중에는 전환 없음, 같은 타이밍 두 번 실행 시 결과 동일(`toEqual`). 창 경계는 절대 UTC(`2026-01-01T00:00:00.000Z`/`…05.000Z`)로 단언 |
+| 3 | 거부된 입력의 원문이 어떤 로그·반환값에도 없다 | met | `parse.adversarial.test.ts` "rejected text never leaves the parser" 3건 — (a) 반환값 직렬화에 `LEAK_MARKERS` 부재 + 키가 `status/reason/commandLike` 3개뿐, (b) 지표 snapshot에 부재, (c) 33벡터를 파싱하는 동안 `console.*`·`process.stdout/stderr.write` 호출 0. 추가로 T1 fixture를 계약 adapter에 통과시켜 어떤 envelope에도 `example.invalid`/`NGWORD_TEST`/작성자명이 없음을 확인 |
+| — | `VOTE_A/B/C`는 `identity.gateOpen && voteWindowOpen`일 때만 | met | `parse.test.ts` "vote gating" — 닫힘/게이트만 열림/창만 열림 3경우 모두 `vote_disabled`, 둘 다 열릴 때만 수락. 차단된 투표도 `commandLike: true`로 지표 분모에 남음 |
+| — | 기여 수 보존·사용자별 cooldown 없음·전역 flood control | met | `arbiter.test.ts` "preserves every contribution when the cap is exceeded"(9건 중 6 direct + 3 aggregated, `counts.FEED = 9`), `metrics.test.ts` `windowContributions`. `actor`를 받는 API가 없어 사용자별 규칙이 구조적으로 불가능 |
+| — | 명령 성공 지표(§14.1) | met | `metrics.test.ts` — 4 command-like / 2 accepted → `0.5`, 명령처럼 보이지 않는 메시지는 분모에서 제외 |
 
 ### Gates (executed)
 
 ```text
-(작성 예정)
+$ git fetch origin && git rebase origin/main
+Successfully rebased and updated refs/heads/dnhynk/t6-command-parser.   (base 0cd1bbd)
+
+$ npm run format:check
+All matched files use Prettier code style!
+
+$ npm run lint
+eslint . -> no findings
+check-no-legacy-imports: ok (0 legacy imports)
+
+$ npm run typecheck
+tsc --build tsconfig.json -> no output (success)
+
+$ npm run test
+Test Files  26 passed (26)
+Tests  654 passed (654)
+(그중 apps/server/src/input: Test Files 8 passed, Tests 170 passed)
+
+$ npm run build
+@vl/contract build (tsc --build + generate-schema --check) -> ok
+@vl/renderer vite build -> built in 12.99s
+@vl/server  tsc --build -> ok
+@vl/simulator tsc --build -> ok
 ```
 
 ## Not done / out of scope
 
-- (작성 예정)
+- **`GET /metrics` 노출**: `CommandMetrics`는 순수 수집기로만 만들었다. HTTP 노출은 §T6 범위에 없고 건강 지표 집계는 T12 소관이다.
+- **엔진 배선**: 파서·arbiter를 실제 ingest 경로에 연결하는 것은 T8(단일 writer)이다. 여기서는 계약의 `CommandParser` 포트 구현(`createCommandParserPort`)까지만 제공하고, 그 포트를 T1 fixture + 계약 adapter로 테스트했다.
+- **`packages/contract` 변경 없음**: 이 task는 `[contract]`가 아니다. 별칭 데이터·`CommandRef`·`AggregateWindow`는 계약 정본을 그대로 읽는다.
+- **UTS #39 confusables 전체 테이블 미탑재**: ~6,000 항목이고 Unicode 판올림마다 바뀐다고 규격이 명시한다. Latin 혼동 문자 부분집합만 싣고 근거를 데이터 파일에 남겼다.
+- **일본어 문구 없음**: 이 task는 화면 문자열을 만들지 않는다(거부는 코드로만). `ja.json`은 T5/T14.
 
 ## Follow-ups
 
-- (작성 예정)
+- 금칙어 목록의 운영 정본화: Studio blocked words[S16] 설정 절차와 운영자 관리 목록 로딩(외부 파일/DB)은 T13 데이터 정책 또는 T16 런북에서 정한다.
+- `input.window.*`·`maxRawLength`를 Gate 2 측정값으로 교체(A-3, A-15). 교체 시 `config/default.json`의 `provisional` 목록에서 뺀다.
+- identity gate가 열리면(§17 미정) 사용자별 한 표·cooldown 규칙이 추가된다. 현재 arbiter는 `actor`를 받지 않으므로 그때 시그니처가 바뀐다.
+- 모더레이션이 과차단한 사례를 실제 파일럿에서 표본 검토(§12.3 "사람 호출" 운영표와 함께). 현재는 과차단이 거부 코드만 바꾸므로 무해하지만, 명령 성공 지표를 왜곡할 수 있다.
