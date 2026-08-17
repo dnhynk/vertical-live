@@ -70,30 +70,93 @@ reconnect 횟수·마지막 token·마지막 사용자 이벤트 시각)와 재�
 | `youtube.chat.parts` | `["id","snippet"]` | 확정 | 스펙 §7.2. `authorDetails`는 identity gate가 열릴 때만 |
 | `youtube.chat.maxResults` | `500` | 확정(문서 기본값) | [S4] 레퍼런스 "The default value is 500", 허용 200–2000 |
 | `youtube.chat.grpc.keepalive.*` | time 300000ms / timeout 20000ms / permitWithoutCalls false | provisional | 공식 keepalive 가이드의 "5분 미만 ping 금지" 권고 안쪽. YouTube가 공표한 값은 없음 |
-| `youtube.chat.reconnect.*` | initial 1000ms / max 60000ms / factor 2 / jitter 0.2 / maxAttempts 0(무한) | provisional | 스펙 §11 "backoff로 재연결"만 요구. 채팅 수집은 포기하면 무인성이 깨지므로 시도 상한을 두지 않고 T12가 degraded를 판정 |
-| `youtube.chat.rest.minPollIntervalMs` | `2000` | provisional | 서버가 `pollingIntervalMillis`를 주지 않은 응답에서만 쓰는 하한. 문서에 기본값 없음 |
+| `youtube.chat.reconnect.*` | initial 1000ms / max 60000ms / factor 2 / jitter 0.2 / maxAttempts 8 | provisional | 스펙 §11 "backoff로 재연결"만 요구. `maxAttempts`는 **포기 횟수가 아니라 degraded 보고 임계값**이다 — 소진 뒤에도 `maxDelayMs` 간격으로 계속 재연결한다(§2.1 무인성). 판정은 T12 |
+| `youtube.chat.rest.minPollIntervalMs` / `maxPollIntervalMs` / `requestTimeoutMs` | 2000 / 60000 / 20000 | provisional | 서버가 준 `pollingIntervalMillis`를 이 범위로만 clamp한다(주지 않으면 하한). 문서에 기본값·상한 없음 |
+| `youtube.chat.readyPollIntervalMs` | `250` | provisional | 엔진 `ready`를 기다리는 폴링 간격. 스펙은 순서만 정한다(§7.3(3)) |
 | `youtube.chat.fallback.*` | gRPC 연속 실패 3회 → REST, `retryPrimaryAfterMs` 300000 | provisional | 스펙은 "REST는 fallback"만 정함 |
 | `liveChatId` 출처 | config `youtube.chat.liveChatId`(기본 `null`) 또는 주입된 resolver | — | T10 `broadcast_resources`는 아직 main에 없다(PR #11 리뷰 중). 명세 §T9가 허용한 config 주입 + resolver 포트로 두어 T10/T12가 배선한다 |
 
 ## Result
 
-(구현 후 채움)
+구현 완료. 새 파일은 `apps/server/proto/stream_list.proto`,
+`apps/server/src/youtube/chat/*`(config·transport·sink·state·health·grpc-source·rest-source·
+chat-source·retry·runtime), 테스트 지원 `apps/server/src/testing/`(fake-stream-list-server·
+fake-live-chat-rest-server·tcp-breaker·chat-test-support), 운영 문서
+`docs/ops/youtube-chat-source.md`. 기존 파일 수정은 `config/default.json`(`youtube.chat` 블록),
+`apps/server/src/health/types.ts`(`HealthComponent`에 `youtube-chat` 추가),
+`apps/server/src/server.ts`(`/health`의 `sources`), `apps/server/src/main.ts`(배선),
+`apps/server/src/youtube/index.ts`(re-export), `scripts/check-install-scripts.mjs`(protobufjs 근거),
+`apps/server/package.json`·`package-lock.json`(새 의존성 2개).
 
 ### Acceptance criteria
 
-| # | 기준 | 상태(met/unmet/unverifiable) | 근거(테스트 파일·명령·출력) |
+| # | 기준 | 상태 | 근거 |
 |---|---|---|---|
+| 1 | 가짜 gRPC 서버(같은 proto)로 스트림 수신·token 재개·중간 끊김·poison item·REST 전환 테스트 통과 | met | `apps/server/src/youtube/chat/grpc-source.test.ts`(12), `rest-source.test.ts`(9), `chat-source.test.ts`(5), `sink.test.ts`(9). 끊김은 실제 소켓 절단(`testing/tcp-breaker.ts`) — grpc-js 서버의 `call.destroy()`는 클라이언트가 관측할 수 있는 것을 보내지 않음을 실험으로 확인하고 relay 방식으로 바꿨다. 전환은 `chat-source.test.ts > falls back to REST and keeps the same checkpoint`(REST 첫 요청의 `pageToken`이 gRPC가 저장한 token) |
+| 2 | 요청 parts에 `authorDetails`가 없음을 테스트로 고정 | met | 3중으로 고정: (a) config 로더가 `authorDetails`를 거부(`config.test.ts`), (b) 실제 wire에 도착한 요청을 검사(`grpc-source.test.ts > requests id,snippet only — never authorDetails`, `rest-source.test.ts > requests id,snippet only …`), (c) proto에 `author_details`가 존재함을 확인해 "요청하지 않는다"가 공허한 주장이 아님을 보임(`proto.test.ts`) |
+| 3 | 실계정 없이 완료 판정 가능한 범위를 티켓에 명시하고 실계정 절차는 T16으로 | met | 아래 "Not done" + `docs/ops/youtube-chat-source.md` §4 |
+
+추가로 구현·검증한 명세 항목:
+
+- `next_page_token` checkpoint 복원·전진과 **같은 트랜잭션** 커밋(§7.3(2)): `sink.test.ts`(빈 응답도 전진, token 없는 응답은 이전 token 유지, 중복은 오류가 아니라 카운트).
+- poison item에도 checkpoint 전진: `sink.test.ts > drops an item whose adapter throws …`, `> drops an envelope the contract schema would refuse`, `grpc-source.test.ts > commits a poison item as a minimal envelope and keeps going`.
+- gRPC status별 처리: UNAVAILABLE 재시도, UNAUTHENTICATED/PERMISSION_DENIED는 T3 갱신 1회 후 중단(`AuthRevokedError`면 `auth_revoked`), FAILED_PRECONDITION/NOT_FOUND 중단, INVALID_ARGUMENT는 token 폐기 후 재연결 — `grpc-source.test.ts` 6개 케이스.
+- REST `pollingIntervalMillis` 준수와 clamp: `rest-source.test.ts > obeys the server-supplied polling interval …`, `> waits the interval the server asked for between polls`.
+- 건강 신호(§9.4(3)) 4종과 "무수신은 degraded가 아니다": `health.test.ts`(6시간 무수신에도 `ok`), `chat-source.test.ts > publishes the four health signals …`.
+- 재연결 중복·손실 추정(§11): 중복은 `commitIngestBatch`가 돌려주는 실측값, 손실은 token으로 재개했으면 0, token이 없었으면 `null`(모름). `grpc-source.test.ts`, `health.test.ts`.
+- `engine.ready` 이전에는 수신하지 않음(§7.3(3)): `chat-source.test.ts > waits for the engine to finish its recovery drain before connecting`.
 
 ### Gates (executed)
 
 ```text
-(구현 후 채움)
+$ npm run format:check && npm run lint && npm run typecheck && npm run test && npm run build
+All matched files use Prettier code style!
+check-no-legacy-imports: ok (0 legacy imports)
+check-install-scripts: ok (4 reviewed, better-sqlite3 binding loads)
+tsc --build tsconfig.json                     (no output = pass)
+Test Files  96 passed (96)
+     Tests  1354 passed | 1 skipped (1355)
+schema up to date (6 files)
+copied 4 migration(s) to dist/db/migrations
+docs/ops/data-map.md up to date
+exit=0                                        (2026-08-17, this Windows 11 host, Node 24)
+
+$ npx vitest run apps/server/src/youtube/chat
+Test Files  8 passed (8)
+     Tests  62 passed (62)
+
+$ node -e "import('./apps/server/dist/youtube/chat/transport.js') …"
+proto path from dist: …\apps\server\proto\stream_list.proto
+client loaded from dist build: true          (빌드 산출물에서도 proto 경로가 풀린다)
 ```
 
 ## Not done / out of scope
 
-- (구현 후 채움)
+**실계정 없이 판정할 수 없는 것** (합격 기준 3, 절차는 `docs/ops/gate2-experiments.md`(T16)):
+
+1. `streamList`가 실제로 요구하는 OAuth scope. streamList 레퍼런스에는 Authorization 절 자체가
+   없고 REST discovery에도 없다(T3가 `scopes.ts`에 `verified: false`로 남긴 그대로 — 이 task도
+   확정하지 못했다). 실제 호출로만 확인된다.
+2. 실제 keepalive 수용 범위. 설정한 5분/20초는 gRPC 공식 가이드의 서버 기본 허용치(`PERMIT_KEEPALIVE_TIME`
+   300000ms) 안쪽이라는 근거뿐이고, YouTube가 공표한 값은 없다. `too_many_pings` GOAWAY 여부는 실측이다.
+3. 스트림의 실제 수명·재연결 빈도·중복 수신량, 그리고 `pollingIntervalMillis`의 실제 값 범위.
+4. `streamList`/`list`의 실제 quota 단위 비용(T3 `costs.ts`가 `documented: false`로 둔 값).
+5. gRPC 응답 item의 실제 필드 조합(예: Gifts가 켜진 일본 채널의 `gift_details`). fixture는 [S3]/[S4]
+   문서 기준이며 실제 응답으로 재확인해야 한다.
+
+**범위 밖으로 둔 것**
+
+- `liveChatId`를 T10 `broadcast_resources`에서 읽는 배선. T10(PR #11)이 아직 main에 없어 그 테이블이
+  존재하지 않는다. `LiveChatTargetResolver` 포트만 두고 기본 구현은 config다(명세 §T9가 허용).
+- 채팅 소스의 degraded/safe_stopped 판정과 알림. 이 task는 신호를 **보고만** 한다(§9.4 서문, T12).
+- gRPC 채널 풀링([S4]가 동시 스트림이 많을 때 권고). 세계당 채팅 1개이므로 필요 없다.
 
 ## Follow-ups
 
-- (구현 후 채움)
+- T12: `/health`의 `sources` 배열을 supervisor 상태기계에 연결하고, `youtube.chat.transport`가
+  `degraded`로 오래 머물면 알림·safe_stopped 정책을 적용한다. `no_live_chat_id`는 T10 배선 신호다.
+- T10/T12: `broadcast_resources`가 생기면 `resolveTarget`을 그 테이블 판독기로 바꾼다(`liveChatId`
+  교체 시 소스 재시작 필요 — rolling broadcast 실험(A-4)에서 발생).
+- T15 fault matrix: 이 소스가 만드는 상태(`retry`/`degraded`/`stopped`)를 행으로 넣고, inbox commit과
+  token checkpoint 사이의 crash window는 이미 하나의 트랜잭션이라 해당 없음을 기록한다.
+- T16: 위 "실계정" 5개 항목을 `docs/ops/gate2-experiments.md`로 옮긴다.
