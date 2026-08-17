@@ -147,6 +147,16 @@ M1-scheduledEndTime:  exit=1 Tests  1 failed | 54 skipped (55)   (scheduledEndTi
 M2-status-member:     exit=1 Tests  1 failed | 54 skipped (55)   (selfDeclaredMadeForKids 재전송)
 ```
 
+### Reproduction checks (round 5)
+
+```text
+$ (un-fix: #findInsertedStream가 마커 대신 title로 매칭)
+adopts the stream its own insert created…      : exit=1 Tests 1 failed | 57 skipped (58)
+stays inconclusive when two streams carry…     : exit=1 Tests 1 failed | 57 skipped (58)
+```
+
+round 4의 절단 테스트(`writes nothing to the vault when a truncated stream scan cannot decide`)는 그대로 통과한다.
+
 ### Gates (executed)
 
 ```text
@@ -161,6 +171,8 @@ $ npm run build          -> contract, renderer(vite ✓ built), server(copied 2 
 round 1 수정 후 재실행(base `44fefaa`로 rebase): 위 5개 게이트 모두 통과, 테스트 **1129 passed | 1 skipped (1130)**, `copied 2 migration(s)`(003 재번호 후 dist 정리 확인).
 
 round 3 수정 후 재실행: format pass · lint pass · typecheck pass · test **1289 passed | 1 skipped (1290)** · build pass. `marker_cleared_at` 컬럼을 T13 데이터 맵에 선언하고 생성 스크립트를 다시 돌렸다.
+
+round 5 수정 후 재실행(base `c8b6baf`로 rebase): format pass · lint pass · typecheck pass · test **1407 passed | 1 skipped (1408)** · build pass(`copied 5 migration(s)`, data map up to date).
 
 round 4 수정 후 재실행(base `7a858b8`로 rebase): format pass · lint pass · typecheck pass · test **1404 passed | 1 skipped (1405)** · build pass(`copied 5 migration(s)`, `docs/ops/data-map.md up to date`).
 
@@ -270,8 +282,29 @@ round 3에서 인용한 "생략된 속성은 삭제된다"는 규칙에는 **명
 
 즉 round 3의 "description만 바꿀 때도 title을 함께 보낸다"는 판단은 **틀렸다**(예외 목록을 확인하지 않았다). 지금은 title을 보내지 않으므로 동시 Studio 편집을 덮어쓰지 않고, 대신 예외가 아닌 `scheduledEndTime`을 보존한다. `docs/ops/broadcast-lifecycle.md`의 해당 절도 표로 다시 썼다.
 
+## Review round 5
+
+리뷰: https://github.com/dnhynk/vertical-live/pull/11#pullrequestreview-4951761421 (verdict `request_changes`, blocker 1). round 4의 세 항목과 round 1–3 회귀는 리뷰어가 모두 fixed로 확인했다. 커밋 `f13577f`.
+
+| finding | 처리 |
+|---|---|
+| **B1** `lifecycle.ts:1246` 목록이 **완전**해도 same-title 후보가 복수면 `#selectStreamByTitle`이 첫 항목을 채택하고 pending을 해제하고 그 키를 vault에 기록 → 실제 insert가 만든 stream은 고아가 되고 OBS는 잘못된 키를 정본으로 쓴다(§9.1, 합격 1) | 고침 `f13577f`. broadcast와 **같은 원칙**을 적용했다: (a) `liveStreams.insert` 본문에 이 attempt의 마커를 `snippet.description`으로 실어 보낸다(영속은 기존 `broadcast_resources.attempt_marker` 그대로 — 한 attempt가 두 자원에 같은 identity를 쓴다), (b) 새 `#findInsertedStream()`이 마커 단일 일치 + title 일치일 때만 채택하고, 복수는 `stream_marker_ambiguous`, title 불일치는 `stream_marker_title_mismatch`, 절단은 `stream_list_truncated`로 inconclusive 처리한다. **키 commit은 단일 일치 경로 한 곳에서만** 일어나므로 다른 모든 분기는 vault에 흔적을 남기지 않는다, (c) 재사용 경로(`#selectStreamByTitle`)는 title 매칭을 유지한다 — 그것은 교체 가능한 자원 중 하나를 **선택**하는 일이고 불확실한 호출에 대한 **판정**이 아니다(주석에 명시), (d) 재현 테스트 3건 + round 4 절단 테스트 유지 |
+
+### stream 마커를 제거하지 않는 판단과 그 근거 (2026-08-17 확인)
+
+| 항목 | 내용 | 출처 |
+|---|---|---|
+| 왜 title이 identity가 될 수 없나 | title은 **재사용 키**다. 같은 title의 stream이 여러 개 있을 수 있고 실제로 리뷰어 재현이 그 경우다 | 이 티켓 §범위(생성/재사용) |
+| 마커를 넣을 필드 | `snippet.description` — insert에서 쓰기 가능, 10,000자, `liveStreams.list`의 `snippet` 파트로 반환된다 | https://developers.google.com/youtube/v3/live/docs/liveStreams/insert · .../liveStreams |
+| stream이 공개 자원인가 | 리소스 문서: "A `liveStream` resource contains information about the video stream that you are transmitting to YouTube." → **송출 입력** 자원이고, watch 페이지를 갖는 것은 `liveBroadcast`/video다. round 3에서 인용된 description·YPP 심사 지침은 *video* 메타데이터에 대한 것이다 | https://developers.google.com/youtube/v3/live/docs/liveStreams |
+| 남는 불확실성 | 공식 문서는 stream snippet이 시청자에게 보이는지 **말하지 않는다**. 그래서 이것은 증명이 아니라 판단이다 | 같은 문서(해당 서술 없음) |
+| 그래서 둔 안전장치 | ① 마커는 `title`이 아니라 `description`에 넣는다(Studio는 stream을 title로 나열한다) ② Gate 2에서 stream description이 노출되는 화면이 확인되면 broadcast와 동일한 `update`+검증 단계를 추가한다(A-18과 같은 방식) — Follow-up에 등록 | — |
+
+broadcast 마커는 제거하고 stream 마커는 남기는 이유의 요약: broadcast는 공개되는 산출물이고 공개 전환 시점이라는 **훅이 존재**한다(A-18). stream은 attempt 사이에 재사용되는 입력 자원이어서 "이제 안전하다"고 말할 수 있는 시점이 없고, 노출 근거도 없다.
+
 ## Follow-ups
 
+- **Gate 2 확인 항목(round 5)**: YouTube의 어떤 화면이 `liveStream`의 `snippet.description`을 시청자에게 노출하는지 확인한다. 노출된다면 stream 마커도 broadcast와 같이 `liveStreams.update`로 제거하고 검증하는 단계를 추가한다(A-18과 동일한 방식).
 - **T12 배선**: `BroadcastLifecycle`은 `BroadcastAlertSink`·`SafeStopRequestSink`·`HealthSignalSink`만 호출한다. T12가 (a) Discord alert 구현(D-3), (b) `safe_stopped` 전이, (c) `BroadcastHealthMonitor` 기동, (d) `ObsControl.setStreamServiceFromVault()` → `startStream()` 순서를 `ensureBound()` **뒤**에 두는 것을 맡는다. `errorStreamInactive`는 `BroadcastStreamInactiveError`로 나오므로 "인코더를 먼저 켜라"는 신호로 쓸 수 있다.
 - **T9**: `liveChatId`는 `store.findOpenBroadcastAttempt()?.liveChatId` 또는 `ensureLive()`의 `BroadcastTarget.liveChatId`에서 읽는다(§T9 "T10의 broadcast_resources에서 읽되"). rolling 교체 신호는 새 attempt 행의 `live_chat_id`다.
 - **T3 `quota/classify.ts`**: 공용 표에 `sharedIngestionBroadcastsExceedLimit`가 없어 403 → `forbidden`(safe_stopped)으로 분류된다. T10은 자기 `classifyBroadcastLimit`에서 먼저 잡으므로 이 task의 동작에는 영향이 없다. 공용 표에 한 줄 추가하는 것은 T3 소유 파일 변경이라 하지 않았다.
