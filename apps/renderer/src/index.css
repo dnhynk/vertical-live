@@ -1,5 +1,6 @@
 :root {
   font-family:
+    'Noto Sans JP',
     Inter,
     ui-sans-serif,
     system-ui,
@@ -38,17 +39,211 @@ body {
   background: #11110f;
 }
 
-/* 9:16 stage: the only layout the T0 renderer needs. */
+/*
+ * Fixed 9:16 1080x1920 coordinate system (spec §11 "화면"). Only `transform`
+ * changes with the window; every length below is in broadcast pixels.
+ */
 .stage {
   position: relative;
-  height: 100vh;
-  aspect-ratio: 9 / 16;
-  max-width: 100vw;
   overflow: hidden;
   background: #0b0c0c;
+  transform-origin: center center;
 }
 
 .stage-canvas {
   position: absolute !important;
   inset: 0;
+}
+
+.screen {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 56px 48px 72px;
+  pointer-events: none;
+}
+
+.hud {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.hud-waiting {
+  font-size: 48px;
+  opacity: 0.7;
+}
+
+.slot {
+  background: rgba(8, 10, 12, 0.62);
+  border: 2px solid rgba(247, 243, 234, 0.14);
+  border-radius: 28px;
+  padding: 24px 28px;
+}
+
+.slot-label {
+  margin: 0 0 12px;
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  opacity: 0.72;
+}
+
+.slot-value {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  font-size: 44px;
+  font-weight: 700;
+  flex-wrap: wrap;
+}
+
+.slot-need .slot-value {
+  font-size: 56px;
+}
+
+.slot-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 72px;
+  height: 72px;
+  padding: 0 12px;
+  border-radius: 20px;
+  background: rgba(247, 243, 234, 0.12);
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 22px;
+  font-weight: 500;
+}
+
+.slot-count,
+.slot-time {
+  font-size: 30px;
+  font-weight: 500;
+  opacity: 0.78;
+}
+
+.progress-track {
+  margin-top: 18px;
+  height: 22px;
+  border-radius: 11px;
+  background: rgba(247, 243, 234, 0.14);
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: #ffd84d;
+}
+
+.effect-layer {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.effect {
+  background: rgba(255, 216, 77, 0.18);
+  border: 2px solid rgba(255, 216, 77, 0.45);
+  border-radius: 999px;
+  padding: 12px 28px;
+  font-size: 32px;
+  font-weight: 600;
+}
+
+.cta {
+  background: rgba(8, 10, 12, 0.62);
+  border: 2px solid rgba(247, 243, 234, 0.14);
+  border-radius: 28px;
+  padding: 24px 28px;
+}
+
+.cta-paused {
+  font-size: 40px;
+  font-weight: 700;
+  text-align: center;
+  opacity: 0.85;
+}
+
+.cta-commands {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+
+.cta-command {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 40px;
+  font-weight: 700;
+  background: rgba(247, 243, 234, 0.1);
+  border-radius: 999px;
+  padding: 10px 26px;
+}
+
+.cta-icon {
+  font-size: 44px;
+}
+
+/* `?mode=dev` only: never rendered in the broadcast mode OBS opens. */
+.dev-panel {
+  position: absolute;
+  top: 24px;
+  right: 24px;
+  width: 460px;
+  max-height: 900px;
+  overflow: auto;
+  background: rgba(4, 6, 8, 0.86);
+  border: 2px solid rgba(247, 243, 234, 0.2);
+  border-radius: 20px;
+  padding: 20px;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 18px;
+  pointer-events: auto;
+}
+
+.dev-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 14px;
+  margin: 0 0 16px;
+}
+
+.dev-grid dt {
+  opacity: 0.6;
+}
+
+.dev-grid dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.dev-log {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.dev-log li {
+  display: flex;
+  gap: 10px;
+}
+
+.dev-log-warn .dev-log-code {
+  color: #ffb4a2;
+}
+
+.dev-log-detail {
+  opacity: 0.7;
 }

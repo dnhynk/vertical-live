@@ -15,9 +15,10 @@ export default defineConfig([
     'legacy/**',
   ]),
 
-  // TypeScript workspaces: @vl/contract, @vl/server, @vl/simulator.
+  // TypeScript workspaces that run on Node: @vl/contract, @vl/server, @vl/simulator.
   {
     files: ['**/*.{ts,mts,cts}'],
+    ignores: ['apps/renderer/src/**'],
     extends: [js.configs.recommended, tseslint.configs.recommended],
     languageOptions: {
       ecmaVersion: 2023,
@@ -28,12 +29,7 @@ export default defineConfig([
 
   // Repo-level ESM tooling that runs on Node.
   {
-    files: [
-      'scripts/**/*.mjs',
-      '{packages,apps,tools}/*/scripts/**/*.mjs',
-      'eslint.config.js',
-      'apps/renderer/vite.config.js',
-    ],
+    files: ['scripts/**/*.mjs', '{packages,apps,tools}/*/scripts/**/*.mjs', 'eslint.config.js'],
     extends: [js.configs.recommended],
     languageOptions: {
       ecmaVersion: 2023,
@@ -42,26 +38,24 @@ export default defineConfig([
     },
   },
 
-  // @vl/renderer browser sources. Rules preserved from the prototype config;
-  // the TypeScript migration is T5.
+  // @vl/renderer browser sources (TypeScript since T5).
   {
-    files: ['apps/renderer/src/**/*.{js,jsx}'],
+    files: ['apps/renderer/src/**/*.{ts,tsx}'],
     extends: [
       js.configs.recommended,
+      tseslint.configs.recommended,
       reactHooks.configs.flat.recommended,
       reactRefresh.configs.vite,
     ],
     languageOptions: {
-      ecmaVersion: 2020,
+      ecmaVersion: 2023,
+      sourceType: 'module',
       globals: { ...globals.browser },
       parserOptions: {
         ecmaVersion: 'latest',
         ecmaFeatures: { jsx: true },
         sourceType: 'module',
       },
-    },
-    rules: {
-      'no-unused-vars': ['error', { varsIgnorePattern: '^[A-Z_]' }],
     },
   },
 
