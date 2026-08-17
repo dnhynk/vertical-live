@@ -161,6 +161,7 @@ interface BroadcastAttemptColumns {
   readonly live_chat_id: string | null
   readonly scheduled_start_time: string
   readonly attempt_marker: string
+  readonly marker_cleared_at: string | null
   readonly auto_start: number | null
   readonly last_error_reason: string | null
   readonly created_at: string
@@ -1174,6 +1175,8 @@ export class PersistenceStore {
                 live_chat_id = COALESCE(?, live_chat_id),
                 scheduled_start_time = COALESCE(?, scheduled_start_time),
                 auto_start = COALESCE(?, auto_start),
+                -- Write-once: a marker that has been removed cannot come back.
+                marker_cleared_at = COALESCE(marker_cleared_at, ?),
                 last_error_reason = CASE WHEN ? THEN ? ELSE last_error_reason END,
                 pending_call = CASE WHEN ? THEN NULL ELSE pending_call END,
                 pending_transition = CASE WHEN ? THEN NULL ELSE pending_transition END,
@@ -1188,6 +1191,7 @@ export class PersistenceStore {
         update.liveChatId ?? null,
         update.scheduledStartTime ?? null,
         update.autoStart === undefined ? null : update.autoStart ? 1 : 0,
+        update.markerCleared === true ? now : null,
         update.lastErrorReason === undefined ? 0 : 1,
         update.lastErrorReason ?? null,
         options.clearPending ? 1 : 0,
@@ -1217,7 +1221,7 @@ const DEADLINE_COLUMNS = `SELECT id, kind, due_at, policy, payload_json, status 
 
 const BROADCAST_COLUMNS = `SELECT attempt_id, strategy, stage, pending_call, pending_transition, pending_since,
          stream_id, stream_title, broadcast_id, live_chat_id, scheduled_start_time, attempt_marker,
-         auto_start, last_error_reason, created_at, updated_at, closed_at
+         marker_cleared_at, auto_start, last_error_reason, created_at, updated_at, closed_at
     FROM broadcast_resources`
 
 function toBroadcastAttempt(row: BroadcastAttemptColumns): BroadcastAttemptRecord {
@@ -1234,6 +1238,7 @@ function toBroadcastAttempt(row: BroadcastAttemptColumns): BroadcastAttemptRecor
     liveChatId: row.live_chat_id,
     scheduledStartTime: row.scheduled_start_time,
     attemptMarker: row.attempt_marker,
+    markerClearedAt: row.marker_cleared_at,
     autoStart: row.auto_start === null ? null : row.auto_start === 1,
     lastErrorReason: row.last_error_reason,
     createdAt: row.created_at,

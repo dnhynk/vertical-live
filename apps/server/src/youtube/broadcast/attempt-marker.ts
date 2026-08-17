@@ -64,6 +64,27 @@ export function describeWithMarker(description: string, marker: string): string 
 }
 
 /**
+ * The description with the marker taken out again (BOARD A-18), leaving the operator's
+ * text as YouTube currently holds it. The separator this module added comes out with
+ * it, and a description that was only ever the marker becomes empty.
+ */
+export function withoutAttemptMarker(description: string | null, marker: string): string {
+  if (description === null) {
+    return ''
+  }
+  return description
+    .split(
+      `
+
+${marker}`,
+    )
+    .join('')
+    .split(marker)
+    .join('')
+    .trimEnd()
+}
+
+/**
  * Whether a listed broadcast carries this attempt's marker. A substring test, not an
  * equality one: the operator's description travels with it, and a platform that
  * appended anything of its own must not make our own resource unrecognisable.

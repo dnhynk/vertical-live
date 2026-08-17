@@ -192,6 +192,7 @@
         "live_chat_id",
         "scheduled_start_time",
         "attempt_marker",
+        "marker_cleared_at",
         "auto_start",
         "last_error_reason",
         "created_at",

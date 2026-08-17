@@ -19,7 +19,12 @@ import {
   type BroadcastAlertSink,
   type SafeStopRequestSink,
 } from './alerts.js'
-import { attemptMarkerOf, carriesAttemptMarker, describeWithMarker } from './attempt-marker.js'
+import {
+  attemptMarkerOf,
+  carriesAttemptMarker,
+  describeWithMarker,
+  withoutAttemptMarker,
+} from './attempt-marker.js'
 import type { BroadcastConfig } from './config.js'
 import type { StreamKeyCustodian } from './stream-key.js'
 import {
@@ -42,8 +47,16 @@ import {
  *    retry is how a channel ends up with two broadcasts and hits its own limits.
  *
  * The reconcile keys are ours by construction: the ingestion stream is found by its
- * configured title, the broadcast by the `scheduledStartTime` this attempt chose
- * and persisted before calling insert.
+ * configured title, and the broadcast by the **attempt marker** this attempt persisted
+ * before calling insert and wrote into `snippet.description`, with its
+ * `scheduledStartTime` as corroboration. A scheduled time is not an identity on its
+ * own (review round 2, B1), and neither answer — adopted or not applied — may be read
+ * off a truncated list (review round 3, B1).
+ *
+ * The marker is machine metadata, so it does not outlive its purpose: the broadcast is
+ * created `private`, the marker is taken back out of the description with
+ * `liveBroadcasts.update` as soon as the broadcast id is durably ours, and `publish()`
+ * refuses to make anything public before that has happened (BOARD A-18).
  *
  * What this class does not do: decide that the system is degraded, sleep between
  * supervision cycles, start OBS, or restart itself out of `safe_stopped`. It
@@ -100,6 +113,20 @@ export class BroadcastReconcileFailedError extends Error {
     super(`${call} could not be confirmed after ${String(attempts)} attempt(s) and a reconcile`)
     this.name = 'BroadcastReconcileFailedError'
     this.call = call
+  }
+}
+
+/**
+ * Refuses to expose a broadcast that still carries the attempt marker in its
+ * description (BOARD A-18). The marker is an internal identity string, and viewers see
+ * descriptions on search and watch surfaces.
+ */
+export class BroadcastMarkerNotClearedError extends Error {
+  constructor(broadcastId: string) {
+    super(
+      `broadcast ${broadcastId} still carries its attempt marker in the description; it cannot be made public until the marker has been removed (BOARD A-18)`,
+    )
+    this.name = 'BroadcastMarkerNotClearedError'
   }
 }
 
@@ -197,6 +224,9 @@ export class BroadcastLifecycle {
     let attempt = (await this.resume()) ?? this.#beginAttempt()
     attempt = await this.#ensureStream(attempt)
     attempt = await this.#ensureBroadcast(attempt)
+    // The broadcast id is durable from here on, so the marker has done its job and
+    // comes back out before anything can expose the description (BOARD A-18).
+    attempt = await this.#clearAttemptMarker(attempt)
     attempt = await this.#ensureBound(attempt)
     return this.#toBinding(attempt)
   }
@@ -223,6 +253,110 @@ export class BroadcastLifecycle {
   async ensureLive(): Promise<BroadcastTarget> {
     await this.ensureBound()
     return this.goLive()
+  }
+
+  /**
+   * Applies `youtube.broadcast.privacyStatus` to the broadcast — the only path from
+   * `private` to anything visible (BOARD A-18).
+   *
+   * Never called from `ensureLive()`: spec §9.1 keeps 최초 공개 with the operator, so
+   * this is a step T12 or an operator triggers. It refuses while the attempt marker is
+   * still in the description, which is what keeps internal metadata off a viewer
+   * surface (spec §4, §12.5).
+   */
+  async publish(): Promise<BroadcastAttemptRecord> {
+    const attempt = await this.#requireOpenAttempt()
+    const broadcastId = requireId(attempt.broadcastId, 'broadcastId')
+    if (attempt.markerClearedAt === null) {
+      throw new BroadcastMarkerNotClearedError(broadcastId)
+    }
+    const privacyStatus = this.#config.privacyStatus
+    if (privacyStatus === 'private') {
+      throw new Error(
+        'youtube.broadcast.privacyStatus is "private", so there is nothing to publish; set it to public or unlisted first',
+      )
+    }
+
+    return this.#withRetries(
+      attempt,
+      'liveBroadcasts.update',
+      async (current) => {
+        const updated = await this.#runCall(current, 'liveBroadcasts.update', () =>
+          this.#api.updateBroadcast({
+            broadcastId,
+            // `status` overrides every mutable member it contains, so the
+            // made-for-kids declaration travels with the privacy change.
+            status: {
+              privacyStatus,
+              selfDeclaredMadeForKids: this.#config.selfDeclaredMadeForKids,
+            },
+          }),
+        )
+        if (updated.privacyStatus !== privacyStatus) {
+          throw new Error(
+            `broadcast ${broadcastId} reports privacyStatus ${String(updated.privacyStatus)} after asking for ${privacyStatus}`,
+          )
+        }
+        this.#alert('broadcast_published', privacyStatus, { broadcastId })
+        return this.#store.recordBroadcastCallResult(current.attemptId, { lastErrorReason: null })
+      },
+      // Setting the same privacy twice is harmless, so a retry is always allowed to
+      // run rather than being short-circuited by a row that records nothing about it.
+      () => false,
+    )
+  }
+
+  /**
+   * Takes the attempt marker back out of `snippet.description` (BOARD A-18) and
+   * records that it is gone, so `publish()` can tell.
+   *
+   * The broadcast is read first: an *adopted* broadcast never carried our marker, and
+   * rewriting a description this host did not write would be vandalism. Only the marker
+   * is removed — the surrounding text is whatever YouTube currently holds, so an
+   * operator edit made in Studio in the meantime survives.
+   */
+  async #clearAttemptMarker(attempt: BroadcastAttemptRecord): Promise<BroadcastAttemptRecord> {
+    if (attempt.markerClearedAt !== null || attempt.broadcastId === null) {
+      return attempt
+    }
+    const broadcastId = attempt.broadcastId
+    const observed = await this.#readBroadcast(broadcastId)
+    if (observed === null) {
+      throw new Error(`broadcast ${broadcastId} cannot be read back to clear its attempt marker`)
+    }
+    if (!carriesAttemptMarker(observed.description, attempt.attemptMarker)) {
+      // Nothing of ours to remove: an adopted broadcast, or a strip that already
+      // landed before this process died.
+      return this.#store.updateBroadcastAttempt(attempt.attemptId, { markerCleared: true })
+    }
+
+    const title = observed.title ?? this.#config.title
+    const scheduledStartTime = observed.scheduledStartTime ?? attempt.scheduledStartTime
+    const description = withoutAttemptMarker(observed.description, attempt.attemptMarker)
+
+    return this.#withRetries(
+      attempt,
+      'liveBroadcasts.update',
+      async (current) => {
+        const updated = await this.#runCall(current, 'liveBroadcasts.update', () =>
+          // `snippet` overrides every mutable member it contains, so title and
+          // scheduled start have to travel with the description or they are deleted.
+          this.#api.updateBroadcast({
+            broadcastId,
+            snippet: { title, description, scheduledStartTime },
+          }),
+        )
+        if (carriesAttemptMarker(updated.description, current.attemptMarker)) {
+          throw new Error(
+            `broadcast ${broadcastId} still carries its attempt marker after the update`,
+          )
+        }
+        this.#alert('attempt_marker_cleared', 'updated', { broadcastId })
+        // The outcome is known, so the pending marker goes with the same write.
+        return this.#store.recordBroadcastCallResult(current.attemptId, { markerCleared: true })
+      },
+      (current) => current.markerClearedAt !== null,
+    )
   }
 
   /**
@@ -361,7 +495,11 @@ export class BroadcastLifecycle {
             // `list` response (review round 2, B1), so it always travels.
             description: describeWithMarker(this.#config.description, current.attemptMarker),
             scheduledStartTime: current.scheduledStartTime,
-            privacyStatus: this.#config.privacyStatus,
+            // Always private, whatever `config.privacyStatus` asks for: while the
+            // marker is in the description nothing may be viewer-visible, and spec
+            // §9.1 keeps first publication with the operator anyway. `publish()`
+            // applies the configured privacy afterwards (BOARD A-18).
+            privacyStatus: 'private',
             selfDeclaredMadeForKids: this.#config.selfDeclaredMadeForKids,
             latencyPreference: this.#config.latencyPreference,
             enableAutoStart: autoStart,
@@ -649,6 +787,9 @@ export class BroadcastLifecycle {
           attemptId: attempt.attemptId,
           listComplete: search.complete,
         })
+        // Same rule as the broadcast case below (review round 3, B1): a partial scan
+        // supports no verdict, not even a positive one.
+        this.#assertConclusive(attempt, call, search.complete, 'stream_list_truncated')
         if (search.streamId !== null) {
           // The insert did land: the stream exists, so its key has to reach the
           // vault even though this process never saw the insert's own response.
@@ -657,7 +798,6 @@ export class BroadcastLifecycle {
             streamId: search.streamId,
           })
         }
-        this.#assertConclusive(attempt, call, search.complete, 'stream_list_truncated')
         return this.#store.recordBroadcastCallResult(attempt.attemptId, {
           lastErrorReason: 'reconciled_not_applied',
         })
@@ -669,6 +809,11 @@ export class BroadcastLifecycle {
           listComplete: search.complete,
           markerMatches: search.markerMatches,
         })
+        // A partial scan cannot establish anything, in either direction. `markerMatches`
+        // is only a lower bound while the list is truncated, so one visible marker does
+        // not make it the only one — the copy the insert actually created can sit past
+        // the page bound (review round 3, B1). No verdict is reachable from here.
+        this.#assertConclusive(attempt, call, search.complete, 'broadcast_list_truncated')
         // More than one broadcast carrying this attempt's marker means two inserts
         // landed. Picking either would orphan the other, so a human decides.
         this.#assertConclusive(attempt, call, search.markerMatches <= 1, 'marker_ambiguous')
@@ -684,9 +829,8 @@ export class BroadcastLifecycle {
         // A marker match whose scheduled time disagrees is not something to reason
         // about: this attempt's own record and YouTube's copy of it differ.
         this.#assertConclusive(attempt, call, search.markerMatches === 0, 'marker_time_mismatch')
-        // Absent from a *truncated* list is not absent (review round 1, B2). Another
-        // insert here is how a channel ends up with two broadcasts for one attempt.
-        this.#assertConclusive(attempt, call, search.complete, 'broadcast_list_truncated')
+        // Only a complete scan that found no marker at all can say "not applied"
+        // (review round 1, B2 — and the same rule now gates adoption above).
         return this.#store.recordBroadcastCallResult(attempt.attemptId, {
           lastErrorReason: 'reconciled_not_applied',
         })
@@ -706,6 +850,38 @@ export class BroadcastLifecycle {
         }
         return this.#store.recordBroadcastCallResult(attempt.attemptId, {
           lastErrorReason: 'reconciled_not_applied',
+        })
+      }
+      case 'liveBroadcasts.update': {
+        // Both uses of `update` are judged by the state they were meant to produce, in
+        // order: the marker is gone, and then the configured privacy holds. An id
+        // lookup is one page, so this answer is never partial.
+        const observed = await this.#readBroadcast(requireId(attempt.broadcastId, 'broadcastId'))
+        if (observed === null) {
+          this.#assertConclusive(attempt, call, false, 'broadcast_not_found')
+        }
+        const markerGone = !carriesAttemptMarker(
+          observed?.description ?? null,
+          attempt.attemptMarker,
+        )
+        this.#alertReconcile(call, markerGone, {
+          attemptId: attempt.attemptId,
+          privacyStatus: observed?.privacyStatus ?? null,
+        })
+        if (!markerGone) {
+          return this.#store.recordBroadcastCallResult(attempt.attemptId, {
+            lastErrorReason: 'reconciled_not_applied:marker_present',
+          })
+        }
+        const wanted = this.#config.privacyStatus
+        const privacyApplied = wanted === 'private' || observed?.privacyStatus === wanted
+        return this.#store.recordBroadcastCallResult(attempt.attemptId, {
+          markerCleared: true,
+          ...(privacyApplied
+            ? { lastErrorReason: null }
+            : {
+                lastErrorReason: `reconciled_not_applied:privacy_${String(observed?.privacyStatus)}`,
+              }),
         })
       }
       case 'liveBroadcasts.transition': {

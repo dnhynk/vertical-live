@@ -219,6 +219,7 @@ export type BroadcastMutatingCall =
   | 'liveBroadcasts.insert'
   | 'liveBroadcasts.bind'
   | 'liveBroadcasts.transition'
+  | 'liveBroadcasts.update'
 
 /**
  * `liveBroadcasts.transition` targets. Persisted with the pending call because the
@@ -257,6 +258,8 @@ export interface BroadcastAttemptRecord extends BroadcastAttemptInput {
   /** null = not attempted, true = accepted, false = `invalidAutoStart` (§4). */
   readonly autoStart: boolean | null
   readonly lastErrorReason: string | null
+  /** Set once the attempt marker is no longer in the description (BOARD A-18). */
+  readonly markerClearedAt: string | null
   readonly createdAt: string
   readonly updatedAt: string
   readonly closedAt: string | null
@@ -273,6 +276,8 @@ export interface BroadcastAttemptUpdate {
   readonly liveChatId?: string
   readonly scheduledStartTime?: string
   readonly autoStart?: boolean
+  /** Stamps `markerClearedAt` with the store clock; never unsets it. */
+  readonly markerCleared?: true
   /** `null` clears a previously recorded reason. */
   readonly lastErrorReason?: string | null
 }

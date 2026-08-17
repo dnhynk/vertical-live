@@ -12,6 +12,10 @@ import type { BroadcastStrategy } from '../../db/types.js'
 /**
  * `youtube.broadcast` from `config/default.json` (spec §9.1, §9.3, §12.2).
  *
+ * Note what `privacyStatus` means here: it is the privacy `BroadcastLifecycle.publish()`
+ * applies as a separate, operator-triggered step. Insert is always `private`
+ * (BOARD A-18).
+ *
  * Only values an official page states are fixed here; everything else is listed in
  * `provisional` (BOARD A-15) and is replaced by the Gate 0/2 approved numbers.
  *
@@ -69,8 +73,18 @@ export interface BroadcastConfig {
   /** BOARD A-4: `single` is production, `rolling-experiment` is labelled. */
   readonly strategy: BroadcastStrategy
   readonly title: string
-  /** Empty string means "send no description". */
+  /**
+   * The operator's description text. An empty string is *not* "send no description":
+   * the insert always sends one, because the attempt marker travels in it (review
+   * round 2, B1) and is removed again once the broadcast id is durable (BOARD A-18).
+   */
   readonly description: string
+  /**
+   * The privacy `publish()` applies. The **insert always creates the broadcast
+   * `private`** whatever this says: spec §9.1 keeps first publication with the
+   * operator, and nothing may be viewer-visible while the attempt marker is still in
+   * the description (BOARD A-18).
+   */
   readonly privacyStatus: BroadcastPrivacyStatus
   readonly selfDeclaredMadeForKids: boolean
   readonly latencyPreference: BroadcastLatencyPreference

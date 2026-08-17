@@ -6,6 +6,7 @@ import { FakeClock } from '../../testing/fake-clock.js'
 import { METHOD_ALLOWED_PARTS, YouTubeApiCallError } from './api.js'
 import {
   BroadcastLifecycle,
+  BroadcastMarkerNotClearedError,
   BroadcastReconcileFailedError,
   BroadcastReconcileInconclusiveError,
   BroadcastSafeStopRequiredError,
@@ -67,6 +68,10 @@ describe('normal path', () => {
       'liveStreams.list',
       'liveStreams.insert',
       'liveBroadcasts.insert',
+      // The broadcast id is durable now, so the attempt marker is read back and
+      // removed from the description before anything else happens (BOARD A-18).
+      'liveBroadcasts.list',
+      'liveBroadcasts.update',
       'liveBroadcasts.bind',
       // `#goLive` reads the lifecycle status once, then testing → live.
       'liveBroadcasts.list',
@@ -248,6 +253,18 @@ describe('uncertain results are reconciled, never retried blindly', () => {
       lifeCycleStatus: 'ready',
       scheduledStartTime,
     })
+    let inserted: { id: string } | undefined
+    h.server.onRequest = (request) => {
+      if (request.method === 'liveBroadcasts.insert') {
+        // Recorded here because the marker is removed once the id is adopted, so the
+        // description can no longer be used to point at it afterwards.
+        queueMicrotask(() => {
+          inserted = [...h.server.broadcasts.values()].find(
+            (broadcast) => broadcast.id !== decoy.id,
+          )
+        })
+      }
+    }
 
     const target = await withAppliedButUnknown(h, clock, 'liveBroadcasts.insert', () =>
       lifecycle.ensureLive(),
@@ -261,9 +278,13 @@ describe('uncertain results are reconciled, never retried blindly', () => {
     )
     expect(sameTime).toHaveLength(2)
     expect(target.broadcastId).not.toBe(decoy.id)
-    expect(h.server.broadcasts.get(target.broadcastId)?.description).toContain(
+    // It adopted the broadcast its own insert created — the one that carried the
+    // marker — and then took the marker back out again (BOARD A-18).
+    expect(target.broadcastId).toBe(inserted?.id)
+    expect(h.server.broadcasts.get(target.broadcastId)?.description ?? '').not.toContain(
       attempt?.attemptMarker,
     )
+    expect(attempt?.markerClearedAt).not.toBeNull()
     // Still exactly one insert, and the decoy was left alone.
     expect(h.server.requestsFor('liveBroadcasts.insert')).toHaveLength(1)
     expect(h.server.broadcasts.get(decoy.id)?.boundStreamId).toBeNull()
@@ -292,6 +313,55 @@ describe('uncertain results are reconciled, never retried blindly', () => {
     const attempt = h.temp.store.findOpenBroadcastAttempt()
     expect(attempt?.broadcastId).toBeNull()
     expect(attempt?.lastErrorReason).toBe('reconciled_not_applied')
+  })
+
+  it('refuses to adopt a visible marker match while the list is truncated', async () => {
+    // Review round 3 (B1) reproduction. A marker is visible on the first page, 200
+    // unrelated broadcasts follow, and the copy this attempt's insert actually created
+    // sits past the page bound. `markerMatches` is only a lower bound here, so one
+    // visible match proves nothing — the old build adopted the first-page decoy and
+    // orphaned the real resource.
+    const clock = new FakeClock()
+    const h = await setUp({ clock })
+    const lifecycle = h.lifecycle()
+    const scheduledStartTime = new Date(
+      Date.parse(clock.nowUtcIso()) + h.config.scheduledStartLeadMs,
+    ).toISOString()
+    // The marker is derived from the attempt id, which the harness makes deterministic.
+    const decoy = h.server.seedBroadcast({
+      title: 'synthetic-first-page-decoy',
+      lifeCycleStatus: 'ready',
+      scheduledStartTime,
+      description: 'vl-attempt:attempt-0001',
+    })
+    for (let index = 0; index < 200; index += 1) {
+      h.server.seedBroadcast({
+        title: `synthetic-unrelated-broadcast-${String(index)}`,
+        lifeCycleStatus: 'ready',
+        scheduledStartTime: `2026-01-02T00:${String(index % 60).padStart(2, '0')}:00.000Z`,
+      })
+    }
+
+    const error = await withAppliedButUnknown(h, clock, 'liveBroadcasts.insert', () =>
+      lifecycle.ensureBound().catch((caught: unknown) => caught),
+    )
+
+    expect(error).toBeInstanceOf(BroadcastReconcileInconclusiveError)
+    expect((error as BroadcastReconcileInconclusiveError).detail).toBe('broadcast_list_truncated')
+    const attempt = h.temp.store.findOpenBroadcastAttempt()
+    expect(attempt?.attemptMarker).toBe('vl-attempt:attempt-0001')
+    // Nothing was adopted — least of all the decoy — and nothing was retried.
+    expect(attempt?.broadcastId).toBeNull()
+    expect(attempt?.pendingCall).toBe('liveBroadcasts.insert')
+    expect(attempt?.lastErrorReason).toBe('reconcile_inconclusive:broadcast_list_truncated')
+    expect(h.server.requestsFor('liveBroadcasts.insert')).toHaveLength(1)
+    expect(h.server.broadcasts.get(decoy.id)?.boundStreamId).toBeNull()
+    // Two broadcasts carry the marker, which is precisely why no verdict was reachable.
+    const marked = [...h.server.broadcasts.values()].filter((broadcast) =>
+      (broadcast.description ?? '').includes('vl-attempt:attempt-0001'),
+    )
+    expect(marked).toHaveLength(2)
+    expect(h.logger.dump()).toContain('list truncated at the page bound')
   })
 
   it('stays inconclusive when two broadcasts carry the same attempt marker', async () => {
@@ -805,6 +875,118 @@ describe('stopping a broadcast (review round 1, B4)', () => {
     expect(resumed?.stage).toBe('complete')
     expect(resumed?.closedAt).not.toBeNull()
     expect(resumed?.pendingCall).toBeNull()
+  })
+})
+
+describe('the attempt marker does not outlive its purpose (BOARD A-18)', () => {
+  it('creates the broadcast private and removes the marker once the id is durable', async () => {
+    const h = await setUp({ config: { privacyStatus: 'public', description: 'synthetic blurb' } })
+
+    const binding = await h.lifecycle().ensureBound()
+
+    const insert = h.server.requestsFor('liveBroadcasts.insert')[0]
+    // Private at insert whatever the config asks for: the marker is in the description
+    // and spec §9.1 keeps first publication with the operator.
+    expect((insert?.body as { status: { privacyStatus: string } }).status.privacyStatus).toBe(
+      'private',
+    )
+    const broadcast = h.server.broadcasts.get(binding.broadcastId)
+    expect(broadcast?.privacyStatus).toBe('private')
+    // The operator's text survives; only the marker is gone.
+    expect(broadcast?.description).toBe('synthetic blurb')
+    expect(broadcast?.title).toBe(h.config.title)
+    expect(broadcast?.scheduledStartTime).not.toBeUndefined()
+    const attempt = h.temp.store.getBroadcastAttempt(binding.attemptId)
+    expect(attempt?.markerClearedAt).not.toBeNull()
+    expect(h.alerts.ofKind('attempt_marker_cleared')).toHaveLength(1)
+  })
+
+  it('refuses to publish while the marker is still in the description', async () => {
+    const h = await setUp({ config: { privacyStatus: 'public' } })
+    const lifecycle = h.lifecycle()
+    // Fail every attempt to clear the marker, so the description still carries it.
+    for (let index = 0; index < 4; index += 1) {
+      h.server.queueFailure('liveBroadcasts.update', { status: 403, reason: 'forbidden' })
+    }
+    await expect(lifecycle.ensureBound()).rejects.toThrow(YouTubeApiCallError)
+    const attempt = h.temp.store.findOpenBroadcastAttempt()
+    expect(attempt?.markerClearedAt).toBeNull()
+
+    await expect(h.lifecycle().publish()).rejects.toThrow(BroadcastMarkerNotClearedError)
+
+    const broadcast = h.server.broadcasts.get(attempt?.broadcastId ?? '')
+    expect(broadcast?.privacyStatus).toBe('private')
+    expect(broadcast?.description).toContain(attempt?.attemptMarker)
+  })
+
+  it('applies the configured privacy only after the marker is gone', async () => {
+    const h = await setUp({ config: { privacyStatus: 'public' } })
+    const binding = await h.lifecycle().ensureBound()
+
+    await h.lifecycle().publish()
+
+    const broadcast = h.server.broadcasts.get(binding.broadcastId)
+    expect(broadcast?.privacyStatus).toBe('public')
+    // `status` overrides every member it carries, so the made-for-kids declaration
+    // travelled with the privacy change instead of being deleted.
+    expect(broadcast?.selfDeclaredMadeForKids).toBe(false)
+    expect(broadcast?.description ?? '').not.toContain(binding.attemptId)
+    expect(h.alerts.ofKind('broadcast_published').map((alert) => alert.reason)).toEqual(['public'])
+  })
+
+  it('refuses to publish when the configured privacy is private', async () => {
+    const h = await setUp()
+    await h.lifecycle().ensureBound()
+
+    await expect(h.lifecycle().publish()).rejects.toThrow(/nothing to publish/)
+  })
+
+  it('reconciles a marker removal whose result was unknown', async () => {
+    const h = await setUp({ maxAttempts: 2 })
+    const lifecycle = h.lifecycle()
+    // The update is applied and then answered with a 5xx-shaped unknown, so the
+    // reconcile has to read the description back rather than assume.
+    h.server.queueFailure('liveBroadcasts.update', { status: 503, reason: 'serviceUnavailable' })
+    h.server.onRequest = (request) => {
+      if (request.method === 'liveBroadcasts.update') {
+        const attempt = h.temp.store.findOpenBroadcastAttempt()
+        const broadcast = h.server.broadcasts.get(attempt?.broadcastId ?? '')
+        if (broadcast !== undefined) {
+          broadcast.description = undefined
+        }
+      }
+    }
+
+    const binding = await lifecycle.ensureBound()
+
+    const attempt = h.temp.store.getBroadcastAttempt(binding.attemptId)
+    expect(attempt?.markerClearedAt).not.toBeNull()
+    // One update attempt: the reconcile found it had applied after all.
+    expect(h.server.requestsFor('liveBroadcasts.update')).toHaveLength(1)
+    expect(h.alerts.ofKind('call_reconciled').map((alert) => alert.reason)).toContain('applied')
+  })
+
+  it('leaves an adopted broadcast’s description alone', async () => {
+    const h = await setUp()
+    const otherStream = h.server.seedStream({ title: 'synthetic-other-ingest' })
+    const candidate = h.server.seedBroadcast({
+      title: h.config.title,
+      lifeCycleStatus: 'live',
+      boundStreamId: otherStream.id,
+      description: 'someone else wrote this',
+    })
+    h.server.queueFailure('liveBroadcasts.insert', {
+      status: 403,
+      reason: 'userBroadcastsExceedLimit',
+    })
+
+    const target = await h.lifecycle().ensureLive()
+
+    expect(target.broadcastId).toBe(candidate.id)
+    // Nothing of ours was in it, so nothing was rewritten — and no update was sent.
+    expect(h.server.broadcasts.get(candidate.id)?.description).toBe('someone else wrote this')
+    expect(h.server.requestsFor('liveBroadcasts.update')).toHaveLength(0)
+    expect(h.temp.store.getBroadcastAttempt(target.attemptId)?.markerClearedAt).not.toBeNull()
   })
 })
 

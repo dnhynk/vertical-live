@@ -41,7 +41,8 @@ CREATE TABLE broadcast_resources (
   -- never recorded here: re-reading is always safe.
   pending_call         TEXT    CHECK (pending_call IS NULL OR pending_call IN (
                          'liveStreams.insert', 'liveBroadcasts.insert',
-                         'liveBroadcasts.bind', 'liveBroadcasts.transition')),
+                         'liveBroadcasts.bind', 'liveBroadcasts.transition',
+                         'liveBroadcasts.update')),
   pending_since        TEXT,
   -- Which transition was in flight. Without it a resumed reconcile cannot read the
   -- observed `lifeCycleStatus`: `complete` means "applied" for a stop and "someone
@@ -60,6 +61,11 @@ CREATE TABLE broadcast_resources (
   -- resumed reconcile has to compare against what this attempt actually wrote, even
   -- if the marker format changes in a later build (review round 2, B1).
   attempt_marker       TEXT    NOT NULL,
+  -- When the marker was removed from the broadcast's public description again
+  -- (BOARD A-18). NULL means it is still there, which is why the broadcast may not be
+  -- made public yet: the identity string is machine metadata, not viewer-facing
+  -- description text (spec §4, §12.5).
+  marker_cleared_at    TEXT,
   -- NULL = not yet attempted, 1 = insert accepted `enableAutoStart`,
   -- 0 = YouTube answered `invalidAutoStart`, so the transition path is used (§4).
   auto_start           INTEGER CHECK (auto_start IS NULL OR auto_start IN (0, 1)),

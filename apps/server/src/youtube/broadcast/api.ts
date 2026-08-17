@@ -56,6 +56,8 @@ export const YOUTUBE_API_BASE_URL = 'https://www.googleapis.com/youtube/v3'
  *   https://developers.google.com/youtube/v3/live/docs/liveBroadcasts/transition
  * - liveBroadcasts.list  — id, snippet, contentDetails, monetizationDetails, status
  *   https://developers.google.com/youtube/v3/live/docs/liveBroadcasts/list
+ * - liveBroadcasts.update — id, snippet, contentDetails, monetizationDetails, status
+ *   https://developers.google.com/youtube/v3/live/docs/liveBroadcasts/update
  */
 export const METHOD_ALLOWED_PARTS: Readonly<Partial<Record<PlannedMethod, readonly string[]>>> =
   Object.freeze({
@@ -65,6 +67,13 @@ export const METHOD_ALLOWED_PARTS: Readonly<Partial<Record<PlannedMethod, readon
     'liveBroadcasts.bind': Object.freeze(['id', 'snippet', 'contentDetails', 'status']),
     'liveBroadcasts.transition': Object.freeze(['id', 'snippet', 'contentDetails', 'status']),
     'liveBroadcasts.list': Object.freeze([
+      'id',
+      'snippet',
+      'contentDetails',
+      'monetizationDetails',
+      'status',
+    ]),
+    'liveBroadcasts.update': Object.freeze([
       'id',
       'snippet',
       'contentDetails',
@@ -230,6 +239,35 @@ export interface InsertBroadcastInput {
 
 /** `liveBroadcasts.transition` `broadcastStatus` values (checked 2026-08-17). */
 export type BroadcastTransition = 'testing' | 'live' | 'complete'
+
+/**
+ * One `liveBroadcasts.update` call. Every field of a requested part must be sent:
+ * "this method will override the existing values for all of the mutable properties
+ * that are contained in any parts that the parameter value specifies" and "if your
+ * request does not specify a value for a property that already has a value, the
+ * property's existing value will be deleted"
+ * (https://developers.google.com/youtube/v3/live/docs/liveBroadcasts/update, checked
+ * 2026-08-17). `snippet.scheduledStartTime` is required whenever `snippet` is sent.
+ *
+ * `contentDetails` is deliberately not updatable through this client: sending that
+ * part would additionally require `monitorStream.enableMonitorStream` and
+ * `broadcastStreamDelayMs`, and several of its fields refuse modification once the
+ * broadcast has started (`enableDvrModificationNotAllowed`, …).
+ */
+export interface UpdateBroadcastInput {
+  readonly broadcastId: string
+  /** Sent as one unit; omitting a member of it would delete that member. */
+  readonly snippet?: {
+    readonly title: string
+    readonly description: string
+    readonly scheduledStartTime: string
+  }
+  /** Same rule: `selfDeclaredMadeForKids` travels with `privacyStatus`. */
+  readonly status?: {
+    readonly privacyStatus: BroadcastPrivacyStatus
+    readonly selfDeclaredMadeForKids: boolean
+  }
+}
 
 /** `liveBroadcasts.list` filter: exactly one of these may be set. */
 export type BroadcastListFilter =
@@ -451,6 +489,31 @@ export class YouTubeLiveApi {
   }
 
   /**
+   * Overwrites the parts named in `input`. Used for exactly two things (BOARD A-18):
+   * taking the attempt marker back out of `snippet.description` once the broadcast id
+   * is durably ours, and applying the configured privacy afterwards.
+   */
+  async updateBroadcast(input: UpdateBroadcastInput): Promise<LiveBroadcastSummary> {
+    const parts: string[] = ['id']
+    if (input.snippet !== undefined) parts.push('snippet')
+    if (input.status !== undefined) parts.push('status')
+    if (parts.length === 1) {
+      throw new Error('updateBroadcast needs at least one part to write')
+    }
+    const parsed = await this.#request('liveBroadcasts.update', {
+      httpMethod: 'PUT',
+      path: '/liveBroadcasts',
+      query: { part: requestedParts('liveBroadcasts.update', parts) },
+      body: {
+        id: input.broadcastId,
+        ...(input.snippet === undefined ? {} : { snippet: input.snippet }),
+        ...(input.status === undefined ? {} : { status: input.status }),
+      },
+    })
+    return toLiveBroadcast(parsed)
+  }
+
+  /**
    * `broadcastStatus`, `id` and `mine` are mutually exclusive — "specify exactly
    * one" — and `broadcastType` defaults to `event`, which would hide a persistent
    * broadcast from a reconcile, so it is always sent as `all`
@@ -512,7 +575,7 @@ export class YouTubeLiveApi {
   async #request(
     method: PlannedMethod,
     request: {
-      readonly httpMethod: 'GET' | 'POST'
+      readonly httpMethod: 'GET' | 'POST' | 'PUT'
       readonly path: string
       readonly query: Record<string, string>
       readonly body?: unknown

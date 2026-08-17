@@ -13,6 +13,7 @@ export {
 export type {
   AccessTokenSource,
   ApiCallOutcome,
+  UpdateBroadcastInput,
   BroadcastListFilter,
   BroadcastTransition,
   ConfigurationIssue,
@@ -34,6 +35,7 @@ export {
   attemptMarkerOf,
   carriesAttemptMarker,
   describeWithMarker,
+  withoutAttemptMarker,
 } from './attempt-marker.js'
 
 export {
@@ -89,6 +91,7 @@ export type { BroadcastLimitKind } from './limits.js'
 
 export {
   BroadcastLifecycle,
+  BroadcastMarkerNotClearedError,
   BroadcastReconcileFailedError,
   BroadcastReconcileInconclusiveError,
   BroadcastSafeStopRequiredError,

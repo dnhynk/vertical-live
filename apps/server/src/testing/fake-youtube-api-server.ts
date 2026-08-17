@@ -29,6 +29,7 @@ export type FakeApiMethod =
   | 'liveBroadcasts.list'
   | 'liveBroadcasts.bind'
   | 'liveBroadcasts.transition'
+  | 'liveBroadcasts.update'
 
 export interface FakeFailure {
   readonly status: number
@@ -110,6 +111,7 @@ const ALLOWED_PARTS: Readonly<Record<FakeApiMethod, readonly string[]>> = {
   'liveBroadcasts.list': ['id', 'snippet', 'contentDetails', 'monetizationDetails', 'status'],
   'liveBroadcasts.bind': ['id', 'snippet', 'contentDetails', 'status'],
   'liveBroadcasts.transition': ['id', 'snippet', 'contentDetails', 'status'],
+  'liveBroadcasts.update': ['id', 'snippet', 'contentDetails', 'monetizationDetails', 'status'],
 }
 
 /** Property names that exist on the resource at all, whatever the method accepts. */
@@ -388,7 +390,55 @@ export class FakeYouTubeApiServer {
         return broadcastResource(this.#bind(query), parts)
       case 'liveBroadcasts.transition':
         return broadcastResource(this.#transition(query), parts)
+      case 'liveBroadcasts.update':
+        return broadcastResource(this.#update(query, body, parts), parts)
     }
+  }
+
+  /**
+   * Applies the documented override semantics: a requested part replaces *all* of its
+   * mutable members, so a member the request left out is deleted. Tests depend on that
+   * being modelled rather than merged — it is why the client has to resend
+   * `snippet.title` to change only the description.
+   */
+  #update(query: Record<string, string>, body: unknown, parts: readonly string[]): FakeBroadcast {
+    const root = asRecord(body)
+    const id = typeof root['id'] === 'string' ? root['id'] : (query['id'] ?? '')
+    const broadcast = this.broadcasts.get(id)
+    if (broadcast === undefined) {
+      throw fail(404, 'liveBroadcastNotFound', 'youtube.liveBroadcast')
+    }
+    if (parts.includes('contentDetails')) {
+      const contentDetails = asRecord(root['contentDetails'])
+      const monitorStream = asRecord(contentDetails['monitorStream'])
+      if (monitorStream['enableMonitorStream'] === undefined) {
+        throw fail(400, 'enableMonitorStreamRequired', 'youtube.liveBroadcast')
+      }
+    }
+    if (parts.includes('snippet')) {
+      const snippet = asRecord(root['snippet'])
+      const scheduledStartTime = snippet['scheduledStartTime']
+      if (typeof scheduledStartTime !== 'string' || scheduledStartTime === '') {
+        throw fail(400, 'scheduledStartTimeRequired', 'youtube.liveBroadcast')
+      }
+      // Omitted members are deleted, exactly as the reference states.
+      broadcast.title = typeof snippet['title'] === 'string' ? snippet['title'] : ''
+      broadcast.description =
+        typeof snippet['description'] === 'string' && snippet['description'] !== ''
+          ? snippet['description']
+          : undefined
+      broadcast.scheduledStartTime = scheduledStartTime
+    }
+    if (parts.includes('status')) {
+      const status = asRecord(root['status'])
+      const privacyStatus = status['privacyStatus']
+      if (typeof privacyStatus !== 'string' || privacyStatus === '') {
+        throw fail(400, 'invalidPrivacyStatus', 'youtube.liveBroadcast')
+      }
+      broadcast.privacyStatus = privacyStatus
+      broadcast.selfDeclaredMadeForKids = status['selfDeclaredMadeForKids'] === true
+    }
+    return broadcast
   }
 
   #insertStream(body: unknown): FakeStream {
@@ -537,6 +587,9 @@ function resolveMethod(httpMethod: string, pathname: string): FakeApiMethod | nu
     return httpMethod === 'POST' ? 'liveStreams.insert' : 'liveStreams.list'
   }
   if (path === '/liveBroadcasts') {
+    if (httpMethod === 'PUT') {
+      return 'liveBroadcasts.update'
+    }
     return httpMethod === 'POST' ? 'liveBroadcasts.insert' : 'liveBroadcasts.list'
   }
   if (path === '/liveBroadcasts/bind' && httpMethod === 'POST') {

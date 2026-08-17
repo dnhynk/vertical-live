@@ -23,6 +23,7 @@ export const PLANNED_METHODS = [
   'liveBroadcasts.insert',
   'liveBroadcasts.bind',
   'liveBroadcasts.transition',
+  'liveBroadcasts.update',
   'liveStreams.list',
   'liveStreams.insert',
   'videos.list',
@@ -85,6 +86,13 @@ export const METHOD_SCOPES: Readonly<Record<PlannedMethod, MethodScopeEntry>> = 
     evidenceUrl: 'https://developers.google.com/youtube/v3/live/docs/liveBroadcasts/transition',
     checkedOn: CHECKED_ON,
     verified: true,
+  },
+  'liveBroadcasts.update': {
+    acceptedScopes: [SCOPE_YOUTUBE, SCOPE_YOUTUBE_FORCE_SSL],
+    evidenceUrl: 'https://developers.google.com/youtube/v3/live/docs/liveBroadcasts/update',
+    checkedOn: CHECKED_ON,
+    verified: true,
+    note: 'Added by T10 (BOARD A-18): the attempt marker is removed from snippet.description before any public exposure, and the configured privacy is applied by the same method.',
   },
   'liveStreams.list': {
     acceptedScopes: [SCOPE_YOUTUBE, SCOPE_YOUTUBE_FORCE_SSL, SCOPE_YOUTUBE_READONLY],

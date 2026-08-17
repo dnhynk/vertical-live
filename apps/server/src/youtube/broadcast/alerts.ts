@@ -21,6 +21,10 @@ export type BroadcastAlertKind =
   | 'safe_stop_requested'
   /** A mutating call's result was unknown and was reconciled against YouTube. */
   | 'call_reconciled'
+  /** The attempt marker is out of the public description again (BOARD A-18). */
+  | 'attempt_marker_cleared'
+  /** The configured privacy was applied; the broadcast is no longer private. */
+  | 'broadcast_published'
 
 export interface BroadcastAlert {
   readonly kind: BroadcastAlertKind
