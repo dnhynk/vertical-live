@@ -125,12 +125,7 @@ export function fromGrpcStreamListItem(item: unknown, ctx: IngestAdapterContext)
 
   const details = snippet[binding.detailsField]
   if (!isRecord(details)) {
-    return reject(
-      'MISSING_EVENT_DETAILS',
-      `snippet.${binding.detailsField}`,
-      messageId,
-      typeToken,
-    )
+    return reject('MISSING_EVENT_DETAILS', `snippet.${binding.detailsField}`, messageId, typeToken)
   }
 
   let commandText: string | null = null

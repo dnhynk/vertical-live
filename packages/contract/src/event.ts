@@ -92,7 +92,9 @@ export function eventKeyFor(parts: EventKeyParts): EventKey {
  * the key: each combo step is its own idempotency unit and `delta` against the
  * stored maximum is computed by the state engine in T8.
  */
-export function giftEventKeyFor(parts: EventKeyParts & { readonly comboCount: number | null }): EventKey {
+export function giftEventKeyFor(
+  parts: EventKeyParts & { readonly comboCount: number | null },
+): EventKey {
   return `${eventKeyFor(parts)}:gift:${effectiveGiftCount(parts.comboCount)}`
 }
 
