@@ -46,7 +46,7 @@ T5가 만든 read model 위에 **방송에 나갈 화면**을 완성한다. 소�
 | 유료 연출의 `tier` | 화면에 전달하지 않음(컴포넌트 props에 없음) | 스펙 판단 | §8.4는 고정 감사 연출을 허용하지만 §8.5는 지출 순위표·과도한 화면 독점을 금지한다. 연출 크기·시간·강도가 결제 등급에 비례하면 사실상 순위표가 되므로 `tier`는 감사 카드에 넣지 않았다(계약·감사 기록에는 그대로 남는다) |
 | 시각 팔레트·크리처 모션 수치 | `visual/palette.ts`, `components/Pet.tsx`의 테이블 | provisional (A-15) | 스펙은 "상태·챕터·환경에 따라 변한다"만 요구하고 값은 정하지 않는다. Gate 3 화면 검수에서 조정 |
 | 알 수 없는 콘텐츠 식별자 | 팔레트·아이콘·크리처 모두 문서화된 기본값으로 fallback, i18n은 키를 그대로 표시하고 `i18n_missing_key` 로그 | 설계 판단 | 어휘 정본은 T7이며 렌더러가 뒤처질 수 있다. 방송이 깨지는 것보다 밋밋하게 나오는 편이 낫고, 누락은 로그·dev 패널로 드러난다 |
-| 측정 FPS | headless Chrome + software WebGL에서 99.2 fps(1080x1920) | 참고치 | 호스트 GPU·OBS 인코더 경로의 성능이 아니다. Gate 2에서 실제 호스트로 다시 잰다 |
+| 측정 FPS | headless Chrome + software WebGL에서 **98.8 fps**(1080x1920, round 2 재캡처 실행) | 참고치 | 호스트 GPU·OBS 인코더 경로의 성능이 아니다. Gate 2에서 실제 호스트로 다시 잰다. (round 1에서는 이 줄만 99.2로 적혀 Result의 99.3과 어긋나 있었다 — R-T14-1 minor 1. 이제 문서의 모든 수치는 아래 Gates에 인용한 **한 번의 실행**에서 나온다) |
 
 ## Result
 
@@ -62,7 +62,7 @@ T5가 만든 read model 위에 **방송에 나갈 화면**을 완성한다. 소�
 | 범위 | CTA(무료 명령 3개 + 무료 달성 문구) / 비활성 상태 | met | `Screen.test.tsx` "offers the three free commands and says participation is free"(FEED·PLAY·PET, 일본어·이모지·영어 3형식, `cta-free-note`), "adds the open decision without taking the free commands away", "hides the CTA and says so when the server disables interaction"(§9.2). `read-model/cta.test.ts` |
 | 범위 | 유료 감사 연출(고정 동작·익명 아이콘, 이름·순위표 없음), 멤버 배지 | met | `Screen.test.tsx` "thanks a paid event with a fixed staging and no name, amount or ranking", "marks the substitute acknowledgement that ran after a degraded window"(§9.2 `fallback`, `thanks_membership` 배지 아이콘) |
 | 범위 | 상태·챕터·환경별 배경/조명 변주 | met | `visual/palette.test.ts`(시간대·장소·날씨·챕터·위기별 차이, 알 수 없는 식별자 fallback, 순수성), `Screen.test.tsx` "varies the scene with the world it is drawing" |
-| 범위 | 1080x1920@30 프레임 유지 측정 | met(참고치) | capture 스크립트 출력 `frame budget: 993 frames in 10.0s = 99.3 fps at 1080x1920 (headless, software WebGL; 13 health frames)`. 프레임 수는 렌더러가 스스로 보고한 `renderer_health.frameCounter`를 벽시계로 나눈 값이다. headless·software WebGL이므로 호스트 GPU 성능이 아님을 명시 |
+| 범위 | 1080x1920@30 프레임 유지 측정 | met(참고치) | capture 스크립트 출력 `frame budget: 989 frames in 10.0s = 98.8 fps at 1080x1920 (headless, software WebGL; 13 health frames)`. 프레임 수는 렌더러가 스스로 보고한 `renderer_health.frameCounter`를 벽시계로 나눈 값이다. headless·software WebGL이므로 호스트 GPU 성능이 아님을 명시 |
 | 범위 | 새 자산 `ASSETS.md` 기록, `pet.glb` 처리 | met | `ASSETS.md` 갱신(크리처·배경 셰이더·그림자 텍스처·아이콘 14종·favicon·이모지 출처). 번들에 들어가는 자산 파일은 `favicon.svg` 하나이며 나머지는 전부 코드 생성. Vite 템플릿 `vite.svg` 삭제. `pet.glb`는 T5대로 `legacy/renderer-prototype/`에 격리된 채 그대로(표에 사용 금지로 유지) |
 
 ### Gates (executed)
@@ -86,7 +86,7 @@ node apps/renderer/scripts/capture.mjs --measure-ms 10000
   dev/degraded:    stage 1080x1920, canvas 1080x1920, slots 4 -> …-dev-degraded-…png
   dev/paid-thanks: stage 1080x1920, canvas 1080x1920, slots 4 -> …-dev-paid-thanks-…png
   broadcast/calm, broadcast/paid-thanks -> …-broadcast-…png
-  frame budget: 993 frames in 10.0s = 99.3 fps at 1080x1920 (headless, software WebGL; 13 health frames)
+  frame budget: 989 frames in 10.0s = 98.8 fps at 1080x1920 (headless, software WebGL; 13 health frames)
   wrote 8 screenshots to docs/tasks/assets
 
 정직성 메모: `prettier --check .`는 로컬 도구가 만든 `.impeccable/hook.cache.json`(이 저장소 산출물 아님, 커밋하지 않음)까지 훑어서 처음에 warn을 냈다. 해당 캐시를 지운 뒤 위 결과다.
@@ -107,3 +107,33 @@ node apps/renderer/scripts/capture.mjs --measure-ms 10000
 - `?mode=dev` 패널은 화면 가운데 오른쪽을 덮는다(4개 슬롯·CTA는 가리지 않도록 옮겼다). 주입 UI가 들어오는 T11에서 패널 레이아웃을 다시 볼 것.
 - 팔레트·모션 수치와 일본어 문구는 Gate 3 화면 검수에서 한 번에 조정하는 편이 낫다(지금 값은 provisional).
 - 크리처는 코드 생성 primitive다. 조형을 더 끌어올리려면 자체 제작 3D 자산이 필요하고, 그때도 `ASSETS.md` 규칙(자체 제작 또는 CC0·상업 허용)을 따른다.
+
+## Review round 1
+
+리뷰: R-T14-1 (verdict `request_changes`, blocker 0, major 1, minor 1). 리뷰어가 게이트 5개를 모두 pass로 재현했고 합격 기준 3개는 met로 확인했다.
+
+| finding | 처리(고침 SHA / 반박 근거) |
+|---|---|
+| [major] `apps/renderer/src/visual/palette.ts:224` — `chapterId`만 바꾸면 `paletteId`와 HUD `accent`만 달라지고 `Background.tsx`·`Scene.tsx`가 소비하는 배경·조명 필드는 하나도 바뀌지 않는다. §12.5·TASK_SPECS §T14의 "챕터에 따른 배경·조명 변화"가 구현되지 않은 것. 챕터만 바꾸는 단독 테스트도 함께 요구 | **고침** `245e88e`. 챕터 테이블을 `CHAPTER_ACCENTS`(색 하나)에서 `CHAPTER_MOODS`(accent + `skyTint`/`skyTintMix` + `rimMix`/`rimScale`)로 넓혔다. 이제 `selectPalette`가 (1) 날씨 wash **뒤에** 챕터 색을 하늘 3색(`skyTop`/`skyMid`/`skyBottom` — `Background.tsx`의 uniform)에 섞고, (2) rim light를 방 고유색에서 챕터 쪽으로 이동시키며(`rimColor`) 세기를 곱한다(`rimIntensity` — `Scene.tsx`의 pointLight). 같은 오후 정원이 gathering이면 초록, festival_prep이면 등불빛, growth_choice면 서늘하게 읽힌다. 모르는 챕터 식별자는 `CHAPTER_DEFAULT`(`skyTintMix: 0`, `rimMix: 0`, `rimScale: 1`)로 떨어져 round 1과 동일하게 중립이다 |
+| [major] (같은 항목) 검증 | `apps/renderer/src/visual/palette.test.ts`의 새 describe "chapter variation" — **`chapterId`만** 바꾸고 나머지 조건은 고정한 채 3개 챕터의 모든 쌍에 대해 `skyTop`·`skyMid`·`skyBottom`·`rimColor`가 채널당 최소 6/255 이상 달라지고 `rimIntensity`·`accent`도 달라짐을 검사한다(반올림 수준 차이로는 통과 불가). 추가로 "holds everything else steady"(챕터만 바꿔도 key/ambient/motion은 불변), "leaves the room alone for a chapter it does not know"(fallback), "moves fields the scene really draws with"(`Background.tsx`가 `palette.skyTop/skyMid/skyBottom`을, `Scene.tsx`가 `palette.rimColor/rimIntensity`를 실제로 읽는지 소스 검사 — 리뷰어가 지적한 "scene-consumed"를 문자 그대로 고정). 검사기가 무는지 확인: 챕터 테이블의 `skyTintMix`·`rimMix`·`rimScale`을 중립값으로 되돌리자 `AssertionError: gathering vs festival_prep: expected 0 to be greater than or equal to 6`으로 실패(되돌린 뒤 13/13 통과) |
+| [minor] `docs/tasks/TASK-T14-renderer-screen.md:49` — Assumptions의 FPS 99.2와 Result/Gates의 99.3 불일치 | **고침**(이 커밋). 팔레트 변경으로 배경이 달라졌으므로 스크린샷 8장을 재캡처했고, 문서의 FPS는 그 **한 번의 재캡처 실행**에서 나온 `989 frames in 10.0s = 98.8 fps` 하나로 통일했다. round 1의 두 값이 어긋났던 사실은 Assumptions 줄에 남겼다 |
+
+### Gates (round 1 fix, executed)
+
+```text
+git fetch origin && git rebase origin/main -> Successfully rebased (origin/main ea678e2)
+npm run format:check -> All matched files use Prettier code style!
+npm run lint         -> eslint 0 problems; check-no-legacy-imports: ok; check-install-scripts: ok
+npm run typecheck    -> tsc --build tsconfig.json, 오류 0
+npm run test         -> Test Files 65 passed (65), Tests 1087 passed | 1 skipped (1088)
+npm run build        -> @vl/contract, @vl/renderer(vite ✓ built), @vl/server, @vl/simulator 성공
+
+npm run build -w @vl/contract && npm run build -w @vl/renderer
+node apps/renderer/scripts/capture.mjs --measure-ms 10000
+  dev/{calm,hungry,play,sleeping,degraded,paid-thanks} + broadcast/{calm,paid-thanks}
+  각 장 stage 1080x1920, canvas 1080x1920, slots 4
+  frame budget: 989 frames in 10.0s = 98.8 fps at 1080x1920 (headless, software WebGL; 13 health frames)
+  wrote 8 screenshots to docs/tasks/assets
+```
+
+스크린샷 8장은 새 팔레트로 다시 찍어 커밋했다(gathering 상태는 하늘에 초록, festival_prep 상태는 등불빛 계열이 들어간다). 실행하지 않았음: 실제 OBS Browser Source 육안 확인·GPU 브라우저 FPS(round 1과 같은 이유, Gate 2 항목).
