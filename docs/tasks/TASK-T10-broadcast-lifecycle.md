@@ -1,7 +1,7 @@
 # TASK-T10-broadcast-lifecycle
 
 - Task: T10 broadcast lifecycle·reconcile·한도 처리 (`docs/tasks/TASK_SPECS.md` §T10)
-- Branch: `dnhynk/t10-broadcast-lifecycle` · PR: #_(TBD)_
+- Branch: `dnhynk/t10-broadcast-lifecycle` · PR: #11
 - Orca: task `task_41769f69d4b7` · dispatch `ctx_a44401984418`
 - Spec sections read: §4(liveBroadcasts·12h archive 행), §9.1, §9.2, §9.3, §9.4(6), §10.2, §11, §12.2, §12.4, §17
 - BOARD decisions/assumptions relied on: D-1, D-2, A-4(전략 기본 `single`), A-14(공용 규격), A-15(provisional 숫자), A-16(stream key = vault 정본)
