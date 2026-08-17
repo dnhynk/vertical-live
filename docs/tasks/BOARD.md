@@ -29,7 +29,7 @@
 | T16 | 문서 정합화·운영 런북·Gate 체크리스트 | T12 | — | merged | t16-docs-alignment | #19 | `task_60d68899d24c` |
 | T17 | Windows 운영 스크립트(자동시작·OBS·아카이브) | T2, T12 | — | merged | t17-windows-ops | #17 | `task_e2466b978ebe` |
 | T8b | 엔진 버그픽스: /ingest/simulator inbox write 예외 시 hang(T15 발견) | T8 | — | merged | t8b-ingest-hang | #20 | `task_f1aeb51337bf` |
-| T8c | 엔진 버그픽스: 렌더러 ACK 경로 store 실패(disk-full) uncaught(T15 발견) | T8 | — | dispatched | t8c-ack-store-failure | | `task_658a5641bf1c` |
+| T8c | 엔진 버그픽스: 렌더러 ACK 경로 store 실패(disk-full) uncaught(T15 발견) | T8 | — | in_review | t8c-ack-store-failure | #21 | `task_658a5641bf1c` |
 
 디스패치 순서 원칙: `ready` 중 T-ID 낮은 것부터, 동시 2, `[contract]`는 하나만. 리뷰 Task는 `R-<T-ID>-<round>`로 별도 등록하고 아래 이력에만 남긴다.
 
@@ -186,3 +186,4 @@
 | 2026-08-17 19:05 | F-T15-1 완료(프로덕션 엔진 child SIGKILL 경계 주입·실제 SQLITE_FULL·coverage 실행 도출; 1871 tests, soak:ci PASS). 발견: T8 renderer ACK 경로 disk-full uncaught → **T8c 등록·디스패치** `ctx_2313b56ee0d2`. R-T15-2 `task_d50420fe3800` → `ctx_1bffa8f59051`(review). 진행: R-T16-2(review2) |
 | 2026-08-17 19:16 | R-T15-2 verdict **approve**(로컬 게이트 5개+soak:ci 52.5s PASS, 경계 negative probe) → 최종 게이트(server subpath export만 추가·deps 없음·config soak 절 합격선 null(A-15)) → **PR #18 squash merge**(main 499cdaa). T15 worker release·worktree 제거. R-T16-2 verdict request_changes(잔여 blocker 1: ACCOUNT_SETUP_FROM_ZERO.md:168 무출처 advanced-features 항목) → **F-T16-2** `task_dcb1fb230065` → T16 터미널. 진행: T8c, F-T16-2. 남은 open PR: #19 |
 | 2026-08-17 19:27 | F-T16-2 완료(8e0ed84/51f4d71: advanced-features 무출처 필요조건 3곳 정정, 새 UI 경로 미도입) → R-T16-3 `task_b503054ef256` verdict **approve**(로컬 게이트 5개, 코드·config·contract 변경 0) → 최종 게이트(CLAUDE.md/AGENTS.md '구식' 문장 갱신은 A-승인 범위, 금지 패턴 0) → **PR #19 squash merge**(main 173156c). T16 worker release·worktree 제거, review/review2 유휴 터미널 정리. **미머지 task: T8c만**(진행 중). CLAUDE.md §1(5)는 이 PR로 '정합화 완료'로 갱신됨 |
+| 2026-08-17 19:40 | T8c worker_done(succeeded, PR #21: onAckEffect store-first, classifySqliteError→lastFailure/consecutiveFailures, ack_effect_store_failed metric, RendererHub 핸들러 wrap; 재현 테스트 실제 SQLITE_FULL 수정 전 uncaught 1→후 4 pass; 1875 tests 로컬). 후속 제안: T15 SoakRenderer.pauseEffectAcks 제거(선택). R-T8c-1 `task_90058350c319` → `ctx_aa878d5c9a32`(review) |
