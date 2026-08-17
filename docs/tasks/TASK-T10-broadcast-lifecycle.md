@@ -13,7 +13,7 @@ YouTube 방송 자원(liveStream · liveBroadcast)의 생명주기를 서버가 
 ## Plan
 
 1. **정본 사실 확정(먼저)**: liveBroadcasts insert/bind/transition/list, liveStreams insert/list, liveBroadcast·liveStream 리소스, Live Streaming API 오류표, 일일 생성 한도 Help 문서를 읽고 표(아래 "Sources consulted")로 고정한다. 9:16 관련 필드가 API에 있는지, 일일 한도 reason 문자열이 공개돼 있는지를 특히 확인한다.
-2. **migration 002**: 001의 `broadcast_resources`는 "T10이 컬럼을 확정한다"는 skeleton이고 어떤 코드도 쓰지 않는다(grep: 001과 migrate.test.ts의 테이블 목록 뿐). 001은 적용 후 수정 금지이므로 `002_broadcast-resources.sql`에서 skeleton을 대체한다(파일명은 runner의 `NNN_lower-kebab-name.sql` 패턴에 맞춘 kebab-case). 컬럼: 시도 식별자(attempt_id) PK, strategy, stage, **pending_call**(호출 직전 기록·결과 확정 후 해제), pending_since, stream_id, broadcast_id, live_chat_id, scheduled_start_time(insert reconcile 키), stream_title(liveStreams 재사용·reconcile 키), auto_start_supported, last_error_reason, created_at/updated_at/closed_at.
+2. **migration 002**: 001의 `broadcast_resources`는 "T10이 컬럼을 확정한다"는 skeleton이고 어떤 코드도 쓰지 않는다(grep: 001과 migrate.test.ts의 테이블 목록 뿐). 001은 적용 후 수정 금지이므로 `002_broadcast-resources.sql`에서 skeleton을 대체한다(파일명은 runner의 `NNN_lower-kebab-name.sql` 패턴에 맞춘 kebab-case; **round 1 m2로 003으로 재번호** — PR #10이 002를 씀). 컬럼: 시도 식별자(attempt_id) PK, strategy, stage, **pending_call**(호출 직전 기록·결과 확정 후 해제), pending_since, stream_id, broadcast_id, live_chat_id, scheduled_start_time(insert reconcile 키), stream_title(liveStreams 재사용·reconcile 키), auto_start_supported, last_error_reason, created_at/updated_at/closed_at.
 3. **`PersistenceStore` 확장**(T4가 정한 유일 writer 인터페이스): `beginBroadcastAttempt`, `markBroadcastCallPending`, `recordBroadcastCallResult`, `closeBroadcastAttempt`, `getBroadcastAttempt`, `findOpenBroadcastAttempt`, `listBroadcastAttempts`. 단계 전진은 단조(monotonic) — 뒤로 가는 전이는 거부.
 4. **`youtube/broadcast/api.ts`**: `liveStreams.insert|list`, `liveBroadcasts.insert|bind|transition|list`를 REST로 호출하는 얇은 클라이언트. `fetch` + `AbortSignal`(주입 `Clock`), base URL 주입, 응답에서 `cdn.ingestionInfo.streamName`(= stream key)을 **파싱 즉시 vault로 보내고 반환 shape에서 제거**. 실패는 `YouTubeApiCallError{classification, outcome: 'rejected'|'uncertain'}`로 정규화. `uncertain`은 "요청이 서버에 적용됐는지 알 수 없음"(timeout/abort/network/5xx), `rejected`는 "서버가 확정 거부"(4xx). quota는 T3 `QuotaTracker`로 사전 검사·기록.
 5. **`youtube/broadcast/limits.ts`**: 3종 한도 판정과 복구 정책. named reason 3개 + limit-shaped unknown(공개 reason 없는 일일 생성 한도) → 모두 동일 행동(복구 우선 → 불가 시 safe_stopped 요청 + alert).
@@ -123,7 +123,7 @@ $ npm run test           -> Test Files 64 passed (64) / Tests 1128 passed | 1 sk
 $ npm run build          -> contract, renderer(vite ✓ built), server(copied 2 migration(s)), simulator ok
 ```
 
-round 1 수정 후 재실행(base `44fefaa`로 rebase): 위 5개 게이트 모두 통과, 테스트 1128 passed | 1 skipped. 리뷰어가 관측한 `api.test.ts:162` flake는 M2의 배리어로 원인 자체를 제거했다(벽시계 의존 삭제).
+round 1 수정 후 재실행(base `44fefaa`로 rebase): 위 5개 게이트 모두 통과, 테스트 **1129 passed | 1 skipped (1130)**, `copied 2 migration(s)`(003 재번호 후 dist 정리 확인). 리뷰어가 관측한 `api.test.ts:162` flake는 M2의 배리어로 원인 자체를 제거했다(벽시계 의존 삭제).
 
 위 게이트는 `git fetch && git rebase origin/main`(base `751126f`) 뒤에 돌렸다. rebase 직후 `npm run test`가 renderer 3파일에서 `Cannot find package 'jsdom'`로 실패했는데, 원인은 T5(PR #9)가 추가한 devDependency가 이 worktree의 `node_modules`에 없던 것이었다 — `npm install`(lockfile 변경 없음) 후 재실행하여 위 결과를 얻었다.
 

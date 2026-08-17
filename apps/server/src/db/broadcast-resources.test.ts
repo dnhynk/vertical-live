@@ -74,6 +74,30 @@ describe('broadcast attempts', () => {
     expect(resolved.streamId).toBe('synthetic-stream-1')
   })
 
+  it('records which transition is in flight, and refuses one without a target', () => {
+    // Review round 1 (B4): the observed `lifeCycleStatus` is only readable against
+    // the target the call asked for, so the target is part of the pending marker.
+    temp.store.beginBroadcastAttempt(ATTEMPT)
+
+    expect(() =>
+      temp.store.markBroadcastCallPending(ATTEMPT.attemptId, 'liveBroadcasts.transition'),
+    ).toThrow(/must record its target status/)
+    expect(() =>
+      temp.store.markBroadcastCallPending(ATTEMPT.attemptId, 'liveBroadcasts.bind', 'live'),
+    ).toThrow(/has no transition target/)
+
+    const pending = temp.store.markBroadcastCallPending(
+      ATTEMPT.attemptId,
+      'liveBroadcasts.transition',
+      'complete',
+    )
+    expect(pending.pendingTransition).toBe('complete')
+
+    const resolved = temp.store.recordBroadcastCallResult(ATTEMPT.attemptId, {})
+    expect(resolved.pendingCall).toBeNull()
+    expect(resolved.pendingTransition).toBeNull()
+  })
+
   it('refuses a second in-flight call while one is unresolved', () => {
     temp.store.beginBroadcastAttempt(ATTEMPT)
     temp.store.markBroadcastCallPending(ATTEMPT.attemptId, 'liveBroadcasts.insert')

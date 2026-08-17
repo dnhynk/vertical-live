@@ -3,10 +3,12 @@
  * and T9's chat adapter consume this module; nothing here decides system state.
  */
 export {
+  METHOD_ALLOWED_PARTS,
   YOUTUBE_API_BASE_URL,
   YouTubeApiCallError,
   YouTubeApiShapeError,
   YouTubeLiveApi,
+  YouTubePartError,
 } from './api.js'
 export type {
   AccessTokenSource,
@@ -16,8 +18,10 @@ export type {
   ConfigurationIssue,
   InsertBroadcastInput,
   InsertLiveStreamInput,
+  ListResult,
   LiveBroadcastSummary,
   LiveStreamStatus,
+  LiveStreamStatusSummary,
   LiveStreamSummary,
   StreamKeySink,
   StreamListFilter,
@@ -78,6 +82,7 @@ export type { BroadcastLimitKind } from './limits.js'
 export {
   BroadcastLifecycle,
   BroadcastReconcileFailedError,
+  BroadcastReconcileInconclusiveError,
   BroadcastSafeStopRequiredError,
   BroadcastStreamInactiveError,
 } from './lifecycle.js'
