@@ -13,7 +13,7 @@
 | T1 | 정규 이벤트·snapshot·effect 계약과 fixture | T0 | ✔ | merged | t1-contract | #2 | `task_1acc78f93775` |
 | T1b | [contract] Effect 원인 확장(causedByEventKey nullable + cause 판별자; T7 발견) | T1 | ✔ | dispatched | t1b-effect-cause | | `task_0a64fcaaae4a` |
 | T2 | obs-websocket 5 감시·제어 + OBS 프로파일 | T0 | — | merged | t2-obs-monitor | #3 | `task_6e0c43d6b74c` |
-| T3 | OAuth·비밀정보 vault·quota | T0 | — | in_review | t3-auth-vault | #4 | `task_62829ec3ab8b` |
+| T3 | OAuth·비밀정보 vault·quota | T0 | — | changes_requested | t3-auth-vault | #4 | `task_62829ec3ab8b` |
 | T4 | SQLite 영속층(inbox·checkpoint·snapshot·outbox·deadline) | T1 | — | in_review | t4-persistence | #5 | `task_6bb9ff9f79c8` |
 | T5 | 렌더러 read model(snapshot 복구·effect 멱등·ACK·건강) | T1 | — | ready | t5-renderer-readmodel | | `task_6ba022bb6151` |
 | T6 | 명령 파서·모더레이션·입력 arbiter | T1 | — | ready | t6-command-parser | | `task_a0f96dd7e038` |
@@ -103,3 +103,4 @@
 | 2026-08-17 06:55 | PR #4(T3) mergeStateStatus DIRTY(#3과 중복 파일) → F-T3-0 rebase task `task_3d2ac48f0034` → T3 터미널 `ctx_153cfdeffe35`. 이후 R-T3-1 |
 | 2026-08-17 07:20 | F-T3-0 rebase 완료(PR #4 CLEAN, 551 tests). R-T3-1 `task_cba4ef036404` → `ctx_1e16e3c930eb` |
 | 2026-08-17 07:35 | T4 worker_done(succeeded, PR #5: SQLite WAL+synchronous=FULL, 마이그레이션 러너, 두 트랜잭션 경계, crash-window·SIGKILL 테스트, 562 tests). 후속: T1b 머지 후 effect_outbox.caused_by_event_key nullable 마이그레이션 002 필요(T8 또는 T1b 후속). T1b 디스패치 `ctx_6219c7a4e46f`. 리뷰 대기열: R-T3-1(진행) → R-T4-1 |
+| 2026-08-17 07:55 | R-T3-1 verdict **request_changes**(blocker 3: T2 호출자가 여전히 EnvSecretProvider 기본, 8자 미만 secret 오류 노출, streamList scope 미확인·force-ssl 유일성 미입증; major 3: google-auth-library 미선언 직접 import, in-memory fallback 프로덕션 도달, revoke 후 vault 삭제 실패 시 auth_revoked 누락; minor 2). 리뷰 https://github.com/dnhynk/vertical-live/pull/4#pullrequestreview-4948810479. F-T3-1 `task_8524b9e6eabb` → T3 터미널 `ctx_3a1bde95e0c7`. R-T4-1 `task_f8fcd1f7c232` → `ctx_43914df6be16` |
