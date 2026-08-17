@@ -89,6 +89,32 @@ function statusLine(engine: EngineHealth, supervisor: SupervisorHealthSummary | 
   }
 }
 
+/**
+ * Last resort: end a request whose handler threw after the body was read.
+ *
+ * `void readJsonBody(req).then(onFulfilled, onRejected)` looks like it covers
+ * both outcomes, but `onRejected` only sees rejections of the promise it is
+ * attached to. A throw *inside* `onFulfilled` rejects the promise `.then()`
+ * returns instead, and `void` discards it — so the exception became an unhandled
+ * rejection and the response was never written at all. The caller waited until it
+ * gave up (T8b; found by T15's fault matrix drill, where an inbox write hit
+ * `SQLITE_BUSY`).
+ *
+ * A route maps the failures it can name — see `SimulatorIngestEndpoint` for the
+ * 503/500 split on an inbox write. This is what guarantees the request ends even
+ * when it cannot: a bare `internal_error`, with no detail from the exception,
+ * because nothing here knows what the exception is carrying.
+ */
+function failClosed(res: ServerResponse, headers: Readonly<Record<string, string>> = {}): void {
+  if (!res.headersSent) {
+    sendJson(res, 500, { error: 'internal_error' }, headers)
+    return
+  }
+  // Part of an answer already went out, so the status is no longer ours to
+  // choose; the only thing left is to stop the caller waiting for the rest of it.
+  if (!res.writableEnded) res.end()
+}
+
 function sendJson(
   res: ServerResponse,
   statusCode: number,
@@ -209,30 +235,37 @@ export function handleRequest(
       sendJson(res, 405, { error: 'method_not_allowed' })
       return
     }
-    void readJsonBody(req).then(
-      (body) => {
-        if (body === BODY_TOO_LARGE) {
-          sendJson(res, 413, { error: 'body_too_large' })
-          return
-        }
-        // A kill switch must work with an empty body: the reason is optional and
-        // an operator with a wedged broadcast should not have to get JSON right.
-        const result = adminKill.handle({
-          authorization: headerValue(req, 'authorization'),
-          remoteAddress: req.socket.remoteAddress ?? null,
-          body: body === BODY_UNPARSEABLE ? null : body,
-        })
-        sendJson(res, result.status, result.body)
-      },
-      () => {
-        const result = adminKill.handle({
-          authorization: headerValue(req, 'authorization'),
-          remoteAddress: req.socket.remoteAddress ?? null,
-          body: null,
-        })
-        sendJson(res, result.status, result.body)
-      },
-    )
+    void readJsonBody(req)
+      .then(
+        (body) => {
+          if (body === BODY_TOO_LARGE) {
+            sendJson(res, 413, { error: 'body_too_large' })
+            return
+          }
+          // A kill switch must work with an empty body: the reason is optional and
+          // an operator with a wedged broadcast should not have to get JSON right.
+          const result = adminKill.handle({
+            authorization: headerValue(req, 'authorization'),
+            remoteAddress: req.socket.remoteAddress ?? null,
+            body: body === BODY_UNPARSEABLE ? null : body,
+          })
+          sendJson(res, result.status, result.body)
+        },
+        () => {
+          const result = adminKill.handle({
+            authorization: headerValue(req, 'authorization'),
+            remoteAddress: req.socket.remoteAddress ?? null,
+            body: null,
+          })
+          sendJson(res, result.status, result.body)
+        },
+      )
+      // The kill switch reaches the supervisor, so `handle()` can throw for
+      // reasons this route cannot enumerate. An operator killing a wedged
+      // broadcast must not be left holding an open socket either.
+      .catch(() => {
+        failClosed(res)
+      })
     return
   }
 
@@ -259,27 +292,31 @@ export function handleRequest(
       sendJson(res, 405, { error: 'method_not_allowed' }, cors)
       return
     }
-    void readJsonBody(req).then(
-      (body) => {
-        if (body === BODY_TOO_LARGE) {
-          sendJson(res, 413, { error: 'body_too_large' }, cors)
-          return
-        }
-        if (body === BODY_UNPARSEABLE) {
+    void readJsonBody(req)
+      .then(
+        (body) => {
+          if (body === BODY_TOO_LARGE) {
+            sendJson(res, 413, { error: 'body_too_large' }, cors)
+            return
+          }
+          if (body === BODY_UNPARSEABLE) {
+            sendJson(res, 400, { error: 'body_must_be_json' }, cors)
+            return
+          }
+          const result = ingest.handle({
+            authorization: headerValue(req, 'authorization'),
+            remoteAddress: req.socket.remoteAddress ?? null,
+            body,
+          })
+          sendJson(res, result.status, result.body, cors)
+        },
+        () => {
           sendJson(res, 400, { error: 'body_must_be_json' }, cors)
-          return
-        }
-        const result = ingest.handle({
-          authorization: headerValue(req, 'authorization'),
-          remoteAddress: req.socket.remoteAddress ?? null,
-          body,
-        })
-        sendJson(res, result.status, result.body, cors)
-      },
-      () => {
-        sendJson(res, 400, { error: 'body_must_be_json' }, cors)
-      },
-    )
+        },
+      )
+      .catch(() => {
+        failClosed(res, cors)
+      })
     return
   }
 

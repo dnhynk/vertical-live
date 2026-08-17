@@ -2,6 +2,7 @@ import { timingSafeEqual } from 'node:crypto'
 
 import { IngestEnvelopeSchema, type IngestEnvelope } from '@vl/contract'
 
+import { classifySqliteError } from '../db/errors.js'
 import type { IngestBatchResult, SourceCheckpointInput } from '../db/types.js'
 
 /**
@@ -30,6 +31,14 @@ import type { IngestBatchResult, SourceCheckpointInput } from '../db/types.js'
  * with a synthetic one, which would lose real messages on the next reconnect
  * (R-T8-1 major 1). The key is `simulator:{liveChatId}` of the batch itself, and a
  * batch that mixes chats is refused rather than silently attributed to one.
+ *
+ * A fifth outcome is not a refusal: the write itself can fail. SQLite has one
+ * writer, so a concurrent transaction makes `commitIngestBatch` wait out
+ * `busy_timeout` and then throw `SQLITE_BUSY` (spec §11 fault matrix "DB lock").
+ * That is answered — 503 when the same request may succeed unchanged, 500
+ * otherwise — because the alternative was worse: the exception escaped into the
+ * HTTP layer, the response was never written, and the caller waited forever
+ * (T8b, found by T15's drill of that fault matrix row).
  */
 
 /** The inbox write path (`StateEngine.ingest`), injected so this stays testable. */
@@ -81,7 +90,12 @@ export class SimulatorIngestEndpoint {
     const parsed = parseBody(request.body)
     if ('error' in parsed) return { status: 400, body: parsed }
 
-    const result = this.#options.inbox.ingest(parsed.envelopes, parsed.checkpoint)
+    let result: IngestBatchResult
+    try {
+      result = this.#options.inbox.ingest(parsed.envelopes, parsed.checkpoint)
+    } catch (error) {
+      return writeFailureResponse(error)
+    }
     this.#options.onIngested?.(result.insertedCount)
     return {
       status: 202,
@@ -105,6 +119,32 @@ export class SimulatorIngestEndpoint {
     if (presented.length !== secret.length) return false
     return timingSafeEqual(presented, secret)
   }
+}
+
+/**
+ * Turns a failed inbox write into a response.
+ *
+ * The split is `SqliteFailure.retryable`, which already means exactly what the
+ * two status codes mean: lock contention (`busy`, `locked`) is a 503 because the
+ * identical request may succeed a moment later, and everything else is a 500
+ * because repeating it would only repeat the failure. The supervisor of T12 is
+ * what acts on the fault itself; this response only tells the caller which of the
+ * two it was.
+ *
+ * The body carries a **reason code from a fixed vocabulary and nothing else**.
+ * A `SqliteError` message is operator detail — "database is locked", but also
+ * file paths and, for a constraint violation, column values — and spec §12.3
+ * (no raw input back out) and §10.2 (secrets stay in the vault) both rule out
+ * echoing it to a caller.
+ */
+function writeFailureResponse(error: unknown): SimulatorIngestResponse {
+  const failure = classifySqliteError(error)
+  // `code === null` is a non-SQLite exception, e.g. a `PersistenceInvariantError`
+  // from the store. Naming its kind would say nothing a caller can act on.
+  const reason = failure.code === null ? 'internal' : `db_${failure.kind}`
+  return failure.retryable
+    ? { status: 503, body: { error: 'ingest_unavailable', reason } }
+    : { status: 500, body: { error: 'ingest_failed', reason } }
 }
 
 interface ParsedBody {
