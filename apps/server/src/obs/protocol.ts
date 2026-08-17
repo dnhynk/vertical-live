@@ -94,6 +94,14 @@ export const OBS_OUTPUT_STATE = {
 
 export type ObsOutputState = (typeof OBS_OUTPUT_STATE)[keyof typeof OBS_OUTPUT_STATE]
 
+/**
+ * `streamServiceType` for a server+key pair the caller supplies itself
+ * (obs-studio `plugins/rtmp-services/rtmp-custom.c`). The server injects the
+ * ingestion URL and the vault's stream key at runtime under this type instead
+ * of relying on a service configured in the OBS UI.
+ */
+export const CUSTOM_STREAM_SERVICE_TYPE = 'rtmp_custom'
+
 /** The property button obs-browser exposes for "Refresh cache of current page". */
 export const BROWSER_SOURCE_REFRESH_PROPERTY = 'refreshnocache'
 

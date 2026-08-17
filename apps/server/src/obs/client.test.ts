@@ -187,11 +187,14 @@ describe('ObsClient handshake and authentication', () => {
       }),
     )
 
-    const connecting = client.connect()
+    // The expectation is attached before the clock advances: the rejection
+    // happens inside advance(), and a handler attached afterwards would leave
+    // it momentarily unobserved and trip vitest's unhandled-rejection check.
+    const connecting = expect(client.connect()).rejects.toBeInstanceOf(ObsConnectTimeoutError)
     await waitFor(() => clock.pendingTimerCount === 1, 'connect timeout is armed')
     await clock.advance(1000)
+    await connecting
 
-    await expect(connecting).rejects.toBeInstanceOf(ObsConnectTimeoutError)
     expect(client.state).toBe('disconnected')
 
     // Give the delayed Hello time to land, then confirm nothing came back up.

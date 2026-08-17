@@ -24,6 +24,7 @@ const validSection = {
   commandVerifyTimeoutMs: 5000,
   commandVerifyIntervalMs: 250,
   browserSourceName: 'test-browser-source',
+  streamIngestUrl: 'rtmps://test-ingest.invalid:443/live2',
   reconnect: { initialDelayMs: 1000, maxDelayMs: 30_000, factor: 2 },
   thresholds: {
     congestionDegradedAt: 0.2,
@@ -40,6 +41,10 @@ describe('loadObsConfig', () => {
     expect(config.url).toBe('ws://127.0.0.1:4455')
     expect(config.pollIntervalMs).toBeGreaterThan(0)
     expect(config.thresholds.congestionDegradedAt).toBeGreaterThan(0)
+    // Review round 1 finding 2: the ingestion URL ships in config, the key does
+    // not — it comes from the vault at runtime (spec §10.2).
+    expect(config.streamIngestUrl).toBe('rtmps://a.rtmps.youtube.com:443/live2')
+    expect(JSON.stringify(config)).not.toMatch(/"key"/)
     // BOARD A-15: numbers the spec does not fix are declared, not silently fixed.
     expect(config.provisional).toContain('pollIntervalMs')
     expect(config.provisional).toContain('thresholds')

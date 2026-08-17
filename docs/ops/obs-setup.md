@@ -83,9 +83,42 @@ Browser Source는 `shutdown=false`, `restart_when_active=false`로 두어 24시�
 
 > 렌더러 URL은 T5가 dev 서버(`:5173`)에서 빌드 서빙 주소로 바꿀 수 있다. 바뀌면 이 파일과 `ops/obs/scenes/vertical-live.json`을 같이 고친다.
 
-### 스트림 키
+### 스트림 키 — 운영자는 OBS UI에 입력하지 않는다
 
-**스트림 키는 저장소에 없다.** `service.json`에 `key` 필드를 두지 않으며, 그것을 테스트가 강제한다(`apps/server/src/obs/profile.test.ts`). 키는 YouTube Live Control Room에서 받아 OBS **설정 → 방송(Stream)** 화면에 직접 입력한다(스펙 §10.2: stream key는 vault에만). [S27]에 따라 RTMPS URL은 Live Control Room의 Stream URL 필드에서 자물쇠 아이콘을 눌러야 보인다.
+**운영자는 스트림 키를 OBS 화면에 붙여넣지 않는다.** vault(`SecretProvider`, 이름 `youtube.streamKey`)가 스트림 키의 정본이고, 서버가 `StartStream` 직전에 obs-websocket `SetStreamServiceSettings`로 런타임 주입한다(`ObsControl.setStreamServiceFromVault()`, `apps/server/src/obs/control.ts`).
+
+```text
+streamServiceType     rtmp_custom
+streamServiceSettings { server: <obs.streamIngestUrl>, key: <vault: youtube.streamKey> }
+```
+
+`server`는 `config/default.json`의 `obs.streamIngestUrl`(기본값 `rtmps://a.rtmps.youtube.com:443/live2`)이고, `key`만 vault에서 온다. 주입 후 서버는 `GetStreamServiceSettings`로 되읽어 검증하되 **키 값 자체는 비교하지도 반환하지도 않는다**(타입·server 일치와 키가 비어 있지 않은지만 확인). 명령의 반환값은 `{streamServiceType, server, keyConfigured}`뿐이라 그대로 로그에 남겨도 안전하다.
+
+T3 전까지 vault 임시 구현은 env다:
+
+```powershell
+$env:VL_YOUTUBE_STREAM_KEY = '<Live Control Room에서 받은 스트림 키>'
+```
+
+키가 없으면 명령은 OBS에 아무것도 보내지 않고 `MissingSecretError: secret not configured: youtube.streamKey (provider: env)`로 거부한다. 값은 메시지에 들어가지 않는다.
+
+**저장소에는 스트림 키가 없다.** `ops/obs/.../service.json`에 `key` 필드를 두지 않으며, `ops/obs/`의 모든 json을 재귀 탐색해 비어 있지 않은 `key`를 금지하는 테스트가 이를 강제한다(`apps/server/src/obs/profile.test.ts`).
+
+#### 정직하게: 주입 후 키는 호스트 OBS 프로파일에도 남는다
+
+"오직 vault에만 있다"고 말하지 않는다. OBS는 자신이 들고 있는 서비스 설정을 활성 프로파일 디렉터리의 `service.json`에 직렬화해 저장한다:
+
+- [`frontend/widgets/OBSBasic_Service.cpp` L35-40](https://github.com/obsproject/obs-studio/blob/1bf1379faa8b87dbb1cb75635e7880e7d9625b8c/frontend/widgets/OBSBasic_Service.cpp#L35-L40) — 서비스 설정 전체를 `service.json`으로 저장
+- [`plugins/rtmp-services/rtmp-common.c` L154](https://github.com/obsproject/obs-studio/blob/1bf1379faa8b87dbb1cb75635e7880e7d9625b8c/plugins/rtmp-services/rtmp-common.c#L154) — `settings.key`를 읽는 지점
+
+따라서 주입 이후 키는 **vault와 호스트의 `%APPDATA%\obs-studio\basic\profiles\vertical-live\service.json` 두 곳**에 존재한다. 이 task가 보장하는 것은 키가 **저장소·게임 DB·로그·화면**에 없다는 것이다(스펙 §10.2, CLAUDE.md §3). 운영자가 UI에 입력하던 이전 절차와 비교하면 사람이 키를 다루는 단계가 사라지고 정본이 vault 하나가 된다는 점이 개선이다.
+
+남은 노출을 닫는 것은 **T17**이다(티켓 Follow-ups·BOARD 후보):
+
+1. 정지(`StopStream`) 후 `SetStreamServiceSettings`로 키를 비워 프로파일에서 제거
+2. 프로파일 디렉터리 ACL을 서비스 계정으로 제한
+
+[S27]에 따라 RTMPS URL과 스트림 키는 Live Control Room에서 받는다(Stream URL 필드의 자물쇠 아이콘). 받은 키는 OBS가 아니라 vault에 넣는다.
 
 ## 4. 연결 확인
 
@@ -110,6 +143,8 @@ npm run obs:probe
 ## 5. 프로파일 값과 공식 권장값 대조 (TASK_SPECS §T2 합격 기준 3)
 
 출처는 [S26](https://support.google.com/youtube/answer/2853702?hl=en), [S27](https://support.google.com/youtube/answer/10364924?hl=en), 그리고 OBS의 서비스 정의 `plugins/rtmp-services/data/services.json`(모두 2026-08-17 확인). 이 표의 모든 행은 `apps/server/src/obs/profile.test.ts`가 실제 파일에 대해 검사한다.
+
+> **서비스 타입 주의**: 저장소가 싣는 `service.json`은 키 없는 `rtmp_common`("YouTube - RTMPS")이다. 서버가 `setStreamServiceFromVault()`로 키를 주입하는 순간 OBS의 서비스 타입은 `rtmp_custom`으로 바뀌고, 그때 `server`는 `obs.streamIngestUrl`(같은 ingest URL)에서 온다. 따라서 아래 "프로토콜/ingest 서버" 행의 값은 두 경로에서 같지만, 주입 이후에는 `rtmp_common`의 `recommended`(keyint 2 등)가 더 이상 적용되지 않는다 — 그래서 keyframe·비트레이트·B-frame 값을 `streamEncoder.json`에 직접 고정해 둔 것이며, 서비스 타입이 바뀌어도 인코더 설정은 그대로 유지된다.
 
 | 항목 | 공식 권장값 | 이 프로파일 값 | 파일 · 키 |
 |---|---|---|---|

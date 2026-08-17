@@ -70,6 +70,8 @@ export interface FakeObsState {
   obsVersion: string
   obsWebSocketVersion: string
   platform: string
+  /** What `SetStreamServiceSettings` last stored, as real OBS would keep it. */
+  streamService: FakeStreamService
   /**
    * Models OBS's real `OBS_WEBSOCKET_OUTPUT_STARTING` window: `StartStream`
    * succeeds, but `outputActive` only flips after this many further
@@ -81,6 +83,11 @@ export interface FakeObsState {
    * zero (the default) models a frozen output.
    */
   streamProgressPerSample: StreamProgressPerSample
+}
+
+export interface FakeStreamService {
+  streamServiceType: string
+  streamServiceSettings: Record<string, unknown>
 }
 
 export interface StreamProgressPerSample {
@@ -183,6 +190,9 @@ function defaultState(): FakeObsState {
     obsVersion: '32.0.2',
     obsWebSocketVersion: '5.6.3',
     platform: 'windows',
+    // No service configured until something injects one — the shipped profile
+    // carries no stream key.
+    streamService: { streamServiceType: 'rtmp_common', streamServiceSettings: {} },
     startStreamLatencySamples: 0,
     streamProgressPerSample: { bytes: 0, durationMs: 0, totalFrames: 0, skippedFrames: 0 },
   }
@@ -196,6 +206,12 @@ export class FakeObsServer {
 
   /** Flip on to make every subsequent `Identify` fail authentication. */
   rejectIdentify = false
+
+  /**
+   * Flip on to acknowledge `SetStreamServiceSettings` without storing it, so a
+   * caller's read-back verification fails the way a rejecting OBS would.
+   */
+  freezeStreamService = false
 
   readonly #wss: WebSocketServer
   readonly #password: string
@@ -436,6 +452,30 @@ export class FakeObsServer {
 
       case 'GetVideoSettings':
         return ok({ ...state.videoSettings })
+
+      case 'GetStreamServiceSettings':
+        return ok({
+          streamServiceType: state.streamService.streamServiceType,
+          streamServiceSettings: { ...state.streamService.streamServiceSettings },
+        })
+
+      case 'SetStreamServiceSettings': {
+        const streamServiceType = requestData['streamServiceType']
+        const settings = requestData['streamServiceSettings']
+        if (typeof streamServiceType !== 'string') {
+          return fail(REQUEST_STATUS.missingRequestField, 'streamServiceType')
+        }
+        if (typeof settings !== 'object' || settings === null || Array.isArray(settings)) {
+          return fail(REQUEST_STATUS.invalidRequestFieldType, 'streamServiceSettings')
+        }
+        if (!this.freezeStreamService) {
+          state.streamService = {
+            streamServiceType,
+            streamServiceSettings: { ...(settings as Record<string, unknown>) },
+          }
+        }
+        return ok(undefined)
+      }
 
       case 'StartStream':
         if (state.streamStatus.outputActive) {

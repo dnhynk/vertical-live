@@ -30,6 +30,12 @@ export interface ObsConfig {
   readonly commandVerifyIntervalMs: number
   /** Browser Source input that shows the renderer; target of `refreshnocache`. */
   readonly browserSourceName: string
+  /**
+   * RTMPS ingestion URL the server injects with the vault's stream key before
+   * going live. The key itself never appears in config — only in the vault
+   * (spec §10.2).
+   */
+  readonly streamIngestUrl: string
   readonly reconnect: ObsReconnectConfig
   readonly thresholds: ObsThresholdConfig
   /** Keys whose values are provisional (BOARD A-15). */
@@ -95,6 +101,7 @@ export function loadObsConfig(options: LoadObsConfigOptions = {}): ObsConfig {
       'obs.commandVerifyIntervalMs',
     ),
     browserSourceName: readString(section['browserSourceName'], 'obs.browserSourceName'),
+    streamIngestUrl: readString(section['streamIngestUrl'], 'obs.streamIngestUrl'),
     reconnect: Object.freeze({
       initialDelayMs: readPositiveInt(reconnect['initialDelayMs'], 'obs.reconnect.initialDelayMs'),
       maxDelayMs: readPositiveInt(reconnect['maxDelayMs'], 'obs.reconnect.maxDelayMs'),

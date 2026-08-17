@@ -17,6 +17,7 @@ export function testObsConfig(url: string, overrides: Partial<ObsConfig> = {}): 
     commandVerifyTimeoutMs: 5000,
     commandVerifyIntervalMs: 250,
     browserSourceName: 'test-browser-source',
+    streamIngestUrl: 'rtmps://test-ingest.invalid:443/live2',
     reconnect: { initialDelayMs: 1000, maxDelayMs: 30_000, factor: 2 },
     thresholds: {
       congestionDegradedAt: 0.2,

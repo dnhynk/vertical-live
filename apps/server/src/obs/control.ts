@@ -1,6 +1,12 @@
 import { systemClock, type Clock } from '../clock.js'
+import { EnvSecretProvider } from '../secrets/env.js'
+import { requireSecret, type SecretProvider } from '../secrets/index.js'
 import type { ObsConfig } from './config.js'
-import { BROWSER_SOURCE_INPUT_KIND, BROWSER_SOURCE_REFRESH_PROPERTY } from './protocol.js'
+import {
+  BROWSER_SOURCE_INPUT_KIND,
+  BROWSER_SOURCE_REFRESH_PROPERTY,
+  CUSTOM_STREAM_SERVICE_TYPE,
+} from './protocol.js'
 import type { ObsRequester } from './requester.js'
 
 /**
@@ -50,21 +56,86 @@ export interface SceneSwitchResult {
   readonly changed: boolean
 }
 
+/**
+ * Outcome of a stream-service injection. It deliberately carries no key — only
+ * whether one is now configured — so it stays safe to log (spec §10.2).
+ */
+export interface StreamServiceResult {
+  readonly streamServiceType: string
+  readonly server: string
+  readonly keyConfigured: boolean
+}
+
 export interface ObsControlOptions {
   readonly source: ObsRequester
   readonly config: ObsConfig
   readonly clock?: Clock
+  readonly secrets?: SecretProvider
 }
 
 export class ObsControl {
   readonly #source: ObsRequester
   readonly #config: ObsConfig
   readonly #clock: Clock
+  readonly #secrets: SecretProvider
 
   constructor(options: ObsControlOptions) {
     this.#source = options.source
     this.#config = options.config
     this.#clock = options.clock ?? systemClock
+    this.#secrets = options.secrets ?? new EnvSecretProvider()
+  }
+
+  /**
+   * Pushes the RTMPS ingestion URL and the vault's stream key into OBS, so the
+   * operator never types the key into the OBS UI (spec §10.2: the vault is the
+   * stream key's system of record).
+   *
+   * Note what this does *not* claim: OBS persists whatever service settings it
+   * holds into the active profile's `service.json`
+   * (obs-studio `frontend/widgets/OBSBasic_Service.cpp`), so after injection the
+   * key exists on the host's OBS profile directory as well as in the vault. It
+   * is kept out of the repository, the game DB, logs, and the screen; removing
+   * it on stop and locking down the profile directory is T17.
+   *
+   * Call this before `startStream()`.
+   */
+  async setStreamServiceFromVault(): Promise<StreamServiceResult> {
+    const key = await requireSecret(
+      this.#secrets,
+      'youtube.streamKey',
+      `set ${EnvSecretProvider.envVarFor('youtube.streamKey')} (spec §10.2: the stream key lives in the vault, not in OBS or the repository)`,
+    )
+    const server = this.#config.streamIngestUrl
+
+    await this.#source.call('SetStreamServiceSettings', {
+      streamServiceType: CUSTOM_STREAM_SERVICE_TYPE,
+      streamServiceSettings: { server, key },
+    })
+
+    // Verify by reading back, but never compare or surface the key itself:
+    // only that OBS reports a non-empty one for the server we asked for.
+    const applied = await this.#source.call('GetStreamServiceSettings')
+    const appliedServer = readString(applied.streamServiceSettings, 'server')
+    const appliedKey = readString(applied.streamServiceSettings, 'key')
+
+    if (
+      applied.streamServiceType !== CUSTOM_STREAM_SERVICE_TYPE ||
+      appliedServer !== server ||
+      appliedKey === undefined ||
+      appliedKey === ''
+    ) {
+      throw new ObsCommandError(
+        'stream_service_not_applied',
+        `obs did not apply the stream service (type ${JSON.stringify(applied.streamServiceType)}, server ${JSON.stringify(appliedServer ?? null)}, key ${appliedKey === undefined || appliedKey === '' ? 'missing' : 'set'})`,
+      )
+    }
+
+    return {
+      streamServiceType: applied.streamServiceType,
+      server,
+      keyConfigured: true,
+    }
   }
 
   /** Idempotent: an already-running output is reported, not re-started. */
