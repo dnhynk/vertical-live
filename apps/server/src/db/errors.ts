@@ -98,6 +98,21 @@ export class StateRevisionError extends PersistenceInvariantError {
   }
 }
 
+/**
+ * The recovery cursor (`processedIngestSeq`) would move past inbox rows that
+ * have no processing record (spec §7.3(3)(5), §11 상태 복구).
+ *
+ * The cursor is where the drain resumes after a restart, so a row left below it
+ * without a record is never processed and never reported — the event is silently
+ * lost, which spec §9.2 forbids even while degraded.
+ */
+export class ProcessedCursorError extends PersistenceInvariantError {
+  constructor(message: string) {
+    super(message)
+    this.name = 'ProcessedCursorError'
+  }
+}
+
 /** An effect id that is not in `effect_outbox` (spec §7.3(7)). */
 export class UnknownEffectError extends PersistenceInvariantError {
   constructor(effectId: string) {

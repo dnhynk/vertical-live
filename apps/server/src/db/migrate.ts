@@ -15,7 +15,9 @@ import { PersistenceInvariantError } from './errors.js'
  * already-applied file whose bytes changed is a hard failure: the schema on disk
  * would no longer be the schema the file describes, and this store is the
  * authority for paid audit rows (spec §10.2), so silently continuing is worse
- * than refusing to start.
+ * than refusing to start. A recorded migration whose file is gone or renamed is
+ * the same failure by another route — the checksum of a file that no longer
+ * exists cannot be compared — so the audit runs over the records, not the files.
  */
 
 /** `src/db/migrations` in a source run, `dist/db/migrations` in a built run. */
@@ -105,8 +107,27 @@ export function migrate(database: Database.Database, options: MigrateOptions): M
 
   const alreadyApplied = listAppliedMigrations(database)
   const appliedByVersion = new Map(alreadyApplied.map((row) => [row.version, row]))
-  const migrations = loadMigrations(options.directory)
+  const directory = options.directory ?? MIGRATIONS_DIR
+  const migrations = loadMigrations(directory)
   const applied: Migration[] = []
+
+  // The history audit has to run over the *records*, not over the files: a
+  // per-file loop only ever sees migrations that still exist, so deleting or
+  // renaming an applied file would quietly switch the checksum check off for it.
+  const migrationByVersion = new Map(migrations.map((migration) => [migration.version, migration]))
+  for (const row of alreadyApplied) {
+    const migration = migrationByVersion.get(row.version)
+    if (migration === undefined) {
+      throw new MigrationError(
+        `applied migration ${String(row.version)} (${row.name}) has no file in ${directory}; the schema on disk was built by a migration this checkout cannot verify`,
+      )
+    }
+    if (migration.name !== row.name) {
+      throw new MigrationError(
+        `applied migration ${String(row.version)} was recorded as ${row.name} but the file is now ${migration.fileName}; renaming an applied migration breaks the history audit`,
+      )
+    }
+  }
 
   const record = database.prepare(
     'INSERT INTO schema_migrations (version, name, checksum, applied_at) VALUES (?, ?, ?, ?)',

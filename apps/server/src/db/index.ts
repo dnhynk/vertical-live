@@ -21,6 +21,7 @@ export {
 export {
   EffectNotPublishedError,
   PersistenceInvariantError,
+  ProcessedCursorError,
   StateRevisionError,
   UnknownEffectError,
   classifySqliteError,

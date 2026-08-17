@@ -17,6 +17,7 @@ import { loadDatabaseConfig, type LoadDatabaseConfigOptions } from './config.js'
 import {
   EffectNotPublishedError,
   PersistenceInvariantError,
+  ProcessedCursorError,
   StateRevisionError,
   UnknownEffectError,
 } from './errors.js'
@@ -288,6 +289,20 @@ export class PersistenceStore {
     }))
   }
 
+  /**
+   * The drain a restart must use: rows after the persisted recovery cursor
+   * (spec §7.3(3) — "시작·복구 시 source 수신을 재개하기 전에 `processedIngestSeq`
+   * 이후의 inbox를 순서대로 drain한다"). Reading the cursor and the rows in one
+   * call keeps the two from being taken from different points in time.
+   */
+  drainFromRecoveryCursor(limit: number): InboxRow[] {
+    assertPositiveInt(limit, 'limit')
+    const read = this.#db.transaction(() =>
+      this.drainUnprocessed(this.#readSnapshotRow()?.processed_ingest_seq ?? 0, limit),
+    )
+    return read()
+  }
+
   getSourceCheckpoint(sourceKey: string): SourceCheckpoint | null {
     const row = this.#db
       .prepare<[string], CheckpointColumns>(
@@ -334,6 +349,13 @@ export class PersistenceStore {
    * processed sequence that moves backwards, or a snapshot whose own
    * `stateRevision`/`processedIngestSeq` disagree with the commit — a snapshot
    * that disagreed with its own revision would make recovery unsound.
+   *
+   * Advancing `processedSeq` additionally has to be *earned*: every inbox row in
+   * `(stored processedSeq, new processedSeq]` must carry a processing record when
+   * the transaction ends, and each supplied record must fall inside that window
+   * in ascending order. The cursor is where the drain resumes after a restart
+   * (spec §7.3(3)), so a row left below it without a record would never be
+   * processed and never be reported — silent loss, which spec §9.2 forbids.
    */
   commitStateTransition(input: StateTransitionInput): StateTransitionResult {
     const snapshot = WorldSnapshotSchema.parse(input.snapshot)
@@ -351,10 +373,22 @@ export class PersistenceStore {
     }
     const effects = (input.effects ?? []).map((effect) => EffectSchema.parse(effect))
     const transitions = input.transitions ?? []
+    const processed = input.processed ?? []
     const giftCombo = input.giftCombo ?? []
     for (const request of giftCombo) {
       assertGiftBaseKey(request)
     }
+    // The single writer serializes by `ingestSeq` (spec §7.3(5)), so records that
+    // are out of order or repeat a sequence are a writer bug, not a data case.
+    processed.forEach((record, index) => {
+      assertPositiveInt(record.ingestSeq, 'processed.ingestSeq')
+      const previous = processed[index - 1]
+      if (previous !== undefined && record.ingestSeq <= previous.ingestSeq) {
+        throw new ProcessedCursorError(
+          `processed records must be in ascending ingestSeq order: ${String(previous.ingestSeq)} then ${String(record.ingestSeq)}`,
+        )
+      }
+    })
 
     const commit = this.#db.transaction((): StateTransitionResult => {
       const current = this.#readSnapshotRow()
@@ -367,6 +401,14 @@ export class PersistenceStore {
         throw new StateRevisionError(
           `processedSeq must not move backwards: got ${String(input.processedSeq)}, stored ${String(current.processed_ingest_seq)}`,
         )
+      }
+      const previousProcessedSeq = current?.processed_ingest_seq ?? 0
+      for (const record of processed) {
+        if (record.ingestSeq <= previousProcessedSeq || record.ingestSeq > input.processedSeq) {
+          throw new ProcessedCursorError(
+            `processing record for ingestSeq ${String(record.ingestSeq)} is outside the cursor window (${String(previousProcessedSeq)}, ${String(input.processedSeq)}]`,
+          )
+        }
       }
       const previousRevision = current?.state_revision ?? -1
       for (const transition of transitions) {
@@ -386,7 +428,8 @@ export class PersistenceStore {
 
       this.#writeSnapshot(snapshot, input.revision, input.processedSeq)
       this.#writeTransitions(transitions)
-      this.#markProcessed(input.processed ?? [])
+      this.#markProcessed(processed)
+      this.#assertCursorEarned(previousProcessedSeq, input.processedSeq)
       this.#writeDeadlines(input.deadlines ?? [])
       const { inserted: effectsInserted, duplicate: effectsDuplicate } = this.#writeEffects(effects)
       const paid = this.#writePaidLedger(input.paidLedger ?? [])
@@ -462,6 +505,35 @@ export class PersistenceStore {
         )
       }
     }
+  }
+
+  /**
+   * The cursor may only pass inbox rows that are recorded as processed.
+   *
+   * Checked by reading the inbox back rather than by comparing the input to the
+   * expected set: rows can also have been marked in an earlier commit, and the
+   * question that matters for recovery is only whether anything below the new
+   * cursor is still unprocessed. A sequence with no row at all is fine — it was
+   * burnt by a rolled-back transaction or removed by retention (T13).
+   */
+  #assertCursorEarned(previousProcessedSeq: number, processedSeq: number): void {
+    if (processedSeq <= previousProcessedSeq) return
+    const stranded = this.#db
+      .prepare<[number, number], { ingest_seq: number }>(
+        `SELECT ingest_seq FROM ingest_inbox
+          WHERE ingest_seq > ? AND ingest_seq <= ? AND processed_at IS NULL
+          ORDER BY ingest_seq
+          LIMIT 6`,
+      )
+      .all(previousProcessedSeq, processedSeq)
+    if (stranded.length === 0) return
+
+    const listed = stranded.slice(0, 5).map((row) => String(row.ingest_seq))
+    const suffix = stranded.length > 5 ? ', …' : ''
+    throw new ProcessedCursorError(
+      `processedIngestSeq ${String(processedSeq)} would move the recovery cursor past unprocessed inbox rows ${listed.join(', ')}${suffix} ` +
+        `(stored cursor ${String(previousProcessedSeq)}); commit a processing record for every row in the window (spec §7.3(3)(5))`,
+    )
   }
 
   #writeDeadlines(deadlines: readonly DeadlineRecord[]): void {

@@ -160,6 +160,43 @@ describe('migrate', () => {
     }
   })
 
+  it('refuses to continue when an applied migration file is gone', () => {
+    const directory = tempDir()
+    const file = join(tempDir(), 'db.sqlite')
+    const probe = join(directory, '001_probe.sql')
+    writeFileSync(probe, 'CREATE TABLE probe (id INTEGER PRIMARY KEY);')
+    const database = openDatabase({ file, busyTimeoutMs: BUSY_TIMEOUT_MS })
+    try {
+      migrate(database, { clock: new FakeClock(), directory })
+      // Deleting the file used to switch the checksum audit off for it silently:
+      // the per-file loop simply never visited the missing migration.
+      rmSync(probe)
+      expect(() => migrate(database, { clock: new FakeClock(), directory })).toThrow(
+        /applied migration 1 \(probe\) has no file/,
+      )
+    } finally {
+      database.close()
+    }
+  })
+
+  it('refuses to continue when an applied migration file was renamed', () => {
+    const directory = tempDir()
+    const file = join(tempDir(), 'db.sqlite')
+    const sql = 'CREATE TABLE probe (id INTEGER PRIMARY KEY);'
+    writeFileSync(join(directory, '001_probe.sql'), sql)
+    const database = openDatabase({ file, busyTimeoutMs: BUSY_TIMEOUT_MS })
+    try {
+      migrate(database, { clock: new FakeClock(), directory })
+      rmSync(join(directory, '001_probe.sql'))
+      writeFileSync(join(directory, '001_probe-renamed.sql'), sql)
+      expect(() => migrate(database, { clock: new FakeClock(), directory })).toThrow(
+        /recorded as probe but the file is now 001_probe-renamed\.sql/,
+      )
+    } finally {
+      database.close()
+    }
+  })
+
   it('leaves no partial schema when a migration file fails half way', () => {
     const directory = tempDir()
     const file = join(tempDir(), 'db.sqlite')
