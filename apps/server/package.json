@@ -12,7 +12,8 @@
     }
   },
   "scripts": {
-    "build": "tsc --build && node scripts/copy-migrations.mjs",
+    "build": "tsc --build && node scripts/copy-migrations.mjs && node scripts/generate-data-map.mjs --check",
+    "data-map:generate": "tsc --build && node scripts/generate-data-map.mjs",
     "start": "node dist/main.js",
     "obs:probe": "tsc --build && node dist/obs/probe.js",
     "auth:login": "npm run build && node dist/bin/auth-login.js",
