@@ -92,6 +92,13 @@
       "minFps": 20,
       "reportStaleAfterMs": 15000
     },
+    "startup": {
+      "maxAttempts": 5
+    },
+    "integrations": {
+      "obs": false,
+      "broadcast": false
+    },
     "restart": {
       "initialDelayMs": 2000,
       "maxDelayMs": 120000,
@@ -149,6 +156,7 @@
       "unobservableGraceMs",
       "requiredFamilies",
       "renderer",
+      "startup.maxAttempts",
       "restart",
       "alerts.suppressWindowMs",
       "alerts.deliveryTimeoutMs",

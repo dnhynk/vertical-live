@@ -5,7 +5,7 @@ import type { HealthSignal, HealthStatus } from '../health/types.js'
 import { silentLogger, type Logger } from '../secrets/redaction.js'
 import type { AuthEvent, AuthEventSink } from '../youtube/auth/events.js'
 import type { SafeStopRequest } from '../youtube/broadcast/alerts.js'
-import { createExponentialBackoff } from '../youtube/quota/backoff.js'
+import { createExponentialBackoff, type BackoffPolicy } from '../youtube/quota/backoff.js'
 import { nullAlertSink, type Alert, type AlertSeverity, type AlertSink } from './alerts.js'
 import type { SupervisorConfig } from './config.js'
 import type { DeadManMonitor } from './deadman.js'
@@ -83,6 +83,12 @@ export interface SupervisorOptions {
   readonly actions: ComponentActions
   /** Last renderer health frame (`RendererHub.lastHealth`), spec §9.4(4). */
   readonly renderer?: () => RendererHealthReport | null
+  /**
+   * Producers that expose their signals as a snapshot rather than a push (T9's
+   * `ChatSource.signals()`). Read at every evaluation, so a source that only
+   * emits on change cannot go stale while it is perfectly healthy.
+   */
+  readonly sources?: () => readonly HealthSignal[]
   readonly alerts?: AlertSink
   readonly deadMan?: DeadManMonitor
   readonly screenshots?: DiagnosticScreenshotRecorder
@@ -110,6 +116,7 @@ export class Supervisor {
   readonly #logger: Logger
   readonly #alerts: AlertSink
   readonly #aggregator: HealthAggregator
+  readonly #startupBackoff: BackoffPolicy
   readonly registry = new SupervisorRegistry()
 
   #state: SupervisorState = 'offline'
@@ -119,6 +126,7 @@ export class Supervisor {
   #safeStop: SafeStopTrigger | null = null
   #preflight: PreflightResult | null = null
   #startupResult: StartupResult | null = null
+  #startupAttempts = 0
   #moderation: ModerationHealth = MODERATION_HEALTHY
   #lastEvaluationMonotonicMs: number | null = null
   #lastAggregate: HealthAggregate | null = null
@@ -134,6 +142,14 @@ export class Supervisor {
     this.#alerts = options.alerts ?? nullAlertSink
     this.#aggregator = new HealthAggregator(options.config)
     this.#since = options.clock.nowUtcIso()
+    this.#startupBackoff = createExponentialBackoff({
+      initialDelayMs: options.config.restart.initialDelayMs,
+      maxDelayMs: options.config.restart.maxDelayMs,
+      factor: options.config.restart.factor,
+      jitterRatio: options.config.restart.jitterRatio,
+      maxAttempts: options.config.startup.maxAttempts,
+      ...(options.random === undefined ? {} : { random: options.random }),
+    })
     this.#registerComponents()
   }
 
@@ -164,19 +180,7 @@ export class Supervisor {
     await this.#evaluate('start_requested')
     if (this.#state === 'safe_stopped') return
 
-    if (this.#options.startup !== undefined) {
-      this.#startupResult = await runStartupSequence({
-        steps: this.#options.startup,
-        clock: this.#clock,
-        logger: this.#logger,
-      })
-      if (!this.#startupResult.completed) {
-        await this.#alert('warning', 'supervisor.startup_failed', {
-          reason: this.#startupResult.failedStep ?? 'unknown_step',
-          detail: { error: this.#startupResult.error },
-        })
-      }
-    }
+    await this.#runStartup()
 
     this.#options.deadMan?.start()
     this.#options.screenshots?.start()
@@ -286,6 +290,26 @@ export class Supervisor {
     void this.#alert('warning', 'retention.sweep_incomplete', {
       reason: result.clean ? 'rows_unprocessed' : 'sweep_not_clean',
       detail: { clean: result.clean, rowsUnprocessed: result.rowsUnprocessed },
+    })
+  }
+
+  /**
+   * T13 revocation results. A deletion that missed its deadline or left fields
+   * incomplete is a policy obligation this run did not keep (spec §12.4), so it
+   * reaches a human rather than a log line.
+   */
+  readonly onRevocationResult = (result: {
+    readonly withinDeadline: boolean
+    readonly incomplete: readonly string[]
+    readonly reason: string
+  }): void => {
+    if (result.withinDeadline && result.incomplete.length === 0) return
+    void this.#alert('critical', 'privacy.revocation_incomplete', {
+      reason: result.withinDeadline ? 'fields_incomplete' : 'deadline_missed',
+      detail: {
+        revocationReason: result.reason,
+        incomplete: result.incomplete.join(',') || null,
+      },
     })
   }
 
@@ -416,6 +440,53 @@ export class Supervisor {
     })
   }
 
+  /**
+   * Runs the §7.3(3) sequence, and retries the **whole** sequence with the
+   * restart backoff when it fails. A host that comes up before OBS or before its
+   * network is the ordinary case (spec §9.1 자동 복구); a sequence that keeps
+   * failing after `supervisor.startup.maxAttempts` is §9.2's "최대 재시도 후
+   * safe_stopped". Every step is idempotent by construction — `ensureBound()`
+   * resumes the open attempt, `startStream()` reports an already-running output —
+   * so a retry re-runs the sequence rather than continuing a half-finished one.
+   */
+  async #runStartup(): Promise<void> {
+    if (this.#options.startup === undefined) return
+    this.#startupAttempts += 1
+    this.#startupResult = await runStartupSequence({
+      steps: this.#options.startup,
+      clock: this.#clock,
+      logger: this.#logger,
+    })
+    if (this.#startupResult.completed) return
+
+    const maxAttempts = this.#config.startup.maxAttempts
+    await this.#alert('warning', 'supervisor.startup_failed', {
+      reason: this.#startupResult.failedStep ?? 'unknown_step',
+      detail: {
+        error: this.#startupResult.error,
+        attempt: this.#startupAttempts,
+        maxAttempts,
+      },
+    })
+    if (this.#startupAttempts >= maxAttempts) {
+      await this.requestSafeStop({
+        kind: 'restart_budget_exhausted',
+        at: this.#clock.nowUtcIso(),
+        reason: `startup:${this.#startupResult.failedStep ?? 'unknown_step'}`,
+        detail: { attempts: this.#startupAttempts, error: this.#startupResult.error },
+      })
+      return
+    }
+    const delayMs = this.#startupBackoff.nextDelayMs(this.#startupAttempts)
+    this.#clock.setTimeout(() => {
+      if (this.#stopped || this.#state === 'safe_stopped') return
+      void this.#runStartup().then(async () => {
+        await this.#runPreflight()
+        await this.#evaluate('startup_retry')
+      })
+    }, delayMs)
+  }
+
   async #runPreflight(): Promise<PreflightResult> {
     if (this.#options.preflight === undefined) {
       // No probes injected (unit tests, and the bare health server of T0):
@@ -446,6 +517,7 @@ export class Supervisor {
 
   async #evaluate(cause: string): Promise<HealthAggregate> {
     const nowMonotonicMs = this.#clock.monotonicMs()
+    for (const signal of this.#options.sources?.() ?? []) this.#aggregator.report(signal)
     const engine = this.#options.engine.health()
     const aggregate = this.#aggregator.evaluate({
       engine,

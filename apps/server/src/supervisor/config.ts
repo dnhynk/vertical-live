@@ -31,6 +31,24 @@ export interface SupervisorRestartConfig {
   readonly maxAttempts: Readonly<Record<SupervisedComponent, number>>
 }
 
+export interface SupervisorStartupConfig {
+  /**
+   * Attempts at the whole §7.3(3) start-up sequence before `safe_stopped`.
+   * A host that boots faster than OBS or than its network is the ordinary case
+   * this exists for (spec §9.1 자동 복구); a sequence that keeps failing is the
+   * "최대 재시도 후 safe_stopped" case of §9.2.
+   */
+  readonly maxAttempts: number
+}
+
+/** Integrations this deployment actually has (spec §9.1 자동화 경계). */
+export interface SupervisorIntegrationConfig {
+  /** OBS websocket: connection, stream service injection, output control. */
+  readonly obs: boolean
+  /** YouTube broadcast lifecycle (T10). Needs an OAuth grant and a channel. */
+  readonly broadcast: boolean
+}
+
 export interface SupervisorAlertConfig {
   /** Per-severity duplicate-suppression window, keyed by `kind:reason`. */
   readonly suppressWindowMs: {
@@ -99,6 +117,8 @@ export interface SupervisorConfig {
   /** Families whose absence is itself a fault (see `unobservableGraceMs`). */
   readonly requiredFamilies: readonly HealthFamily[]
   readonly renderer: SupervisorRendererConfig
+  readonly startup: SupervisorStartupConfig
+  readonly integrations: SupervisorIntegrationConfig
   readonly restart: SupervisorRestartConfig
   readonly alerts: SupervisorAlertConfig
   readonly deadMan: DeadManConfig
@@ -141,6 +161,8 @@ export function loadSupervisorConfig(
   const root = readObject(parsed, 'root')
   const section = readObject(root['supervisor'], 'supervisor')
   const renderer = readObject(section['renderer'], 'supervisor.renderer')
+  const startup = readObject(section['startup'], 'supervisor.startup')
+  const integrations = readObject(section['integrations'], 'supervisor.integrations')
   const restart = readObject(section['restart'], 'supervisor.restart')
   const maxAttempts = readObject(restart['maxAttempts'], 'supervisor.restart.maxAttempts')
   const alerts = readObject(section['alerts'], 'supervisor.alerts')
@@ -179,6 +201,16 @@ export function loadSupervisorConfig(
       reportStaleAfterMs: readPositiveInt(
         renderer['reportStaleAfterMs'],
         'supervisor.renderer.reportStaleAfterMs',
+      ),
+    }),
+    startup: Object.freeze({
+      maxAttempts: readPositiveInt(startup['maxAttempts'], 'supervisor.startup.maxAttempts'),
+    }),
+    integrations: Object.freeze({
+      obs: readBoolean(env['VL_OBS_ENABLED'] ?? integrations['obs'], 'supervisor.integrations.obs'),
+      broadcast: readBoolean(
+        env['VL_BROADCAST_ENABLED'] ?? integrations['broadcast'],
+        'supervisor.integrations.broadcast',
       ),
     }),
     restart: Object.freeze({

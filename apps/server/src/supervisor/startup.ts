@@ -23,10 +23,18 @@ import { silentLogger, type Logger } from '../secrets/redaction.js'
  *    (BOARD A-16); the operator never types it into the OBS UI.
  * 6. `startStream` — the encoder starts pushing only after it has a key and a
  *    bound ingest.
- * 7. `chatSource` — the `liveChatId` comes from the open attempt in
+ * 7. `goLive` — the one step TASK_SPECS §T12 does not name, added because the
+ *    two steps around it need it: a broadcast only has a `liveChatId` once it is
+ *    live, and `enableAutoStart` can be refused (`invalidAutoStart`, spec §4), in
+ *    which case somebody has to run the transition. `BroadcastLifecycle.goLive()`
+ *    waits for auto-start first and falls back to the transition, so this step is
+ *    a no-op on the happy path rather than a second way of starting a broadcast.
+ * 8. `chatSource` — the `liveChatId` comes from the open attempt in
  *    `broadcast_resources`, so it cannot start before step 4.
- * 8. `publish` — last, and only after the attempt marker has been removed from
- *    the public description (BOARD A-18).
+ * 9. `publish` — last, and only after the attempt marker has been removed from
+ *    the public description (BOARD A-18). Spec §9.1 keeps the first public
+ *    go-live with the operator, so this step does nothing while
+ *    `youtube.broadcast.privacyStatus` is `private`.
  *
  * A step that fails stops the sequence: everything after it depends on it, and
  * a half-started broadcast that kept going would be exactly the "무책임 운영"
@@ -40,6 +48,7 @@ export const STARTUP_STEP_ORDER = [
   'broadcast',
   'streamService',
   'startStream',
+  'goLive',
   'chatSource',
   'publish',
 ] as const

@@ -7,6 +7,7 @@ import { createCommandParserPort, parserLimits, type InputConfig } from '../../i
 import { SecretRedactor, silentLogger, type Logger } from '../../secrets/redaction.js'
 import { resolveSecretVault } from '../../secrets/resolve.js'
 import { loadOAuthClientCredentials, loadYouTubeAuthConfig } from '../auth/config.js'
+import type { AuthEventSink } from '../auth/events.js'
 import { OAuthClient } from '../auth/oauth-client.js'
 import { TokenManager } from '../auth/token-manager.js'
 import { QuotaTracker } from '../quota/tracker.js'
@@ -39,6 +40,13 @@ export interface ChatRuntimeDeps {
   readonly resolveTarget?: LiveChatTargetResolver
   readonly logger?: Logger
   readonly config?: ChatConfig
+  /**
+   * Where the `TokenManager` this factory builds sends its auth events. T12
+   * needs it for `auth_revoked` → `safe_stopped` (spec §9.1) and T13 for the
+   * deletion that revocation triggers (§12.4); neither can reach the manager
+   * otherwise, because it is constructed in here.
+   */
+  readonly authEvents?: AuthEventSink
 }
 
 export async function createChatSource(deps: ChatRuntimeDeps): Promise<ChatSource | null> {
@@ -62,6 +70,7 @@ export async function createChatSource(deps: ChatRuntimeDeps): Promise<ChatSourc
     refreshSkewMs: authConfig.accessTokenRefreshSkewMs,
     logger,
     redactor,
+    ...(deps.authEvents === undefined ? {} : { events: deps.authEvents }),
   })
 
   const quotaConfig = loadQuotaConfig()
