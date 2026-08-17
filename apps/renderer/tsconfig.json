@@ -12,5 +12,12 @@
     "tsBuildInfoFile": "node_modules/.cache/renderer.tsbuildinfo"
   },
   "include": ["src/**/*.ts", "src/**/*.tsx"],
-  "references": [{ "path": "../../packages/contract" }]
+  "references": [
+    {
+      "path": "../../packages/contract"
+    },
+    {
+      "path": "../../tools/simulator"
+    }
+  ]
 }

@@ -11,7 +11,12 @@ export {
   simulatorCommandParser,
   type CommandParserOptions,
 } from './adversarial.js'
-export { VIRTUAL_EPOCH_MS, VirtualClock, flushEventLoop, type VirtualClockOptions } from './clock.js'
+export {
+  VIRTUAL_EPOCH_MS,
+  VirtualClock,
+  flushEventLoop,
+  type VirtualClockOptions,
+} from './clock.js'
 export {
   HARNESS_BUSY_TIMEOUT_MS,
   SimulatorHarness,

@@ -59,6 +59,18 @@ export interface RendererConfig {
    * was opened without one. Only `authenticatedWsUrl()` reads it (spec §10.2).
    */
   readonly wsToken: string | null
+  /**
+   * The server's HTTP origin, derived from `wsUrl`. It carries no secret and is
+   * safe to draw; the `?mode=dev` injection panel posts to
+   * `${apiUrl}/ingest/simulator` (TASK_SPECS §T11).
+   */
+  readonly apiUrl: string
+  /**
+   * `server.simulatorToken`, for the `?mode=dev` injection panel only. It is a
+   * vault secret and follows exactly the same rule as `wsToken`: it is never
+   * rendered, never logged and never stored (spec §10.2, R-T8-2 blocker 1).
+   */
+  readonly simToken: string | null
   readonly rendererId: RendererId
   readonly backoff: BackoffConfig
   readonly healthIntervalMs: number
@@ -151,6 +163,30 @@ function readWsToken(params: URLSearchParams, log: RendererLog): string | null {
   return token
 }
 
+/**
+ * `server.simulatorToken` from the page query string.
+ *
+ * Only `?mode=dev` can use it, and the endpoint it unlocks answers 404 unless
+ * `simulator.enabled` is true (§T11 acceptance 3). Absence is normal — the
+ * panel then shows the injection controls as unavailable rather than pretending
+ * they work.
+ */
+function readSimToken(params: URLSearchParams): string | null {
+  const token = params.get('simToken')
+  return token === null || token === '' ? null : token
+}
+
+/** `ws://host:port/ws/renderer` → `http://host:port`. Never carries a token. */
+export function apiUrlFrom(wsUrl: string): string {
+  let url: URL
+  try {
+    url = new URL(wsUrl)
+  } catch {
+    return ''
+  }
+  return `${url.protocol === 'wss:' ? 'https:' : 'http:'}//${url.host}`
+}
+
 function readRendererId(
   params: URLSearchParams,
   log: RendererLog,
@@ -184,10 +220,13 @@ export interface ReadRendererConfigOptions {
 
 export function readRendererConfig(options: ReadRendererConfigOptions): RendererConfig {
   const params = new URLSearchParams(options.search)
+  const wsUrl = readWsUrl(params, options.log)
   return {
     mode: readMode(params, options.log),
-    wsUrl: readWsUrl(params, options.log),
+    wsUrl,
     wsToken: readWsToken(params, options.log),
+    apiUrl: apiUrlFrom(wsUrl),
+    simToken: readSimToken(params),
     rendererId: readRendererId(
       params,
       options.log,

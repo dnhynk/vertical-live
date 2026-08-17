@@ -24,7 +24,7 @@ afterEach(async () => {
   session = null
 })
 
-async function play(scenario: Scenario, sliceMs?: number): Promise<SimulatorSession> {
+async function play(sliceMs?: number): Promise<SimulatorSession> {
   session = await openSession(sliceMs === undefined ? {} : { sliceMs })
   return session
 }
@@ -37,7 +37,7 @@ function requireScenario(id: string): Scenario {
 
 describe('idle-24h', () => {
   it('advances content, state and world time for 24 virtual hours with zero input', async () => {
-    const active = await play(requireScenario('idle-24h'), 5 * 60_000)
+    const active = await play(5 * 60_000)
     const before = active.harness.engine.health()
 
     const result = await active.run(requireScenario('idle-24h'))
@@ -60,7 +60,7 @@ describe('idle-24h', () => {
 
 describe('direct-low', () => {
   it('applies every free command individually and records the rejected items', async () => {
-    const active = await play(requireScenario('direct-low'))
+    const active = await play()
 
     const result = await active.run(requireScenario('direct-low'))
     const counters = active.harness.engine.metrics().counters
@@ -82,7 +82,7 @@ describe('direct-low', () => {
 
 describe('aggregate-switch', () => {
   it('switches to aggregate on a burst and back to direct on a quiet window', async () => {
-    const active = await play(requireScenario('aggregate-switch'))
+    const active = await play()
 
     await active.run(requireScenario('aggregate-switch'))
     const modes = (active.renderer?.snapshots ?? []).map((snapshot) => snapshot.inputMode)
@@ -102,7 +102,7 @@ describe('aggregate-switch', () => {
 
 describe('flood', () => {
   it('absorbs a flood into aggregate windows without losing a contribution', async () => {
-    const active = await play(requireScenario('flood'))
+    const active = await play()
 
     const result = await active.run(requireScenario('flood'))
     const counters = active.harness.engine.metrics().counters
@@ -121,7 +121,7 @@ describe('flood', () => {
 
 describe('paid-replay', () => {
   it('plays without a refusal and refuses both the replayed delivery and the empty combo step', async () => {
-    const active = await play(requireScenario('paid-replay'))
+    const active = await play()
 
     const result = await active.run(requireScenario('paid-replay'))
     const counters = active.harness.engine.metrics().counters
@@ -176,7 +176,9 @@ describe('degraded-window', () => {
     expect(degradedSamples.every((sample) => !sample.snapshotInteraction)).toBe(true)
     // Spec §9.2: events received while degraded are neither lost nor shown as
     // accepted — the cursor stands still until the condition clears.
-    expect(new Set(degradedSamples.map((sample) => sample.processedIngestSeq))).toEqual(new Set([1]))
+    expect(new Set(degradedSamples.map((sample) => sample.processedIngestSeq))).toEqual(
+      new Set([1]),
+    )
 
     expect(health.interactionEnabled).toBe(true)
     expect(health.degraded).toBe(false)
@@ -189,7 +191,7 @@ describe('degraded-window', () => {
 describe('adversarial', () => {
   it('plays the T6 vectors through the endpoint without a refusal', async () => {
     const scenario = buildAdversarialScenario()
-    const active = await play(scenario)
+    const active = await play()
 
     const result = await active.run(scenario)
 

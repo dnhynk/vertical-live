@@ -762,6 +762,61 @@ body {
   overflow-wrap: anywhere;
 }
 
+/*
+ * T11 injection controls. They post to `POST /ingest/simulator` and never touch
+ * the read model, so they are styled as an instrument panel rather than as part
+ * of the screen: the broadcast mode never renders them at all.
+ */
+.dev-sim {
+  margin: 0 0 16px;
+  padding: 12px 0 0;
+  border-top: 2px solid rgba(247, 243, 234, 0.2);
+}
+
+.dev-sim-title {
+  margin: 0 0 8px;
+  font-size: 18px;
+  font-weight: 600;
+  opacity: 0.6;
+}
+
+.dev-sim-note,
+.dev-sim-result {
+  margin: 8px 0 0;
+  opacity: 0.7;
+  overflow-wrap: anywhere;
+}
+
+.dev-sim-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.dev-sim-scenario {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.dev-sim button,
+.dev-sim select {
+  font-family: inherit;
+  font-size: 16px;
+  color: inherit;
+  background: rgba(247, 243, 234, 0.1);
+  border: 2px solid rgba(247, 243, 234, 0.25);
+  border-radius: 10px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+.dev-sim button:disabled,
+.dev-sim select:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
 .dev-log {
   list-style: none;
   margin: 0;

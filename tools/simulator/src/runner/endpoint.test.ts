@@ -107,9 +107,10 @@ describe('POST /ingest/simulator', () => {
     const [envelope] = sampleEnvelopes(clock)
     if (envelope === undefined) throw new Error('expected an envelope')
 
-    const response = await postEnvelopes({ baseUrl: active.baseUrl, token: active.simulatorToken }, [
-      { ...envelope, source: 'youtube' },
-    ])
+    const response = await postEnvelopes(
+      { baseUrl: active.baseUrl, token: active.simulatorToken },
+      [{ ...envelope, source: 'youtube' }],
+    )
 
     // Spec §2.6: synthetic participation may never present itself as real.
     expect(response.status).toBe(400)

@@ -31,6 +31,8 @@ import Screen from './Screen'
 
 /** Obviously synthetic, and long enough that a partial leak still matches. */
 const SENTINEL = 'sentinel_renderer_token_do_not_display_0001'
+/** The simulator bearer token (T11) is a vault value under the same rule. */
+const SIM_SENTINEL = 'sentinel_simulator_token_do_not_display_0002'
 
 interface Harness {
   runtime: RendererRuntime
@@ -120,6 +122,121 @@ describe('dev panel token exposure', () => {
     // this is what makes the field name the whole of the rule to remember.
     expect(wsToken).toBe(SENTINEL)
     expect(JSON.stringify(safe)).not.toContain(SENTINEL)
+  })
+})
+
+describe('simulator token exposure', () => {
+  it('never puts the simulator token on screen or in the log', () => {
+    const harness = mount(`?mode=dev&token=${SENTINEL}&simToken=${SIM_SENTINEL}`)
+
+    // The injection controls are open — otherwise this passes vacuously.
+    expect(harness.container.querySelector('[data-testid="dev-injector"]')).not.toBeNull()
+    expect(harness.container.querySelector('[data-testid="dev-sim-auth"]')?.textContent).toBe(
+      'token: present',
+    )
+    expect(harness.container.innerHTML).not.toContain(SIM_SENTINEL)
+    expect(JSON.stringify(harness.runtime.log.entries())).not.toContain(SIM_SENTINEL)
+    // It is still readable by the one consumer that needs it.
+    expect(harness.runtime.config.simToken).toBe(SIM_SENTINEL)
+  })
+
+  it('says the token is missing rather than pretending injection works', () => {
+    const harness = mount(`?mode=dev&token=${SENTINEL}`)
+
+    expect(harness.runtime.config.simToken).toBeNull()
+    expect(harness.container.querySelector('[data-testid="dev-sim-auth"]')?.textContent).toContain(
+      'missing',
+    )
+  })
+
+  it('keeps both secrets out of a serialized config, however it is dumped', () => {
+    const harness = mount(`?mode=dev&token=${SENTINEL}&simToken=${SIM_SENTINEL}`)
+    const { wsToken, simToken, ...safe } = harness.runtime.config
+
+    expect(wsToken).toBe(SENTINEL)
+    expect(simToken).toBe(SIM_SENTINEL)
+    expect(JSON.stringify(safe)).not.toContain(SENTINEL)
+    expect(JSON.stringify(safe)).not.toContain(SIM_SENTINEL)
+  })
+
+  it('derives the injection endpoint from the socket address, without a token', () => {
+    const harness = mount(`?mode=dev&token=${SENTINEL}&simToken=${SIM_SENTINEL}`)
+
+    expect(harness.runtime.config.apiUrl).toBe('http://127.0.0.1:8787')
+    expect(harness.container.querySelector('[data-testid="dev-api-url"]')?.textContent).toBe(
+      'http://127.0.0.1:8787',
+    )
+  })
+})
+
+describe('dev panel injection controls', () => {
+  it('is absent from the broadcast screen OBS opens', () => {
+    const harness = mount(`?token=${SENTINEL}&simToken=${SIM_SENTINEL}`)
+
+    expect(harness.container.querySelector('[data-testid="dev-panel"]')).toBeNull()
+    expect(harness.container.querySelector('[data-testid="dev-injector"]')).toBeNull()
+  })
+
+  it('offers only the scenarios a browser can play, and no injection changes the read model', () => {
+    const harness = mount(`?mode=dev&token=${SENTINEL}&simToken=${SIM_SENTINEL}`)
+    const options = [
+      ...harness.container.querySelectorAll('[data-testid="dev-scenario-select"] option'),
+    ].map((option) => option.textContent)
+
+    expect(options).toEqual(['direct-low', 'aggregate-switch', 'flood', 'paid-replay'])
+    // The renderer had no snapshot and the panel cannot give it one: state comes
+    // from the server alone (spec §10.2).
+    expect(harness.runtime.model.snapshot).toBeNull()
+    expect(harness.container.querySelector('[data-testid="dev-sim-result"]')?.textContent).toBe(
+      'idle',
+    )
+  })
+
+  it('sends a pressed button through POST /ingest/simulator and nowhere else', async () => {
+    const requests: { url: string; method: string; authorization: string | null; body: string }[] =
+      []
+    const original = globalThis.fetch
+    globalThis.fetch = ((url: string, init: RequestInit) => {
+      const headers = (init.headers ?? {}) as Record<string, string>
+      requests.push({
+        url,
+        method: init.method ?? 'GET',
+        authorization: headers['authorization'] ?? null,
+        body: String(init.body),
+      })
+      return Promise.resolve(
+        new Response(JSON.stringify({ inserted: 1, duplicates: 0 }), { status: 202 }),
+      )
+    }) as unknown as typeof fetch
+
+    try {
+      const harness = mount(`?mode=dev&token=${SENTINEL}&simToken=${SIM_SENTINEL}`)
+      const button = harness.container.querySelector<HTMLButtonElement>(
+        '[data-testid="dev-inject-feed"]',
+      )
+      expect(button).not.toBeNull()
+
+      await act(async () => {
+        button?.click()
+        await Promise.resolve()
+      })
+
+      expect(requests).toHaveLength(1)
+      expect(requests[0]?.url).toBe('http://127.0.0.1:8787/ingest/simulator')
+      expect(requests[0]?.method).toBe('POST')
+      expect(requests[0]?.authorization).toBe(`Bearer ${SIM_SENTINEL}`)
+      expect(requests[0]?.body).toContain('"source":"simulator"')
+      // The panel reports the endpoint's answer and changes nothing itself: the
+      // read model is still waiting for a server snapshot (spec §10.2).
+      expect(harness.container.querySelector('[data-testid="dev-sim-result"]')?.textContent).toBe(
+        'accepted (202) inserted=1 duplicates=0',
+      )
+      expect(harness.runtime.model.snapshot).toBeNull()
+      // And it is on screen without the token that authorized it.
+      expect(harness.container.innerHTML).not.toContain(SIM_SENTINEL)
+    } finally {
+      globalThis.fetch = original
+    }
   })
 })
 

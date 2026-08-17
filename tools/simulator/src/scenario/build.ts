@@ -29,9 +29,10 @@ export interface ScenarioIdentity {
 }
 
 /** Obviously synthetic ids derived from the scenario id (spec §2.6). */
-export function scenarioIdentity(scenario: Scenario): ScenarioIdentity {
+export function scenarioIdentity(scenario: Scenario, broadcastSuffix?: string): ScenarioIdentity {
   const slug = scenario.id.replace(/-/g, '_')
-  return { broadcastId: `brd_sim_${slug}`, liveChatId: `chat_sim_${slug}` }
+  const suffix = broadcastSuffix === undefined ? '' : `_${broadcastSuffix.replace(/-/g, '_')}`
+  return { broadcastId: `brd_sim_${slug}${suffix}`, liveChatId: `chat_sim_${slug}` }
 }
 
 export interface ScenarioBatch {
@@ -59,6 +60,14 @@ export interface PlanOptions {
    * has no envelope field, so only the parser's verdict can cross (spec §7.3(1)).
    */
   readonly parseCommand?: CommandParser
+  /**
+   * Appended to the derived `broadcastId`, which makes a second playback of the
+   * same file a **different synthetic broadcast** rather than a replay of the
+   * first. The dev panel uses it so pressing "run" twice injects twice; a replay
+   * test leaves it out, because there the redelivery is the point (spec §7.4:
+   * the event key is built from the broadcast id).
+   */
+  readonly broadcastSuffix?: string
 }
 
 /** True when the scenario cannot be built without a command parser. */
@@ -73,7 +82,7 @@ export function planScenario(scenario: Scenario, options: PlanOptions = {}): Sce
       `${scenario.id} has chat steps and needs a command parser (spec §7.3(1))`,
     )
   }
-  const identity = scenarioIdentity(scenario)
+  const identity = scenarioIdentity(scenario, options.broadcastSuffix)
 
   const byOffset = new Map<number, ScenarioStep[]>()
   for (const step of scenario.steps) {

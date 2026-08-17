@@ -1,4 +1,9 @@
-import { parseScenario, type Scenario, type ScenarioInput, type ScenarioStepInput } from './schema.js'
+import {
+  parseScenario,
+  type Scenario,
+  type ScenarioInput,
+  type ScenarioStepInput,
+} from './schema.js'
 
 /**
  * The built-in scenarios of TASK_SPECS §T11.
@@ -92,18 +97,74 @@ const paidReplay: ScenarioInput = {
   summary:
     'A repeated Super Chat, a gift combo that only advances, a Super Sticker and two memberships (spec §11 유료 무결성).',
   steps: [
-    { kind: 'superChat', atMs: 0, amountMicros: 500_000, currency: 'JPY', tier: 1, messageId: 'msg_sim_paid_sc_a' },
+    {
+      kind: 'superChat',
+      atMs: 0,
+      amountMicros: 500_000,
+      currency: 'JPY',
+      tier: 1,
+      messageId: 'msg_sim_paid_sc_a',
+    },
     // The same delivery replayed: one Super Chat, applied once.
-    { kind: 'superChat', atMs: 800, amountMicros: 500_000, currency: 'JPY', tier: 1, messageId: 'msg_sim_paid_sc_a' },
-    { kind: 'superSticker', atMs: 1_200, amountMicros: 200_000, currency: 'JPY', tier: 1, messageId: 'msg_sim_paid_st_a' },
+    {
+      kind: 'superChat',
+      atMs: 800,
+      amountMicros: 500_000,
+      currency: 'JPY',
+      tier: 1,
+      messageId: 'msg_sim_paid_sc_a',
+    },
+    {
+      kind: 'superSticker',
+      atMs: 1_200,
+      amountMicros: 200_000,
+      currency: 'JPY',
+      tier: 1,
+      messageId: 'msg_sim_paid_st_a',
+    },
     // Non-combo gift: comboCount 0 still counts as the first one (spec §7.4).
-    { kind: 'gift', atMs: 2_000, comboCount: 0, jewels: 10, giftName: 'sim_gift', messageId: 'msg_sim_paid_gift_a' },
-    { kind: 'gift', atMs: 2_400, comboCount: 3, jewels: 10, giftName: 'sim_gift', messageId: 'msg_sim_paid_gift_a' },
+    {
+      kind: 'gift',
+      atMs: 2_000,
+      comboCount: 0,
+      jewels: 10,
+      giftName: 'sim_gift',
+      messageId: 'msg_sim_paid_gift_a',
+    },
+    {
+      kind: 'gift',
+      atMs: 2_400,
+      comboCount: 3,
+      jewels: 10,
+      giftName: 'sim_gift',
+      messageId: 'msg_sim_paid_gift_a',
+    },
     // Same combo step twice: the second adds nothing.
-    { kind: 'gift', atMs: 2_800, comboCount: 3, jewels: 10, giftName: 'sim_gift', messageId: 'msg_sim_paid_gift_a' },
-    { kind: 'gift', atMs: 3_200, comboCount: 5, jewels: 10, giftName: 'sim_gift', messageId: 'msg_sim_paid_gift_a' },
+    {
+      kind: 'gift',
+      atMs: 2_800,
+      comboCount: 3,
+      jewels: 10,
+      giftName: 'sim_gift',
+      messageId: 'msg_sim_paid_gift_a',
+    },
+    {
+      kind: 'gift',
+      atMs: 3_200,
+      comboCount: 5,
+      jewels: 10,
+      giftName: 'sim_gift',
+      messageId: 'msg_sim_paid_gift_a',
+    },
     // A combo count that went backwards: `storedMax` never decreases.
-    { kind: 'gift', atMs: 3_600, comboCount: 2, jewels: 10, giftName: 'sim_gift', messageId: 'msg_sim_paid_gift_a' },
+    {
+      kind: 'gift',
+      atMs: 3_600,
+      comboCount: 2,
+      jewels: 10,
+      giftName: 'sim_gift',
+      messageId: 'msg_sim_paid_gift_a',
+    },
     { kind: 'membership', atMs: 4_000, tier: 1, messageId: 'msg_sim_paid_mem_a' },
     { kind: 'membership', atMs: 4_400, tier: 2, messageId: 'msg_sim_paid_mem_b' },
     { kind: 'membership', atMs: 4_800, tier: 2, messageId: 'msg_sim_paid_mem_b' },
@@ -122,7 +183,14 @@ const degradedWindow: ScenarioInput = {
     { kind: 'control', atMs: 1_000, control: 'degrade' },
     { kind: 'command', atMs: 2_000, command: 'PET' },
     { kind: 'command', atMs: 2_500, command: 'PLAY' },
-    { kind: 'superChat', atMs: 3_000, amountMicros: 300_000, currency: 'JPY', tier: 1, messageId: 'msg_sim_degraded_sc' },
+    {
+      kind: 'superChat',
+      atMs: 3_000,
+      amountMicros: 300_000,
+      currency: 'JPY',
+      tier: 1,
+      messageId: 'msg_sim_degraded_sc',
+    },
     // Well inside `engine.degraded.eventValidityMs`, so the commands are still
     // applicable when the condition clears (spec §9.2 유효시간).
     { kind: 'wait', atMs: 3_000, durationMs: 22_000 },

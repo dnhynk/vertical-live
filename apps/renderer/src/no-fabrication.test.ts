@@ -71,7 +71,14 @@ describe('renderer source invariants', () => {
   it('has no identity field anywhere', () => {
     expect(FILES.length).toBeGreaterThan(10)
     expect(
-      offenders(FILES, /author|display_?name|channel_?id|user_?name|nick_?name|profile_?image/i),
+      offenders(
+        FILES,
+        // `author` still catches `authorDetails`, `authorName` and
+        // `authorChannelId`. `authoriz…` is excluded because it is the HTTP
+        // `Authorization` header and the `unauthorized` outcome of the T11
+        // injection client — access control, not an identity field.
+        /author(?!iz)|display_?name|channel_?id|user_?name|nick_?name|profile_?image/i,
+      ),
     ).toEqual([])
   })
 

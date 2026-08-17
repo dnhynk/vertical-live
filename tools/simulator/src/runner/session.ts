@@ -105,10 +105,7 @@ export async function openSession(options: SessionOptions = {}): Promise<Simulat
     clock,
     target,
     async run(scenario) {
-      const plan = planScenario(
-        scenario,
-        requiresParser(scenario) ? { parseCommand } : {},
-      )
+      const plan = planScenario(scenario, requiresParser(scenario) ? { parseCommand } : {})
       return runScenario({
         plan,
         target,
