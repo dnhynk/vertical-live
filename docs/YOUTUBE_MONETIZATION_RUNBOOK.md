@@ -1,183 +1,252 @@
 # YouTube Monetization Launch Runbook
 
-Last updated: 2026-05-16
+Last updated: 2026-08-18 (aligned with `docs/PROJECT_SPEC.md` v1 in T16)
 
-This document turns the project from a local prototype into a real YouTube monetization launch plan.
+The account-and-policy side of taking this project to a monetized launch. The spec is the authority: where this
+document and `docs/PROJECT_SPEC.md` disagree, the spec wins. Product gates are `docs/ROADMAP.md` (Gate 0–5).
+
+**How claims are sourced here.** Every external claim carries a spec source tag (`[S…]`, resolved in
+`docs/PROJECT_SPEC.md` §18) or a URL. URLs carried over from the pre-spec version were **not re-verified in T16**;
+confirm them during the Gate 0 account audit (`docs/ops/gate0-checklist.md` §1.2). Platform features change and the
+spec requires re-checking before launch (§4).
 
 ## 1. Operating Goal
 
-Launch a 24/7 unattended vertical live stream that uses a Pokemon-based interactive pet format and monetizes through YouTube fan-funding features first, then ads and memberships when the channel qualifies.
+Run a 24/7 unattended vertical Live in which viewers collectively raise an **original creature** — no third-party
+characters, names, silhouettes, UI, music or sound effects (spec §3, §12.1, [S17] [S18]) — and monetize through
+YouTube's own fan-funding features once the channel qualifies.
 
-Primary revenue targets:
+Two facts shape everything below:
 
-1. Super Chat
-2. Super Stickers
-3. Channel memberships
-4. Jewels/Gifts, if available for the account and region
-5. Ads, after full YPP revenue sharing eligibility
+- **The vertical Live feed has no clickable external links and no live pre-roll/mid-roll ads** [S1]. Ads and external
+  conversion are not the core revenue model, and feed impressions are counted from zero and measured, never assumed
+  (§4).
+- **Before YPP there is no YouTube-internal revenue at all** (§8.1). Until the channel is accepted, this project does
+  not say "run it and it earns money on YouTube" (§8.2).
 
-## 2. Account Gate Checklist
+Revenue priority (spec §8.3, in order):
 
-These items must be confirmed in the real YouTube account.
+1. **Gifts + Super Chat** — immediate thanks, room-wide celebration, visible presence
+2. **Memberships** — badges, emoji, fixed thank-you staging, season recaps
+3. **First-party Shopping** — only once the original IP is validated and real products exist
+4. **Watch Page ads via simultaneous horizontal+vertical output** — only if dual stream is offered on the account and
+   the added cost is justified
+5. **Affiliate Shopping** — only when Studio eligibility and product fit are confirmed
+
+Vertical Live feed ads, recommendation reach, and Shorts-view credit for vertical Live are all modelled as **zero**
+(§8.3, [S8]).
+
+## 2. What Paid Events May and May Not Buy
+
+This section is a hard boundary, not a design preference (spec §2.4, §8.4, §8.5).
+
+**May buy** — recognition, never power:
+
+- pre-announced fixed thank-you animations and sounds
+- a short display of a supporter name or a safe icon (name display requires the identity/consent gate; with the gate
+  closed in V1 there is no name display at all — §12.3, §7.4)
+- seasonal backgrounds and celebration staging the whole room sees
+- time-limited appearance, lighting and music changes
+- flat membership benefits: badges, emoji, recaps
+
+**May not buy** — any of these is a blocker:
+
+- paid-only survival, revival, growth, evolution or victory
+- vote weight or territory power scaled by payment amount
+- paid random rewards, re-rolls, gacha
+- cash, gift certificates, crypto or exchangeable value
+- prizes drawn among a subset of payers
+- spending leaderboards, or paid staging that monopolizes the screen
+- "pay or it dies / you lose" guilt or anxiety copy
+- anything that gets children to pay or to ask a parent to pay
+
+The creature never dies and never permanently regresses; crisis states such as `asleep`, `exhausted` and
+`needs help` recover through free collective action and the passage of time (§6.3). Every paid CTA states clearly
+that all core outcomes are reachable through free participation (§8.4).
+
+## 3. Account Gate Checklist
+
+Confirm these in the real YouTube account and record the evidence. The full Gate 0 list is
+`docs/ops/gate0-checklist.md` §1.2.
 
 - [ ] Dedicated Google account exists.
 - [ ] Brand Account YouTube channel exists.
 - [ ] Google account has 2-Step Verification enabled.
 - [ ] Channel has advanced features access.
 - [ ] Channel has no active Community Guidelines strikes.
-- [ ] Channel has no live streaming restrictions in the last 90 days.
+- [ ] Channel has no live streaming restrictions in the recent period.
 - [ ] Channel is phone/identity verified for live streaming.
 - [ ] AdSense for YouTube is linked or ready to set up in YouTube Studio.
-- [ ] Channel audience is not set as Made for Kids.
+- [ ] Audience classification reviewed with evidence, not merely declared (§12.2, [S15] [S29] [S32] — see §6).
 - [ ] Live chat and comments can be enabled.
-- [ ] Channel country/region supports YPP and target fan-funding features.
-- [ ] The account owner is at least 18 or has an eligible AdSense arrangement.
+- [ ] Channel country/region supports YPP and the target fan-funding features.
+- [ ] The account owner meets the AdSense age/arrangement requirements.
+- [ ] Actual per-feature state read from Studio: YPP, Supers, Memberships, Gifts/Jewels, Shopping.
 
-## 3. Monetization Thresholds
+The **actual Studio state is the feature gate** the product uses — thresholds alone do not enable anything (§8.1).
 
-### Earlier Fan-Funding Access
+## 4. Monetization Thresholds (spec §8.1, [S8] [S36])
 
-In eligible countries/regions, the expanded YPP can unlock fan-funding features earlier:
+### Expanded YPP (earlier fan-funding access)
 
 - 500 subscribers
 - 3 valid public uploads in the last 90 days
-- Either 3,000 valid public watch hours in the last 12 months or 3 million valid public Shorts views in the last 90 days
+- 3,000 valid public watch hours in the last 12 months **or** 3 million valid public Shorts views in the last 90 days
 
-When accepted at this level, the channel can use eligible fan-funding features such as memberships, Super Chat, Super Stickers, Super Thanks, and potentially Jewels/Gifts if the account meets that feature's requirements.
-
-### Full YPP Revenue Sharing
-
-For ads and broader revenue sharing:
+### Full YPP (ad revenue sharing)
 
 - 1,000 subscribers
-- Either 4,000 valid public watch hours in the last 12 months or 10 million valid public Shorts views in the last 90 days
+- 4,000 valid public watch hours in the last 12 months **or** 10 million valid public Shorts views in the last 90 days
 
-Important: Shorts feed watch hours do not count toward the 4,000 public watch hour threshold.
+Japan is an Expanded YPP and Gifts region, but these numbers are **application thresholds only**. Monetization-policy
+compliance, the target region, active strike state, 2-Step Verification, advanced features, an AdSense link, channel
+review and per-feature eligibility apply separately (§8.1, [S8] [S10] [S36]).
 
-## 4. Feature Availability Notes
+Two counting limits (§4):
+
+- Watch time from a Live that is **not converted to VOD** is excluded from YPP valid public watch time [S8]. A single
+  endless Live is therefore not a YPP-acquisition strategy.
+- There is **no official basis** for counting vertical Live views as valid Shorts views, so the revenue model does not
+  count them [S8].
+
+### New channels
+
+If the account audit shows a channel that is not yet eligible, YouTube-internal revenue is zero and the spec forbids
+assuming one over-12-hour Live can satisfy valid watch hours and the public-upload condition (§8.2). Which public
+path produces traffic and YPP-valid metrics — rolling archive under 12 hours, human-reviewed original recap/VOD, or
+original Shorts — is chosen by experiment against the real Earn figures and policy review. Bulk automated template
+uploads are not a candidate ([S13] [S14]).
+
+## 5. Feature Availability
+
+### Gifts / Jewels
+
+**Japan has had Jewels/Gifts rolling out since 2026-07-27, and turning Gifts on means Super Stickers are not
+available on that Live** [S10]. (The pre-spec version of this document said Gifts were listed for the United States
+and Taiwan only; that statement is removed as outdated.)
+
+Whether to enable Gifts or keep Super Stickers is an **open decision**, to be made before fan-funding is activated,
+on the basis of the actual Japanese Studio feature state and a conversion experiment (§17). Do not design as if both
+were available at once (§4) — the product normalizes both event shapes at the contract level so either configuration
+works (`packages/contract`, BOARD A-2).
 
 ### Super Chat and Super Stickers
 
-Japan and South Korea are listed among available locations for Super Chat and Super Stickers. These features still require the channel to meet fan-funding requirements, accept the relevant commerce terms, and keep live chat/comments enabled.
+Super Chat is kept as a separate path from Gifts (§4). Super Stickers are supported **only in a Gifts-off
+configuration** [S10]. Both still require the channel to meet fan-funding requirements, accept the relevant commerce
+terms, and keep live chat/comments enabled.
+
+Reference (not re-verified in T16): https://support.google.com/youtube/answer/9277801
 
 ### Channel Memberships
 
-Memberships require eligibility for fan-funding features and acceptance of the Commerce Product Module. YouTube notes that memberships may be reviewed after YPP acceptance and may not activate instantly.
+Memberships require fan-funding eligibility and acceptance of the Commerce Product Module. In the vertical feed,
+**membership purchase from inside the feed is currently not supported on iPhone** [S1] [S2], so membership conversion
+is measured per device (§4).
 
-### Jewels and Gifts
+Reference (not re-verified in T16): https://support.google.com/youtube/answer/7636690
 
-Gifts powered by Jewels are specifically for eligible vertical live streams. Official YouTube Help currently lists availability for eligible creators in the United States and Taiwan. For a Japan-targeted operation, do not treat Gifts as guaranteed until the actual account shows the Gifts option in YouTube Studio Earn.
+### Live reactions and Likes
 
-## 5. Stream Eligibility Rules
+Live reactions are excluded from V1 inputs: Help describes them as anonymized and the current `liveChatMessages`
+type list contains no reaction event [S3] [S35]. Likes are an aggregate gauge candidate only — a difference in
+`videos` statistics, not an accurate real-time per-person event [S30]. Recent-subscriber lists are likewise not an
+accurate real-time personal event [S31].
+
+## 6. Stream and Channel Eligibility Rules
 
 To keep fan-funding features available on individual live streams:
 
-- Stream must not be age-restricted.
-- Stream must not be unlisted or private.
-- Stream must not be Made for Kids.
-- Stream must not be attached to a YouTube Giving fundraiser.
-- Live chat/comments must not be turned off.
-- Gifts require vertical live streams, not horizontal streams.
+- The stream must not be Made for Kids. A Made for Kids classification removes Live Chat, Super Chat, Gifts and
+  memberships, and **a declaration alone does not settle the classification** (§12.2, [S15] [S29] [S32]).
+- Gifts are for eligible **vertical** live streams [S32].
+- Live chat/comments must stay enabled.
+- The stream must not be age-restricted, unlisted/private, or attached to a fundraiser —
+  **확인 필요(출처 없음)**: these three items were carried over from the pre-spec version and have no spec source; verify
+  them in Studio during the Gate 0 audit. Reference (not re-verified in T16):
+  https://support.google.com/youtube/answer/15535963
 
-## 6. Launch Phases
+## 7. Launch Sequence
 
-### Phase 0: Create The Account
+The account-side work, mapped onto the product gates (`docs/ROADMAP.md`). The gates are the authority on ordering.
 
-Goal: create the channel correctly before any uploads or live tests.
+### Before Gate 0 — create the account
 
-- Create dedicated Google account.
-- Create a Brand Account YouTube channel.
-- Set the channel audience to Not Made for Kids.
-- Verify the account by phone.
-- Start advanced features unlock.
-- Enable live streaming.
-- Complete initial branding.
+Create the dedicated Google account and Brand Account channel, verify by phone, unlock advanced features, enable live
+streaming, complete branding with original assets. Detailed checklist: `docs/ACCOUNT_SETUP_FROM_ZERO.md`.
 
-Detailed checklist: `docs/ACCOUNT_SETUP_FROM_ZERO.md`.
+### Gate 0 — audit and approve
 
-### Phase A: Account Audit
+Read the real numbers and per-feature states from Studio (§3 above), approve the identity path, the moderation call
+table, the provisional availability targets and the public budget/stop-loss line. Checklist:
+`docs/ops/gate0-checklist.md`.
 
-Goal: know exactly where the account stands.
+### Gate 1 — local world
 
-User must provide these numbers/statuses manually from YouTube Studio:
+No account work. The world runs locally against the same event contract as the public broadcast (§15 Gate 1).
 
-- Subscribers
-- Public watch hours in the last 12 months
-- Shorts views in the last 90 days
-- Public uploads in the last 90 days
-- Country/region of the channel and AdSense
-- YPP status
-- Supers status
-- Memberships status
-- Gifts/Jewels status
-- Live streaming restriction status
+### Gate 2 — technical validation on the real account
 
-### Phase B: Technical Pilot
+Private/unlisted streams only. OAuth reconnect, `streamList` collection and REST fallback, broadcast lifecycle and
+quota, the OBS host, the data deletion/revocation tests, the broadcast-length experiment and the mobile end-to-end
+calibration. Procedures: `docs/ops/gate2-experiments.md`.
 
-Goal: prove the stream can run without revenue features.
+The encoder is OBS on a single supervised host (spec §10.2, §10.3, BOARD D-2); the old instruction to run `server.py`
+on a cloud machine is removed — that prototype is excluded from the production path (§10.4, §16) and now lives in
+`legacy/`.
 
-- Run cloud machine with GPU or suitable encoder environment.
-- Run `server.py`.
-- Run the Vite renderer in broadcast mode.
-- Capture `http://127.0.0.1:5173/?mode=broadcast` in OBS.
-- Stream privately or unlisted only for technical tests.
-- Run a 6-hour soak test.
-- Run a 24-hour soak test.
-- Confirm restart recovery.
+### Gate 3 — public pilot
 
-### Phase C: Public Non-Monetized Growth
+Public, Japanese-language, 24 hours unattended, with the moderation call table in place (§12.3). Note what is **not**
+done here: raw chat is not shown on screen and viewer names are not displayed while the identity gate is closed
+(§12.3, §7.4, BOARD A-1). Scene variation comes from real state, chapter and environment branching, not from
+re-labelled repeats (§12.5).
 
-Goal: build eligibility while keeping policy risk low.
+### Gate 4 — traffic and YPP eligibility
 
-- Publish 3 short public proof-of-liveness videos in 90 days.
-- Run daily or continuous public vertical live sessions.
-- Show live viewer names/messages in the stream when safe.
-- Keep the scene visibly changing through state, weather, evolution, and event logs.
-- Avoid static loops.
-- Add Japanese title/description once the audience target is finalized.
+Apply for Expanded YPP when the account reaches the thresholds, accept the Base Terms and the Commerce Product
+Module, link/verify AdSense, and enable the features Studio actually offers. Map each paid event type onto the event
+contract — the adapters exist for all four types already (BOARD A-2).
 
-### Phase D: Fan-Funding Activation
+### Gate 5 — monetized operation
 
-Goal: turn on paid features as soon as the account is eligible.
+Reconcile the full paid chain (`received → state commit → renderer ACK → safe thank-you display → settlement`) and
+compute operating contribution margin from **confirmed** settlement only. Review daily conversion by event type and
+adjust which thank-you staging is offered — within §8.4's boundary. Paid staging is never tuned into game power, and
+no paid-power variant is built even as a comparison arm (§8.5, §14.2(5)).
 
-- Apply for expanded YPP when the channel reaches 500-sub threshold and watch/view requirements.
-- Accept Base Terms and Commerce Product Module.
-- Link/verify AdSense.
-- Enable Super Chat and Super Stickers.
-- Enable memberships if surfaced.
-- Check if Gifts/Jewels appears in Earn > Supers & gifts.
-- Map each paid event into the local event contract.
+## 8. Accounting Basis (spec §8.6)
 
-### Phase E: Monetized 24/7 Operation
+- Super Chat amounts, tiers and Jewels from the API are **staging and event-analysis data**, not the revenue ledger.
+- YouTube Analytics `estimatedRevenue` is an operational estimate; the authority for confirmed YouTube revenue is the
+  AdSense for YouTube settlement [S9]. First-party Shopping revenue uses the connected seller's confirmed settlement.
+- Commerce Product Module revenue share and the Gifts→Ruby conversion follow official policy, but are validated
+  against actual net revenue including taxes, adjustments and refunds [S9] [S11].
+- No revenue or conversion-rate targets are invented before a channel baseline, infrastructure costs and a YPP state
+  exist. Gate 5's evaluation period includes the AdSense confirmation delay.
+- Paid-event fields are API data and are deleted on the field-level retention schedule (§12.4,
+  `docs/ops/data-map.md`); the long-term revenue record is the settlement, and long-term KPIs are
+  non-identifying aggregates.
 
-Goal: operate as a recurring revenue system.
+## 9. Technical State
 
-- Run cloud watchdog.
-- Persist game state.
-- Persist event/revenue logs.
-- Monitor crash/reconnect events.
-- Rotate visual events so the broadcast remains dynamic.
-- Review daily event conversion by event type.
-- Tune pricing-to-effect mapping weekly.
+The technical work this document used to list as pending is implemented and merged (see `docs/tasks/BOARD.md` for the
+per-task state): persistent server-authoritative state (T4, T8), the normalized event contract and fixtures (T1),
+replay and latency reporting (T11), the YouTube listener with REST fallback (T9), broadcast lifecycle (T10), OBS
+setup and monitoring (T2), the supervisor with alerting, kill switch and dead-man monitor (T12), and field-level
+retention/deletion (T13). Windows start-up and archive rotation are T17; the fault matrix and 72-hour soak are T15.
 
-## 7. Immediate Technical Work
+Operating procedure: `docs/ops/runbook-operations.md`.
 
-Before touching the real account integration, the codebase needs:
+## 10. Official References
 
-1. Persistent game state: SQLite or JSON file.
-2. Normalized `/api/log` event schema.
-3. Local event replay test script.
-4. Cloud startup script.
-5. OBS scene setup guide.
-6. Watchdog process.
-7. YouTube listener integration after account status is known.
+Spec source tags (`docs/PROJECT_SPEC.md` §18) used above: [S1] [S2] [S3] [S8] [S9] [S10] [S11] [S13] [S14] [S15]
+[S17] [S18] [S29] [S30] [S31] [S32] [S35] [S36]. URLs for each tag are listed at the end of the spec.
 
-## 8. Official References
+Additional URLs carried over from the pre-spec version of this document (**not re-verified in T16**):
 
-- YouTube Partner Program overview and eligibility: https://support.google.com/youtube/answer/72851
-- Expanded YPP overview: https://support.google.com/youtube/answer/13429240
-- Get started with live streaming: https://support.google.com/youtube/answer/2474026
 - Super Chat and Super Stickers eligibility: https://support.google.com/youtube/answer/9277801
 - Channel memberships: https://support.google.com/youtube/answer/7636690
-- Gifts eligibility and availability: https://support.google.com/youtube/answer/15535963
 - Turn on gifts: https://support.google.com/youtube/answer/15534883
+</content>
+</invoke>
