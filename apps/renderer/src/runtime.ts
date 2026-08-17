@@ -1,5 +1,5 @@
 import { readRendererConfig, type RendererConfig } from './config'
-import { createTranslator, type Translate } from './i18n/index'
+import { createAlias, createTranslator, type Alias, type Translate } from './i18n/index'
 import { systemClock, type Clock } from './read-model/clock'
 import {
   RendererConnection,
@@ -32,6 +32,8 @@ export interface RendererRuntime {
   readonly webgl: WebGlContextTracker
   readonly health: RendererHealth
   readonly translate: Translate
+  /** Short English alias shown after the Japanese wording (spec §5.1). */
+  readonly alias: Alias
   start(): void
   stop(): void
 }
@@ -59,6 +61,7 @@ export function createRuntime(options: CreateRuntimeOptions): RendererRuntime {
     generateRendererId: options.generateRendererId,
   })
   const translate = createTranslator(log)
+  const alias = createAlias()
 
   const model = new ReadModel({
     clock,
@@ -107,6 +110,7 @@ export function createRuntime(options: CreateRuntimeOptions): RendererRuntime {
     webgl,
     health,
     translate,
+    alias,
     start() {
       frameLoop.start()
       connection.start()

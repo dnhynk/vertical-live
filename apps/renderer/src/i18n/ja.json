@@ -2,20 +2,192 @@
   "$meta": {
     "locale": "ja",
     "nativeReview": "pending",
-    "note": "Placeholder Japanese wording for the T5 read-model screen. Spec §5.3 requires native-speaker review before Gate 3 (BOARD A-11); no entry may claim review before then. World vocabulary keys (need.*, mission.*, chapter.*) are owned by the content director (T7) and land with the screen in T14."
+    "note": "Japanese is the broadcast's primary language (spec §5.3). Every entry carries its own \"nativeReview\": \"pending\" (TASK_SPECS common rules, BOARD A-11) and none may claim review before a native speaker signs off at Gate 3. \"en\" is the short English alias of spec §5.1, shown after the Japanese; it is not a translation of the sentence and is absent where a slot needs none. World vocabulary keys (need.*, crisis.*, mission.*, chapter.*, choice.*, stage.*) are the content director's identifiers (T7 apps/server/src/world/types.ts, content/chapters.ts)."
   },
   "strings": {
-    "ui.waiting": "接続中",
-    "ui.slot.needOrMission": "いまのおねがい",
-    "ui.slot.lastAction": "いま反映された行動",
-    "ui.slot.progress": "成長",
-    "ui.slot.nextChoice": "つぎの選択",
-    "ui.cta.title": "チャットで参加",
-    "ui.interactionPaused": "相互作用一時停止",
-    "ui.none": "なし",
-    "ui.undecided": "未定",
-    "ui.contributions": "{count}回",
-    "ui.jst": "{time} JST",
-    "ui.progressValue": "{current} / {target}"
+    "ui.waiting": { "text": "接続中", "en": "CONNECTING", "nativeReview": "pending" },
+    "ui.slot.needOrMission": { "text": "いまのおねがい", "en": "NOW", "nativeReview": "pending" },
+    "ui.slot.lastAction": {
+      "text": "反映された行動",
+      "en": "LAST ACTION",
+      "nativeReview": "pending"
+    },
+    "ui.slot.progress": { "text": "成長と章", "en": "GROWTH", "nativeReview": "pending" },
+    "ui.slot.nextChoice": { "text": "つぎの選択", "en": "NEXT", "nativeReview": "pending" },
+
+    "ui.cta.title": { "text": "チャットで参加", "en": "JOIN IN CHAT", "nativeReview": "pending" },
+    "ui.cta.hint": {
+      "text": "この言葉を送るだけ",
+      "en": "JUST SEND IT",
+      "nativeReview": "pending"
+    },
+    "ui.cta.freeNote": {
+      "text": "無料でもすべて達成できます",
+      "en": "EVERYTHING IS REACHABLE FOR FREE",
+      "nativeReview": "pending"
+    },
+
+    "ui.interactionPaused": {
+      "text": "相互作用一時停止",
+      "en": "INPUT PAUSED",
+      "nativeReview": "pending"
+    },
+    "ui.interactionPausedNote": {
+      "text": "復旧するまで入力は反映されません",
+      "en": "COMMANDS RESUME AFTER RECOVERY",
+      "nativeReview": "pending"
+    },
+
+    "ui.none": { "text": "なし", "nativeReview": "pending" },
+    "ui.undecided": { "text": "未定", "nativeReview": "pending" },
+    "ui.contributions": { "text": "{count}回", "nativeReview": "pending" },
+    "ui.jst": { "text": "{time} JST", "nativeReview": "pending" },
+    "ui.remaining": { "text": "あと{duration}", "nativeReview": "pending" },
+    "ui.duration.hours": { "text": "{hours}時間", "nativeReview": "pending" },
+    "ui.duration.minutes": { "text": "{minutes}分", "nativeReview": "pending" },
+    "ui.duration.seconds": { "text": "{seconds}秒", "nativeReview": "pending" },
+
+    "ui.mode.label": { "text": "入力", "en": "INPUT", "nativeReview": "pending" },
+    "ui.mode.direct": { "text": "そのまま反映", "en": "DIRECT", "nativeReview": "pending" },
+    "ui.mode.aggregate": { "text": "まとめて反映", "en": "AGGREGATE", "nativeReview": "pending" },
+    "ui.mode.tally": { "text": "集計", "en": "TALLY", "nativeReview": "pending" },
+
+    "ui.mission.started": { "text": "新しい目標", "en": "NEW GOAL", "nativeReview": "pending" },
+    "ui.mission.progress": { "text": "目標が進んだ", "en": "PROGRESS", "nativeReview": "pending" },
+    "ui.mission.completed": {
+      "text": "目標を達成",
+      "en": "GOAL REACHED",
+      "nativeReview": "pending"
+    },
+
+    "ui.thanks.title": {
+      "text": "ありがとうございます",
+      "en": "THANK YOU",
+      "nativeReview": "pending"
+    },
+    "ui.thanks.later": {
+      "text": "あらためてお礼",
+      "en": "LATER THANKS",
+      "nativeReview": "pending"
+    },
+    "ui.thanks.SUPER_CHAT": {
+      "text": "スーパーチャット",
+      "en": "SUPER CHAT",
+      "nativeReview": "pending"
+    },
+    "ui.thanks.SUPER_STICKER": {
+      "text": "スーパーステッカー",
+      "en": "SUPER STICKER",
+      "nativeReview": "pending"
+    },
+    "ui.thanks.GIFT": { "text": "ギフト", "en": "GIFT", "nativeReview": "pending" },
+    "ui.thanks.MEMBERSHIP": {
+      "text": "メンバーシップ",
+      "en": "MEMBERSHIP",
+      "nativeReview": "pending"
+    },
+
+    "need.hungry": { "text": "おなかがすいた", "en": "HUNGRY", "nativeReview": "pending" },
+    "need.play": { "text": "遊びたい", "en": "WANTS TO PLAY", "nativeReview": "pending" },
+    "need.affection": { "text": "そばにいたい", "en": "WANTS COMPANY", "nativeReview": "pending" },
+    "need.rest": { "text": "休みたい", "en": "WANTS REST", "nativeReview": "pending" },
+
+    "crisis.sleeping": { "text": "眠っている", "en": "SLEEPING", "nativeReview": "pending" },
+    "crisis.tired": { "text": "疲れている", "en": "TIRED", "nativeReview": "pending" },
+    "crisis.needs_help": {
+      "text": "手を貸してほしい",
+      "en": "NEEDS HELP",
+      "nativeReview": "pending"
+    },
+
+    "mission.share_a_meal": {
+      "text": "一緒に食事",
+      "en": "SHARE A MEAL",
+      "nativeReview": "pending"
+    },
+    "mission.chase_the_ribbon": {
+      "text": "リボンを追いかける",
+      "en": "CHASE THE RIBBON",
+      "nativeReview": "pending"
+    },
+    "mission.quiet_company": {
+      "text": "静かに寄り添う",
+      "en": "QUIET COMPANY",
+      "nativeReview": "pending"
+    },
+    "mission.gather_ingredients": {
+      "text": "材料を集める",
+      "en": "GATHER INGREDIENTS",
+      "nativeReview": "pending"
+    },
+    "mission.hang_the_lanterns": {
+      "text": "灯りを吊るす",
+      "en": "HANG THE LANTERNS",
+      "nativeReview": "pending"
+    },
+
+    "chapter.gathering": { "text": "集める一日", "en": "GATHERING DAY", "nativeReview": "pending" },
+    "chapter.festival_prep": {
+      "text": "祭りの準備",
+      "en": "FESTIVAL PREP",
+      "nativeReview": "pending"
+    },
+    "chapter.growth_choice": {
+      "text": "成長の選択",
+      "en": "GROWTH CHOICE",
+      "nativeReview": "pending"
+    },
+
+    "choice.gathering.forage_garden": {
+      "text": "庭で探す",
+      "en": "FORAGE THE GARDEN",
+      "nativeReview": "pending"
+    },
+    "choice.gathering.river_walk": {
+      "text": "川辺を歩く",
+      "en": "RIVER WALK",
+      "nativeReview": "pending"
+    },
+    "choice.gathering.rest_indoors": {
+      "text": "部屋で休む",
+      "en": "REST INDOORS",
+      "nativeReview": "pending"
+    },
+    "choice.festival_prep.lantern_row": {
+      "text": "灯りを並べる",
+      "en": "LANTERN ROW",
+      "nativeReview": "pending"
+    },
+    "choice.festival_prep.music_practice": {
+      "text": "音を合わせる",
+      "en": "MUSIC PRACTICE",
+      "nativeReview": "pending"
+    },
+    "choice.festival_prep.night_stalls": {
+      "text": "夜の屋台へ",
+      "en": "NIGHT STALLS",
+      "nativeReview": "pending"
+    },
+    "choice.growth_choice.grow_swift": {
+      "text": "速さを選ぶ",
+      "en": "GROW SWIFT",
+      "nativeReview": "pending"
+    },
+    "choice.growth_choice.grow_gentle": {
+      "text": "優しさを選ぶ",
+      "en": "GROW GENTLE",
+      "nativeReview": "pending"
+    },
+    "choice.growth_choice.grow_curious": {
+      "text": "好奇心を選ぶ",
+      "en": "GROW CURIOUS",
+      "nativeReview": "pending"
+    },
+
+    "stage.egg": { "text": "たまご", "en": "EGG", "nativeReview": "pending" },
+    "stage.hatchling": { "text": "生まれたて", "en": "HATCHLING", "nativeReview": "pending" },
+    "stage.fledgling": { "text": "巣立ち前", "en": "FLEDGLING", "nativeReview": "pending" },
+    "stage.companion": { "text": "相棒", "en": "COMPANION", "nativeReview": "pending" },
+    "stage.guardian": { "text": "守り手", "en": "GUARDIAN", "nativeReview": "pending" }
   }
 }
