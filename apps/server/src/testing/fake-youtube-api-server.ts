@@ -108,6 +108,12 @@ export class FakeYouTubeApiServer {
   #broadcastSerial = 0
   /** Set when a transition should report the bound stream as inactive. */
   streamInactiveOnTransition = false
+  /**
+   * Called after a request is recorded and before it is applied. Lets a test change
+   * the server's state at an exact point in the sequence — e.g. another host
+   * creating a stream while this one's insert is in flight.
+   */
+  onRequest: ((request: FakeRequest) => void) | undefined
 
   private constructor(server: Server) {
     this.#server = server
@@ -212,13 +218,15 @@ export class FakeYouTubeApiServer {
       return
     }
     const body: unknown = raw === '' ? undefined : JSON.parse(raw)
-    this.requests.push({
+    const request: FakeRequest = {
       method,
       httpMethod,
       query,
       body,
       authorization: req.headers.authorization,
-    })
+    }
+    this.requests.push(request)
+    this.onRequest?.(request)
 
     if (req.headers.authorization === undefined || !req.headers.authorization.startsWith('Bearer ')) {
       json(res, 401, errorBody(401, 'authError', 'global', 'missing bearer token'))
@@ -230,7 +238,7 @@ export class FakeYouTubeApiServer {
 
     const respond = (): void => {
       if (failure !== undefined) {
-        const headers =
+        const headers: Record<string, string> =
           failure.retryAfter === undefined ? {} : { 'retry-after': failure.retryAfter }
         // The request is *not* applied when a failure is queued: a rejection means
         // YouTube changed nothing, which is exactly what the client assumes.

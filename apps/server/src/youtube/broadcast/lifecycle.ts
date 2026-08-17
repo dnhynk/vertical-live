@@ -354,10 +354,11 @@ export class BroadcastLifecycle {
     if (stageAtLeast(attempt.stage, 'bound')) {
       return attempt
     }
-    const broadcastId = requireId(attempt.broadcastId, 'broadcastId')
-    const streamId = requireId(attempt.streamId, 'streamId')
-
+    // The ids are read from `current` inside the step, never captured outside it: a
+    // limit recovery can move the attempt onto a different broadcast mid-step.
     return this.#withRetries(attempt, 'liveBroadcasts.bind', async (current) => {
+      const broadcastId = requireId(current.broadcastId, 'broadcastId')
+      const streamId = requireId(current.streamId, 'streamId')
       const bound = await this.#runCall(current, 'liveBroadcasts.bind', () =>
         this.#api.bindBroadcast({ broadcastId, streamId }),
       )
@@ -401,18 +402,22 @@ export class BroadcastLifecycle {
     // With the monitor stream enabled a broadcast must pass through `testing`
     // before `live`; with it disabled `testing` is not a legal target.
     if (this.#config.enableMonitorStream && observed?.lifeCycleStatus !== 'testing') {
-      current = await this.#transition(current, broadcastId, 'testing', 'testing')
+      current = await this.#transition(current, 'testing', 'testing')
+      // A limit recovery inside the step may already have landed on a live one.
+      if (current.stage === 'live') {
+        return current
+      }
     }
-    return this.#transition(current, broadcastId, 'live', 'live')
+    return this.#transition(current, 'live', 'live')
   }
 
   async #transition(
     attempt: BroadcastAttemptRecord,
-    broadcastId: string,
     broadcastStatus: 'testing' | 'live',
     stage: BroadcastStage,
   ): Promise<BroadcastAttemptRecord> {
     return this.#withRetries(attempt, 'liveBroadcasts.transition', async (current) => {
+      const broadcastId = requireId(current.broadcastId, 'broadcastId')
       let result: LiveBroadcastSummary
       try {
         result = await this.#runCall(current, 'liveBroadcasts.transition', () =>
@@ -701,11 +706,19 @@ export class BroadcastLifecycle {
     }
 
     const candidate = await this.#findRecoverableBroadcast(attempt)
-    if (candidate === null) {
+    // A limit on `transition` blocked *going live*. Adopting a broadcast that is
+    // not live would resolve nothing while reporting success, so only a live one
+    // counts as recovery there.
+    const recovered =
+      candidate !== null &&
+      (error.method !== 'liveBroadcasts.transition' ||
+        isLiveLifeCycleStatus(candidate.lifeCycleStatus))
+    if (!recovered || candidate === null) {
       return this.#requestSafeStop(attempt, reason, {
         limit,
         method: error.method,
         recoverable: false,
+        ...(candidate === null ? {} : { candidateLifeCycleStatus: candidate.lifeCycleStatus }),
       })
     }
     this.#alert('broadcast_recovered', reason, {
@@ -752,12 +765,27 @@ export class BroadcastLifecycle {
     candidate: LiveBroadcastSummary,
   ): Promise<BroadcastAttemptRecord> {
     this.#adopted = true
+    // An external id is write-once per row, so adopting a *different* broadcast than
+    // this attempt already owns means this attempt is finished and another row takes
+    // over: one open row per resource (migration 002's unique index).
     const owner = this.#store
       .listBroadcastAttempts()
-      .find((row) => row.broadcastId === candidate.id && row.attemptId !== attempt.attemptId)
-    const target = owner ?? attempt
+      .find((row) => row.broadcastId === candidate.id && row.closedAt === null)
+
+    let target = attempt
     if (owner !== undefined) {
-      this.#store.closeBroadcastAttempt(attempt.attemptId, 'abandoned', 'adopted_other_attempt')
+      if (owner.attemptId !== attempt.attemptId) {
+        this.#store.closeBroadcastAttempt(attempt.attemptId, 'abandoned', 'adopted_other_attempt')
+      }
+      target = owner
+    } else if (attempt.broadcastId !== null && attempt.broadcastId !== candidate.id) {
+      this.#store.closeBroadcastAttempt(attempt.attemptId, 'abandoned', 'adopted_other_broadcast')
+      target = this.#store.beginBroadcastAttempt({
+        attemptId: this.#newAttemptId(),
+        strategy: this.#config.strategy,
+        streamTitle: attempt.streamTitle,
+        scheduledStartTime: candidate.scheduledStartTime ?? attempt.scheduledStartTime,
+      })
     }
 
     const stage: BroadcastStage = isLiveLifeCycleStatus(candidate.lifeCycleStatus)
@@ -765,11 +793,16 @@ export class BroadcastLifecycle {
       : candidate.boundStreamId !== null
         ? 'bound'
         : 'broadcast_created'
+    // The ingestion stream belongs to this host, not to the broadcast, so a
+    // replacement row keeps the stream the abandoned attempt had already found.
+    const streamId = candidate.boundStreamId ?? attempt.streamId
     return this.#store.recordBroadcastCallResult(target.attemptId, {
       ...(stageAtLeast(target.stage, stage) ? {} : { stage }),
       broadcastId: candidate.id,
-      ...(candidate.boundStreamId === null ? {} : { streamId: candidate.boundStreamId }),
-      ...(candidate.liveChatId === null ? {} : { liveChatId: candidate.liveChatId }),
+      ...(streamId === null || target.streamId !== null ? {} : { streamId }),
+      ...(candidate.liveChatId === null || target.liveChatId !== null
+        ? {}
+        : { liveChatId: candidate.liveChatId }),
       ...(candidate.enableAutoStart === null ? {} : { autoStart: candidate.enableAutoStart }),
     })
   }

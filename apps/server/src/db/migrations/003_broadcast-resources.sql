@@ -63,11 +63,13 @@ CREATE TABLE broadcast_resources (
   CHECK (closed_at IS NULL OR pending_call IS NULL)
 ) STRICT;
 
--- One attempt per broadcast id: adopting the same broadcast under two attempts
--- would let two rows claim the same external resource.
+-- One *open* attempt per broadcast id: two live rows claiming the same external
+-- resource would make the audit trail a guess. Closed rows are excluded on purpose:
+-- an attempt that was abandoned and whose broadcast is later found still running
+-- has to be adoptable again (spec §9.1 recovery).
 CREATE UNIQUE INDEX broadcast_resources_broadcast
   ON broadcast_resources (broadcast_id)
-  WHERE broadcast_id IS NOT NULL;
+  WHERE broadcast_id IS NOT NULL AND closed_at IS NULL;
 
 -- "What was in flight when the process died?" (spec §9.1 restart path).
 CREATE INDEX broadcast_resources_open
