@@ -19,7 +19,7 @@
    - `folded`: `normalized` + 혼동 문자(Cyrillic/Greek→Latin) 접기 + 카타카나→히라가나. **URL·개인정보 검사**가 추가로 쓴다.
    - `skeleton`: `folded` + leet(0→o, 1→i, 3→e …) 접기 + 문자 이외 전부 제거. **금칙어 부분문자열 검사**만 쓴다.
    - 혼동 문자·leet 접기를 **명령 매칭에는 쓰지 않는다**: 접기는 허용 방향이라 명령 매칭에 쓰면 우회 표면이 늘고, 거부 검사에만 쓰면 항상 더 많이 거부하는 방향이라 안전하다(우회 0건 논거).
-4. `moderation.ts` + `data/moderation-terms.ts`, `data/homoglyphs.ts` — URL(스킴·`www.`·TLD·`(dot)` 난독화), 개인정보(이메일·전화/장문 숫자열·IP·`〒`·`@handle`), 금칙어 5범주(hate/sexual/self-harm/violence/ads-scam) ja·en. 출처·라이선스는 아래 표와 `ASSETS.md`.
+4. `moderation.ts` + `data/moderation-terms.ts`, `data/homoglyphs.ts` — URL(스킴·`www.`·TLD·`(dot)` 난독화), 개인정보(이메일·전화/장문 숫자열·IP·`〒`·`@handle`), 금칙어 5범주(hate/sexual/self-harm/violence/ads-scam) ja·en. 출처·라이선스는 아래 "Sources consulted" 표와 데이터 파일 헤더에 남긴다(외부 목록을 복제하지 않으므로 `ASSETS.md` 항목은 만들지 않는다).
 5. `parse.ts` — 결정적 순서로 거부 코드 산출. `VOTE_A/B/C`는 `identity.gateOpen && voteWindowOpen`일 때만 수락, 아니면 `vote_disabled`(§6.4·§7.1, A-1·A-9). 명령 뒤에는 `CommandRefSchema`가 허용하는 짧은 토큰 인자 1개만 허용하고 그 외 텍스트는 `extraneous_text`.
 6. `arbiter.ts` — 주입된 `Clock`(monotonic)으로 고정 길이 창을 굴린다. 창이 닫힐 때 그 창의 수락 수로 다음 창의 모드를 정한다(hysteresis). `direct`에서 창당 `maxDirectPerWindow`를 넘는 분은 개별 반영하지 않고 집계에만 넣는다(전역 flood control, 기여 수 보존). 사용자별 cooldown 없음(`actor=null`).
 7. `metrics.ts` — `commandLike` / `accepted` / 거부 코드별 수 / `directApplied` / `aggregated` / `successRatio`.
