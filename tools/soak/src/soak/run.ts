@@ -113,10 +113,15 @@ export const RECOVERABLE_FAULTS: readonly SoakFault[] = Object.freeze([
     apply: (system) => {
       system.obs.crashProcess()
     },
+    // Held long enough for the system to be the thing that fixes it: the
+    // `unobservableGraceMs` window has to pass, `obs-connection` has to spend its
+    // observed budget, and only then does the escalation relaunch OBS (§9.2,
+    // §10.2). A shorter hold would clear the fault before any of that and the
+    // report would credit the harness with a recovery it did not make.
     clear: (system) => {
       system.obs.clearFault()
     },
-    holdSlices: 4,
+    holdSlices: 14,
   },
 ])
 
