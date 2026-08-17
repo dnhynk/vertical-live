@@ -27,7 +27,7 @@
 | T14 | 렌더러 화면 완성(5초 무음·감사 연출·i18n) | T5, T7 | — | merged | t14-renderer-screen | #13 | `task_82f32652b3cf` |
 | T15 | fault matrix·72h soak harness | T11, T12, T13 | — | changes_requested | t15-fault-soak | #18 | `task_f32603eaee51` |
 | T16 | 문서 정합화·운영 런북·Gate 체크리스트 | T12 | — | changes_requested | t16-docs-alignment | #19 | `task_60d68899d24c` |
-| T17 | Windows 운영 스크립트(자동시작·OBS·아카이브) | T2, T12 | — | changes_requested | t17-windows-ops | #17 | `task_e2466b978ebe` |
+| T17 | Windows 운영 스크립트(자동시작·OBS·아카이브) | T2, T12 | — | merged | t17-windows-ops | #17 | `task_e2466b978ebe` |
 | T8b | 엔진 버그픽스: /ingest/simulator inbox write 예외 시 hang(T15 발견) | T8 | — | in_review | t8b-ingest-hang | #20 | `task_f1aeb51337bf` |
 
 디스패치 순서 원칙: `ready` 중 T-ID 낮은 것부터, 동시 2, `[contract]`는 하나만. 리뷰 Task는 `R-<T-ID>-<round>`로 별도 등록하고 아래 이력에만 남긴다.
@@ -179,3 +179,4 @@
 | 2026-08-17 18:34 | F-T17-1 완료(realpath 판정·REFUSED·TOCTOU 재검사, 런처가 서버 로더 결과 사용, 준비 판정 /health·200·PID 검사; 1818 tests). R-T15-1 verdict request_changes(blocker 2: F-10이 실제 엔진을 죽이지 않음, F-14~17 SIGKILL 미주입·expectedState 미관측; major: F-12 disk-full이 Proxy 재던짐; minor 종료 경계 카운트) → F-T15-1 `task_dcc4a35d7178` → T15 터미널. R-T17-2 `task_600cbbe2cd5c` → `ctx_12a3de9ea53b`(review2). 진행: R-T16-1(review), T8b |
 | 2026-08-17 18:37 | R-T16-1 verdict request_changes(blocker 3: 무출처 플랫폼 주장, README dev bind 불일치, Gate 2 지연 계측 설명 오류; major 2: kill 명령 오기, Gate 0 '양쪽 구현' 과장; minor 도구 마커 9파일) → F-T16-1 `task_3ad89ea6c5d9` → T16 터미널. 진행: R-T17-2(review2), F-T15-1, T8b |
 | 2026-08-17 18:41 | T8b worker_done(succeeded, PR #20: ingest 실패 분류→503/500, server.ts fail-closed net, 재현 테스트; 1732 tests). R-T8b-1 `task_4a21ac8e6e03` → `ctx_8831ae1c5c06`(review). 진행: R-T17-2(review2), F-T15-1, F-T16-1 |
+| 2026-08-17 18:48 | R-T17-2 verdict **approve** → 최종 게이트(로컬 게이트 E-5, ops/windows에 비밀 없음) → **PR #17 squash merge**(main d171853). T17 worker release·worktree 제거. 남은 open PR: #18(T15, F-T15-1 진행), #19(T16, F-T16-1 진행), #20(T8b, R-T8b-1 진행) |
