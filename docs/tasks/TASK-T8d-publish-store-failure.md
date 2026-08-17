@@ -1,7 +1,7 @@
 # TASK-T8d-publish-store-failure
 
 - Task: T8d 엔진 버그픽스 — `#publish`의 `markEffectPublished` store 실패로 committed effect가 재시작까지 미발행 (`docs/tasks/TASK_SPECS.md` §T8, 공통 규약)
-- Branch: `dnhynk/t8d-publish-store-failure` · PR: #(미생성)
+- Branch: `dnhynk/t8d-publish-store-failure` · PR: #22
 - Orca: task `task_43eb61f3968d` · dispatch `ctx_f8e5bd22e56b`
 - Spec sections read: §7.3(3)(6)(7)(8), §7.5, §9.1, §9.2, §11("disk-full", "상태 복구", "유료 무결성")
 - BOARD decisions/assumptions relied on: A-5(SQLite 단일 파일·WAL), A-19(store 실패 → `writer_failing` → 엔진 restart → 소진 시 `safe_stopped`), E-5(GitHub Actions 결제 차단 → CI 실행 불가)
