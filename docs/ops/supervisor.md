@@ -42,6 +42,8 @@ offline → starting → live → degraded → recovering → live
 `safe_stopped`에 들어가면:
 
 - **예약된 재시작을 전부 취소한다**(`registry.stopAll()`). backoff를 기다리던 재시작이 남아 있으면 안전 정지 처리가 끈 인코더를 다시 켜게 된다 — §9.1·§9.2가 금지하는 자동 재시작이다(리뷰 round 1 B1). 실행 직전에도 상태를 한 번 더 확인한다.
+- **이미 `await` 안에 들어간 재시작 액션에는 abort 신호를 보낸다**(리뷰 round 3 B2). 타이머 취소로는 이미 시작된 액션을 되돌릴 수 없다. 그래서 `RestartAction`은 `AbortSignal`을 받고, **외부 효과 직전마다 다시 확인해야 한다** — chat 재시작이 `stop()` → `start()`의 2단계라 정확히 이 형태다. 중단된 시도는 완료로 세지 않는다(예산도 쓰지 않는다).
+- **시작 순서가 진행 중이면 즉시 중단한다**(리뷰 round 3 B1). HTTP 리스너가 `supervisor.start()`보다 먼저 뜨므로 kill switch는 시퀀스가 YouTube·OBS I/O를 기다리는 동안 도착할 수 있다. 시퀀스는 각 step **전과 후**에 중단 여부를 확인하고, 진행 중이던 step의 결과는 버리며(`status: 'cancelled'`) 그 뒤 step(streamService·startStream·goLive·chatSource·publish)은 실행하지 않는다. 중단은 *실패가 아니므로* 재시도를 쓰지 않고 실패 alert도 내지 않는다. `start()`는 시퀀스 뒤에서 dead-man·screenshot을 켜기 전에 한 번 더 확인한다.
 - dead-man push를 **멈춘다**. 외부 monitor가 사건을 올려서 사람을 부르는 것이 목적이다([S23]).
 - DB를 아예 열지 못해 supervisor가 만들어지기도 전이라면, `main.ts`가 같은 분류로 critical alert를 보내고 프로세스를 종료한다(자동 재시작 없음).
 

@@ -22,7 +22,16 @@ import { SUPERVISED_COMPONENTS, type ComponentHealth, type SupervisedComponent }
  * component, and every component covered.
  */
 
-export type RestartAction = () => Promise<void>
+/**
+ * One restart attempt.
+ *
+ * The `signal` is aborted the moment the run stops. An action that awaits
+ * anything **must check it again before every outward effect**: cancelling a
+ * timer cannot unwind an action that is already inside its `await`, and the chat
+ * restart — `stop()` then `start()` — is exactly the shape that would otherwise
+ * start a listener after `safe_stopped` (review round 3).
+ */
+export type RestartAction = (signal: AbortSignal) => Promise<void> | void
 
 export type RestartRequestOutcome =
   /** An attempt was scheduled (after backoff) or is already running. */
@@ -106,6 +115,7 @@ export class RestartSupervisor {
   #exhausted = false
   #stopped = false
   #timer: TimerHandle | undefined
+  #abort: AbortController | undefined
   #lastAttemptAt: string | null = null
   #lastError: string | null = null
 
@@ -152,6 +162,10 @@ export class RestartSupervisor {
   stop(): void {
     this.#stopped = true
     this.#cancelPending()
+    // An attempt already inside its `await` cannot be unwound, so it is told:
+    // the action checks the signal before whatever it does next.
+    this.#abort?.abort()
+    this.#abort = undefined
   }
 
   #cancelPending(): void {
@@ -258,8 +272,20 @@ export class RestartSupervisor {
       })
       return
     }
+    const abort = new AbortController()
+    this.#abort = abort
     try {
-      await restart()
+      await restart(abort.signal)
+      if (abort.signal.aborted) {
+        // The run stopped while the action was awaiting. Whatever it managed to
+        // do, it is not a completed restart and it is not counted as one.
+        this.#logger.warn('supervisor restart abandoned: the run stopped mid-action', {
+          component: this.component,
+          attempt: this.#attempts,
+          reason,
+        })
+        return
+      }
       this.#lastError = null
       this.#logger.info('supervisor restart completed', {
         component: this.component,
@@ -275,8 +301,13 @@ export class RestartSupervisor {
         error: this.#lastError,
       })
     } finally {
+      if (this.#abort === abort) this.#abort = undefined
       this.#inFlight = false
-      if (this.#attempts >= this.#options.backoff.maxAttempts && this.#lastError !== null) {
+      if (
+        !this.#stopped &&
+        this.#attempts >= this.#options.backoff.maxAttempts &&
+        this.#lastError !== null
+      ) {
         this.#markExhausted(reason)
       }
     }

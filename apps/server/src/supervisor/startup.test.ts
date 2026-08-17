@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 
-import { FakeClock } from '../testing/fake-clock.js'
+import { FakeClock, flushMicrotasks } from '../testing/fake-clock.js'
 import { runStartupSequence, STARTUP_STEP_ORDER, type StartupSteps } from './startup.js'
 
 /**
@@ -90,6 +90,82 @@ describe('start-up sequence', () => {
     expect(onStep).toHaveBeenCalledTimes(STARTUP_STEP_ORDER.length)
     expect(result.steps.every((step) => step.status === 'completed')).toBe(true)
     expect(result.steps.every((step) => step.at === '2026-01-01T00:00:00.000Z')).toBe(true)
+  })
+
+  describe('cancellation (review round 3)', () => {
+    it('runs nothing once the run has stopped', async () => {
+      const order: string[] = []
+
+      const result = await runStartupSequence({
+        steps: recordingSteps(order),
+        clock: new FakeClock(),
+        canContinue: () => false,
+      })
+
+      expect(order).toEqual([])
+      expect(result.aborted).toBe(true)
+      expect(result.completed).toBe(false)
+      expect(result.steps.every((step) => step.status === 'cancelled')).toBe(true)
+    })
+
+    it('discards the step that was in flight and runs nothing after it', async () => {
+      // The step's I/O cannot be unwound, but its result is not carried forward
+      // and the encoder/broadcast steps behind it never run (spec §9.1, §9.2).
+      const order: string[] = []
+      let running = true
+      let release = (): void => {}
+      const blocked = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      const steps: StartupSteps = {
+        ...recordingSteps(order),
+        broadcast: async () => {
+          order.push('broadcast')
+          await blocked
+        },
+      }
+
+      const sequence = runStartupSequence({
+        steps,
+        clock: new FakeClock(),
+        canContinue: () => running,
+      })
+      await flushMicrotasks()
+      running = false
+      release()
+      const result = await sequence
+
+      expect(order).toEqual(['db', 'engine', 'retention', 'broadcast'])
+      expect(result.aborted).toBe(true)
+      expect(result.failedStep).toBeNull()
+      expect(result.steps.find((step) => step.step === 'broadcast')?.status).toBe('cancelled')
+    })
+
+    it('reports a step that threw because the run stopped as cancelled, not failed', async () => {
+      // A step that notices the cancellation by throwing must not spend a
+      // start-up retry or raise a failure alert.
+      const order: string[] = []
+      let running = true
+      const steps: StartupSteps = {
+        ...recordingSteps(order),
+        broadcast: async () => {
+          running = false
+          await Promise.resolve()
+          throw new Error('aborted mid-call')
+        },
+      }
+
+      const result = await runStartupSequence({
+        steps,
+        clock: new FakeClock(),
+        canContinue: () => running,
+      })
+
+      expect(result.aborted).toBe(true)
+      expect(result.failedStep).toBeNull()
+      expect(result.error).toBeNull()
+      expect(result.steps.find((step) => step.step === 'broadcast')?.status).toBe('cancelled')
+    })
   })
 
   it('awaits an asynchronous step before starting the next one', async () => {

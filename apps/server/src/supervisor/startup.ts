@@ -55,13 +55,27 @@ export const STARTUP_STEP_ORDER = [
 
 export type StartupStep = (typeof STARTUP_STEP_ORDER)[number]
 
-export type StartupStepAction = () => Promise<void> | void
+/**
+ * What a step is told while it runs. A step that waits on I/O — every step from
+ * `broadcast` on does — must check `cancelled()` before each outward effect:
+ * the run can stop while it is waiting, and after that nothing may start a
+ * broadcast, an encoder or a listener (spec §9.1, §9.2; review round 3).
+ */
+export interface StartupStepContext {
+  cancelled(): boolean
+}
+
+export type StartupStepAction = (context: StartupStepContext) => Promise<void> | void
 
 export type StartupSteps = Readonly<Record<StartupStep, StartupStepAction>>
 
 export interface StartupStepResult {
   readonly step: StartupStep
-  readonly status: 'completed' | 'failed' | 'skipped'
+  /**
+   * `cancelled` is the step that was in flight when the run stopped, plus every
+   * step after it: their results are discarded and they are not run.
+   */
+  readonly status: 'completed' | 'failed' | 'skipped' | 'cancelled'
   readonly at: string
   readonly durationMs: number | null
   /** Machine-stable failure text; `null` unless the step failed. */
@@ -73,6 +87,8 @@ export interface StartupResult {
   readonly steps: readonly StartupStepResult[]
   readonly failedStep: StartupStep | null
   readonly error: string | null
+  /** True when the sequence stopped because the run did (not a step failure). */
+  readonly aborted: boolean
 }
 
 export interface RunStartupOptions {
@@ -80,55 +96,96 @@ export interface RunStartupOptions {
   readonly clock: Clock
   readonly logger?: Logger
   readonly onStep?: (result: StartupStepResult) => void
+  /**
+   * Checked before every step *and* again after each awaited step returns.
+   * `false` abandons the sequence: the awaited step's result is discarded and
+   * nothing later runs. Absent means "nothing can stop this run", which only the
+   * unit tests of ordering want.
+   */
+  readonly canContinue?: () => boolean
 }
 
 export async function runStartupSequence(options: RunStartupOptions): Promise<StartupResult> {
   const logger = options.logger ?? silentLogger
   const results: StartupStepResult[] = []
+  const canContinue = options.canContinue ?? (() => true)
+  const context: StartupStepContext = { cancelled: () => !canContinue() }
   let failedStep: StartupStep | null = null
   let error: string | null = null
+  let aborted = false
 
-  for (const step of STARTUP_STEP_ORDER) {
-    if (failedStep !== null) {
-      const skipped: StartupStepResult = {
-        step,
-        status: 'skipped',
-        at: options.clock.nowUtcIso(),
-        durationMs: null,
-        error: null,
-      }
-      results.push(skipped)
-      options.onStep?.(skipped)
-      continue
-    }
-
-    const startedAt = options.clock.monotonicMs()
-    let result: StartupStepResult
-    try {
-      await options.steps[step]()
-      result = {
-        step,
-        status: 'completed',
-        at: options.clock.nowUtcIso(),
-        durationMs: options.clock.monotonicMs() - startedAt,
-        error: null,
-      }
-      logger.info('startup step completed', { step, durationMs: result.durationMs })
-    } catch (caught) {
-      failedStep = step
-      error = caught instanceof Error ? caught.message : String(caught)
-      result = {
-        step,
-        status: 'failed',
-        at: options.clock.nowUtcIso(),
-        durationMs: options.clock.monotonicMs() - startedAt,
-        error,
-      }
-      logger.error('startup step failed', { step, error })
+  const record = (
+    step: StartupStep,
+    status: StartupStepResult['status'],
+    durationMs: number | null,
+    stepError: string | null,
+  ): void => {
+    const result: StartupStepResult = {
+      step,
+      status,
+      at: options.clock.nowUtcIso(),
+      durationMs,
+      error: stepError,
     }
     results.push(result)
     options.onStep?.(result)
   }
 
-  return { completed: failedStep === null, steps: results, failedStep, error }
+  for (const step of STARTUP_STEP_ORDER) {
+    if (aborted) {
+      record(step, 'cancelled', null, null)
+      continue
+    }
+    if (failedStep !== null) {
+      record(step, 'skipped', null, null)
+      continue
+    }
+    // Before: the run may have stopped while the previous step was awaiting.
+    if (!canContinue()) {
+      aborted = true
+      logger.warn('startup cancelled: the run has stopped', { step })
+      record(step, 'cancelled', null, null)
+      continue
+    }
+
+    const startedAt = options.clock.monotonicMs()
+    try {
+      await options.steps[step](context)
+      // After: the step waited on I/O, and the run may have stopped meanwhile.
+      // Its result is discarded rather than carried into the next step — the
+      // encoder and the broadcast must not be touched after a safety stop
+      // (spec §9.1, §9.2; review round 3).
+      if (!canContinue()) {
+        aborted = true
+        logger.warn('startup cancelled while a step was in flight', { step })
+        record(step, 'cancelled', options.clock.monotonicMs() - startedAt, null)
+        continue
+      }
+      const durationMs = options.clock.monotonicMs() - startedAt
+      record(step, 'completed', durationMs, null)
+      logger.info('startup step completed', { step, durationMs })
+    } catch (caught) {
+      error = caught instanceof Error ? caught.message : String(caught)
+      if (!canContinue()) {
+        // A step that threw *because* the run stopped is a cancellation, not a
+        // start-up failure: it must not spend a retry or raise a failure alert.
+        aborted = true
+        logger.warn('startup cancelled while a step was in flight', { step, error })
+        record(step, 'cancelled', options.clock.monotonicMs() - startedAt, error)
+        error = null
+        continue
+      }
+      failedStep = step
+      record(step, 'failed', options.clock.monotonicMs() - startedAt, error)
+      logger.error('startup step failed', { step, error })
+    }
+  }
+
+  return {
+    completed: failedStep === null && !aborted,
+    steps: results,
+    failedStep,
+    error,
+    aborted,
+  }
 }

@@ -182,12 +182,17 @@ export class Supervisor {
     if (this.#state === 'safe_stopped') return
 
     await this.#runStartup()
+    // The sequence waits on I/O, so a kill switch or a policy stop can land
+    // while it runs. Nothing after it may start something (review round 3).
+    if (!this.#outwardActionsAllowed()) return
 
     this.#options.deadMan?.start()
     this.#options.screenshots?.start()
     await this.#runPreflight()
     await this.#evaluate('startup_complete')
-    if (this.#options.autoEvaluate !== false) this.#scheduleNext()
+    if (this.#options.autoEvaluate !== false && this.#outwardActionsAllowed()) {
+      this.#scheduleNext()
+    }
   }
 
   /** Stops the supervisor's own timers. It never stops the components. */
@@ -434,7 +439,7 @@ export class Supervisor {
           onExhausted: (event) => {
             void this.#handleExhausted(event)
           },
-          canRestart: () => this.#restartsAllowed(),
+          canRestart: () => this.#outwardActionsAllowed(),
         }),
       )
     }
@@ -458,8 +463,16 @@ export class Supervisor {
     this.registry.assertComplete()
   }
 
-  /** No restart, of any component, once the run has stopped (spec §9.1, §9.2). */
-  #restartsAllowed(): boolean {
+  /**
+   * The one gate on every **outward** action: a component restart, a start-up
+   * step, the evaluation loop's next tick. Once the run has stopped, nothing
+   * starts a broadcast, an encoder or a listener again (spec §9.1, §9.2).
+   *
+   * It is asked before *and after* each await, because both the start-up
+   * sequence and a restart action can be waiting on I/O when the stop arrives
+   * (review rounds 1 and 3).
+   */
+  #outwardActionsAllowed(): boolean {
     return this.#safeStop === null && this.#state !== 'safe_stopped' && !this.#stopped
   }
 
@@ -495,13 +508,23 @@ export class Supervisor {
    */
   async #runStartup(): Promise<void> {
     if (this.#options.startup === undefined) return
+    if (!this.#outwardActionsAllowed()) return
     this.#startupAttempts += 1
     this.#startupResult = await runStartupSequence({
       steps: this.#options.startup,
       clock: this.#clock,
       logger: this.#logger,
+      canContinue: () => this.#outwardActionsAllowed(),
     })
     if (this.#startupResult.completed) return
+    if (this.#startupResult.aborted) {
+      // The run stopped mid-sequence. That is not a start-up failure: it spends
+      // no retry, raises no failure alert, and above all starts nothing.
+      this.#logger.warn('startup abandoned: the run has stopped', {
+        attempt: this.#startupAttempts,
+      })
+      return
+    }
 
     const maxAttempts = this.#config.startup.maxAttempts
     await this.#alert('warning', 'supervisor.startup_failed', {

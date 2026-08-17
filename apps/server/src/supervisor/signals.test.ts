@@ -138,13 +138,20 @@ describe('health aggregator (spec §9.4)', () => {
   })
 
   describe('chat readiness comes from the transport, not from its bookkeeping (round 2)', () => {
-    /** The signals T9's own state machine emits, not a hand-written stand-in. */
-    function realChatSignals(mutate: (state: ChatSourceState) => void = () => {}): HealthSignal[] {
+    /**
+     * The signals T9's own state machine emits, not a hand-written stand-in.
+     * `channelState` is what `GrpcChatSource.channelState()` would report, so a
+     * dialling or failing channel is described the same way the source does.
+     */
+    function realChatSignals(
+      mutate: (state: ChatSourceState) => void = () => {},
+      channelState: string | null = null,
+    ): HealthSignal[] {
       const clock = new FakeClock()
       const state = new ChatSourceState(clock, testChatConfig().grpc.keepalive)
       mutate(state)
-      const channelState = state.mode === 'grpc' ? 'READY' : null
-      return buildChatHealthSignals(state.observe(null, channelState), clock)
+      const observed = channelState ?? (state.mode === 'grpc' ? 'READY' : null)
+      return buildChatHealthSignals(state.observe(null, observed), clock)
     }
 
     it('does not call an idle source healthy (reviewer reproduction)', () => {
@@ -209,17 +216,19 @@ describe('health aggregator (spec §9.4)', () => {
     })
 
     it('does not let a channel that is still dialling count as delivering', () => {
-      // `keepalive` is `ok` for any channel state that is not a failure —
-      // including one that has never delivered a message — so it stays out of
-      // the readiness set and can only degrade the family.
+      // A real gRPC source whose channel is `CONNECTING` and which has had no
+      // response yet: `keepalive` is `ok` (the channel is not failing) while
+      // `transport` is still `unknown`. That is why keepalive stays out of the
+      // readiness set — it can only degrade the family (review round 3 asked for
+      // this case to come from the real state object, not a hand-built signal).
+      const dialing = realChatSignals((state) => {
+        state.setMode('grpc')
+      }, 'CONNECTING')
+      expect(dialing[0]?.status).toBe('unknown')
+      expect(dialing[1]?.status).toBe('ok')
+
       const aggregator = new HealthAggregator(config)
-      aggregator.report(
-        signal('youtube.chat.transport', 'unknown', {
-          component: 'youtube-chat',
-          reason: 'reconnecting',
-        }),
-      )
-      aggregator.report(signal('youtube.chat.keepalive', 'ok', { component: 'youtube-chat' }))
+      for (const item of dialing) aggregator.report(item)
 
       const result = aggregator.evaluate(readings())
 
@@ -228,14 +237,18 @@ describe('health aggregator (spec §9.4)', () => {
     })
 
     it('still lets keepalive degrade the family', () => {
+      // Connected, but the gRPC channel has fallen into `TRANSIENT_FAILURE`:
+      // degradation is decided before readiness, so the family is degraded even
+      // though the transport signal itself says `ok`.
+      const failing = realChatSignals((state) => {
+        state.setMode('grpc')
+        state.recordResponse()
+      }, 'TRANSIENT_FAILURE')
+      expect(failing[0]?.status).toBe('ok')
+      expect(failing[1]?.status).toBe('degraded')
+
       const aggregator = new HealthAggregator(config)
-      aggregator.report(signal('youtube.chat.transport', 'ok', { component: 'youtube-chat' }))
-      aggregator.report(
-        signal('youtube.chat.keepalive', 'degraded', {
-          component: 'youtube-chat',
-          reason: 'channel_transient_failure',
-        }),
-      )
+      for (const item of failing) aggregator.report(item)
 
       const result = aggregator.evaluate(readings())
 

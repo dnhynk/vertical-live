@@ -97,41 +97,49 @@ export function buildStartupSteps(deps: RuntimeDeps): StartupSteps {
       }
       deps.retention.start()
     },
-    broadcast: async () => {
+    // Every step from here on reaches YouTube or OBS, so each one asks whether
+    // the run is still going before it does (review round 3). The sequence asks
+    // the same question around each await; this is the inner half of that guard.
+    broadcast: async (context) => {
       if (deps.broadcast === null) {
         skip('broadcast', 'not_configured')
         return
       }
+      if (context.cancelled()) return
       await deps.broadcast.ensureBound()
     },
-    streamService: async () => {
+    streamService: async (context) => {
       if (deps.obs === null) {
         skip('streamService', 'not_configured')
         return
       }
+      if (context.cancelled()) return
       // BOARD A-16: the vault is the stream key's system of record and the key
       // is injected at runtime, before the output starts.
       await deps.obs.setStreamServiceFromVault()
     },
-    startStream: async () => {
+    startStream: async (context) => {
       if (deps.obs === null) {
         skip('startStream', 'not_configured')
         return
       }
+      if (context.cancelled()) return
       await deps.obs.startStream()
     },
-    goLive: async () => {
+    goLive: async (context) => {
       if (deps.broadcast === null) {
         skip('goLive', 'not_configured')
         return
       }
+      if (context.cancelled()) return
       await deps.broadcast.goLive()
     },
-    chatSource: async () => {
+    chatSource: async (context) => {
       if (deps.chat === null) {
         skip('chatSource', 'not_configured')
         return
       }
+      if (context.cancelled()) return
       deps.chat.start()
       // A step that "succeeded" without a source running is what let a
       // configured chat disappear silently (review round 1, B2). Round 2 found
@@ -141,6 +149,9 @@ export function buildStartupSteps(deps: RuntimeDeps): StartupSteps {
       // and fails the sequence if it never does.
       const deadlineMs = deps.clock.monotonicMs() + deps.config.chatStart.timeoutMs
       while (!deps.chat.started()) {
+        // A wait of up to `chatStart.timeoutMs` is exactly the window a kill
+        // switch is most likely to land in, so the loop watches for it too.
+        if (context.cancelled()) return
         if (deps.clock.monotonicMs() >= deadlineMs) {
           throw new Error(
             `chat source did not start within ${deps.config.chatStart.timeoutMs}ms; the configured input path (spec §9.4(3)) is not running`,
@@ -149,11 +160,12 @@ export function buildStartupSteps(deps: RuntimeDeps): StartupSteps {
         await sleep(deps.clock, deps.config.chatStart.pollIntervalMs)
       }
     },
-    publish: async () => {
+    publish: async (context) => {
       if (deps.broadcast === null) {
         skip('publish', 'not_configured')
         return
       }
+      if (context.cancelled()) return
       if (!deps.broadcast.publishable()) {
         // Spec §9.1 leaves 최초 공개 with the operator; a `private` broadcast is
         // the configured outcome, not a failure.

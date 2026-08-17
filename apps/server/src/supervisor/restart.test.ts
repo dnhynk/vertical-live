@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 
-import { FakeClock } from '../testing/fake-clock.js'
+import { FakeClock, flushMicrotasks } from '../testing/fake-clock.js'
 import { createExponentialBackoff } from '../youtube/quota/backoff.js'
 import {
   DelegatedRestartError,
@@ -224,6 +224,69 @@ describe('RestartSupervisor', () => {
 
       expect(restart).not.toHaveBeenCalled()
       expect(supervisor.inFlight).toBe(false)
+    })
+
+    it('tells an action that is already awaiting to stop (review round 3)', async () => {
+      // The reviewer's reproduction, with the shape of the real chat action:
+      // `stop()` the source, await it, then `start()` it again. Cancelling the
+      // backoff timer cannot help here — the action is already past it — so the
+      // action is given a signal and re-checks it before its outward effect.
+      const clock = new FakeClock()
+      const effects: string[] = []
+      let release = (): void => {}
+      const stopping = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      const supervisor = new RestartSupervisor({
+        component: 'chat-source',
+        clock,
+        backoff: backoff(3),
+        restart: async (signal) => {
+          effects.push('stop-began')
+          await stopping
+          if (signal.aborted) return
+          effects.push('start-after-stop')
+        },
+      })
+
+      supervisor.request('transport')
+      await clock.advance(1000)
+      expect(effects).toEqual(['stop-began'])
+
+      supervisor.stop()
+      release()
+      await flushMicrotasks()
+
+      expect(effects).toEqual(['stop-began'])
+      expect(supervisor.inFlight).toBe(false)
+    })
+
+    it('does not count an abandoned attempt as a completed restart', async () => {
+      const clock = new FakeClock()
+      let release = (): void => {}
+      const pending = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      const supervisor = new RestartSupervisor({
+        component: 'engine',
+        clock,
+        backoff: backoff(1),
+        restart: async () => {
+          await pending
+        },
+        onExhausted: () => {
+          throw new Error('an abandoned attempt must not exhaust the budget')
+        },
+      })
+
+      supervisor.request('writer_failing')
+      await clock.advance(1000)
+      supervisor.stop()
+      release()
+      await flushMicrotasks()
+
+      expect(supervisor.health().lastError).toBeNull()
+      expect(supervisor.exhausted).toBe(false)
     })
 
     it('does not hand the budget back to a stopped component', () => {

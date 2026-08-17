@@ -4,6 +4,8 @@ import type { HealthSignal } from '../../health/types.js'
 import { FakeClock } from '../../testing/fake-clock.js'
 import { RecordingAlertSink } from '../alerts.js'
 import { loadSupervisorConfig, type SupervisorConfig } from '../config.js'
+import type { DeadManMonitor } from '../deadman.js'
+import type { DiagnosticScreenshotRecorder } from '../screenshot.js'
 import { PREFLIGHT_OK, type PreflightProbes } from '../preflight.js'
 import { Supervisor, type ComponentActions } from '../supervisor.js'
 import type { StartupSteps } from '../startup.js'
@@ -114,6 +116,9 @@ export interface HarnessOptions {
    * without advancing the fake clock past the other families' freshness windows.
    */
   readonly restartDelayMs?: number
+  /** Real collaborators, so a test can assert they were never started. */
+  readonly deadMan?: DeadManMonitor
+  readonly screenshots?: DiagnosticScreenshotRecorder
 }
 
 /** All six pre-checks passing; a test that cares overrides the ones it tests. */
@@ -195,6 +200,8 @@ export function createSupervisorHarness(options: HarnessOptions = {}): Superviso
     ...(options.preflight === undefined ? {} : { preflight: options.preflight }),
     ...(options.startup === undefined ? {} : { startup: options.startup }),
     ...(options.onSafeStop === undefined ? {} : { onSafeStop: options.onSafeStop }),
+    ...(options.deadMan === undefined ? {} : { deadMan: options.deadMan }),
+    ...(options.screenshots === undefined ? {} : { screenshots: options.screenshots }),
   })
 
   return {

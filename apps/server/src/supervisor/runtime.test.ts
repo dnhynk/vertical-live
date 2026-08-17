@@ -167,6 +167,35 @@ describe('buildStartupSteps', () => {
     expect(result.error).toContain('chat source did not start')
   })
 
+  it('stops waiting for the listener when the run stops (round 3)', async () => {
+    // The chat wait is the longest window in the sequence, so it is also the
+    // most likely one for a kill switch to land in: the loop watches for it
+    // instead of holding the sequence open until the timeout.
+    let polls = 0
+    let running = true
+    const runtime = deps({
+      chat: {
+        start: () => {},
+        started: () => {
+          polls += 1
+          if (polls === 2) running = false
+          return false
+        },
+      },
+    })
+
+    const result = await runStartupSequence({
+      steps: buildStartupSteps(runtime),
+      clock: new FakeClock(),
+      canContinue: () => running,
+    })
+
+    expect(result.aborted).toBe(true)
+    // Not a timeout failure: the run stopped, so no retry is spent.
+    expect(result.failedStep).toBeNull()
+    expect(polls).toBeLessThan(5)
+  })
+
   it('waits for the listener to report that it is really running (round 2)', async () => {
     // `started()` flips only after the background loop has selected a path, so
     // the step polls instead of accepting the object the moment it exists.

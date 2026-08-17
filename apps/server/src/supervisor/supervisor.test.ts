@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest'
 
 import { testChatConfig } from '../testing/chat-test-support.js'
+import { FakeClock, flushMicrotasks } from '../testing/fake-clock.js'
 import { buildChatHealthSignals } from '../youtube/chat/health.js'
 import { ChatSourceState } from '../youtube/chat/state.js'
+import { DeadManMonitor } from './deadman.js'
+import { STARTUP_STEP_ORDER, type StartupStep, type StartupSteps } from './startup.js'
 import { SUPERVISED_COMPONENTS } from './types.js'
 import {
   BASE_ENGINE_HEALTH,
@@ -503,6 +506,70 @@ describe('supervisor state machine', () => {
         expect(harness.supervisor.health().safeStop?.kind).toBe('kill_switch')
         expect(harness.supervisor.health().safeStop?.detail['source']).toBe(source)
       }
+    })
+
+    it('abandons the start-up sequence when a kill lands mid-step (review round 3)', async () => {
+      // The HTTP surface listens before `supervisor.start()` runs, so a kill can
+      // arrive while the sequence is awaiting YouTube or OBS. The reviewer's
+      // reproduction: block `broadcast`, stop the run, release it — everything
+      // after must not run, and the dead-man/screenshot loops must not start.
+      const calls: string[] = []
+      let releaseBroadcast = (): void => {}
+      const broadcasting = new Promise<void>((resolve) => {
+        releaseBroadcast = resolve
+      })
+      const step = (name: StartupStep) => async (): Promise<void> => {
+        calls.push(name)
+        if (name === 'broadcast') await broadcasting
+      }
+      const steps = Object.fromEntries(
+        STARTUP_STEP_ORDER.map((name) => [name, step(name)]),
+      ) as unknown as StartupSteps
+
+      const clock = new FakeClock()
+      const deadMan = new DeadManMonitor({
+        pushUrl: () => Promise.resolve('https://kuma.example/api/push/synthetic'),
+        config: { enabled: true, intervalMs: 60_000, requestTimeoutMs: 1000 },
+        clock,
+        fetchImpl: (() =>
+          Promise.reject(new Error('must not be called'))) as unknown as typeof fetch,
+      })
+      const harness = createSupervisorHarness({
+        preflight: passingPreflight(),
+        startup: steps,
+        deadMan,
+      })
+      harness.pushHealthy()
+
+      const starting = harness.supervisor.start()
+      await flushMicrotasks()
+      expect(calls).toEqual(['db', 'engine', 'retention', 'broadcast'])
+
+      harness.supervisor.onKillSwitch({
+        source: 'http',
+        reason: 'operator',
+        at: harness.clock.nowUtcIso(),
+      })
+      await flushMicrotasks()
+      releaseBroadcast()
+      await starting
+
+      // Nothing after the in-flight step ran: no stream key injection, no
+      // encoder start, no go-live, no listener, no publication.
+      expect(calls).toEqual(['db', 'engine', 'retention', 'broadcast'])
+      expect(harness.supervisor.state).toBe('safe_stopped')
+      expect(deadMan.running).toBe(false)
+
+      const result = harness.supervisor.startupResult
+      expect(result?.aborted).toBe(true)
+      expect(result?.completed).toBe(false)
+      // A cancelled sequence is not a failed one: it spends no retry and raises
+      // no start-up failure alert.
+      expect(result?.failedStep).toBeNull()
+      expect(harness.alerts.ofKind('supervisor.startup_failed')).toHaveLength(0)
+      expect(
+        result?.steps.filter((entry) => entry.status === 'cancelled').map((entry) => entry.step),
+      ).toEqual(['broadcast', 'streamService', 'startStream', 'goLive', 'chatSource', 'publish'])
     })
 
     it('cancels a restart that was already scheduled (review round 1, B1)', async () => {

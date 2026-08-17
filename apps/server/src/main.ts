@@ -526,16 +526,23 @@ const supervisor: Supervisor = new Supervisor({
       engine.start()
       return Promise.resolve()
     },
-    chatSource: async () => {
+    // Two-phase, so it is the action that has to re-check: stopping the source
+    // awaits, and by the time it returns the run may have entered
+    // `safe_stopped`. Starting a listener after that is exactly the automatic
+    // restart §9.1/§9.2 forbid (review round 3).
+    chatSource: async (signal) => {
       await chatSource?.stop()
+      if (signal.aborted) return
       chatSource?.start()
     },
-    obsStream: async () => {
+    obsStream: async (signal) => {
       if (obsControl === null) throw new Error('obs integration is not configured')
+      if (signal.aborted) return
       await obsControl.startStream()
     },
-    rendererSource: async () => {
+    rendererSource: async (signal) => {
       if (obsControl === null) throw new Error('obs integration is not configured')
+      if (signal.aborted) return
       await obsControl.refreshBrowserSource()
     },
     obsProcess: () =>
