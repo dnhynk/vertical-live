@@ -103,6 +103,8 @@ npm run obs:probe
 | `--json` | 사람이 읽는 표 대신 JSON 한 덩이 |
 | `--fake` | 실제 OBS 대신 in-process 가짜 obs-websocket v5 서버에 붙는다. **probe 자체를 검증할 뿐 OBS 스모크가 아니다** |
 
+옵션은 `--` 뒤에 붙여야 npm이 스크립트로 전달한다(`npm run obs:probe -- --fake`). `--`를 빼면 npm이 `--fake`를 자기 config 플래그로 먹어 실제 OBS 접속을 시도한다.
+
 실패 시 exit code 1과 한 줄 사유를 낸다(예: `obs probe failed: connect ECONNREFUSED 127.0.0.1:4455` → WebSocket 서버가 꺼져 있거나 포트가 다르다).
 
 ## 5. 프로파일 값과 공식 권장값 대조 (TASK_SPECS §T2 합격 기준 3)
@@ -144,7 +146,7 @@ npm run obs:probe
 대신 검증한 것:
 
 - 가짜 obs-websocket v5 서버(핸드셰이크·인증·요청/응답·이벤트·강제 종료를 wire protocol 수준에서 구현)에 대한 자동 테스트
-- 같은 가짜 서버를 상대로 `npm run obs:probe --fake`를 **실제 실행**(출력은 `docs/tasks/TASK-T2-obs-monitor.md`)
+- 같은 가짜 서버를 상대로 `npm run obs:probe -- --fake`를 **실제 실행**(출력은 `docs/tasks/TASK-T2-obs-monitor.md`)
 - `ops/obs/`의 프로파일·씬 파일 값을 [S26][S27]·services.json과 대조하는 테스트
 
 사용자가 §2를 수행해 WebSocket 서버를 켠 뒤 `npm run obs:probe`를 돌리면 이 항목이 닫힌다. 그 출력에서 확인할 것:

@@ -56,6 +56,8 @@ protocol.md의 Hello 예시와 Identify 예시는 **같은 세션의 쌍이 아�
 
 2026-08-16 14:47 UTC 호스트 BSOD(bugcheck 0x50)로 이전 worker 세션이 소실됐다. worktree에 남은 미커밋 작업(Plan 1~6, 10)을 `wip(obs): recover in-progress obs-websocket client after host crash`로 커밋한 뒤 `origin/main`(4bae2ce)에 rebase하고 Plan 7부터 이어갔다. 재개 dispatch `ctx_67c1bd15a86b`.
 
+2026-08-17 03:24 UTC 같은 bugcheck 0x50으로 **두 번째** 세션이 소실됐다. 커밋된 HEAD는 `d51b3fd`(Plan 1~11)였고 미커밋으로 Plan 12~14 산출물(`ops/`, `docs/ops/obs-setup.md`, `apps/server/src/obs/profile.test.ts`)이 남아 있었다. 이를 `wip(obs): recover profile/docs after second host crash`로 먼저 커밋·push한 뒤 `origin/main`(789be11)에 rebase하고, 복구한 파일을 검증(게이트 5개 + probe 실행)하는 것으로 재개했다. 재개 dispatch `ctx_b7a70a2f34f8`.
+
 ## Assumptions / provisional values
 
 | 항목 | 값 | 라벨 | 이유 |
@@ -74,13 +76,107 @@ protocol.md의 Hello 예시와 Identify 예시는 **같은 세션의 쌍이 아�
 
 ### Acceptance criteria
 
-| # | 기준 | 상태(met/unmet/unverifiable) | 근거(테스트 파일·명령·출력) |
+| # | 기준 | 상태 | 근거(테스트 파일·명령·출력) |
 |---|---|---|---|
+| 1 | 가짜 obs-websocket v5 서버 또는 mock에 대한 테스트로 연결·인증·재연결·`GetStreamStatus` 파싱·이벤트 구독 검증 | **met** | `apps/server/src/testing/fake-obs-server.ts`(wire 수준 Hello/Identify/Identified·Request/RequestResponse·Event·강제 close)에 대해 `client.test.ts`(10) + `health.test.ts`(16) + `control.test.ts`(14) + `protocol.test.ts`(7) + `probe.test.ts`(8). `npm run test` → **11 files / 101 tests passed** (아래 Gates) |
+| 2 | 로컬 OBS 실제 연결 스모크(`npm run obs:probe`) 실행 후 출력 첨부, 없으면 "실행하지 않았음" 명시 | **실행하지 않았음(명시)** | **실제 OBS 스모크 실행하지 않았음: OBS 32.0.2 미실행 · obs-websocket 5.6.3 `server_enabled=false`, 호스트 설정 변경은 범위 밖**(코디네이터 결정 B, 2026-08-17). 대신 `npm run obs:probe -- --fake`를 **실제 실행**했고 출력은 아래 "obs:probe 실행 출력". 사용자용 실제 스모크 절차는 `docs/ops/obs-setup.md` §2·§4·§6 |
+| 3 | 프로파일 값이 [S26][S27]과 일치함을 문서에 표로 대조 | **met** | `docs/ops/obs-setup.md` §5 대조표(15행) + "출처에 값이 없어 우리가 정한 것"(5행). 표의 모든 행을 `apps/server/src/obs/profile.test.ts`(14 tests)가 `ops/obs/`의 실제 파일에 대해 검사하므로 문서와 파일이 갈라질 수 없다 |
 
 ### Gates (executed)
 
+2026-08-17, `origin/main` = `789be11` rebase 이후 실행.
+
 ```text
+$ npm run format:check
+> prettier --check .
+Checking formatting...
+All matched files use Prettier code style!
+
+$ npm run lint
+> eslint . && node scripts/check-no-legacy-imports.mjs
+check-no-legacy-imports: ok (0 legacy imports)
+
+$ npm run typecheck
+> tsc --build tsconfig.json
+(no output)
+
+$ npm run test
+> vitest run
+ Test Files  11 passed (11)
+      Tests  101 passed (101)
+   Duration  4.57s
+
+$ npm run build
+✓ 609 modules transformed.       (@vl/renderer)
+✓ built in 23.23s
+> @vl/server@0.0.0 build  > tsc --build
+> @vl/simulator@0.0.0 build  > tsc --build
 ```
+
+### obs:probe 실행 출력 (가짜 v5 서버 — 실제 OBS 아님)
+
+```text
+$ npm run obs:probe -- --fake
+
+NOTE: --fake probes an in-process fake obs-websocket v5 server. This verifies the probe,
+      not OBS. A real OBS smoke test needs a running OBS with its WebSocket server on.
+
+obs-websocket probe — ws://127.0.0.1:63143
+
+connection
+  obsWebSocketVersion       5.6.3
+  negotiatedRpcVersion      1
+  reconnectCount            0
+
+GetVersion
+  obsVersion                32.0.2
+  rpcVersion                1
+  platform                  windows
+  platformDescription       fake obs-websocket v5 server
+
+GetVideoSettings
+  base                      1080x1920
+  output                    1080x1920
+  fps                       30/1
+  matches 1080x1920@30      yes
+
+GetStreamStatus
+  outputActive              true
+  outputReconnecting        false
+  outputTimecode            00:00:30.000
+  outputDuration            30000
+  outputCongestion          0.02
+  outputBytes               37500000
+  outputSkippedFrames       1
+  outputTotalFrames         900
+
+scenes
+  current                   test-scene-live
+  all                       test-scene-live, test-scene-standby
+  browser sources           test-browser-source
+
+health signals (second sample)
+  obs.stream              ok
+                          {"outputActive":true,"outputReconnecting":false,"outputDurationMs":34000,"outputBytes":42500000}
+  obs.output_progress     ok
+                          {"outputActive":true,"bytesDelta":2500000,"durationDeltaMs":2000,"stalledSamples":0}
+  obs.frames              ok
+                          {"outputSkippedDelta":0,"outputTotalDelta":60,"outputSkippedRatio":0,"renderSkippedDelta":0,"renderTotalDelta":0,"renderSkippedRatio":null}
+  obs.congestion          ok
+                          {"outputCongestion":0.02}
+```
+
+가짜 서버의 값은 CLAUDE.md §3에 따라 명백한 합성값이다(`platformDescription = "fake obs-websocket v5 server"`, 씬 이름 `test-scene-*`). 실제 OBS를 흉내 낸 참여·정체성 데이터는 없다.
+
+거부 경로도 실제로 확인했다. `--`를 빼면 npm이 `--fake`를 자기 config 플래그로 먹어 실제 OBS 접속 경로로 떨어진다:
+
+```text
+$ npm run obs:probe --fake
+obs probe failed: secret not configured: obs.websocketPassword (provider: env) — set VL_OBS_PASSWORD (spec §10.2 requires authentication on obs-websocket)
+npm error code 1
+```
+
+비밀번호 값은 메시지에 들어가지 않는다(이름만). 이 실행을 근거로 `docs/ops/obs-setup.md` §4에 `--` 전달 규칙을 명시했다.
 
 ## Not done / out of scope
 
