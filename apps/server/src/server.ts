@@ -10,6 +10,7 @@ import type { SimulatorIngestEndpoint } from './engine/ingest.js'
 import { isLoopbackAddress } from './engine/ingest.js'
 import type { EngineMetricsSnapshot } from './engine/metrics.js'
 import type { RendererHealthReport } from './engine/publisher.js'
+import type { HealthSignal } from './health/types.js'
 
 /** Loopback only: the server is never bound to a routable interface (spec §10.2). */
 export const DEFAULT_HOST = '127.0.0.1'
@@ -47,6 +48,13 @@ export interface ServerOptions {
   readonly ingest?: SimulatorIngestEndpoint
   /** Last renderer health frame, reported under `/health` (spec §9.4(4)). */
   readonly rendererHealth?: () => RendererHealthReport | null
+  /**
+   * Chat source signals, reported under `/health` (spec §9.4(3)). They are
+   * reported, never folded into the top-level `status`: only the supervisor of
+   * T12 decides what a chat transport state means for the broadcast, and a
+   * quiet chat is not a fault.
+   */
+  readonly sourceHealth?: () => readonly HealthSignal[]
 }
 
 function sendJson(res: ServerResponse, statusCode: number, body: unknown): void {
@@ -86,6 +94,7 @@ export function handleRequest(
       status: health.degraded ? 'degraded' : 'ok',
       engine: health,
       renderer: options.rendererHealth?.() ?? null,
+      sources: options.sourceHealth?.() ?? [],
     })
     return
   }

@@ -33,6 +33,10 @@ const ALLOWED_WITHOUT_INSTALL_SCRIPT = new Map([
     'better-sqlite3',
     'ships prebuilds/<platform>.node in the tarball; npm injects node-gyp only because it cannot see "gypfile": false',
   ],
+  [
+    'protobufjs',
+    'its postinstall (scripts/postinstall.js) only prints a warning when a dependent pins the package without the "~" range it prefers; it writes nothing and builds nothing (read at 7.6.5)',
+  ],
 ])
 
 const failures = []

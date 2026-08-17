@@ -66,3 +66,4 @@ export { loadQuotaConfig } from './quota/config.js'
 export type { QuotaBackoffConfig, QuotaConfig } from './quota/config.js'
 
 export * from './broadcast/index.js'
+export * from './chat/index.js'

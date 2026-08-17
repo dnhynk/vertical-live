@@ -185,6 +185,46 @@
         "reconcileMaxPages"
       ]
     },
+    "chat": {
+      "enabled": false,
+      "liveChatId": null,
+      "broadcastId": null,
+      "parts": ["id", "snippet"],
+      "maxResults": 500,
+      "readyPollIntervalMs": 250,
+      "grpc": {
+        "endpoint": "youtube.googleapis.com:443",
+        "keepalive": {
+          "timeMs": 300000,
+          "timeoutMs": 20000,
+          "permitWithoutCalls": false
+        }
+      },
+      "rest": {
+        "baseUrl": "https://www.googleapis.com/youtube/v3/liveChat/messages",
+        "minPollIntervalMs": 2000,
+        "requestTimeoutMs": 20000
+      },
+      "reconnect": {
+        "initialDelayMs": 1000,
+        "maxDelayMs": 60000,
+        "factor": 2,
+        "jitterRatio": 0.2,
+        "maxAttempts": 8
+      },
+      "fallback": {
+        "enterAfterConsecutiveFailures": 3,
+        "retryPrimaryAfterMs": 300000
+      },
+      "provisional": [
+        "readyPollIntervalMs",
+        "grpc.keepalive",
+        "rest.minPollIntervalMs",
+        "rest.requestTimeoutMs",
+        "reconnect",
+        "fallback"
+      ]
+    },
     "quota": {
       "dailyUnits": 10000,
       "resetTimeZone": "America/Los_Angeles",

@@ -14,7 +14,7 @@ export type HealthStatus =
   | 'unknown'
 
 /** The component a signal belongs to. Extended as later tasks add producers. */
-export type HealthComponent = 'obs' | 'youtube'
+export type HealthComponent = 'obs' | 'youtube' | 'youtube-chat'
 
 /** Detail values stay primitive so signals can be serialized to `/health` as-is. */
 export type HealthDetailValue = string | number | boolean | null
