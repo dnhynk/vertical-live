@@ -14,7 +14,8 @@ import type { SupervisorState } from '@vl/server/supervisor'
  * `docs/ops/fault-matrix.md` is generated from it (`vl-soak matrix --write`), so
  * the document cannot drift from what the tests assert, and `matrix.test.ts`
  * injects every row and compares the observed outcome with `expected` /
- * `expectedState`. A row without a test fails `rows.test.ts`.
+ * `expectedState`. Its coverage check is derived from the drills that actually
+ * ran, so a row added here without one fails.
  *
  * Where the product already owns a classifier, the expectation is **taken from
  * it** rather than restated here: `classifyOAuthError().faultAction` (T3),
@@ -173,7 +174,7 @@ export const FAULT_MATRIX: readonly FaultMatrixRow[] = Object.freeze([
     fault: 'host crash (프로세스 SIGKILL)',
     spec: '§11 상태 복구',
     injection:
-      '자식 프로세스가 실제 엔진으로 이벤트를 처리한 뒤 `ready`를 보고하고 부모가 `SIGKILL`한다. 같은 DB 파일로 새 엔진을 띄운다.',
+      '자식 프로세스가 프로덕션 `PersistenceStore`·`StateEngine`으로 이벤트를 처리해 상태를 commit하고, 이어 받은 batch는 inbox에만 commit한 채(드레인 전) 그 지점에서 스레드를 멈춘다. 부모가 `SIGKILL`한다. 그 뒤 같은 파일 위에 supervisor를 포함한 시스템을 다시 띄워 복구를 관측한다.',
     expected: 'retry',
     expectedState: 'live',
     dataPreservation:
@@ -196,7 +197,7 @@ export const FAULT_MATRIX: readonly FaultMatrixRow[] = Object.freeze([
     fault: 'disk-full',
     spec: '§11, §9.1',
     injection:
-      '`PRAGMA max_page_count`가 소진된 연결에서 쓰기가 실패한다. SQLite가 직접 낸 `SQLITE_FULL`을 쓴다(손으로 만든 오류 객체가 아니다).',
+      '프로덕션 store가 연 그 연결에서(`openDatabase`를 감싸 포착) `VACUUM` 후 `max_page_count`를 현재 페이지 수로 낮춰 실제로 꽉 찬 파일을 만든다(`max_page_count`는 연결별이고 파일에 저장되지 않음을 측정으로 확인). inbox에 미처리 rows를 남겨 둔 상태이므로 실제 writer pass와 실제 `commitIngestBatch`가 SQLite가 낸 `SQLITE_FULL`로 실패한다.',
     expected: 'degraded',
     expectedState: 'degraded',
     dataPreservation:
@@ -220,7 +221,8 @@ export const FAULT_MATRIX: readonly FaultMatrixRow[] = Object.freeze([
     id: 'F-14',
     fault: 'crash window: inbox commit 전',
     spec: '§11, §7.3(3)(5)',
-    injection: 'inbox row를 연 트랜잭션 안에 쓴 직후, COMMIT 전에 프로세스를 `SIGKILL`한다.',
+    injection:
+      '자식 프로세스의 프로덕션 엔진이 `commitIngestBatch` 트랜잭션 안 — 행을 쓴 뒤 checkpoint 시각을 읽는 지점 — 에서 스레드를 멈추고, 부모가 그 상태로 `SIGKILL`한다. COMMIT은 일어나지 않는다.',
     expected: 'retry',
     expectedState: 'live',
     dataPreservation: 'inbox row도 checkpoint도 남지 않는다. 원본에서 다시 받는다.',
@@ -230,7 +232,8 @@ export const FAULT_MATRIX: readonly FaultMatrixRow[] = Object.freeze([
     id: 'F-15',
     fault: 'crash window: inbox·token checkpoint commit 직후 / state commit 전',
     spec: '§11, §7.3(3)(5)',
-    injection: 'ingest 트랜잭션이 COMMIT된 직후 `SIGKILL`한다.',
+    injection:
+      '자식 프로세스의 프로덕션 엔진이 ingest 트랜잭션을 COMMIT한 직후, writer pass 전에 멈추고 부모가 `SIGKILL`한다.',
     expected: 'retry',
     expectedState: 'live',
     dataPreservation:
@@ -242,7 +245,8 @@ export const FAULT_MATRIX: readonly FaultMatrixRow[] = Object.freeze([
     id: 'F-16',
     fault: 'crash window: state commit 직후 / effect 발행 전',
     spec: '§11, §7.3(6)',
-    injection: '상태 전이 트랜잭션이 COMMIT된 직후, effect를 발행하기 전에 `SIGKILL`한다.',
+    injection:
+      '자식 프로세스의 프로덕션 엔진이 상태 전이 트랜잭션을 COMMIT한 직후 `publishSnapshot` 진입 지점에서 멈추고 부모가 `SIGKILL`한다. effect는 outbox에 있으나 published 표시가 없다.',
     expected: 'retry',
     expectedState: 'live',
     dataPreservation:
@@ -253,7 +257,8 @@ export const FAULT_MATRIX: readonly FaultMatrixRow[] = Object.freeze([
     id: 'F-17',
     fault: 'crash window: effect 발행 직후 / ACK 전',
     spec: '§11, §7.3(7)',
-    injection: 'effect를 published로 표시한 직후 `SIGKILL`한다.',
+    injection:
+      '자식 프로세스의 프로덕션 엔진이 `markEffectPublished`를 commit한 직후 `publishEffect` 진입 지점에서 멈추고 부모가 `SIGKILL`한다. ACK를 보낸 렌더러는 없다.',
     expected: 'retry',
     expectedState: 'live',
     dataPreservation:

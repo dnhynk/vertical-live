@@ -27,7 +27,7 @@ export interface DrillSystem {
 }
 
 export async function startDrill(
-  options: Partial<Omit<SoakSystemOptions, 'clock' | 'virtualClock'>> = {},
+  options: Omit<Partial<SoakSystemOptions>, 'clock' | 'virtualClock'> = {},
 ): Promise<DrillSystem> {
   const clock = new VirtualClock()
   const system = await SoakSystem.start({
@@ -41,7 +41,7 @@ export async function startDrill(
 
 /** Start-up through to `live`, which every drill begins from. */
 export async function startLive(
-  options: Partial<Omit<SoakSystemOptions, 'clock' | 'virtualClock'>> = {},
+  options: Omit<Partial<SoakSystemOptions>, 'clock' | 'virtualClock'> = {},
 ): Promise<DrillSystem> {
   const drill = await startDrill(options)
   await drill.system.bringUp(SLICE_MS)

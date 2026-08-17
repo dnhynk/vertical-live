@@ -14,12 +14,13 @@
 export { FaultyAuth, type FaultyAuthOptions } from './auth.js'
 export { FaultyBroadcast, type BroadcastFault, type FaultyBroadcastOptions } from './broadcast.js'
 export { FaultyChat, type ChatFault, type FaultyChatOptions } from './chat.js'
-export { crashChild, type CrashChildMode } from './crash.js'
+export { crashChild, type CrashChildMode, type CrashResult } from './crash.js'
 export { FaultyObs, type FaultyObsOptions, type ObsFault } from './obs.js'
 export { SoakRenderer, type SoakRendererOptions } from './renderer.js'
 export {
-  captureDiskFullError,
-  withDiskFull,
+  fillDisk,
+  freeDisk,
+  UNLIMITED_PAGE_COUNT,
   WriteLockHolder,
-  type DiskFullGate,
+  type SqliteConnection,
 } from './storage.js'

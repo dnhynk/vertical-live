@@ -67,6 +67,12 @@ export interface SoakCounters {
   readonly backendRestarts: number
   readonly componentRestarts: Readonly<Record<string, number>>
   readonly faultsInjected: readonly string[]
+  /**
+   * Drills the schedule reached but the run had no room to hold and observe, so
+   * they were not injected. Reported rather than dropped: a bound on coverage
+   * that nobody can see reads as coverage.
+   */
+  readonly faultsSkipped: readonly string[]
   readonly alerts: Readonly<Record<string, number>>
   readonly safeStops: number
   readonly finalConsecutiveWriterFailures: number
@@ -282,6 +288,9 @@ export function formatSoakReport(report: SoakReport): string {
   lines.push(
     `  faults injected           ${report.counters.faultsInjected.length === 0 ? 'none' : report.counters.faultsInjected.join(', ')}`,
   )
+  if (report.counters.faultsSkipped.length > 0) {
+    lines.push(`  faults skipped (no room)  ${report.counters.faultsSkipped.join(', ')}`)
+  }
   lines.push('')
 
   lines.push('interruptions (spec §9.2 transitions out of `live`)')

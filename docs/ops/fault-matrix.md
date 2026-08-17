@@ -123,7 +123,7 @@
 ### F-10 — host crash (프로세스 SIGKILL)
 
 - 스펙: §11 상태 복구
-- 주입: 자식 프로세스가 실제 엔진으로 이벤트를 처리한 뒤 `ready`를 보고하고 부모가 `SIGKILL`한다. 같은 DB 파일로 새 엔진을 띄운다.
+- 주입: 자식 프로세스가 프로덕션 `PersistenceStore`·`StateEngine`으로 이벤트를 처리해 상태를 commit하고, 이어 받은 batch는 inbox에만 commit한 채(드레인 전) 그 지점에서 스레드를 멈춘다. 부모가 `SIGKILL`한다. 그 뒤 같은 파일 위에 supervisor를 포함한 시스템을 다시 띄워 복구를 관측한다.
 - 예상 상태: `retry` · 관측 상태: `live`
 - 데이터 보존: commit된 것만 남는다: 미처리 `ingestSeq`는 복구 커서 아래로 묻히지 않고 재드레인되며, 마지막 commit 상태와 deadline이 복원된다.
 - 분류기: 없음(관측으로만 판정)
@@ -139,7 +139,7 @@
 ### F-12 — disk-full
 
 - 스펙: §11, §9.1
-- 주입: `PRAGMA max_page_count`가 소진된 연결에서 쓰기가 실패한다. SQLite가 직접 낸 `SQLITE_FULL`을 쓴다(손으로 만든 오류 객체가 아니다).
+- 주입: 프로덕션 store가 연 그 연결에서(`openDatabase`를 감싸 포착) `VACUUM` 후 `max_page_count`를 현재 페이지 수로 낮춰 실제로 꽉 찬 파일을 만든다(`max_page_count`는 연결별이고 파일에 저장되지 않음을 측정으로 확인). inbox에 미처리 rows를 남겨 둔 상태이므로 실제 writer pass와 실제 `commitIngestBatch`가 SQLite가 낸 `SQLITE_FULL`로 실패한다.
 - 예상 상태: `degraded` · 관측 상태: `degraded`
 - 데이터 보존: 부분 commit 없음. 이미 commit된 상태·paid ledger는 그대로. 데이터 무결성 사건이 아니므로 자동 정지하지 않는다.
 - 분류기: `classifyStoreFailure().integrity === false ('SQLITE_FULL')`
@@ -157,7 +157,7 @@
 ### F-14 — crash window: inbox commit 전
 
 - 스펙: §11, §7.3(3)(5)
-- 주입: inbox row를 연 트랜잭션 안에 쓴 직후, COMMIT 전에 프로세스를 `SIGKILL`한다.
+- 주입: 자식 프로세스의 프로덕션 엔진이 `commitIngestBatch` 트랜잭션 안 — 행을 쓴 뒤 checkpoint 시각을 읽는 지점 — 에서 스레드를 멈추고, 부모가 그 상태로 `SIGKILL`한다. COMMIT은 일어나지 않는다.
 - 예상 상태: `retry` · 관측 상태: `live`
 - 데이터 보존: inbox row도 checkpoint도 남지 않는다. 원본에서 다시 받는다.
 - 분류기: 없음(관측으로만 판정)
@@ -165,7 +165,7 @@
 ### F-15 — crash window: inbox·token checkpoint commit 직후 / state commit 전
 
 - 스펙: §11, §7.3(3)(5)
-- 주입: ingest 트랜잭션이 COMMIT된 직후 `SIGKILL`한다.
+- 주입: 자식 프로세스의 프로덕션 엔진이 ingest 트랜잭션을 COMMIT한 직후, writer pass 전에 멈추고 부모가 `SIGKILL`한다.
 - 예상 상태: `retry` · 관측 상태: `live`
 - 데이터 보존: inbox와 `nextPageToken`은 같은 트랜잭션이므로 함께 남고, `processedIngestSeq`는 전진하지 않아 재시작 후 그대로 드레인된다.
 - 분류기: 없음(관측으로만 판정)
@@ -174,7 +174,7 @@
 ### F-16 — crash window: state commit 직후 / effect 발행 전
 
 - 스펙: §11, §7.3(6)
-- 주입: 상태 전이 트랜잭션이 COMMIT된 직후, effect를 발행하기 전에 `SIGKILL`한다.
+- 주입: 자식 프로세스의 프로덕션 엔진이 상태 전이 트랜잭션을 COMMIT한 직후 `publishSnapshot` 진입 지점에서 멈추고 부모가 `SIGKILL`한다. effect는 outbox에 있으나 published 표시가 없다.
 - 예상 상태: `retry` · 관측 상태: `live`
 - 데이터 보존: snapshot·engine state·effect outbox·커서가 한 트랜잭션으로 남고, 미발행 effect는 재시작 후 발행된다.
 - 분류기: 없음(관측으로만 판정)
@@ -182,7 +182,7 @@
 ### F-17 — crash window: effect 발행 직후 / ACK 전
 
 - 스펙: §11, §7.3(7)
-- 주입: effect를 published로 표시한 직후 `SIGKILL`한다.
+- 주입: 자식 프로세스의 프로덕션 엔진이 `markEffectPublished`를 commit한 직후 `publishEffect` 진입 지점에서 멈추고 부모가 `SIGKILL`한다. ACK를 보낸 렌더러는 없다.
 - 예상 상태: `retry` · 관측 상태: `live`
 - 데이터 보존: 해당 effect는 미ACK로 복구돼 재전송되고, 같은 `effectId`이므로 렌더러가 연출을 다시 시작하지 않는다.
 - 분류기: 없음(관측으로만 판정)

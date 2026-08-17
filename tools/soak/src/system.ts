@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto'
 import { mkdtempSync, rmSync } from 'node:fs'
 import type { Server } from 'node:http'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 
 import {
   createServer,
@@ -31,17 +31,12 @@ import { flushEventLoop, postEnvelopes, type VirtualClock } from '@vl/simulator'
 
 import { soakCommandBatch } from './events.js'
 import { FaultyAuth } from './injection/auth.js'
-import { crashChild } from './injection/crash.js'
+import { crashChild, type CrashResult } from './injection/crash.js'
 import { FaultyBroadcast } from './injection/broadcast.js'
 import { FaultyChat } from './injection/chat.js'
 import { FaultyObs } from './injection/obs.js'
 import { SoakRenderer } from './injection/renderer.js'
-import {
-  captureDiskFullError,
-  withDiskFull,
-  WriteLockHolder,
-  type DiskFullGate,
-} from './injection/storage.js'
+import { WriteLockHolder } from './injection/storage.js'
 
 /**
  * The whole supervised run in one process, with every collaborator replaceable
@@ -78,6 +73,15 @@ export interface SoakSystemOptions {
   readonly busyTimeoutMs?: number
   /** Flattens the restart backoff so a drill does not wait out real delays. */
   readonly restartDelayMs?: number
+  /**
+   * An existing database file to come up on, instead of a fresh temporary one.
+   *
+   * This is how the crash rows are observed: the child process dies holding a
+   * boundary, and the supervised system that has to recover from it is started
+   * on the file the child left behind. The caller owns that file, so `close()`
+   * does not delete it.
+   */
+  readonly file?: string
 }
 
 export const SOAK_BUSY_TIMEOUT_MS = 250
@@ -128,15 +132,15 @@ export class SoakSystem {
   readonly #supervisor: Supervisor
 
   #store: PersistenceStore | null = null
-  #diskFull: DiskFullGate | null = null
   #engine: StateEngine | null = null
   #hub: RendererHub | null = null
   #http: Server | null = null
   #port = 0
   #lock: WriteLockHolder | null = null
-  #diskFullError: unknown = null
   #sequence = 0
   #backendRestarts = 0
+  /** False when the caller handed us its file: it is not ours to delete. */
+  readonly #ownsDirectory: boolean
 
   private constructor(options: SoakSystemOptions, auth: FaultyAuth) {
     this.clock = options.clock
@@ -145,8 +149,10 @@ export class SoakSystem {
     this.inputConfig = options.inputConfig ?? loadInputConfig({ env: {} })
     this.supervisorConfig = options.supervisorConfig ?? soakSupervisorConfig(options.restartDelayMs)
     this.#busyTimeoutMs = options.busyTimeoutMs ?? SOAK_BUSY_TIMEOUT_MS
-    this.directory = mkdtempSync(join(tmpdir(), 'vl-soak-'))
-    this.file = join(this.directory, 'vertical-live.db')
+    this.#ownsDirectory = options.file === undefined
+    this.directory =
+      options.file === undefined ? mkdtempSync(join(tmpdir(), 'vl-soak-')) : dirname(options.file)
+    this.file = options.file ?? join(this.directory, 'vertical-live.db')
     // Obviously synthetic, generated per system, never persisted or printed.
     this.simulatorToken = `soak_sim_token_${randomBytes(16).toString('hex')}`
     this.rendererToken = `soak_renderer_token_${randomBytes(16).toString('hex')}`
@@ -338,9 +344,7 @@ export class SoakSystem {
       busyTimeoutMs: this.#busyTimeoutMs,
       clock: this.clock,
     })
-    const gate = withDiskFull(store, this.#diskFullErrorOrCapture())
     this.#store = store
-    this.#diskFull = gate
 
     const ingest = new SimulatorIngestEndpoint({
       inbox: { ingest: (envelopes, checkpoint) => this.engine.ingest(envelopes, checkpoint) },
@@ -380,18 +384,13 @@ export class SoakSystem {
     this.#http = http
     this.#hub = hub
     this.#engine = new StateEngine({
-      store: gate.store,
+      store,
       clock: this.clock,
       config: this.config,
       inputConfig: this.inputConfig,
       publisher: hub,
       autoTick: false,
     })
-  }
-
-  #diskFullErrorOrCapture(): unknown {
-    this.#diskFullError ??= captureDiskFullError()
-    return this.#diskFullError
   }
 
   async #listen(port: number): Promise<void> {
@@ -422,19 +421,6 @@ export class SoakSystem {
     this.#lock?.release()
   }
 
-  /** Writes fail with a real `SQLITE_FULL` until `freeDisk()`. */
-  fillDisk(): void {
-    required(this.#diskFull, 'disk gate').arm()
-  }
-
-  freeDisk(): void {
-    required(this.#diskFull, 'disk gate').disarm()
-  }
-
-  get refusedWrites(): number {
-    return this.#diskFull?.refusals ?? 0
-  }
-
   /**
    * A backend restart against the same database file: the engine stops, the HTTP
    * and WS surfaces close, everything is rebuilt on the same port and the
@@ -445,16 +431,21 @@ export class SoakSystem {
   }
 
   /**
-   * Fault matrix row F-10: a real host crash between the two backends.
+   * Fault matrix row F-10: a real host crash of a real engine.
    *
-   * A child process opens the same file, starts a destructive write transaction
-   * and is `SIGKILL`ed with it open — no shutdown hook, no SQLite close. The
-   * restarted engine then has to recover from whatever the OS left on disk.
+   * This backend is torn down first because the child needs the file to itself;
+   * the crash that matters then happens in the **child**, which opens the same
+   * database with the product's own `PersistenceStore` and `StateEngine`,
+   * processes events, leaves a later batch committed to the inbox but undrained,
+   * and is `SIGKILL`ed parked in that state. What this system comes back up on is
+   * whatever that killed engine left on disk.
    */
-  async crashHost(): Promise<void> {
+  async crashHost(): Promise<CrashResult> {
+    let result: CrashResult = { state: null }
     await this.#replaceBackend(async () => {
-      await crashChild(this.file, this.#busyTimeoutMs, 'uncommitted-delete-then-kill')
+      result = await crashChild(this.file, 'host-crash')
     })
+    return result
   }
 
   async #replaceBackend(between?: () => Promise<void>): Promise<void> {
@@ -555,7 +546,7 @@ export class SoakSystem {
     await this.renderer.disconnect()
     await this.#teardownBackend()
     await this.auth.close()
-    rmSync(this.directory, { recursive: true, force: true })
+    if (this.#ownsDirectory) rmSync(this.directory, { recursive: true, force: true })
   }
 
   async #teardownBackend(): Promise<void> {
@@ -579,7 +570,6 @@ export class SoakSystem {
     this.#hub = null
     this.#http = null
     this.#store = null
-    this.#diskFull = null
   }
 }
 

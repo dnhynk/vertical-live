@@ -184,6 +184,7 @@ export async function runSoak(options: RunSoakOptions): Promise<SoakReport> {
 
   const interruptions: SoakInterruption[] = []
   const faultsInjected: string[] = []
+  const faultsSkipped: string[] = []
   let scenarioMs = 0
   let slices = 0
   let liveSlices = 0
@@ -271,13 +272,28 @@ export async function runSoak(options: RunSoakOptions): Promise<SoakReport> {
           activeFault = null
         }
       } else if (faults.length > 0 && scenarioMs >= nextFaultAtMs) {
-        nextFaultAtMs = scenarioMs + shape.faultIntervalMs
         const fault = faults[faultIndex % faults.length] as SoakFault
-        faultIndex += 1
-        fault.apply(system)
-        activeFault = { fault, slicesLeft: fault.holdSlices }
-        faultsInjected.push(`${fault.row}:${fault.label}`)
-        log(`fault injected at ${String(scenarioMs)}ms: ${fault.row} ${fault.label}`)
+        // A fault the run has no room left to hold *and* observe is not injected
+        // at all. Injecting one on the last slice and clearing it after the loop
+        // would put a drill in `faultsInjected` that nothing ever watched, which
+        // makes the report claim more coverage than the run has.
+        const slicesLeft = Math.floor((shape.durationMs - scenarioMs) / shape.sliceMs)
+        if (slicesLeft < fault.holdSlices + 1) {
+          faultsSkipped.push(`${fault.row}:${fault.label}`)
+          log(
+            `fault skipped at ${String(scenarioMs)}ms: ${fault.row} ${fault.label}` +
+              ` (needs ${String(fault.holdSlices + 1)} slices, ${String(slicesLeft)} left)`,
+          )
+          // Nothing later in this run has room either, so stop asking.
+          nextFaultAtMs = Number.POSITIVE_INFINITY
+        } else {
+          nextFaultAtMs = scenarioMs + shape.faultIntervalMs
+          faultIndex += 1
+          fault.apply(system)
+          activeFault = { fault, slicesLeft: fault.holdSlices }
+          faultsInjected.push(`${fault.row}:${fault.label}`)
+          log(`fault injected at ${String(scenarioMs)}ms: ${fault.row} ${fault.label}`)
+        }
       }
 
       options.onProgress?.({
@@ -338,6 +354,7 @@ export async function runSoak(options: RunSoakOptions): Promise<SoakReport> {
       // restarts for a run full of them.
       componentRestarts: countRestartAttempts(system.alerts.alerts),
       faultsInjected,
+      faultsSkipped,
       alerts: countAlerts(system.alerts.alerts.map((alert) => alert.kind)),
       safeStops,
       finalConsecutiveWriterFailures: finalObservation.consecutiveWriterFailures,
