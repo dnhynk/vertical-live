@@ -43,12 +43,33 @@ export interface IngestBatchResult {
   readonly checkpoint: SourceCheckpoint
 }
 
+/**
+ * One envelope on its way into the inbox, plus what a storage-boundary filter
+ * did to it.
+ *
+ * `commitIngestBatch` also accepts a bare `IngestEnvelope`, which means "nothing
+ * was filtered" — every caller that has nothing to declare stays unchanged.
+ */
+export interface InboxSubmission {
+  readonly envelope: IngestEnvelope
+  /**
+   * A `command.argument` outside the storable vocabulary was removed before this
+   * write (T8). Persisted as a flag; the removed token is never stored anywhere
+   * (spec §12.3).
+   */
+  readonly argumentRejected?: boolean
+}
+
+export type InboxInput = IngestEnvelope | InboxSubmission
+
 /** An inbox row handed to the single writer for processing (spec §7.3(3)). */
 export interface InboxRow {
   readonly ingestSeq: number
   readonly validationStatus: ValidationStatus
   readonly receivedAt: string
   readonly envelope: IngestEnvelope
+  /** True when a storage-boundary filter removed this row's command argument. */
+  readonly argumentRejected: boolean
 }
 
 /** One committed transition of the authoritative state (spec §7.3(5)). */
@@ -120,6 +141,14 @@ export interface StateTransitionInput {
   readonly snapshot: WorldSnapshot
   readonly revision: number
   readonly processedSeq: number
+  /**
+   * The writer's own domain state, serialized with the snapshot in the same
+   * transaction (T8). The store treats it as opaque JSON: the read model in
+   * `snapshot` cannot rebuild a content director, and a second transaction would
+   * leave a crash window where the cursor has passed inputs this state never
+   * saw. Omitting it stores `NULL` — the value is replaced, never merged.
+   */
+  readonly engineState?: unknown
   readonly transitions?: readonly StateTransitionRecord[]
   readonly processed?: readonly InboxProcessingRecord[]
   readonly deadlines?: readonly DeadlineRecord[]
@@ -158,6 +187,8 @@ export interface RecoveryState {
   readonly snapshot: WorldSnapshot | null
   readonly stateRevision: number
   readonly processedIngestSeq: number
+  /** Whatever the writer stored as `StateTransitionInput.engineState`. */
+  readonly engineState: unknown
   /** Committed effects that are neither acked nor expired (spec §7.3(7)). */
   readonly unackedEffects: readonly PersistedEffect[]
   /** Pending deadlines already due at the recovery instant (spec §10.2). */

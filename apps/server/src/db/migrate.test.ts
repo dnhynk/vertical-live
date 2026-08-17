@@ -100,10 +100,11 @@ describe('migrate', () => {
     const database = openDatabase({ file, busyTimeoutMs: BUSY_TIMEOUT_MS })
     try {
       const result = migrate(database, { clock: new FakeClock() })
-      expect(result.applied.map((migration) => migration.fileName)).toEqual([
-        '001_initial.sql',
-        '002_retention-ledger.sql',
-      ])
+      // Derived from the directory: every task adds a migration, and pinning the
+      // list here would make this test a merge conflict rather than a check.
+      expect(result.applied.map((migration) => migration.fileName)).toEqual(
+        loadMigrations().map((migration) => migration.fileName),
+      )
 
       const tables = (
         database
@@ -134,11 +135,12 @@ describe('migrate', () => {
     const file = join(tempDir(), 'db.sqlite')
     const database = openDatabase({ file, busyTimeoutMs: BUSY_TIMEOUT_MS })
     try {
+      const versions = loadMigrations().map((migration) => migration.version)
       migrate(database, { clock: new FakeClock() })
       const second = migrate(database, { clock: new FakeClock() })
       expect(second.applied).toEqual([])
-      expect(second.alreadyApplied.map((row) => row.version)).toEqual([1, 2])
-      expect(listAppliedMigrations(database)).toHaveLength(2)
+      expect(second.alreadyApplied.map((row) => row.version)).toEqual(versions)
+      expect(listAppliedMigrations(database)).toHaveLength(versions.length)
     } finally {
       database.close()
     }

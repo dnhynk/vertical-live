@@ -4,6 +4,7 @@ import {
   DEFAULT_WS_URL,
   STAGE_HEIGHT,
   STAGE_WIDTH,
+  authenticatedWsUrl,
   isLoopbackWebSocketUrl,
   readRendererConfig,
 } from './config'
@@ -55,6 +56,33 @@ describe('renderer config (spec §10.2, BOARD A-14)', () => {
     expect(isLoopbackWebSocketUrl('http://127.0.0.1:8787/ws/renderer')).toBe(false)
     expect(isLoopbackWebSocketUrl('wss://example.test/ws/renderer')).toBe(false)
     expect(isLoopbackWebSocketUrl('not a url')).toBe(false)
+  })
+
+  it('keeps the renderer token out of the address and in its own field', () => {
+    // The server authenticates the upgrade (spec §10.2) and an OBS Browser Source
+    // can only pass values through its URL, so the token rides the query string —
+    // but it is kept out of `wsUrl`, which is what diagnostics render
+    // (R-T8-2 blocker 1, `components/DevPanel.test.tsx`).
+    const { config, log } = read('?token=test_renderer_token_0001')
+    expect(config.wsUrl).toBe('ws://127.0.0.1:8787/ws/renderer')
+    expect(config.wsToken).toBe('test_renderer_token_0001')
+    expect(authenticatedWsUrl(config)).toBe(
+      'ws://127.0.0.1:8787/ws/renderer?token=test_renderer_token_0001',
+    )
+    expect(log.entries().some((entry) => entry.code === 'config_token_missing')).toBe(false)
+
+    const overridden = read('?ws=ws%3A%2F%2F127.0.0.1%3A9999%2Fws%2Frenderer&token=abc')
+    expect(overridden.config.wsUrl).toBe('ws://127.0.0.1:9999/ws/renderer')
+    expect(authenticatedWsUrl(overridden.config)).toBe('ws://127.0.0.1:9999/ws/renderer?token=abc')
+  })
+
+  it('says so when no token was supplied instead of inventing one', () => {
+    const { config, log } = read('?mode=dev')
+    expect(config.wsToken).toBeNull()
+    expect(config.wsUrl).toBe(DEFAULT_WS_URL)
+    expect(log.entries().some((entry) => entry.code === 'config_token_missing')).toBe(true)
+    // No token value is ever logged, only its absence.
+    expect(JSON.stringify(log.entries())).not.toContain('token=')
   })
 
   it('takes a renderer id from the URL only when it fits the contract', () => {

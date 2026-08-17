@@ -4,6 +4,31 @@
     "busyTimeoutMs": 5000,
     "provisional": ["busyTimeoutMs"]
   },
+  "engine": {
+    "worldSeed": "vertical-live-world-v1",
+    "creatureId": "creature_1",
+    "identityGateOpen": false,
+    "drainBatchSize": 200,
+    "tickIntervalMs": 250,
+    "effects": {
+      "retransmitIntervalMs": 3000,
+      "expiryGraceMs": 20000
+    },
+    "degraded": {
+      "eventValidityMs": 900000,
+      "rendererAckTimeoutMs": 15000
+    },
+    "metricsSampleSize": 1024,
+    "provisional": [
+      "drainBatchSize",
+      "tickIntervalMs",
+      "effects.retransmitIntervalMs",
+      "effects.expiryGraceMs",
+      "degraded.eventValidityMs",
+      "degraded.rendererAckTimeoutMs",
+      "metricsSampleSize"
+    ]
+  },
   "input": {
     "maxRawLength": 500,
     "window": {
@@ -46,6 +71,78 @@
       "reconnect",
       "thresholds"
     ]
+  },
+  "simulator": {
+    "enabled": false
+  },
+  "world": {
+    "tuning": {
+      "provisional": true,
+      "idleBeat": {
+        "minIntervalMs": 30000,
+        "maxIntervalMs": 75000,
+        "durationMs": 4000
+      },
+      "needs": {
+        "decayIntervalMs": 90000,
+        "rates": {
+          "hungry": { "awakePerHour": 0.25, "asleepPerHour": 0.06 },
+          "play": { "awakePerHour": 0.2, "asleepPerHour": 0 },
+          "affection": { "awakePerHour": 0.15, "asleepPerHour": 0.03 },
+          "rest": { "awakePerHour": 0.1, "asleepPerHour": -0.45 }
+        },
+        "relief": { "FEED": 0.34, "PLAY": 0.3, "PET": 0.26 },
+        "reliefPerExtraContribution": 0.04
+      },
+      "crisis": {
+        "enterThreshold": 0.8,
+        "exitThreshold": 0.6,
+        "needsHelpThreshold": 0.8,
+        "sleepThreshold": 0.5,
+        "wakeThreshold": 0.2,
+        "recoveryIntervalMs": 300000,
+        "selfCarePerHour": 0.5
+      },
+      "staging": { "ambienceMs": 6000, "reactionMs": 4000, "missionMs": 5000 },
+      "mission": {
+        "durationMs": 1200000,
+        "targetContributions": 6,
+        "bondPerContribution": 1.5,
+        "growthPerContribution": 0.5,
+        "growthOnCompleted": 8,
+        "growthOnEased": 2,
+        "bondOnCompleted": 6
+      },
+      "choice": {
+        "windowMs": 1200000,
+        "previewLeadMs": 1800000,
+        "contributionWeightCap": 6
+      },
+      "chapter": {
+        "anchorHourJst": 6,
+        "minFirstDurationMs": 28800000,
+        "turnFraction": 0.35,
+        "resolutionFraction": 0.72,
+        "growthOnResolution": 30,
+        "bondOnResolution": 12
+      },
+      "weather": { "intervalMs": 9000000 },
+      "visitor": { "intervalMs": 12600000, "stayMs": 2400000 },
+      "paid": {
+        "thanksDurationMs": 8000,
+        "originalStagingWindowMs": 180000,
+        "fallbackDurationMs": 6000,
+        "acknowledgedRingSize": 256
+      },
+      "variation": { "recentVariantWindow": 12, "recentSceneWindow": 24 },
+      "growth": { "stageTargets": [100, 160, 240, 340], "bondTarget": 500 }
+    },
+    "freshness": {
+      "provisional": true,
+      "uniqueTransitionsPerVirtualDay": 40,
+      "maxRepeatedNarrativeSceneRatio": 0.7,
+      "sceneSampleSize": 200
+    }
   },
   "youtube": {
     "auth": {

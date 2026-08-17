@@ -1,0 +1,18 @@
+-- 004_engine-state — durable domain state of the single-writer engine (T8).
+--
+-- `world_snapshot.snapshot_json` is the renderer's read model (spec §10.2): it
+-- carries what the screen draws, not what the content director needs to keep
+-- stepping (seed, step counter, need pressures, variation rings, the paid audit
+-- ring, the schedule). Those cannot be recovered from the read model, so without
+-- them a restart would restart the world instead of resuming it.
+--
+-- The column lives on the snapshot row rather than in a table of its own so the
+-- domain state and the revision it belongs to are written by the same UPSERT and
+-- can never disagree — spec §7.3(5) requires one transaction, and a second one
+-- would leave a crash window in which the recovery cursor has already passed
+-- inputs the domain state has not seen.
+--
+-- The value is opaque to the persistence layer: it is the engine's own JSON and
+-- the store neither reads nor validates its shape. NULL means "written by a
+-- caller that owns no domain state" (every pre-T8 commit, and the T4 tests).
+ALTER TABLE world_snapshot ADD COLUMN engine_state_json TEXT;

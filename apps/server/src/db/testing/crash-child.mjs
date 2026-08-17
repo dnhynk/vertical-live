@@ -44,6 +44,50 @@ const ENVELOPE = JSON.stringify({
   payment: null,
 })
 
+/** Shape-only snapshot and engine state: no author, no name, no chat line. */
+const SNAPSHOT = JSON.stringify({
+  schemaVersion: 1,
+  stateRevision: 9,
+  processedIngestSeq: 4,
+  worldTimeUtc: '2026-08-16T00:05:00.000Z',
+  inputMode: 'direct',
+  interactionEnabled: true,
+  broadcastLifecycle: 'live',
+  creature: {
+    creatureId: 'test_creature',
+    lifeStage: 'test_stage',
+    growthStage: 'test_growth',
+    needId: 'test_need',
+    emotionId: 'test_emotion',
+    bondProgress: { current: 1, target: 100 },
+    growthProgress: { current: 1, target: 100 },
+  },
+  mission: null,
+  environment: {
+    environmentId: 'test_environment',
+    worldPhaseId: 'test_phase',
+    weatherId: 'test_weather',
+    chapterId: 'test_chapter',
+    chapterProgress: { current: 1, target: 3 },
+  },
+  nextTransitionAt: '2026-08-16T00:10:00.000Z',
+  display: {
+    currentNeedOrMission: { textKey: 'test.need', iconId: 'test_icon' },
+    lastAppliedAction: null,
+    growthOrChapterProgress: { textKey: 'test.progress', progress: { current: 1, target: 3 } },
+    nextChoiceAt: null,
+  },
+})
+
+const ENGINE_STATE = JSON.stringify({
+  version: 1,
+  inputMode: 'direct',
+  world: {
+    world: { seed: 'seed_test_crash', stepIndex: 4, worldTimeUtc: '2026-08-16T00:05:00.000Z' },
+    audit: { pendingThanks: [], acknowledgedEventKeys: [] },
+  },
+})
+
 const THANKS_PAYLOAD = JSON.stringify({
   paidEventKind: 'SUPER_CHAT',
   iconId: 'test_thanks_icon',
@@ -97,6 +141,23 @@ switch (mode) {
       )
       .run('eff_test_crash_0001', THANKS_PAYLOAD)
     database.exec('COMMIT')
+    break
+  }
+
+  // Crash window "state 쓰기 중" with the writer's own domain state attached
+  // (migration 004): the snapshot and `engine_state_json` are one row written in
+  // one transaction, so a kill before COMMIT must leave neither behind. If they
+  // could disagree, a restart would resume a world the recovery cursor has
+  // already moved past (TASK_SPECS §T8).
+  case 'state-with-engine-then-kill': {
+    database.exec('BEGIN IMMEDIATE')
+    database
+      .prepare(
+        `INSERT INTO world_snapshot
+           (world_id, state_revision, processed_ingest_seq, snapshot_json, engine_state_json, updated_at)
+         VALUES ('default', 9, 4, ?, ?, '2026-08-16T00:05:00.000Z')`,
+      )
+      .run(SNAPSHOT, ENGINE_STATE)
     break
   }
 

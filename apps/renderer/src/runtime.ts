@@ -1,4 +1,4 @@
-import { readRendererConfig, type RendererConfig } from './config'
+import { authenticatedWsUrl, readRendererConfig, type RendererConfig } from './config'
 import { createAlias, createTranslator, type Alias, type Translate } from './i18n/index'
 import { systemClock, type Clock } from './read-model/clock'
 import {
@@ -87,7 +87,8 @@ export function createRuntime(options: CreateRuntimeOptions): RendererRuntime {
   const health = new RendererHealth(frameLoop, webgl)
 
   const connection = new RendererConnection({
-    url: config.wsUrl,
+    // The one consumer of the token; everything else reads `config.wsUrl`.
+    url: authenticatedWsUrl(config),
     rendererId: config.rendererId,
     model,
     health,

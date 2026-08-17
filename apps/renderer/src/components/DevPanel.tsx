@@ -10,6 +10,10 @@ import { paletteFor } from '../visual/palette'
  * The panel only shows values the renderer produced itself — codes, counters,
  * ids and i18n keys — because it is on screen and raw chat may not be
  * (spec §12.3).
+ *
+ * `config.wsUrl` carries no token by construction (`config.ts`), so the address
+ * below is safe to draw. Never render `authenticatedWsUrl()` here: it is the
+ * socket's URL and it contains a vault secret (spec §10.2, `DevPanel.test.tsx`).
  */
 export interface DevPanelProps {
   runtime: RendererRuntime

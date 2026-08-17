@@ -53,6 +53,7 @@ stream key·OBS websocket 비밀번호·admin/simulator 토큰도 같은 vault�
 "<obs password>" | npm run secrets -w @vl/server -- set obs.websocketPassword
 "<admin token>" | npm run secrets -w @vl/server -- set server.adminToken
 "<simulator token>" | npm run secrets -w @vl/server -- set server.simulatorToken
+"<renderer token>"  | npm run secrets -w @vl/server -- set server.rendererToken
 
 npm run secrets -w @vl/server -- delete youtube.streamKey   # 제거
 ```
