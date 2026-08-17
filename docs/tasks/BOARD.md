@@ -71,7 +71,8 @@
 | E-1 | 호스트 BSOD 0x00000050 2회(2026-08-16 14:47 UTC, 2026-08-17 03:24 UTC; minidump `081626-14718-01.dmp`, `081726-14937-01.dmp`) | 사용자가 minidump 분석(WinDbg `!analyze -v`)·메모리 진단·드라이버 갱신을 수행할지, 동시 에이전트 상한을 D-4(2+1)에서 낮출지 | 런북 2.8 |
 | E-2 | OBS 32.0.2 / obs-websocket 5.6.3을 고정 버전으로 승인 | 승인 시 docs/ops/obs-setup.md의 '후보' 표기 제거 | T2, T17 |
 | E-3 | 실제 OBS 스모크(`npm run obs:probe`) — 사용자가 OBS WebSocket 서버(loopback·비밀번호)를 켠 뒤 실행 | Gate 2 호스트 검증 항목 | T2 |
-| E-4 | **해결(2026-08-18)**: PR #11 round 6에서 approve·머지. 원 항목: PR #11(T10 broadcast lifecycle) 리뷰가 round 4까지 request_changes(각 round의 지적은 해소, 리뷰어가 reconcile·update 경로의 인접 갭을 계속 발견 — 절단 목록 무판정, 마커 생명주기(A-18), update 본문 정확성). 코디네이터는 수렴 중으로 판단해 F-T10-4 진행. 사용자가 중단·재설계를 원하면 지시 | 런북 2.5(4) | T10 |
+| E-5 | **차단(2026-08-17 13:45 UTC~)**: GitHub Actions 결제 차단 — 모든 CI run이 2초 만에 실패, annotation: "The job was not started because recent account payments have failed or your spending limit needs to be increased. Please check the 'Billing & plans' section in your settings". **사용자 조치 필요**: GitHub Settings → Billing & plans에서 결제수단/지출 한도 복구. 그동안 코디네이터 정책: 리뷰어와 worker가 로컬에서 실행한 동일 게이트 5개(format/lint/typecheck/test/build) 결과를 CI 대신 최종 게이트 근거로 사용하고, 결제 복구 후 main CI를 재실행해 녹색을 확인한다(미확인 머지 목록: PR #14 이후) | 런북 2.5(6), 2.6(1) | 전체 |
+| E-4 | **해결(2026-08-17)**: PR #11 round 6에서 approve·머지. 원 항목: PR #11(T10 broadcast lifecycle) 리뷰가 round 4까지 request_changes(각 round의 지적은 해소, 리뷰어가 reconcile·update 경로의 인접 갭을 계속 발견 — 절단 목록 무판정, 마커 생명주기(A-18), update 본문 정확성). 코디네이터는 수렴 중으로 판단해 F-T10-4 진행. 사용자가 중단·재설계를 원하면 지시 | 런북 2.5(4) | T10 |
 
 ## 5. 이력
 
@@ -156,3 +157,5 @@
 | 2026-08-18 03:40 | R-T9-2 verdict **approve**(PR #14 DIRTY → F-T9-2 rebase `task_4bd81121aa94`). F-T11-1 완료(ledger 경로 실증·프로덕션 ReadModel 재전송 테스트·잔여 wait; 1479 tests) → R-T11-2 `task_5ff00d927243` → `ctx_dd838ea2d983`(review2) |
 | 2026-08-18 04:10 | F-T9-2 rebase 완료 → 검사(HealthComponent 'youtube-chat' 추가, main.ts chat source 배선, /health sourceHealth) → **PR #14 squash merge**(main 4023689). T9 worker release·worktree 제거. **T12 디스패치**. 진행: R-T11-2(review2). 남은: T15(T11·T12), T16(T12), T17(T12) |
 | 2026-08-18 04:40 | R-T11-2 verdict **approve** → 최종 게이트(@vl/server/input subpath, test:replay·sim 스크립트) → **PR #15 squash merge**(main 628e7cf). T11 worker release·worktree 제거. 머지 완료 13개 task(T0–T11·T13·T14·T1b), 진행 T12, 대기 T15·T16·T17(T12 이후) |
+| 2026-08-17 14:52 (실측) | **타임스탬프 정정**: 위 이력 중 '2026-08-17 12:55' 이후 항목의 시각은 코디네이터 추정치로 실제보다 앞서 기록됨(마지막 항목 실제 시각 2026-08-17 14:52 UTC). 이후 항목은 `date -u` 실측값 사용 |
+| 2026-08-17 14:52 | T12 worker escalation: **GitHub Actions 결제 차단**(13:45 UTC~ 모든 CI 2초 실패, main 포함; 마지막 성공 13:42 f35df65). T12 로컬 게이트 전부 통과(1689 tests). → **E-5 등록**, 정책: 로컬 게이트를 CI 대체 근거로 리뷰·머지 계속, 결제 복구 후 main CI 재검증. GitHub API/Actions 부분 장애도 동시 진행 중(status page: degraded) |
