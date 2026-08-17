@@ -1,7 +1,7 @@
 # TASK-T16-docs-alignment
 
 - Task: T16 문서 정합화·운영 런북·Gate 체크리스트 (`docs/tasks/TASK_SPECS.md` §T16)
-- Branch: `dnhynk/t16-docs-alignment` · PR: #TBD
+- Branch: `dnhynk/t16-docs-alignment` · PR: #19
 - Orca: task `task_60d68899d24c` · dispatch `ctx_811705fb17ba`
 - Spec sections read: §0, §1–§4, §5.2, §5.3, §6.3, §6.4, §7.1–§7.5, §8 전체, §9 전체, §10, §11, §12 전체, §14, §15, §16, §17, §18
 - BOARD decisions/assumptions relied on: D-1, D-2, D-3, D-4, A-1, A-2, A-3, A-4, A-9, A-10, A-11, A-14, A-15, A-16, A-18, E-2, E-3, E-5
