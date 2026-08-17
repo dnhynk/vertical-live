@@ -7,6 +7,8 @@ export {
   SCOPE_YOUTUBE_READONLY,
   checkScopeCoverage,
   parseScopeString,
+  sufficientSingleScopes,
+  unverifiedScopeMethods,
 } from './scopes.js'
 export type { MethodScopeEntry, PlannedMethod, ScopeCoverage } from './scopes.js'
 

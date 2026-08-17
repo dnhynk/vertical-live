@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import { FakeClock } from '../../testing/fake-clock.js'
-import { METHOD_SCOPES, PLANNED_METHODS, REQUIRED_SCOPES, checkScopeCoverage } from '../scopes.js'
+import {
+  METHOD_SCOPES,
+  PLANNED_METHODS,
+  REQUIRED_SCOPES,
+  checkScopeCoverage,
+  sufficientSingleScopes,
+  unverifiedScopeMethods,
+} from '../scopes.js'
 import { createExponentialBackoff, decideRetry } from './backoff.js'
 import { GRPC_CODES, classifyYouTubeApiError } from './classify.js'
 import { loadQuotaConfig } from './config.js'
@@ -54,6 +61,28 @@ describe('minimal scope set', () => {
     expect(coverage.sufficient).toBe(true)
     expect(coverage.uncoveredMethods).toEqual([])
     expect(coverage.extraneousScopes).toEqual([])
+  })
+
+  it('records that two single scopes are sufficient, not one', () => {
+    // Review round 1, B3: the claim that force-ssl was the *only* sufficient
+    // single scope was false on the method evidence. The tie is recorded here
+    // so the choice stays a documented judgment (see scopes.ts) rather than a
+    // claim the evidence does not support.
+    expect(sufficientSingleScopes()).toEqual([
+      'https://www.googleapis.com/auth/youtube',
+      'https://www.googleapis.com/auth/youtube.force-ssl',
+    ])
+    expect(sufficientSingleScopes()).toContain(REQUIRED_SCOPES[0])
+  })
+
+  it('reports the methods whose scopes no official source states', () => {
+    // These are unverifiable, not unchecked: recorded so no acceptance claim
+    // covers them (review round 1, B3).
+    expect(unverifiedScopeMethods()).toEqual(['liveChatMessages.streamList', 'videos.list'])
+    expect(METHOD_SCOPES['liveChatMessages.streamList'].note).toContain('UNVERIFIABLE')
+    expect(METHOD_SCOPES['liveChatMessages.streamList'].evidenceUrl).toBe(
+      'https://developers.google.com/youtube/v3/live/docs/liveChatMessages/streamList',
+    )
   })
 
   it('rejects a read-only grant, which cannot create or transition a broadcast', () => {

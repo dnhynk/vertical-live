@@ -57,10 +57,10 @@ export const METHOD_SCOPES: Readonly<Record<PlannedMethod, MethodScopeEntry>> = 
   },
   'liveChatMessages.streamList': {
     acceptedScopes: [SCOPE_YOUTUBE, SCOPE_YOUTUBE_FORCE_SSL, SCOPE_YOUTUBE_READONLY],
-    evidenceUrl: 'https://developers.google.com/youtube/v3/live/streaming-live-chat',
+    evidenceUrl: 'https://developers.google.com/youtube/v3/live/docs/liveChatMessages/streamList',
     checkedOn: CHECKED_ON,
     verified: false,
-    note: 'gRPC streaming variant of liveChatMessages.list; the guide shows an OAuth bearer token but publishes no scope list. Confirm in T9 before the first real call.',
+    note: 'UNVERIFIABLE from official sources on 2026-08-17, not merely unchecked: the streamList reference page has no "Authorization" section at all (headings: Demo, Request, Parameters, Request body, Response, Properties, Errors), the REST discovery document has no streamList method because the service is gRPC, and the streaming guide shows only `authorization: Bearer TOKEN` without naming a scope. The listed scopes are those of liveChatMessages.list, the REST method this streams; they are an inference, not documentation. T9 must confirm against a real call before relying on it.',
   },
   'liveBroadcasts.list': {
     acceptedScopes: [SCOPE_YOUTUBE, SCOPE_YOUTUBE_FORCE_SSL, SCOPE_YOUTUBE_READONLY],
@@ -108,12 +108,52 @@ export const METHOD_SCOPES: Readonly<Record<PlannedMethod, MethodScopeEntry>> = 
 })
 
 /**
- * The scope set the login CLI requests. One scope: `youtube.force-ssl` is the
- * only single scope accepted by every verified method above, including the
- * write ones (insert/bind/transition), so requesting anything else would either
- * be insufficient (`youtube.readonly`) or a second grant on top of it.
+ * Least-privilege comparison (review round 1, B3). Official scope descriptions,
+ * quoted from https://developers.google.com/youtube/v3/guides/auth/installed-apps
+ * (checked 2026-08-17; the general scope index at
+ * https://developers.google.com/identity/protocols/oauth2/scopes carries the
+ * same table but could not be read past its Google Chat section in this pass):
+ *
+ * | scope                | official description                                                              |
+ * |----------------------|-----------------------------------------------------------------------------------|
+ * | `youtube`            | "Manage your YouTube account"                                                     |
+ * | `youtube.force-ssl`  | "See, edit, and permanently delete your YouTube videos, ratings, comments and captions" |
+ * | `youtube.readonly`   | "View your YouTube account"                                                       |
+ * | `youtube.upload`     | "Manage your YouTube videos"                                                      |
+ *
+ * What the method evidence actually shows: **two** single scopes cover every
+ * verified method — `youtube` and `youtube.force-ssl` (see
+ * `sufficientSingleScopes()`, which is asserted in the tests). The earlier claim
+ * that `force-ssl` was the *only* such scope was wrong and is withdrawn.
+ * `youtube.readonly` is genuinely insufficient: it is not accepted by
+ * `liveBroadcasts.insert`/`bind`/`transition` or `liveStreams.insert`.
+ *
+ * Why `youtube.force-ssl` is chosen between the two, given that neither is
+ * documented as a subset of the other:
+ * 1. its description bounds the objects it reaches (videos, ratings, comments,
+ *    captions), while `youtube` is unbounded account management;
+ * 2. it additionally requires every call to use SSL — a strictly stronger
+ *    constraint than `youtube`, never a weaker one.
+ * This is a recorded judgment with its basis, not a proof of strict minimality:
+ * Google publishes no per-scope method matrix. Revisit if one appears.
  */
 export const REQUIRED_SCOPES: readonly string[] = Object.freeze([SCOPE_YOUTUBE_FORCE_SSL])
+
+/** Scopes that on their own authorize every verified planned method. */
+export function sufficientSingleScopes(): string[] {
+  const candidates = new Set<string>()
+  for (const method of PLANNED_METHODS) {
+    const entry = METHOD_SCOPES[method]
+    if (!entry.verified) continue
+    for (const scope of entry.acceptedScopes) candidates.add(scope)
+  }
+  return [...candidates].filter((scope) => checkScopeCoverage([scope]).sufficient).sort()
+}
+
+/** Planned methods whose accepted scopes no official source states. */
+export function unverifiedScopeMethods(): PlannedMethod[] {
+  return PLANNED_METHODS.filter((method) => !METHOD_SCOPES[method].verified)
+}
 
 export interface ScopeCoverage {
   readonly sufficient: boolean
