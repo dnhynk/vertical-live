@@ -27,7 +27,7 @@
 | T14 | 렌더러 화면 완성(5초 무음·감사 연출·i18n) | T5, T7 | — | merged | t14-renderer-screen | #13 | `task_82f32652b3cf` |
 | T15 | fault matrix·72h soak harness | T11, T12, T13 | — | dispatched | t15-fault-soak | | `task_f32603eaee51` |
 | T16 | 문서 정합화·운영 런북·Gate 체크리스트 | T12 | — | dispatched | t16-docs-alignment | | `task_60d68899d24c` |
-| T17 | Windows 운영 스크립트(자동시작·OBS·아카이브) | T2, T12 | — | in_review | t17-windows-ops | #17 | `task_e2466b978ebe` |
+| T17 | Windows 운영 스크립트(자동시작·OBS·아카이브) | T2, T12 | — | changes_requested | t17-windows-ops | #17 | `task_e2466b978ebe` |
 
 디스패치 순서 원칙: `ready` 중 T-ID 낮은 것부터, 동시 2, `[contract]`는 하나만. 리뷰 Task는 `R-<T-ID>-<round>`로 별도 등록하고 아래 이력에만 남긴다.
 
@@ -172,3 +172,4 @@
 | 2026-08-17 16:49 | F-T12-4 완료(#haltOutwardWork 선행, 1723 tests). R-T12-5 `task_9b8aecab4f8e` → `ctx_096dc3db9f85`(review) |
 | 2026-08-17 16:58 | R-T12-5 verdict **approve** → 최종 게이트(로컬 게이트 근거 E-5, deps 변경 없음, vault URL만) → **PR #16 squash merge**(main ade4bf9). T12 worker release·worktree 제거. E-6 해결. **T15 `ctx_394217ab9bcb`·T17 `ctx_f952a9dfbf9f` 디스패치**, T16은 다음 슬롯. 남은 미머지 task: T15·T16·T17 |
 | 2026-08-17 17:45 | T17 질문(schtasks 등록→해제 1사이클) → A 승인. T17 worker_done(succeeded, PR #17: 자동시작 XML·PS 스크립트, rolling archive dry-run/apply, windows-host.md, obs-process 실행기, 토큰·키 주입/제거; schtasks 사이클 로그 첨부, XML 결함 1건 실행으로 발견·수정; 1802 tests 로컬). **E-7 등록**(OBS 32 safe-mode 프롬프트). R-T17-1 `task_ffd6ba0dd481` → `ctx_8be4d490af8d`(review). **T16 디스패치**. 진행: T15 |
+| 2026-08-17 18:00 | T16 질문(CLAUDE.md/AGENTS.md '구식' 문장 갱신 범위) → A(최소 수정 포함). R-T17-1 verdict request_changes(blocker: archive root junction 추종 삭제; major 2: 시작 스크립트 env override 무시·TCP 포트만으로 준비 판정; minor 테스트 수) → F-T17-1 `task_d21724f0b368` → T17 터미널. 진행: T15, T16 |
