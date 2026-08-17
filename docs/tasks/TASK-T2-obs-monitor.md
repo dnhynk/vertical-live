@@ -209,6 +209,17 @@ npm error code 1
 
 - `client.test.ts`의 새 ghost-connection 테스트가 vitest unhandled rejection 1건을 냈다. 원인은 프로덕션 코드가 아니라 테스트였다: 거부가 `clock.advance()` 안에서 일어나는데 핸들러를 그 뒤에 붙여 한 틱 동안 관측되지 않았다. 기대를 advance 앞에서 붙이도록 고쳤고(61819b7에 포함), 전체 실행에서 `Errors 0`을 확인했다.
 
+## Review round 2
+
+리뷰: [PR #3 review 4948555970](https://github.com/dnhynk/vertical-live/pull/3#pullrequestreview-4948555970) · verdict `request_changes` · major 1 + minor 1. 반박 없음 — 둘 다 재현했고 둘 다 고쳤다. round 1 findings 5개는 리뷰어 replay에서 전부 **resolved**로 확인됐고(단 finding 2는 아래 문자열 잔여분 때문에 "functional path resolved"), 게이트 6개·합격 기준 3개도 통과했다.
+
+| # | 심각도 | 위치 | finding | 처리 |
+|---|---|---|---|---|
+| 1 | major | `obs/control.ts:107`, `obs/config.ts:35` | `MissingSecretError` hint("the stream key lives in the vault, **not in OBS** or the repository")와 `streamIngestUrl` 주석("**only in the vault**")이 A-16이 금지한 vault-only 주장을 그대로 남겼다. 둘 다 운영자 가시 문자열이고, missing-secret probe를 돌리면 그 문장이 실제로 출력된다. 인접한 구현·런북은 이미 service.json 캐시를 인정하고 있어 서로 모순이었다 | **고침 (2c04a5f)** — 두 문자열을 A-16 문구로 교체: vault가 **정본(system of record)**, 저장소·게임 DB·로그·화면에는 없음, **주입 후 OBS가 활성 프로파일 `service.json`에 캐시**, 정지 시 제거는 T17. 테스트 추가: `control.test.ts` "describes the vault as system of record without claiming OBS never holds the key" — `system of record`·`service.json` 포함과 `/not in OBS\|only in the vault/` 부재를 단언한다. **옛 문구로 되돌리면 실패함을 확인**했다(이제 A-16은 리뷰가 아니라 테스트가 지킨다) |
+| 2 | minor | `docs/tasks/TASK-T2-obs-monitor.md:220` | EOF에 tool-wrapper 태그 `</content>`·`</invoke>` 리터럴이 남아 티켓이 유효한 기록이 아니었다 | **고침 (2c04a5f)** — 21바이트 제거. 호스트 BSOD로 소실된 세션이 이 파일을 쓰던 중 남긴 잔재였다 |
+
+리뷰어가 지적한 "`## Result`의 '5개 모두 고쳤다'가 너무 넓다"도 함께 정정했다 — 위 `## Review round 1` 머리의 정정 문단.
+
 ## Not done / out of scope
 
 - supervisor 상태기계·건강 집계·알림(T12), Windows 자동시작·OBS 프로세스 기동(T17)
