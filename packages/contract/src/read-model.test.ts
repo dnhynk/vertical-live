@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 
 import {
   ActionReactionEffectSchema,
+  AmbienceEffectSchema,
+  EffectCauseSchema,
   EffectSchema,
   PaidThanksEffectSchema,
   type Effect,
@@ -70,6 +72,7 @@ const ACTION_REACTION: Effect = {
   schemaVersion: CONTRACT_VERSION,
   effectId: 'eff_test_0001',
   kind: 'ACTION_REACTION',
+  cause: { kind: 'event', eventKey: 'youtube:bcast_test_0001:msg_test_0001' },
   causedByEventKey: 'youtube:bcast_test_0001:msg_test_0001',
   stateRevision: 42,
   startsAt: '2026-08-16T00:10:00.000Z',
@@ -82,6 +85,7 @@ const PAID_THANKS: Effect = {
   schemaVersion: CONTRACT_VERSION,
   effectId: 'eff_test_0002',
   kind: 'PAID_THANKS',
+  cause: { kind: 'event', eventKey: 'youtube:bcast_test_0001:msg_test_0003' },
   causedByEventKey: 'youtube:bcast_test_0001:msg_test_0003',
   stateRevision: 43,
   startsAt: '2026-08-16T00:11:00.000Z',
@@ -94,6 +98,7 @@ const AMBIENCE: Effect = {
   schemaVersion: CONTRACT_VERSION,
   effectId: 'eff_test_0003',
   kind: 'AMBIENCE',
+  cause: { kind: 'event', eventKey: 'simulator:bcast_test_0001:msg_test_0100' },
   causedByEventKey: 'simulator:bcast_test_0001:msg_test_0100',
   stateRevision: 44,
   startsAt: '2026-08-16T00:12:00.000Z',
@@ -106,6 +111,7 @@ const MISSION_UPDATE: Effect = {
   schemaVersion: CONTRACT_VERSION,
   effectId: 'eff_test_0004',
   kind: 'MISSION_UPDATE',
+  cause: { kind: 'event', eventKey: 'youtube:bcast_test_0001:msg_test_0002' },
   causedByEventKey: 'youtube:bcast_test_0001:msg_test_0002',
   stateRevision: 45,
   startsAt: '2026-08-16T00:13:00.000Z',
@@ -114,7 +120,49 @@ const MISSION_UPDATE: Effect = {
   payload: { missionId: 'test_mission_a', phase: 'STARTED' },
 }
 
-const EFFECTS = [ACTION_REACTION, PAID_THANKS, AMBIENCE, MISSION_UPDATE]
+/**
+ * Zero viewers still means content (spec §2.1, §6.2): the daily chapter turns
+ * over on a timer, so this effect has a deadline cause and no event key at all.
+ */
+const DEADLINE_AMBIENCE: Effect = {
+  schemaVersion: CONTRACT_VERSION,
+  effectId: 'eff_test_0005',
+  kind: 'AMBIENCE',
+  cause: {
+    kind: 'deadline',
+    deadlineKind: 'test_deadline_weather_turn',
+    deadlineId: 'dl_test_0001',
+  },
+  causedByEventKey: null,
+  stateRevision: 46,
+  startsAt: '2026-08-16T01:00:00.000Z',
+  endsAt: '2026-08-16T01:00:06.000Z',
+  paid: false,
+  payload: { ambienceId: 'test_ambience_rain' },
+}
+
+/** An aggregate window closes on its own timer (spec §6.4); the row id is optional. */
+const DEADLINE_ACTION_REACTION: Effect = {
+  schemaVersion: CONTRACT_VERSION,
+  effectId: 'eff_test_0006',
+  kind: 'ACTION_REACTION',
+  cause: { kind: 'deadline', deadlineKind: 'test_deadline_aggregate_window' },
+  causedByEventKey: null,
+  stateRevision: 47,
+  startsAt: '2026-08-16T01:01:00.000Z',
+  endsAt: '2026-08-16T01:01:04.000Z',
+  paid: false,
+  payload: { commandName: 'PLAY', contributionCount: 12 },
+}
+
+const EFFECTS = [
+  ACTION_REACTION,
+  PAID_THANKS,
+  AMBIENCE,
+  MISSION_UPDATE,
+  DEADLINE_AMBIENCE,
+  DEADLINE_ACTION_REACTION,
+]
 
 describe('enums fixed by the spec', () => {
   it('has the six broadcast lifecycle states of §9.2', () => {
@@ -211,7 +259,7 @@ describe('WorldSnapshot (spec §6.3)', () => {
 })
 
 describe('Effect (spec §7.3(6), §8.4)', () => {
-  it.each(EFFECTS)('accepts the $kind variant', (effect) => {
+  it.each(EFFECTS)('accepts the $kind variant with a $cause.kind cause', (effect) => {
     expect(EffectSchema.parse(effect)).toEqual(effect)
   })
 
@@ -238,14 +286,104 @@ describe('Effect (spec §7.3(6), §8.4)', () => {
     expect(EffectSchema.safeParse({ ...ACTION_REACTION, endsAt: '4s' }).success).toBe(false)
   })
 
-  it('refuses an effect with no causing event key', () => {
+  it('refuses an unknown effect kind', () => {
+    expect(EffectSchema.safeParse({ ...ACTION_REACTION, kind: 'REVIVE' }).success).toBe(false)
+  })
+})
+
+/**
+ * Spec §2.1 and §6.2 want seconds-scale staging with zero viewers, while
+ * §7.3(6) and §10.2 name the causing event key of an effect. The `cause`
+ * discriminator carries both: a timer-caused effect says so and has no key,
+ * and the paid audit row still always names its event (BOARD A-17).
+ */
+describe('Effect cause (spec §2.1, §6.2 vs §7.3(6), §10.2 — BOARD A-17)', () => {
+  it('has exactly the two causes of A-17', () => {
+    expect(EffectCauseSchema.options.map((option) => option.shape.kind.value)).toEqual([
+      'event',
+      'deadline',
+    ])
+  })
+
+  it('refuses a cause kind outside the discriminator', () => {
+    expect(
+      EffectSchema.safeParse({
+        ...DEADLINE_AMBIENCE,
+        cause: { kind: 'operator', operatorId: 'test_operator' },
+      }).success,
+    ).toBe(false)
+  })
+
+  it('refuses an effect with no cause at all', () => {
+    const withoutCause: Record<string, unknown> = { ...ACTION_REACTION }
+    delete withoutCause.cause
+    expect(EffectSchema.safeParse(withoutCause).success).toBe(false)
+  })
+
+  it('refuses free-form text as a deadline kind', () => {
+    expect(
+      EffectSchema.safeParse({
+        ...DEADLINE_AMBIENCE,
+        cause: { kind: 'deadline', deadlineKind: '天気が変わる！ https://example.invalid' },
+      }).success,
+    ).toBe(false)
+  })
+
+  it('refuses a deadline-caused effect that still names an event key', () => {
+    // The two representations of the cause can never disagree: an effect no
+    // event produced must not look like an event in the outbox (spec §10.2).
+    const result = EffectSchema.safeParse({
+      ...DEADLINE_AMBIENCE,
+      causedByEventKey: 'youtube:bcast_test_0001:msg_test_0001',
+    })
+    expect(result.success).toBe(false)
+    // Asserted on the path so the rejection cannot silently come from an
+    // unrelated rule if the shape changes later.
+    expect(result.error?.issues.map((issue) => issue.path.join('.'))).toContain('causedByEventKey')
+  })
+
+  it('refuses an event-caused effect whose causedByEventKey disagrees with cause.eventKey', () => {
+    expect(
+      EffectSchema.safeParse({
+        ...ACTION_REACTION,
+        causedByEventKey: 'youtube:bcast_test_0001:msg_test_9999',
+      }).success,
+    ).toBe(false)
+  })
+
+  it('refuses an event-caused effect with a null causedByEventKey', () => {
     expect(EffectSchema.safeParse({ ...ACTION_REACTION, causedByEventKey: null }).success).toBe(
       false,
     )
   })
 
-  it('refuses an unknown effect kind', () => {
-    expect(EffectSchema.safeParse({ ...ACTION_REACTION, kind: 'REVIVE' }).success).toBe(false)
+  it('refuses a paid effect caused by a deadline (spec §8.4, §10.2)', () => {
+    // A paid effect is the durable audit row of a real payment, so it must name
+    // the event it acknowledges; a timer owes nobody thanks.
+    const result = EffectSchema.safeParse({
+      ...PAID_THANKS,
+      cause: { kind: 'deadline', deadlineKind: 'test_deadline_thanks_replay' },
+      causedByEventKey: null,
+    })
+    expect(result.success).toBe(false)
+    expect(result.error?.issues.map((issue) => issue.path.join('.'))).toContain('cause')
+    expect(
+      EffectSchema.safeParse({
+        ...DEADLINE_AMBIENCE,
+        paid: true,
+      }).success,
+    ).toBe(false)
+  })
+
+  it('applies the same rules through a single variant schema, not only the union', () => {
+    // T8 assembles effects against the exported variant schemas, so they carry
+    // the refinements too.
+    expect(AmbienceEffectSchema.safeParse(DEADLINE_AMBIENCE).success).toBe(true)
+    expect(AmbienceEffectSchema.safeParse({ ...DEADLINE_AMBIENCE, paid: true }).success).toBe(false)
+    expect(
+      ActionReactionEffectSchema.safeParse({ ...DEADLINE_ACTION_REACTION, causedByEventKey: 'x' })
+        .success,
+    ).toBe(false)
   })
 })
 
@@ -324,6 +462,22 @@ describe('WS protocol on /ws/renderer', () => {
         sentAt,
         type: 'snapshot',
         snapshot: { ...SNAPSHOT, stateRevision: -1 },
+      }).success,
+    ).toBe(false)
+  })
+
+  it('carries a deadline-caused effect and still refuses an inconsistent one', () => {
+    const message = {
+      schemaVersion: CONTRACT_VERSION,
+      sentAt,
+      type: 'effect',
+      effect: DEADLINE_AMBIENCE,
+    }
+    expect(ServerToRendererMessageSchema.parse(message)).toEqual(message)
+    expect(
+      ServerToRendererMessageSchema.safeParse({
+        ...message,
+        effect: { ...DEADLINE_AMBIENCE, causedByEventKey: 'youtube:bcast_test_0001:msg_test_0001' },
       }).success,
     ).toBe(false)
   })
