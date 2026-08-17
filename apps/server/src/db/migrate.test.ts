@@ -100,10 +100,11 @@ describe('migrate', () => {
     const database = openDatabase({ file, busyTimeoutMs: BUSY_TIMEOUT_MS })
     try {
       const result = migrate(database, { clock: new FakeClock() })
-      expect(result.applied.map((migration) => migration.fileName)).toEqual([
-        '001_initial.sql',
-        '002_retention-ledger.sql',
-      ])
+      // Derived from the directory: every task adds a migration, and pinning the
+      // list here would make this test a merge conflict rather than a check.
+      expect(result.applied.map((migration) => migration.fileName)).toEqual(
+        loadMigrations().map((migration) => migration.fileName),
+      )
 
       const tables = (
         database
