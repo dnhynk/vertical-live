@@ -175,3 +175,38 @@ client loaded from dist build: true          (빌드 산출물에서도 proto �
 
 라운드 1에서 지적된 티켓 `## Result`의 과장(서버 간격 준수·`id,snippet` 불변·재연결 측정)은 위
 수정으로 사실이 되었고, 해당 문장들도 실제 동작에 맞게 다시 썼다.
+
+## Rebase onto T10 (round 2 → merge gate)
+
+리뷰 round 2가 approve된 뒤 `origin/main`이 PR #11(T10 broadcast lifecycle)로 전진해 PR #14가
+`DIRTY`가 되었다. `git fetch origin && git rebase origin/main`(main `24f33c5`)로 재배치했다.
+**코드 기능 변경은 없다** — T9 소유 파일(`apps/server/src/youtube/chat/**`,
+`apps/server/src/testing/{fake-stream-list-server,fake-live-chat-rest-server,tcp-breaker,chat-test-support}.ts`,
+`apps/server/proto/stream_list.proto`, `docs/ops/youtube-chat-source.md`, 이 티켓)은 rebase 전
+커밋(`676d215`)과 **바이트 동일**하다(`git diff 676d215 HEAD -- <위 경로>` 결과 없음).
+
+충돌 3건은 모두 T10과 T9가 같은 확장점에 각자 항목을 더한 union이었다:
+
+| 파일 | 해결 |
+|---|---|
+| `apps/server/src/health/types.ts` | `HealthComponent = 'obs' \| 'youtube' \| 'youtube-chat'`. T10의 broadcast 신호는 `component: 'youtube'`, T9의 채팅 신호는 `'youtube-chat'`으로 서로 다른 producer다(§9.4(3)·(6)) |
+| `apps/server/src/youtube/index.ts` | `export * from './broadcast/index.js'`와 `'./chat/index.js'` 둘 다 |
+| `config/default.json` | `youtube.broadcast`(T10)와 `youtube.chat`(T9) 블록 병존. 각 블록의 `provisional` 목록은 그대로. round 1 M1의 `rest.maxPollIntervalMs` 삭제도 유지됨 |
+
+`liveChatId` resolver를 T10 `broadcast_resources`에 연결하는 것은 이번 rebase 범위 밖이다(T12 —
+아래 Follow-ups). 지금도 config 주입 + `LiveChatTargetResolver` 포트 그대로다.
+
+```text
+$ git rebase origin/main            # 8 commits, 충돌 1 커밋(3파일) 해결
+$ npm run format:check && npm run lint && npm run typecheck && npm run test && npm run build
+All matched files use Prettier code style!
+check-no-legacy-imports: ok (0 legacy imports)
+check-install-scripts: ok (4 reviewed, better-sqlite3 binding loads)
+tsc --build tsconfig.json                     (no output = pass)
+Test Files  102 passed (102)
+     Tests  1476 passed | 1 skipped (1477)
+schema up to date (6 files)
+copied 5 migration(s) to dist/db/migrations   (T10의 003 포함)
+docs/ops/data-map.md up to date
+exit=0                                        (2026-08-17, this Windows 11 host, Node 24)
+```
