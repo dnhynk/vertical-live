@@ -8,10 +8,10 @@ import {
   type RendererToServerMessage,
 } from '@vl/contract'
 
-import type { Clock } from './clock.js'
-import type { HealthSource } from './health.js'
-import type { RendererLog } from './log.js'
-import type { ReadModel } from './store.js'
+import type { Clock } from './clock'
+import type { HealthSource } from './health'
+import type { RendererLog } from './log'
+import type { ReadModel } from './store'
 
 /**
  * WebSocket client for `/ws/renderer` (spec §7.3(6)(7), §9.4(4)).
@@ -93,6 +93,7 @@ export class RendererConnection {
   #reconnectTimer: number | null = null
   #healthTimer: number | null = null
   #stopped = false
+  #version = 0
 
   readonly #listeners = new Set<() => void>()
 
@@ -114,6 +115,11 @@ export class RendererConnection {
 
   get rejectedMessageCount(): number {
     return this.#rejectedMessageCount
+  }
+
+  /** Changes whenever the status or a counter changes. */
+  get version(): number {
+    return this.#version
   }
 
   subscribe(listener: () => void): () => void {
@@ -324,6 +330,7 @@ export class RendererConnection {
   }
 
   #notify(): void {
+    this.#version += 1
     for (const listener of this.#listeners) listener()
   }
 }

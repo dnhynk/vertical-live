@@ -1,4 +1,4 @@
-import type { RendererLog } from '../read-model/log.js'
+import type { RendererLog } from '../read-model/log'
 
 import ja from './ja.json'
 

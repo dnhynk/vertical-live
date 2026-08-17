@@ -1,7 +1,7 @@
 import type { Effect, EffectId, IsoUtcInstant, WorldSnapshot } from '@vl/contract'
 
-import type { Clock } from './clock.js'
-import type { RendererLog } from './log.js'
+import type { Clock } from './clock'
+import type { RendererLog } from './log'
 
 /**
  * The renderer's read model (spec §10.2, §7.3(6)(7)).

@@ -1,6 +1,6 @@
 import type { IsoUtcInstant } from '@vl/contract'
 
-import type { Clock } from './clock.js'
+import type { Clock } from './clock'
 
 /**
  * Bounded diagnostic log for the `?mode=dev` panel and the browser console.
@@ -26,6 +26,7 @@ export class RendererLog {
   readonly #capacity: number
   readonly #entries: LogEntry[] = []
   readonly #listeners = new Set<() => void>()
+  #version = 0
 
   constructor(clock: Clock, capacity: number = DEFAULT_CAPACITY) {
     this.#clock = clock
@@ -39,8 +40,16 @@ export class RendererLog {
       code,
       detail: detail === null ? null : String(detail),
     })
-    if (this.#entries.length > this.#capacity) this.#entries.splice(0, this.#entries.length - this.#capacity)
+    if (this.#entries.length > this.#capacity) {
+      this.#entries.splice(0, this.#entries.length - this.#capacity)
+    }
+    this.#version += 1
     for (const listener of this.#listeners) listener()
+  }
+
+  /** Changes on every entry; `useSyncExternalStore` reads it. */
+  get version(): number {
+    return this.#version
   }
 
   info(code: string, detail?: string | number | null): void {

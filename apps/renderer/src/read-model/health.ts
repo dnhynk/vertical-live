@@ -1,5 +1,5 @@
-import type { Clock } from './clock.js'
-import type { RendererLog } from './log.js'
+import type { Clock } from './clock'
+import type { RendererLog } from './log'
 
 /**
  * Renderer health signals of spec §9.4(4): frame counter, FPS and WebGL

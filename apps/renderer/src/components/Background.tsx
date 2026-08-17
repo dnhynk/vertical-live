@@ -1,6 +1,6 @@
-﻿import React, { useRef } from 'react'
-import { extend, useFrame } from '@react-three/fiber'
+import { useRef } from 'react'
 import { shaderMaterial } from '@react-three/drei'
+import { extend, useFrame, type ThreeElement } from '@react-three/fiber'
 import * as THREE from 'three'
 
 const DynamicBackgroundMaterial = shaderMaterial(
@@ -36,11 +36,19 @@ const DynamicBackgroundMaterial = shaderMaterial(
 
 extend({ DynamicBackgroundMaterial })
 
-export default function Background() {
-  const materialRef = useRef()
+declare module '@react-three/fiber' {
+  interface ThreeElements {
+    dynamicBackgroundMaterial: ThreeElement<typeof DynamicBackgroundMaterial>
+  }
+}
 
-  useFrame((state, delta) => {
-    if (materialRef.current) {
+type BackgroundMaterial = THREE.ShaderMaterial & { uTime: number }
+
+export default function Background() {
+  const materialRef = useRef<BackgroundMaterial>(null)
+
+  useFrame((_state, delta) => {
+    if (materialRef.current !== null) {
       materialRef.current.uTime += delta * 0.5
     }
   })

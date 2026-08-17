@@ -1,7 +1,7 @@
 import { RendererIdSchema, type RendererId } from '@vl/contract'
 
-import type { BackoffConfig } from './read-model/connection.js'
-import type { RendererLog } from './read-model/log.js'
+import type { BackoffConfig } from './read-model/connection'
+import type { RendererLog } from './read-model/log'
 
 /**
  * Renderer configuration, read from the query string of the URL that OBS (or a
