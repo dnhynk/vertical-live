@@ -89,9 +89,9 @@ switch (mode) {
     database
       .prepare(
         `INSERT INTO effect_outbox
-           (effect_id, caused_by_event_key, kind, paid, state_revision, starts_at, ends_at,
-            payload_json, published_at)
-         VALUES (?, 'youtube:brd_test_0001:msg_test_0003', 'PAID_THANKS', 1, 1,
+           (effect_id, cause_kind, caused_by_event_key, kind, paid, state_revision, starts_at,
+            ends_at, payload_json, published_at)
+         VALUES (?, 'event', 'youtube:brd_test_0001:msg_test_0003', 'PAID_THANKS', 1, 1,
                  '2026-08-16T00:05:01.000Z', '2026-08-16T00:05:06.000Z', ?,
                  '2026-08-16T00:05:01.500Z')`,
       )

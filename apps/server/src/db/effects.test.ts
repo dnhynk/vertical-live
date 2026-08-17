@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 
 import { FakeClock } from '../testing/fake-clock.js'
 import { EffectNotPublishedError, UnknownEffectError } from './errors.js'
-import { makePaidEffect, makeSnapshot } from './testing/fixtures.js'
+import { makeDeadlineEffect, makePaidEffect, makeSnapshot } from './testing/fixtures.js'
 import { createTempStore, type TempStore } from './testing/temp-store.js'
 
 /**
@@ -148,5 +148,83 @@ describe('listUnackedEffects', () => {
     expect(handle.store.getEffect('eff_test_roundtrip')?.effect).toEqual(
       makePaidEffect({ effectId: 'eff_test_roundtrip', stateRevision: 1 }),
     )
+  })
+})
+
+describe('effect cause (BOARD A-17)', () => {
+  it('round-trips a timer-caused effect with a null event key', () => {
+    const clock = new FakeClock()
+    temp = createTempStore({ clock })
+    const effect = makeDeadlineEffect({
+      effectId: 'eff_test_timer',
+      deadlineId: 'dl_test_choice',
+      stateRevision: 1,
+    })
+    temp.store.commitStateTransition({
+      snapshot: makeSnapshot({ stateRevision: 1, processedIngestSeq: 0 }),
+      revision: 1,
+      processedSeq: 0,
+      effects: [effect],
+    })
+
+    // Content moves with no viewers and no event to point at (spec §2.1, §6.2).
+    const reopened = temp.reopen()
+    const stored = reopened.getEffect('eff_test_timer')
+    expect(stored?.effect).toEqual(effect)
+    expect(stored?.effect.causedByEventKey).toBeNull()
+    expect(reopened.listUnackedEffects().map((row) => row.effect.effectId)).toEqual([
+      'eff_test_timer',
+    ])
+  })
+
+  it('round-trips a timer-caused effect that names no deadline row', () => {
+    temp = createTempStore()
+    const effect = makeDeadlineEffect({ effectId: 'eff_test_timer_anon', stateRevision: 1 })
+    temp.store.commitStateTransition({
+      snapshot: makeSnapshot({ stateRevision: 1, processedIngestSeq: 0 }),
+      revision: 1,
+      processedSeq: 0,
+      effects: [effect],
+    })
+    expect(temp.store.getEffect('eff_test_timer_anon')?.effect).toEqual(effect)
+  })
+
+  it('refuses a paid effect that claims a deadline cause', () => {
+    temp = createTempStore()
+    // Rejected twice over: the contract refinement and the table CHECK. A paid
+    // row is a durable audit record and must name its event (spec §8.4, §10.2).
+    expect(() =>
+      temp?.store.commitStateTransition({
+        snapshot: makeSnapshot({ stateRevision: 1, processedIngestSeq: 0 }),
+        revision: 1,
+        processedSeq: 0,
+        effects: [
+          {
+            ...makePaidEffect({ effectId: 'eff_test_paid_timer', stateRevision: 1 }),
+            cause: { kind: 'deadline', deadlineKind: 'test_choice_window' },
+            causedByEventKey: null,
+          } as ReturnType<typeof makePaidEffect>,
+        ],
+      }),
+    ).toThrow()
+    expect(temp.store.loadRecoveryState().unackedEffects).toEqual([])
+  })
+
+  it('refuses an event cause whose key disagrees with causedByEventKey', () => {
+    temp = createTempStore()
+    expect(() =>
+      temp?.store.commitStateTransition({
+        snapshot: makeSnapshot({ stateRevision: 1, processedIngestSeq: 0 }),
+        revision: 1,
+        processedSeq: 0,
+        effects: [
+          {
+            ...makePaidEffect({ effectId: 'eff_test_mismatch', stateRevision: 1 }),
+            causedByEventKey: 'youtube:brd_test_0001:msg_test_other',
+          } as ReturnType<typeof makePaidEffect>,
+        ],
+      }),
+    ).toThrow()
+    expect(temp.store.loadRecoveryState().unackedEffects).toEqual([])
   })
 })

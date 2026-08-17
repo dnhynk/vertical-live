@@ -90,9 +90,19 @@ CREATE INDEX deadlines_pending_due ON deadlines (due_at) WHERE status = 'pending
 -- Durable effect outbox for side effects that cannot be regenerated, i.e. paid
 -- audit staging (spec §7.3(6)(7), §10.2). `state_revision` is stored because the
 -- renderer contract carries it and the effect is rebuilt from this row on restart.
+--
+-- The cause is stored as its discriminator plus the members of that branch
+-- (BOARD A-17): content keeps moving with zero viewers (spec §2.1, §6.2), so a
+-- timer-caused effect has no event to point at and `caused_by_event_key` is NULL
+-- for exactly those rows. The CHECK constraints below are the same two rules the
+-- `EffectCause` contract enforces, so a row that disagrees cannot be written even
+-- by a caller that skipped validation.
 CREATE TABLE effect_outbox (
   effect_id           TEXT    PRIMARY KEY,
-  caused_by_event_key TEXT    NOT NULL,
+  cause_kind          TEXT    NOT NULL CHECK (cause_kind IN ('event', 'deadline')),
+  caused_by_event_key TEXT,
+  cause_deadline_kind TEXT,
+  cause_deadline_id   TEXT,
   kind                TEXT    NOT NULL,
   paid                INTEGER NOT NULL CHECK (paid IN (0, 1)),
   state_revision      INTEGER NOT NULL CHECK (state_revision >= 0),
@@ -101,7 +111,20 @@ CREATE TABLE effect_outbox (
   payload_json        TEXT    NOT NULL,
   published_at        TEXT,
   acked_at            TEXT,
-  expired_at          TEXT
+  expired_at          TEXT,
+  CHECK (
+    (cause_kind = 'event'
+       AND caused_by_event_key IS NOT NULL
+       AND cause_deadline_kind IS NULL
+       AND cause_deadline_id IS NULL)
+    OR
+    (cause_kind = 'deadline'
+       AND caused_by_event_key IS NULL
+       AND cause_deadline_kind IS NOT NULL)
+  ),
+  -- A paid effect is a durable audit row and spec §10.2 requires it to carry the
+  -- causing event key; a timer never owes anyone thanks (spec §8.4).
+  CHECK (paid = 0 OR cause_kind = 'event')
 ) STRICT;
 
 -- Restart republish set: committed but neither acked nor expired (spec §7.3(7)).

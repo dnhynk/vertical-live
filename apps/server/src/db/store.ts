@@ -99,7 +99,10 @@ interface SnapshotColumns {
 
 interface EffectColumns {
   readonly effect_id: string
-  readonly caused_by_event_key: string
+  readonly cause_kind: string
+  readonly caused_by_event_key: string | null
+  readonly cause_deadline_kind: string | null
+  readonly cause_deadline_id: string | null
   readonly kind: string
   readonly paid: number
   readonly state_revision: number
@@ -565,12 +568,25 @@ export class PersistenceStore {
 
   #writeEffects(effects: readonly Effect[]): { inserted: string[]; duplicate: string[] } {
     const insert = this.#db.prepare<
-      [string, string, string, number, number, string, string, string],
+      [
+        string,
+        string,
+        string | null,
+        string | null,
+        string | null,
+        string,
+        number,
+        number,
+        string,
+        string,
+        string,
+      ],
       { effect_id: string }
     >(
       `INSERT INTO effect_outbox
-         (effect_id, caused_by_event_key, kind, paid, state_revision, starts_at, ends_at, payload_json)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         (effect_id, cause_kind, caused_by_event_key, cause_deadline_kind, cause_deadline_id,
+          kind, paid, state_revision, starts_at, ends_at, payload_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (effect_id) DO NOTHING
        RETURNING effect_id`,
     )
@@ -579,7 +595,10 @@ export class PersistenceStore {
     for (const effect of effects) {
       const row = insert.get(
         effect.effectId,
+        effect.cause.kind,
         effect.causedByEventKey,
+        effect.cause.kind === 'deadline' ? effect.cause.deadlineKind : null,
+        effect.cause.kind === 'deadline' ? (effect.cause.deadlineId ?? null) : null,
         effect.kind,
         effect.paid ? 1 : 0,
         effect.stateRevision,
@@ -812,7 +831,8 @@ export class PersistenceStore {
   }
 }
 
-const EFFECT_COLUMNS = `SELECT effect_id, caused_by_event_key, kind, paid, state_revision,
+const EFFECT_COLUMNS = `SELECT effect_id, cause_kind, caused_by_event_key, cause_deadline_kind,
+         cause_deadline_id, kind, paid, state_revision,
          starts_at, ends_at, payload_json, published_at, acked_at, expired_at
     FROM effect_outbox`
 
@@ -842,6 +862,7 @@ function toPersistedEffect(row: EffectColumns): PersistedEffect {
     effect: EffectSchema.parse({
       schemaVersion: 1,
       effectId: row.effect_id,
+      cause: toEffectCause(row),
       causedByEventKey: row.caused_by_event_key,
       kind: row.kind,
       paid: row.paid === 1,
@@ -854,6 +875,22 @@ function toPersistedEffect(row: EffectColumns): PersistedEffect {
     ackedAt: row.acked_at,
     expiredAt: row.expired_at,
   }
+}
+
+/**
+ * Rebuilds the `EffectCause` branch the row stored (BOARD A-17). The table's
+ * CHECK constraints already guarantee the members of the branch are present, and
+ * `EffectSchema.parse` re-checks the cause rules on the way out.
+ */
+function toEffectCause(row: EffectColumns): unknown {
+  if (row.cause_kind === 'deadline') {
+    return {
+      kind: 'deadline',
+      deadlineKind: row.cause_deadline_kind,
+      ...(row.cause_deadline_id === null ? {} : { deadlineId: row.cause_deadline_id }),
+    }
+  }
+  return { kind: 'event', eventKey: row.caused_by_event_key }
 }
 
 function toPersistedDeadline(row: DeadlineColumns): PersistedDeadline {

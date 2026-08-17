@@ -101,18 +101,20 @@ export interface EffectOverrides {
   readonly endsAt?: string
 }
 
-/** A paid thanks effect: the durable outbox row of spec §10.2. */
+/** A paid thanks effect: the durable outbox row of spec §10.2, event-caused. */
 export function makePaidEffect(overrides: EffectOverrides = {}): Effect {
+  const eventKey =
+    overrides.causedByEventKey ??
+    eventKeyFor({
+      source: 'youtube',
+      broadcastId: TEST_BROADCAST_ID,
+      messageId: 'msg_test_0003',
+    })
   return {
     schemaVersion: CONTRACT_VERSION,
     effectId: overrides.effectId ?? 'eff_test_0001',
-    causedByEventKey:
-      overrides.causedByEventKey ??
-      eventKeyFor({
-        source: 'youtube',
-        broadcastId: TEST_BROADCAST_ID,
-        messageId: 'msg_test_0003',
-      }),
+    cause: { kind: 'event', eventKey },
+    causedByEventKey: eventKey,
     kind: 'PAID_THANKS',
     paid: true,
     stateRevision: overrides.stateRevision ?? 1,
@@ -124,6 +126,34 @@ export function makePaidEffect(overrides: EffectOverrides = {}): Effect {
       tier: 1,
       fallback: false,
     },
+  }
+}
+
+export interface DeadlineEffectOverrides extends EffectOverrides {
+  readonly deadlineKind?: string
+  readonly deadlineId?: string
+}
+
+/**
+ * A timer-caused effect: `causedByEventKey` is `null` because content keeps
+ * moving with no viewers and no event to point at (spec §2.1, §6.2, BOARD A-17).
+ */
+export function makeDeadlineEffect(overrides: DeadlineEffectOverrides = {}): Effect {
+  return {
+    schemaVersion: CONTRACT_VERSION,
+    effectId: overrides.effectId ?? 'eff_test_deadline_0001',
+    cause: {
+      kind: 'deadline',
+      deadlineKind: overrides.deadlineKind ?? 'test_choice_window',
+      ...(overrides.deadlineId === undefined ? {} : { deadlineId: overrides.deadlineId }),
+    },
+    causedByEventKey: null,
+    kind: 'MISSION_UPDATE',
+    paid: false,
+    stateRevision: overrides.stateRevision ?? 1,
+    startsAt: overrides.startsAt ?? '2026-08-16T00:05:01.000Z',
+    endsAt: overrides.endsAt ?? '2026-08-16T00:05:06.000Z',
+    payload: { missionId: 'test_mission', phase: 'PROGRESS' },
   }
 }
 
