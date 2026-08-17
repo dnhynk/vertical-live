@@ -1,7 +1,7 @@
 # TASK-T6-command-parser
 
 - Task: T6 명령 파서·모더레이션·입력 arbiter (`docs/tasks/TASK_SPECS.md` §T6)
-- Branch: `dnhynk/t6-command-parser` · PR: #<n>
+- Branch: `dnhynk/t6-command-parser` · PR: #8
 - Orca: task `task_a0f96dd7e038` · dispatch `ctx_89b3a1485b72`
 - Spec sections read: §6.4, §7.1, §7.2, §7.3(1)(4), §11 "모더레이션", §12.3, §14.1
 - BOARD decisions/assumptions relied on: A-1(identity gate 닫힘), A-3(direct 기본·aggregate provisional), A-9(A/B/C 투표는 gate 열림 시에만), A-14(공용 규격), A-15(provisional 수치)
