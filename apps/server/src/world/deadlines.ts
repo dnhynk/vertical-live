@@ -1,0 +1,285 @@
+import type { DeadlinePolicy, IsoUtcInstant } from '@vl/contract'
+
+import { DEFAULT_WORLD_TUNING, type WorldTuning } from './content/tuning.js'
+import { addMillis, toMillis } from './time.js'
+import {
+  DEADLINE_KINDS,
+  type DeadlineDefinition,
+  type DeadlineKind,
+  type ScheduledDeadline,
+} from './types.js'
+
+/**
+ * The content definition of every deadline kind, including the downtime policy
+ * spec §10.2 requires each kind to declare.
+ *
+ * `satisfies Record<DeadlineKind, DeadlineDefinition>` is the enforcement:
+ * adding a kind to `DEADLINE_KINDS` without a definition here, or writing a
+ * definition without a `policy`, fails `npm run typecheck`
+ * (TASK_SPECS §T7 acceptance 4). `deadlines.test.ts` pins that with
+ * `@ts-expect-error` and checks the runtime table for the same coverage.
+ *
+ * Policy meanings, as implemented by `planDeadlineRecovery` below:
+ * - `replay`   — every missed occurrence is delivered, in due order.
+ * - `coalesce` — only the last missed occurrence per (kind, key) is delivered.
+ * - `skip`     — missed occurrences are dropped, recorded as expired, and the
+ *   kind is re-armed for the future. Dropping an occurrence must never end the
+ *   recurrence: spec §2.1 requires the world to keep moving with zero viewers.
+ */
+export const DEADLINE_DEFINITIONS = {
+  idle_beat: {
+    kind: 'idle_beat',
+    policy: 'skip',
+    scale: 'seconds',
+    recurrence: 'interval',
+    rationale:
+      'A seconds-scale idle beat is staging for a moment that has passed; replaying it after downtime would show yesterday’s breath. The next beat is armed instead, so the room keeps breathing.',
+  },
+  need_decay: {
+    kind: 'need_decay',
+    policy: 'coalesce',
+    scale: 'minutes',
+    recurrence: 'state',
+    rationale:
+      'Need pressure is integrated from the elapsed time since needsUpdatedAt, so one delivery reproduces the whole downtime exactly and N deliveries would be redundant.',
+  },
+  mission_close: {
+    kind: 'mission_close',
+    policy: 'coalesce',
+    scale: 'minutes',
+    recurrence: 'state',
+    rationale:
+      'At most one mission is active. Replaying every missed close would resolve missions the room never saw; the last one is the state that matters.',
+  },
+  choice_close: {
+    kind: 'choice_close',
+    policy: 'coalesce',
+    scale: 'minutes',
+    recurrence: 'one_shot',
+    rationale:
+      'A choice window must still be decided after downtime (the chapter branches on it), but only once, from the tally as it stood.',
+  },
+  world_phase: {
+    kind: 'world_phase',
+    policy: 'coalesce',
+    scale: 'hours',
+    recurrence: 'state',
+    rationale:
+      'Time of day is a function of the current instant; the room should show the phase it is in now, not walk through the ones it missed.',
+  },
+  weather_change: {
+    kind: 'weather_change',
+    policy: 'coalesce',
+    scale: 'hours',
+    recurrence: 'state',
+    rationale: 'Only the weather the room is in now is observable; intermediate rolls are not.',
+  },
+  visitor_arrival: {
+    kind: 'visitor_arrival',
+    policy: 'skip',
+    scale: 'hours',
+    recurrence: 'interval',
+    rationale:
+      'A visitor who called while the world was down has gone. Staging the arrival late would claim an event that nobody could have seen. The alternation is re-armed, so a visitor who outlived a downtime leaves at the next firing instead of being stranded.',
+  },
+  chapter_beat: {
+    kind: 'chapter_beat',
+    policy: 'replay',
+    scale: 'day',
+    recurrence: 'state',
+    rationale:
+      'Spec §6.2 requires a daily chapter with a start, a change and an end. The beats are at most a handful per day and each one is a narrative step, so every missed beat is delivered in order rather than skipped.',
+  },
+  crisis_recovery: {
+    kind: 'crisis_recovery',
+    policy: 'coalesce',
+    scale: 'minutes',
+    recurrence: 'state',
+    rationale:
+      'Recovery is time-based from crisisSince, so a single delivery yields the same state as replaying each tick.',
+  },
+  paid_thanks_fallback: {
+    kind: 'paid_thanks_fallback',
+    policy: 'replay',
+    scale: 'minutes',
+    recurrence: 'one_shot',
+    rationale:
+      'Spec §9.2 owes every paid event exactly one substitute thanks when its original staging window passed. Coalescing would silently drop acknowledgements for other supporters.',
+  },
+} as const satisfies Record<DeadlineKind, DeadlineDefinition>
+
+export function deadlineDefinition(kind: DeadlineKind): DeadlineDefinition {
+  return DEADLINE_DEFINITIONS[kind]
+}
+
+export function deadlinePolicy(kind: DeadlineKind): DeadlinePolicy {
+  return DEADLINE_DEFINITIONS[kind].policy
+}
+
+/**
+ * The only constructor of a `ScheduledDeadline`. It copies the policy from the
+ * definition table, so no timer can exist without one (spec §10.2).
+ */
+export function scheduleDeadline(
+  kind: DeadlineKind,
+  dueAt: IsoUtcInstant,
+  key: string | null = null,
+): ScheduledDeadline {
+  return { kind, dueAt, key, policy: deadlinePolicy(kind) }
+}
+
+/** Replaces any pending deadline of the same (kind, key) with `deadline`. */
+export function replaceDeadline(
+  pending: readonly ScheduledDeadline[],
+  deadline: ScheduledDeadline,
+): readonly ScheduledDeadline[] {
+  return [
+    ...pending.filter((it) => !(it.kind === deadline.kind && it.key === deadline.key)),
+    deadline,
+  ]
+}
+
+/**
+ * Removes a pending deadline. The input array is returned unchanged when there
+ * was nothing to remove, which is what lets a caller detect "this input did not
+ * touch the world" by reference (see the paid path in `reducer.ts`).
+ */
+export function removeDeadline(
+  pending: readonly ScheduledDeadline[],
+  kind: DeadlineKind,
+  key: string | null = null,
+): readonly ScheduledDeadline[] {
+  const next = pending.filter((it) => !(it.kind === kind && it.key === key))
+  return next.length === pending.length ? pending : next
+}
+
+/** Stable grouping key for a (kind, key) pair. JSON keeps it unambiguous. */
+function groupKeyOf(deadline: ScheduledDeadline): string {
+  return JSON.stringify([deadline.kind, deadline.key])
+}
+
+/** Due order, ties broken by the declaration order of `DEADLINE_KINDS`. */
+export function compareDeadlines(a: ScheduledDeadline, b: ScheduledDeadline): number {
+  return (
+    toMillis(a.dueAt) - toMillis(b.dueAt) ||
+    DEADLINE_KINDS.indexOf(a.kind) - DEADLINE_KINDS.indexOf(b.kind)
+  )
+}
+
+/** Pending timers due at or before `now`, in due order (ties by kind order). */
+export function dueDeadlines(
+  pending: readonly ScheduledDeadline[],
+  now: IsoUtcInstant,
+): readonly ScheduledDeadline[] {
+  const nowMillis = toMillis(now)
+  return [...pending].filter((it) => toMillis(it.dueAt) <= nowMillis).sort(compareDeadlines)
+}
+
+/**
+ * When an `interval` kind should next fire after an occurrence was dropped by
+ * the `skip` policy. The cadence comes from the tuning and `now` alone — no
+ * world state is involved — which is exactly why `skip` is only ever given to
+ * kinds marked `interval`.
+ *
+ * Returns `null` for the kinds their own handler re-arms (`state`) and for the
+ * ones that are not repeated at all (`one_shot`).
+ */
+export function nextDueAfterSkip(
+  kind: DeadlineKind,
+  now: IsoUtcInstant,
+  tuning: WorldTuning = DEFAULT_WORLD_TUNING,
+): IsoUtcInstant | null {
+  switch (kind) {
+    // The shortest interval of the band, because recovery should not open with
+    // an unusually long silence; the in-step reschedule varies it with the RNG.
+    case 'idle_beat':
+      return addMillis(now, tuning.idleBeat.minIntervalMs)
+    case 'visitor_arrival':
+      return addMillis(now, tuning.visitor.intervalMs)
+    case 'need_decay':
+    case 'mission_close':
+    case 'choice_close':
+    case 'world_phase':
+    case 'weather_change':
+    case 'chapter_beat':
+    case 'crisis_recovery':
+    case 'paid_thanks_fallback':
+      return null
+    default: {
+      // Exhaustiveness: a new deadline kind must decide how recovery re-arms it.
+      const unreachable: never = kind
+      throw new Error(`unhandled deadline kind: ${String(unreachable)}`)
+    }
+  }
+}
+
+export interface DeadlineRecoveryPlan {
+  /** Delivered to the reducer, in this order. */
+  readonly deliver: readonly ScheduledDeadline[]
+  /** Dropped by policy; the engine records them as expired (spec §9.2). */
+  readonly expired: readonly ScheduledDeadline[]
+  /** Successors armed in place of dropped occurrences of recurring kinds. */
+  readonly rescheduled: readonly ScheduledDeadline[]
+  /**
+   * The pending set after the plan: every timer that came due is gone from it
+   * (the delivered ones are re-armed by their handler when they are stepped)
+   * and the `skip` successors are in it. Writing this back is the whole of the
+   * caller's state duty — `recoverDeadlines()` in `reducer.ts` does it.
+   */
+  readonly pending: readonly ScheduledDeadline[]
+}
+
+/**
+ * Applies the §10.2 downtime policies to the timers that came due while the
+ * process was gone.
+ *
+ * The world defines the *whole* of the semantics here so the state engine (T8)
+ * does not have to invent domain behaviour: it delivers `plan.deliver` in order,
+ * records `plan.expired`, and stores `plan.pending`. In particular a `skip` kind
+ * is both removed and re-armed here, because dropping the occurrence must not
+ * end the recurrence (spec §2.1, §10.2).
+ */
+export function planDeadlineRecovery(
+  pending: readonly ScheduledDeadline[],
+  now: IsoUtcInstant,
+  tuning: WorldTuning = DEFAULT_WORLD_TUNING,
+): DeadlineRecoveryPlan {
+  const due = dueDeadlines(pending, now)
+  // Identity, not (kind, key): `dueDeadlines` filters the very objects handed
+  // in, so this drops exactly the timers that fired and nothing adjacent.
+  const fired = new Set<ScheduledDeadline>(due)
+  const deliver: ScheduledDeadline[] = []
+  const expired: ScheduledDeadline[] = []
+  const rescheduled: ScheduledDeadline[] = []
+  const lastByGroup = new Map<string, ScheduledDeadline>()
+  const rearmed = new Set<DeadlineKind>()
+
+  for (const deadline of due) {
+    const policy = deadlinePolicy(deadline.kind)
+    if (policy === 'skip') {
+      expired.push(deadline)
+      if (!rearmed.has(deadline.kind)) {
+        const nextDueAt = nextDueAfterSkip(deadline.kind, now, tuning)
+        if (nextDueAt !== null) {
+          rearmed.add(deadline.kind)
+          rescheduled.push(scheduleDeadline(deadline.kind, nextDueAt, deadline.key))
+        }
+      }
+      continue
+    }
+    if (policy === 'replay') {
+      deliver.push(deadline)
+      continue
+    }
+    const group = groupKeyOf(deadline)
+    const previous = lastByGroup.get(group)
+    if (previous !== undefined) expired.push(previous)
+    lastByGroup.set(group, deadline)
+  }
+
+  for (const deadline of lastByGroup.values()) deliver.push(deadline)
+  deliver.sort(compareDeadlines)
+
+  const stillPending = pending.filter((deadline) => !fired.has(deadline))
+  return { deliver, expired, rescheduled, pending: [...stillPending, ...rescheduled] }
+}
