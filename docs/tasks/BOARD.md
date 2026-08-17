@@ -168,3 +168,4 @@
 | 2026-08-17 16:17 | R-T12-3 verdict request_changes(round 2 해소; 신규 blocker 2: safe_stopped 후 시작 시퀀스 계속 진행, 실행 중 restart 액션의 post-await 효과; minor 티켓 근거) → F-T12-3 `task_1e3ea51a4140` → T12 터미널. round 4에도 미승인이면 E-6 보고 |
 | 2026-08-17 16:31 | F-T12-3 완료(취소 술어·AbortSignal, 1722 tests). R-T12-4 `task_b4fb3f0376e1` → `ctx_09674c39f7c0`(review) |
 | 2026-08-17 16:41 | R-T12-4 verdict request_changes(잔존 blocker 1: safe_stopped 진입 시 alert await가 stopAll보다 앞서 in-flight restart가 완료됨) → F-T12-4 `task_e14fd128b4eb`. **E-6 보고 항목 등록** |
+| 2026-08-17 16:49 | F-T12-4 완료(#haltOutwardWork 선행, 1723 tests). R-T12-5 `task_9b8aecab4f8e` → `ctx_096dc3db9f85`(review) |
