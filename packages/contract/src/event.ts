@@ -101,14 +101,16 @@ export const CanonicalEventSchema = canonicalEventShape
   )
   .refine(
     (event) => {
-      const parsed = parseEventKey(event.eventKey)
-      if (parsed?.effectiveCount === null || parsed === null) return true
-      const comboCount = event.payment?.comboCount
-      // The engine (T8) may not have a combo count for a replayed gift; only a
-      // reported one is checked against the key.
-      return comboCount === undefined || comboCount === null
-        ? true
-        : parsed.effectiveCount === effectiveGiftCount(comboCount)
+      const effectiveCount = parseEventKey(event.eventKey)?.effectiveCount
+      if (effectiveCount === null || effectiveCount === undefined) return true
+      // §7.4 defines the effective count for *every* gift, including one that
+      // reports no combo count: `comboCount > 0 ? comboCount : 1`. A missing
+      // count is therefore the first gift and admits exactly `:gift:1`. Leaving
+      // that case unchecked would let a gift with no reported count carry any
+      // suffix at all, which is the idempotency unit the inbox and the paid
+      // ledger deduplicate on. This is the same expression `eventKeyForEnvelope`
+      // builds the key from, so a helper-produced key always satisfies it.
+      return effectiveCount === effectiveGiftCount(event.payment?.comboCount ?? null)
     },
     {
       path: ['eventKey'],

@@ -213,6 +213,24 @@ describe('CanonicalEvent (spec §7.4)', () => {
         'a suffix that disagrees with the reported combo count',
         { ...giftEvent, eventKey: `youtube:${BROADCAST_ID}:msg_test_gift_0001:gift:9` },
       ],
+      // An unreported count is not an unconstrained one: §7.4 makes it the
+      // first gift, so `:gift:1` is the only key it can have.
+      [
+        'a gift with no combo count and an arbitrary suffix',
+        {
+          ...giftEvent,
+          payment: { ...giftEvent.payment, comboCount: null },
+          eventKey: `youtube:${BROADCAST_ID}:msg_test_gift_0001:gift:9`,
+        },
+      ],
+      [
+        'a gift with no payment at all and an arbitrary suffix',
+        {
+          ...giftEvent,
+          payment: null,
+          eventKey: `youtube:${BROADCAST_ID}:msg_test_gift_0001:gift:9`,
+        },
+      ],
       [
         'a key naming another source',
         { ...event, eventKey: `simulator:${BROADCAST_ID}:msg_test_0001` },
@@ -224,11 +242,15 @@ describe('CanonicalEvent (spec §7.4)', () => {
       expect(result.error?.issues[0]?.path).toEqual(['eventKey'])
     })
 
-    it('accepts combo count 0 with the :gift:1 key the §7.4 rule produces', () => {
+    it.each([
+      ['combo count 0', { ...giftEvent.payment, comboCount: 0 }],
+      ['no combo count', { ...giftEvent.payment, comboCount: null }],
+      ['no payment', null],
+    ])('accepts %s with the :gift:1 key the §7.4 rule produces', (_label, payment) => {
       const firstGift = {
         ...giftEvent,
         eventKey: `youtube:${BROADCAST_ID}:msg_test_gift_0001:gift:1`,
-        payment: { ...giftEvent.payment, comboCount: 0 },
+        payment,
       }
       expect(CanonicalEventSchema.safeParse(firstGift).success).toBe(true)
     })
