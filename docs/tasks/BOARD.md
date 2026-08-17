@@ -153,3 +153,4 @@
 | 2026-08-18 02:10 | R-T11-1 verdict request_changes(major 3: paid-ledger 테스트 false-positive, 재전송 검증이 stub Set, dev 패널 잔여 wait 생략) → F-T11-1 `task_edc8abe328d9` → T11 터미널. 진행: R-T10-6(review2), F-T9-1 |
 | 2026-08-18 02:40 | F-T9-1 완료(4건). R-T9-2 `task_8835c53b11f7` → `ctx_7e0a7146bc1c`(review). 진행: R-T10-6(review2), F-T11-1 |
 | 2026-08-18 03:05 | R-T10-6 verdict **approve**(round 1~5 회귀 감사 포함) → 최종 게이트(마이그레이션 001~005 정렬, stream key 로그 없음) → **PR #11 squash merge**(main df55585). T10 worker release·worktree 제거. E-4 해결. TASK_SPECS §T12에 선행 task 배선 요구(시작 순서·신호 집계·T13 sink·kill·토큰 주입·Discord vault) 추가. T12는 PR #14 머지 후 디스패치 |
+| 2026-08-18 03:40 | R-T9-2 verdict **approve**(PR #14 DIRTY → F-T9-2 rebase `task_4bd81121aa94`). F-T11-1 완료(ledger 경로 실증·프로덕션 ReadModel 재전송 테스트·잔여 wait; 1479 tests) → R-T11-2 `task_5ff00d927243` → `ctx_dd838ea2d983`(review2) |
