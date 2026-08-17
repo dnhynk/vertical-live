@@ -180,3 +180,4 @@
 | 2026-08-17 18:37 | R-T16-1 verdict request_changes(blocker 3: 무출처 플랫폼 주장, README dev bind 불일치, Gate 2 지연 계측 설명 오류; major 2: kill 명령 오기, Gate 0 '양쪽 구현' 과장; minor 도구 마커 9파일) → F-T16-1 `task_3ad89ea6c5d9` → T16 터미널. 진행: R-T17-2(review2), F-T15-1, T8b |
 | 2026-08-17 18:41 | T8b worker_done(succeeded, PR #20: ingest 실패 분류→503/500, server.ts fail-closed net, 재현 테스트; 1732 tests). R-T8b-1 `task_4a21ac8e6e03` → `ctx_8831ae1c5c06`(review). 진행: R-T17-2(review2), F-T15-1, F-T16-1 |
 | 2026-08-17 18:48 | R-T17-2 verdict **approve** → 최종 게이트(로컬 게이트 E-5, ops/windows에 비밀 없음) → **PR #17 squash merge**(main d171853). T17 worker release·worktree 제거. 남은 open PR: #18(T15, F-T15-1 진행), #19(T16, F-T16-1 진행), #20(T8b, R-T8b-1 진행) |
+| 2026-08-17 18:51 | F-T16-1 완료(6건, .md 11개). R-T16-2 → review2. 진행: R-T8b-1(review), F-T15-1 |
