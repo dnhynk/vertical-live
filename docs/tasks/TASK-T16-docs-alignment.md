@@ -74,7 +74,7 @@
 | # | 기준 | 상태(met/unmet/unverifiable) | 근거(테스트 파일·명령·출력) |
 |---|---|---|---|
 | 1 | 문서에 Pokémon 직접 사용·유료 부활·게임 파워 판매 서술 0건(grep 증빙) | met | 아래 "grep 증빙" |
-| 2 | 모든 외부 주장에 스펙 [S] 번호 또는 URL이 붙는다 | met (round 2) | 아래 "외부 주장 감사". **round 1에서는 unmet이었다** — ACCOUNT_SETUP의 advanced-features 필요조건과 fan-funding→chat/comments 주장 2건이 근거 없이 확정형으로 남아 있었고(리뷰 B1), round 2에서 각각 "확인 필요(출처 없음)"과 URL 부착으로 고쳤다 |
+| 2 | 모든 외부 주장에 스펙 [S] 번호 또는 URL이 붙는다 | met (round 3) | 아래 "외부 주장 감사". **round 1·2 모두 unmet이었다.** round 1: ACCOUNT_SETUP의 advanced-features 필요조건과 fan-funding→chat/comments 주장 2건이 근거 없이 확정형(리뷰 B1). round 2: B1 fix가 Step 4만 고치고 같은 문서 §5 Milestone 1의 `Advanced features unlocked` 항목을 남겨, 내려놓은 필요조건이 체크리스트에서 사실로 되살아났다(리뷰 B4) — **round 2 티켓에 `met (round 2)`라고 쓴 것은 틀렸다**. round 3에서 같은 주장이 남은 3곳을 전부 audit 표현으로 바꿨다 |
 
 ### grep 증빙 (기준 1)
 
@@ -127,14 +127,15 @@ docs/ops/runbook-operations.md:166:연출 시간이 지나면 **게임 파워가
 
 ### 외부 주장 감사 (기준 2)
 
-round 2 기준(리뷰 B1 반영 후).
+round 3 기준(리뷰 B1·B4 반영 후). round 2 표의 README URL 수 `3`은 오기였다 — round 1에서 `[::1]:5194`를 추가한
+뒤로 4건이다(아래 grep 출력과도 어긋나 있었다).
 
 ```text
 $ for f in <8개 파일>; do echo "$f | [S]: … | URLs: … | 확인필요: …"; done
-README.md                            | [S]: none                                                                              | URLs: 3 | 확인필요: 0
+README.md                            | [S]: none                                                                              | URLs: 4 | 확인필요: 0
 docs/ROADMAP.md                      | [S]: [S10] [S13] [S14] [S15] [S29] [S32] [S36] [S41] [S42] [S8] [S9]                   | URLs: 0 | 확인필요: 0
-docs/ACCOUNT_SETUP_FROM_ZERO.md      | [S]: [S1] [S13] [S14] [S15] [S16] [S17] [S18] [S23] [S29] [S32] [S36] [S8]             | URLs: 7 | 확인필요: 2
-docs/YOUTUBE_MONETIZATION_RUNBOOK.md | [S]: [S1] [S10] [S11] [S13] [S14] [S15] [S17] [S18] [S2] [S29] [S3] [S30] [S31] [S32] [S35] [S36] [S8] [S9] | URLs: 7 | 확인필요: 1
+docs/ACCOUNT_SETUP_FROM_ZERO.md      | [S]: [S1] [S13] [S14] [S15] [S16] [S17] [S18] [S23] [S29] [S32] [S36] [S8]             | URLs: 7 | 확인필요: 3
+docs/YOUTUBE_MONETIZATION_RUNBOOK.md | [S]: [S1] [S10] [S11] [S13] [S14] [S15] [S17] [S18] [S2] [S29] [S3] [S30] [S31] [S32] [S35] [S36] [S8] [S9] | URLs: 7 | 확인필요: 2
 docs/ops/gate0-checklist.md          | [S]: [S10] [S17] [S18] [S36] [S41] [S42] [S8]                                          | URLs: 0 | 확인필요: 0
 docs/ops/gate2-experiments.md        | [S]: [S1] [S10] [S2] [S23] [S3] [S33] [S34] [S37] [S38] [S4] [S42] [S5] [S7] [S8]      | URLs: 0 | 확인필요: 0
 docs/ops/moderation-call-table.md    | [S]: [S16]                                                                             | URLs: 0 | 확인필요: 0
@@ -152,17 +153,23 @@ docs/ops/runbook-operations.md:66,77,156,189: http://127.0.0.1:{5194,8787}
 - 계정·수익화 런북의 URL은 **원문에서 이어받은 것**이고 T16에서 재확인하지 않았다. 두 문서 머리말과 각 URL 옆에
   "not re-verified in T16"으로 명시했다.
 - 근거가 없는 서술은 지우거나 **확인 필요(출처 없음)**으로 표시했다: ACCOUNT_SETUP §3(업로드 카테고리),
-  §2 Step 4(advanced features **필요조건과** 해제 경로 — round 1 B1), MONETIZATION §6(age-restricted·
-  unlisted/private·fundraiser 3항목). ACCOUNT_SETUP §3의 fan-funding→chat/comments 주장에는 URL을 직접 붙였다
-  (round 1 B1).
+  §2 Step 4(advanced features **필요조건과** 해제 경로 — round 1 B1), §5 Milestone 1(advanced features 항목 —
+  round 2 B4), MONETIZATION §6(age-restricted·unlisted/private·fundraiser 3항목), §7 Before Gate 0(계정 생성
+  순서에서 advanced features → live streaming 함의 제거 — round 2 B4). ACCOUNT_SETUP §3의
+  fan-funding→chat/comments 주장에는 URL을 직접 붙였다(round 1 B1).
+- advanced-features 주장은 **한 문서에만 내리면 안 된다**. round 3에서 8개 문서를
+  `rg -n -i "advanced.feature|unlock"`으로 전수 확인하고, 필요조건 함의가 남은 3곳(ACCOUNT_SETUP §5 Milestone 1,
+  MONETIZATION §3 체크리스트·§7 Before Gate 0)을 전부 audit 표현으로 바꿨다. 남은 hit는 전부 **수익화 자격 입력**
+  서술로 스펙 §8.1이 뒷받침한다(MONETIZATION §4, ACCOUNT_SETUP §5 Milestone 3, `gate0-checklist.md` §1.2,
+  PROJECT_SPEC §8.1 원문).
 
 ### Gates (executed)
 
-round 2(리뷰 fix 후) 실행 결과다.
+round 3(리뷰 B4 fix 후) 실행 결과다.
 
 ```text
 $ git fetch origin && git rebase origin/main
-Successfully rebased and updated refs/heads/dnhynk/t16-docs-alignment.   (origin/main = a29c44a)
+Successfully rebased and updated refs/heads/dnhynk/t16-docs-alignment.   (origin/main = a17b859)
 
 $ npm run format:check
 Checking formatting...
@@ -176,9 +183,9 @@ $ npm run typecheck
 (무출력, exit 0)
 
 $ npm run test
- Test Files  123 passed (123)
-      Tests  1723 passed | 1 skipped (1724)
-   Duration  48.44s
+ Test Files  130 passed (130)
+      Tests  1827 passed | 1 skipped (1828)
+   Duration  36.87s
 
 $ npm run build
 copied 5 migration(s) to dist/db/migrations
@@ -186,7 +193,9 @@ docs/ops/data-map.md up to date
 (@vl/contract · @vl/renderer · @vl/server · @vl/simulator 전부 성공)
 ```
 
-round 1의 게이트 실행 결과도 같았다(origin/main = 854492a, test 1723 passed | 1 skipped, duration 34.09s).
+round 1·2도 5개 전부 pass였다(round 1: origin/main = 854492a, 1723 passed | 1 skipped, 34.09s;
+round 2: origin/main = a29c44a, 1723 passed | 1 skipped, 48.44s). round 3에서 테스트 파일·건수가 는 것은 그 사이
+`origin/main`에 다른 task가 머지된 결과이고, 이 PR의 diff는 여전히 `.md`뿐이다.
 
 5개 게이트 전부 통과. **실행하지 않았음**: 실제 서버 기동(`npm run start -w @vl/server`)·OBS·YouTube 연동 스모크 —
 vault 비밀정보와 실제 계정이 필요하고, 이는 Gate 2 항목이다(`docs/ops/gate2-experiments.md` 3장). 이 PR은 문서만
@@ -220,13 +229,27 @@ vault 비밀정보와 실제 계정이 필요하고, 이는 Gate 2 항목이다(
 
 리뷰: PR #19 코멘트 `#4953468646`(verdict `request_changes`, blocker 3 · major 2 · minor 1).
 게이트는 리뷰어 실행에서도 5개 전부 pass였고, 합격 기준 1은 met, 기준 2가 B1 때문에 unmet이었다.
-아래 고침은 전부 커밋 `82d721c`(rebase 후 SHA).
+아래 고침은 전부 커밋 `be0d550`(rebase 후 SHA).
 
 | finding | 처리(고침 SHA / 반박 근거) |
 |---|---|
-| **[blocker] B1** `docs/ACCOUNT_SETUP_FROM_ZERO.md:79`·`:120` — advanced features 필요조건, fan-funding→chat/comments 필요 주장이 `[S]`/URL 없이 확정형 | **고침** `82d721c`. Step 4는 스펙이 실제로 뒷받침하는 것(§8.1의 audit 항목)만 남기고, "advanced features가 필요하다"와 해제 경로 둘 다 **확인 필요(출처 없음)**으로 내렸다("not asserted here" 명시 + Gate 0 audit에서 Studio 원문 확인 지시). §3의 chat/comments 항목에는 이어받은 URL(`answer/9277801`, not re-verified in T16)을 **직접** 붙이고, 그 주장과 무관하게 이 제품은 chat이 유일한 입력 경로라 chat 없이 못 돈다는 스펙 근거(§7.2)를 분리해 적었다 |
-| **[blocker] B2** `README.md:94` — `npm run dev`가 `127.0.0.1:5173`을 연다는 서술이 실제 bind와 불일치 | **고침** `82d721c`. 재현으로 확인: `npm run dev -w @vl/renderer -- --port 5194`는 `netstat`에 `[::1]:5194`만 LISTENING이고 `curl http://127.0.0.1:5194/` 실패(000) / `curl http://[::1]:5194/` 200. `--host 127.0.0.1`을 주면 `127.0.0.1:5195` LISTENING + 200. 원인은 Vite 기본 host `localhost`가 이 호스트에서 `::1`로 해석되는 것(`apps/renderer/vite.config.ts`에 `server.host` 없음). **코드는 고치지 않고** README 4.2와 `runbook-operations.md` 1.3의 절차를 `--host 127.0.0.1` 명시로 바꾸고 관측 결과를 근거로 적었다 |
-| **[blocker] B3** `docs/ops/gate2-experiments.md:82` — §7.5 구간 계측 설명이 `metrics.ts` 구현과 불일치, 서로 다른 히스토그램 p95 합산 | **고침** `82d721c`. `apps/server/src/engine/metrics.ts`를 읽고 표를 다시 썼다: 구간 2(`API 수신 → 상태 확정 → renderer 확인`)는 **`receivedToAcked` 하나로** 판정한다(`receivedAt` → state ACK `appliedAt` 직접 기록). §7.5의 별도 측정 구간 `상태 확정 → 인코더 frame`은 **현재 확인 불가**로 명시했다(저장소는 renderer ACK까지만 계측, OBS frame 시각은 계측하지 않음). 히스토그램 4종의 모집단 차이(`committedToPublished`는 effect+snapshot 혼재, `publishedToAcked`는 effect만)를 표로 적고 **합산 금지**를 명시했다 |
-| **[major] M1** `runbook-operations.md:174` — `npm run kill -- --clear`는 루트에 script가 없어 실패 | **고침** `82d721c`. `npm run kill -w @vl/server -- --clear`로 정정. 문서 내 나머지 6곳과 `README.md` 2곳은 이미 `-w @vl/server` 형태였음을 grep으로 확인 |
-| **[major] M2** `gate0-checklist.md:13`·`ROADMAP.md:41` — "선택지 양쪽 구현" 과장, 같은 문서 68행과 모순 | **고침** `82d721c`. 두 곳 모두 "**안전한 기본 경로만** 구현(A-1 identity 비활성, A-3 direct+비경쟁 집계, A-4 single)"으로 정정하고, 숫자·값은 설정 교체지만 **경로 선택은 후속 구현이 필요할 수 있다**고 적었다. §1.5에 "vote 경로는 identity gate 개방 전에는 켤 수 없다", ROADMAP identity 행에 "비활성화만 구현" 추가 |
-| **[minor] m1** `README.md:168` 외 — `</content>`/`</invoke>` 생성 도구 마커가 9개 파일 끝에 잔존 | **고침** `82d721c`. 9개 파일 전부에서 마지막 두 줄을 제거했다. 제거 후 `grep -rn '</content>\|</invoke>' README.md docs/ *.md`의 잔여 hit 2건은 **문서 본문이 아니라 서술**이다: 이 표의 이 줄과, 같은 유형을 이미 한 번 겪은 `docs/tasks/TASK-T2-obs-monitor.md:219`의 이력 기록(2026-08-17, BSOD로 소실된 세션의 잔재). 저장소에서 두 번째 발생이므로 Follow-up에 재발 방지를 적었다 |
+| **[blocker] B1** `docs/ACCOUNT_SETUP_FROM_ZERO.md:79`·`:120` — advanced features 필요조건, fan-funding→chat/comments 필요 주장이 `[S]`/URL 없이 확정형 | **고침** `be0d550`. Step 4는 스펙이 실제로 뒷받침하는 것(§8.1의 audit 항목)만 남기고, "advanced features가 필요하다"와 해제 경로 둘 다 **확인 필요(출처 없음)**으로 내렸다("not asserted here" 명시 + Gate 0 audit에서 Studio 원문 확인 지시). §3의 chat/comments 항목에는 이어받은 URL(`answer/9277801`, not re-verified in T16)을 **직접** 붙이고, 그 주장과 무관하게 이 제품은 chat이 유일한 입력 경로라 chat 없이 못 돈다는 스펙 근거(§7.2)를 분리해 적었다 |
+| **[blocker] B2** `README.md:94` — `npm run dev`가 `127.0.0.1:5173`을 연다는 서술이 실제 bind와 불일치 | **고침** `be0d550`. 재현으로 확인: `npm run dev -w @vl/renderer -- --port 5194`는 `netstat`에 `[::1]:5194`만 LISTENING이고 `curl http://127.0.0.1:5194/` 실패(000) / `curl http://[::1]:5194/` 200. `--host 127.0.0.1`을 주면 `127.0.0.1:5195` LISTENING + 200. 원인은 Vite 기본 host `localhost`가 이 호스트에서 `::1`로 해석되는 것(`apps/renderer/vite.config.ts`에 `server.host` 없음). **코드는 고치지 않고** README 4.2와 `runbook-operations.md` 1.3의 절차를 `--host 127.0.0.1` 명시로 바꾸고 관측 결과를 근거로 적었다 |
+| **[blocker] B3** `docs/ops/gate2-experiments.md:82` — §7.5 구간 계측 설명이 `metrics.ts` 구현과 불일치, 서로 다른 히스토그램 p95 합산 | **고침** `be0d550`. `apps/server/src/engine/metrics.ts`를 읽고 표를 다시 썼다: 구간 2(`API 수신 → 상태 확정 → renderer 확인`)는 **`receivedToAcked` 하나로** 판정한다(`receivedAt` → state ACK `appliedAt` 직접 기록). §7.5의 별도 측정 구간 `상태 확정 → 인코더 frame`은 **현재 확인 불가**로 명시했다(저장소는 renderer ACK까지만 계측, OBS frame 시각은 계측하지 않음). 히스토그램 4종의 모집단 차이(`committedToPublished`는 effect+snapshot 혼재, `publishedToAcked`는 effect만)를 표로 적고 **합산 금지**를 명시했다 |
+| **[major] M1** `runbook-operations.md:174` — `npm run kill -- --clear`는 루트에 script가 없어 실패 | **고침** `be0d550`. `npm run kill -w @vl/server -- --clear`로 정정. 문서 내 나머지 6곳과 `README.md` 2곳은 이미 `-w @vl/server` 형태였음을 grep으로 확인 |
+| **[major] M2** `gate0-checklist.md:13`·`ROADMAP.md:41` — "선택지 양쪽 구현" 과장, 같은 문서 68행과 모순 | **고침** `be0d550`. 두 곳 모두 "**안전한 기본 경로만** 구현(A-1 identity 비활성, A-3 direct+비경쟁 집계, A-4 single)"으로 정정하고, 숫자·값은 설정 교체지만 **경로 선택은 후속 구현이 필요할 수 있다**고 적었다. §1.5에 "vote 경로는 identity gate 개방 전에는 켤 수 없다", ROADMAP identity 행에 "비활성화만 구현" 추가 |
+| **[minor] m1** `README.md:168` 외 — `</content>`/`</invoke>` 생성 도구 마커가 9개 파일 끝에 잔존 | **고침** `be0d550`. 9개 파일 전부에서 마지막 두 줄을 제거했다. 제거 후 `grep -rn '</content>\|</invoke>' README.md docs/ *.md`의 잔여 hit 2건은 **문서 본문이 아니라 서술**이다: 이 표의 이 줄과, 같은 유형을 이미 한 번 겪은 `docs/tasks/TASK-T2-obs-monitor.md:219`의 이력 기록(2026-08-17, BSOD로 소실된 세션의 잔재). 저장소에서 두 번째 발생이므로 Follow-up에 재발 방지를 적었다 |
+
+## Review round 2
+
+리뷰: PR #19 코멘트 `#4953685273`(verdict `request_changes`, blocker 1).
+리뷰어 실행에서도 게이트 5개 전부 pass, 합격 기준 1은 met. round 1의 B2·B3·M1·M2·m1은 **resolved**로 확인됐고,
+B1은 **partially resolved** — 남은 blocker 1건이 그 미완의 결과다. 아래 고침은 커밋 `8e0ed84`.
+
+| finding | 처리(고침 SHA / 반박 근거) |
+|---|---|
+| **[blocker] B4** `docs/ACCOUNT_SETUP_FROM_ZERO.md:168` — §5 Milestone 1 체크리스트의 `Advanced features unlocked`가, 같은 문서 82·89행에서 **확인 필요(출처 없음)**으로 내린 advanced-features → live streaming 필요조건을 다시 사실로 되살림(기준 2 미충족) | **고침** `8e0ed84`. 지적을 그대로 받는다 — round 1 B1 fix는 Step 4 본문만 고치고 **같은 주장을 반복하는 다른 위치를 찾지 않았다**. 이번엔 8개 문서를 `rg -n -i "advanced.feature\|unlock"`으로 전수 확인해 필요조건 함의가 남은 **3곳**을 전부 고쳤다: ① `ACCOUNT_SETUP §5` Milestone 1 항목 → "advanced-features state read from YouTube Studio and recorded in the Gate 0 audit … This is an audit record, not a precondition: whether advanced features are *required* for live streaming is **확인 필요(출처 없음)** (Step 4)", ② `MONETIZATION §3` 체크박스 `Channel has advanced features access.` → "Advanced-features state read from Studio and recorded (§8.1 — an eligibility input, not a live-streaming precondition).", ③ `MONETIZATION §7` Before Gate 0의 계정 생성 순서에서 `unlock advanced features, enable live streaming` 나열(순서 자체가 선행조건 함의) 제거 → audit 기록 + Step 4 참조. 덧붙여 `ACCOUNT_SETUP §2` 제목 `Step 4: Request / Unlock Advanced Features`도 명령형이라 `Step 4: Advanced Features Status`로 바꿨다(anchor 참조 없음을 `rg "Step 4\|step-4"`로 확인). **새 URL·UI 경로를 지어내지 않았다** — 리뷰가 예시로 든 `Studio > Settings > Channel > Feature eligibility` 경로는 저장소 어느 문서에도 근거가 없어(`rg "Settings > \|Feature eligibility"` hit 0) 쓰지 않고, 기존 문서가 이미 쓰는 "Gate 0 audit에서 Studio 상태를 읽어 기록" 표현으로 통일했다 |
+
+남은 `advanced features` hit(`MONETIZATION §4`, `ACCOUNT_SETUP §5` Milestone 3, `gate0-checklist.md` §1.2,
+`PROJECT_SPEC.md` §8.1)는 전부 **수익화 자격 입력** 서술이고 스펙 §8.1([S8] [S10] [S36])이 뒷받침한다 —
+live streaming 필요조건 주장이 아니므로 그대로 뒀다.
