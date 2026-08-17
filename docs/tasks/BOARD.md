@@ -10,9 +10,9 @@
 | T-ID | 제목 | 의존 | [contract] | 상태 | 브랜치 slug | PR | Orca task |
 |---|---|---|---|---|---|---|---|
 | T0 | 모노레포 스캐폴드·CI | — | — | merged | t0-scaffold | #1 | `task_658a82e9f356` |
-| T1 | 정규 이벤트·snapshot·effect 계약과 fixture | T0 | ✔ | in_review | t1-contract | #2 | `task_1acc78f93775` |
-| T2 | obs-websocket 5 감시·제어 + OBS 프로파일 | T0 | — | dispatched | t2-obs-monitor | | `task_6e0c43d6b74c` |
-| T3 | OAuth·비밀정보 vault·quota | T0 | — | ready | t3-auth-vault | | `task_62829ec3ab8b` |
+| T1 | 정규 이벤트·snapshot·effect 계약과 fixture | T0 | ✔ | changes_requested | t1-contract | #2 | `task_1acc78f93775` |
+| T2 | obs-websocket 5 감시·제어 + OBS 프로파일 | T0 | — | in_review | t2-obs-monitor | #3 | `task_6e0c43d6b74c` |
+| T3 | OAuth·비밀정보 vault·quota | T0 | — | dispatched | t3-auth-vault | | `task_62829ec3ab8b` |
 | T4 | SQLite 영속층(inbox·checkpoint·snapshot·outbox·deadline) | T1 | — | pending | t4-persistence | | `task_6bb9ff9f79c8` |
 | T5 | 렌더러 read model(snapshot 복구·effect 멱등·ACK·건강) | T1 | — | pending | t5-renderer-readmodel | | `task_6ba022bb6151` |
 | T6 | 명령 파서·모더레이션·입력 arbiter | T1 | — | pending | t6-command-parser | | `task_a0f96dd7e038` |
@@ -82,3 +82,6 @@
 | 2026-08-17 03:13 | T1 worker_done(succeeded, PR #2, 251 tests, CI green). R-T1-1 리뷰 디스패치(ctx_d8d9a74e3fe2). `terminal create --command codex…`가 런타임 재시작 후 타임아웃 → 셸 생성 후 codex 명령 전송하는 2단계 fallback(`start_reviewer.py`) |
 | 2026-08-17 03:24 | **호스트 BSOD 2회째** bugcheck 0x00000050(minidump `081726-14937-01.dmp`; 1차와 동일 코드·유사 주소 `…880e`). 리뷰어(R-T1-1)·T2 worker 세션 소실. PR #2 리뷰 코멘트 없음 |
 | 2026-08-17 03:35 | 복구: run-use 재바인딩(`term_062ef090…`), 죽은 리뷰 task `task_fad386982ded`를 failed로 정리(저수준 dispatch라 worker-abandon 불가 → task-update), T2 재디스패치 `ctx_b7a70a2f34f8`(worktree 미커밋 3항목 보존, WIP 53e2375 push 확인), PR #2 리뷰 재시도 task `task_90e4598e62ac` → `ctx_06bc622a953d`. Orca는 T1 worker_done 시점에 T4–T7을 ready로 올리지만 **PR #2 머지 전에는 디스패치하지 않는다**(BOARD가 권위). 잠정 완화: 리뷰 진행 중에는 새 worker를 추가하지 않아 동시 에이전트 ≤2 유지(D-4 범위 내) |
+| 2026-08-17 03:50 | T2 worker_done(succeeded, PR #3, 101 tests, CI pass; 실제 OBS 스모크는 결정 B대로 '실행하지 않았음'). T3 디스패치 `ctx_11b8639abb3c`(term_892c841f…) |
+| 2026-08-17 03:58 | R-T1-1(재시도) verdict **request_changes**: blocker 1(형식 오류 숫자에서 ZodError throw → 최소 envelope 위반 §7.3(1)), major 3(Date.parse 비-ISO 수용, CanonicalEvent eventKey 관계 미강제 §7.4, NormalizedItemFacts.commandText raw-text TS 타입 노출). 리뷰 https://github.com/dnhynk/vertical-live/pull/2#pullrequestreview-4948249749. F-T1-1 `task_df3f5c1e4034` → 새 worker `ctx_457f6a165433`(t1-contract worktree, 원 터미널은 크래시로 소실) |
+| 2026-08-17 04:05 | R-T2-1 `task_58284055fd87` → `ctx_100e479d4623`(잔여 유휴 codex 터미널 재사용). 활성 에이전트 3(T3, F-T1-1, 리뷰어) = D-4 상한 |
