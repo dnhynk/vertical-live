@@ -14,7 +14,7 @@
 | T1b | [contract] Effect 원인 확장(causedByEventKey nullable + cause 판별자; T7 발견) | T1 | ✔ | in_review | t1b-effect-cause | #7 | `task_0a64fcaaae4a` |
 | T2 | obs-websocket 5 감시·제어 + OBS 프로파일 | T0 | — | merged | t2-obs-monitor | #3 | `task_6e0c43d6b74c` |
 | T3 | OAuth·비밀정보 vault·quota | T0 | — | changes_requested | t3-auth-vault | #4 | `task_62829ec3ab8b` |
-| T4 | SQLite 영속층(inbox·checkpoint·snapshot·outbox·deadline) | T1 | — | in_review | t4-persistence | #5 | `task_6bb9ff9f79c8` |
+| T4 | SQLite 영속층(inbox·checkpoint·snapshot·outbox·deadline) | T1 | — | changes_requested | t4-persistence | #5 | `task_6bb9ff9f79c8` |
 | T5 | 렌더러 read model(snapshot 복구·effect 멱등·ACK·건강) | T1 | — | dispatched | t5-renderer-readmodel | | `task_6ba022bb6151` |
 | T6 | 명령 파서·모더레이션·입력 arbiter | T1 | — | dispatched | t6-command-parser | | `task_a0f96dd7e038` |
 | T7 | 콘텐츠 디렉터·크리처 상태 모델(순수 도메인) | T1 | — | in_review | t7-content-director | #6 | `task_e1e7531798ad` |
@@ -107,3 +107,5 @@
 | 2026-08-17 08:10 | T7 worker_done(succeeded, PR #6: 순수 reducer, §6.2 4단 콘텐츠·일일 챕터, A-9 양 경로, 유료 무영향 타입+속성 테스트, 592 tests). 리뷰 대기열: R-T4-1(진행) → R-T7-1 → R-T3-2. T6은 슬롯 대기(활성 F-T3-1·T1b·리뷰어) |
 | 2026-08-17 08:35 | T1b worker_done(succeeded, PR #7: cause 판별자 + nullable causedByEventKey, refine, JSON Schema 재생성, 495 tests). T6 디스패치 `ctx_89b3a1485b72`. 리뷰 대기열: R-T4-1(진행) → R-T1b-1 → R-T7-1 → R-T3-2 |
 | 2026-08-17 08:50 | F-T3-1 완료(8건 수정: vault 기본화·redactor 전체 마스킹·in-memory 격리·google-auth-library 직접 의존·auth_revoked 선행·IPv6·성공 페이지 지연; streamList scope는 공식 문서상 확인 불가로 정직 표기, force-ssl은 최소권한 판단으로 재기술). T5 디스패치 `ctx_6c476a54cd69`. 리뷰 대기열: R-T4-1(진행) → R-T1b-1 → R-T7-1 → R-T3-2 |
+| 2026-08-17 09:20 | R-T4-1 verdict **request_changes**(blocker 2: processedSeq 전진이 처리 기록으로 증명되지 않아 미처리 inbox가 복구 커서 아래로 묻힘; 이 Windows 호스트에서 clean `npm ci`가 better-sqlite3 node-gyp rebuild로 실패(prebuild 존재하나 미사용) — T5 worktree setup 실패와 같은 원인 가능성; major 1: 삭제된 마이그레이션 파일 검출 안 됨). F-T4-1 `task_1a6ff0a2a2e1` → T4 터미널 `ctx_7f66d3e1035d`. R-T1b-1 `task_08760cd14f5d` → `ctx_523f03d2d553`. 리뷰 대기열: R-T1b-1(진행) → R-T7-1 → R-T3-2 |
+| 2026-08-17 09:00 | T5 질문(CTA 명령 출처가 계약에 없음) → 답 A(선택창/집계창 우선, fallback §7.1 allowlist 표시; interactionEnabled=false면 숨김). display.cta 필드는 필요 시 T14에서 [contract] 후속 |
