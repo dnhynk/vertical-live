@@ -1,15 +1,19 @@
-import { WorldSnapshotSchema } from '@vl/contract'
+import { EffectCauseSchema, WorldSnapshotSchema } from '@vl/contract'
 import { describe, expect, it } from 'vitest'
 
 import { DEFAULT_WORLD_TUNING } from './content/tuning.js'
 import { dominantNeed } from './creature.js'
 import { projectWorldView } from './project.js'
-import { initialWorldState, step, stepRngFor } from './reducer.js'
+import { initialWorldState, pendingDeadlines, step, stepRngFor } from './reducer.js'
 import { createRng } from './rng.js'
 import { runWorld } from './run.js'
 import { commandEvent, paidEvent, testEvent } from './test-support.js'
 import { MILLIS_PER_HOUR, addMillis } from './time.js'
-import type { StepInput, WorldState } from './types.js'
+import type {
+  StepInput,
+  WorldState,
+  WorldEffectCauseIsContractCause,
+} from './types.js'
 
 const START = '2026-08-17T21:00:00.000Z' // 2026-08-18 06:00 JST, a chapter anchor
 const tuning = DEFAULT_WORLD_TUNING
@@ -273,5 +277,78 @@ describe('tuning override', () => {
     const input: StepInput = { kind: 'event', event: commandEvent(at, 'FEED') }
     const result = step(state, input, at, stepRngFor(state, input), { tuning: generous })
     expect(result.state.world.creature.needs.hungry).toBe(0)
+  })
+})
+
+describe('effect provenance (BOARD A-17, contract `EffectCauseSchema`)', () => {
+  it('is a cause the contract accepts, at compile time and at run time', () => {
+    // Compile-time: the world's narrower cause is still a contract cause.
+    const assignable: WorldEffectCauseIsContractCause = true
+    expect(assignable).toBe(true)
+
+    const run = runWorld({ to: addMillis(START, 3 * MILLIS_PER_HOUR), state: fresh() })
+    expect(run.effects.length).toBeGreaterThan(0)
+    for (const effect of run.effects) {
+      const parsed = EffectCauseSchema.safeParse(effect.cause)
+      expect(parsed.error?.issues ?? []).toEqual([])
+    }
+  })
+
+  it('never invents a deadline row id, which only persistence can issue', () => {
+    const run = runWorld({ to: addMillis(START, 9 * MILLIS_PER_HOUR), state: fresh() })
+    const chapterStaging = run.effects.filter(
+      (effect) => effect.cause.kind === 'deadline' && effect.cause.deadlineKind === 'chapter_beat',
+    )
+    expect(chapterStaging.length).toBeGreaterThan(0)
+    for (const effect of chapterStaging) {
+      expect(Object.keys(effect.cause).sort()).toEqual(['deadlineKind', 'kind'])
+    }
+    // The beat is still recoverable — from the staging id, not from a fake id.
+    expect(
+      chapterStaging.some(
+        (effect) => effect.kind === 'AMBIENCE' && effect.payload.ambienceId.endsWith('_turn'),
+      ),
+    ).toBe(true)
+  })
+
+  it('attributes a command-completed mission to the event, not to the timer', () => {
+    const state = fresh()
+    const at = addMillis(START, 60_000)
+    // The opening mission answers to PET and needs six contributions; one
+    // aggregated event therefore completes it inside the command step.
+    const event = commandEvent(at, 'PET')
+    const result = apply(
+      state,
+      { kind: 'event', event, contributions: tuning.mission.targetContributions },
+      at,
+    )
+
+    const phases = result.effects
+      .filter((effect) => effect.kind === 'MISSION_UPDATE')
+      .map((effect) => effect.payload.phase)
+    expect(phases).toContain('COMPLETED')
+    expect(phases).toContain('STARTED')
+    expect(result.transitions.some((it) => it.type === 'mission_resolved')).toBe(true)
+
+    // Every effect the room's command produced names that event (BOARD A-17):
+    // COMPLETED, the next mission's STARTED, its ambience and the reaction.
+    for (const effect of result.effects) {
+      expect(effect.cause).toEqual({ kind: 'event', eventKey: event.eventKey })
+    }
+  })
+
+  it('still attributes a timer-closed mission to the timer', () => {
+    const state = fresh()
+    const closeAt = addMillis(START, tuning.mission.durationMs)
+    const deadline = pendingDeadlines(state).find((it) => it.kind === 'mission_close')
+    expect(deadline).toBeDefined()
+    if (deadline === undefined) return
+
+    const result = apply(state, { kind: 'deadline', deadline }, closeAt)
+    const missionEffects = result.effects.filter((effect) => effect.kind === 'MISSION_UPDATE')
+    expect(missionEffects.length).toBeGreaterThan(0)
+    for (const effect of missionEffects) {
+      expect(effect.cause).toEqual({ kind: 'deadline', deadlineKind: 'mission_close' })
+    }
   })
 })

@@ -26,7 +26,14 @@ import {
   integrateNeeds,
   mapNeeds,
 } from './creature.js'
-import { removeDeadline, replaceDeadline, scheduleDeadline } from './deadlines.js'
+import {
+  compareDeadlines,
+  planDeadlineRecovery,
+  removeDeadline,
+  replaceDeadline,
+  scheduleDeadline,
+  type DeadlineRecoveryPlan,
+} from './deadlines.js'
 import {
   applyPaidEvent,
   applyThanksFallback,
@@ -312,6 +319,7 @@ function startMission(
   rng: Rng,
   tuning: WorldTuning,
   cause: WorldTransition['cause'],
+  effectCause: EffectCause,
 ): void {
   const context = contextOf(draft.world)
   const bias = draft.world.chapter.branchChoiceId === null ? null : missionBiasOf(draft.world)
@@ -333,7 +341,6 @@ function startMission(
       scheduleDeadline('mission_close', mission.closesAt),
     ),
   }
-  const effectCause: EffectCause = { kind: 'deadline', deadlineKind: 'mission_close' }
   draft.effects.push({
     kind: 'MISSION_UPDATE',
     paid: false,
@@ -361,19 +368,29 @@ function missionBiasOf(world: GameState): MissionVariant['missionId'] | null {
   return option?.missionBias ?? null
 }
 
+/**
+ * Closes the active mission and starts the next one.
+ *
+ * `effectCause` is threaded in rather than assumed: the mission timer is only
+ * one of the two ways here. When a free command reaches the target the room
+ * caused the completion, and every effect it produces — COMPLETED, the next
+ * mission's STARTED and its ambience — has to carry that event key, or T8 would
+ * assemble event-derived effects with `causedByEventKey = null` (BOARD A-17).
+ */
 function resolveMission(
   draft: Draft,
   now: IsoUtcInstant,
   rng: Rng,
   tuning: WorldTuning,
   cause: WorldTransition['cause'],
+  effectCause: EffectCause,
 ): void {
   const mission = draft.world.mission
   const completed = mission.progress.current >= mission.progress.target
   draft.effects.push({
     kind: 'MISSION_UPDATE',
     paid: false,
-    cause: { kind: 'deadline', deadlineKind: 'mission_close' },
+    cause: effectCause,
     variantId: mission.variantId,
     startsAt: now,
     endsAt: addMillis(now, tuning.staging.missionMs),
@@ -398,7 +415,7 @@ function resolveMission(
     cause,
   )
   if (completed) grantBond(draft, tuning.mission.bondOnCompleted, now, cause)
-  startMission(draft, now, rng, tuning, cause)
+  startMission(draft, now, rng, tuning, cause, effectCause)
 }
 
 // ---------------------------------------------------------------------------
@@ -466,7 +483,10 @@ function playChapterBeat(
       : beat === 'turn'
         ? chapter.turnAmbienceId
         : chapter.resolutionAmbienceId
-  const cause: EffectCause = { kind: 'deadline', deadlineKind: 'chapter_beat', deadlineId: beat }
+  // No `deadlineId`: the contract defines it as the persistence-issued row id
+  // (T4/T8) and T7 has none. Which beat this is travels in the variant id and in
+  // the beat-specific `ambienceId` below (BOARD A-17).
+  const cause: EffectCause = { kind: 'deadline', deadlineKind: 'chapter_beat' }
 
   draft.world = {
     ...draft.world,
@@ -662,7 +682,7 @@ function applyCareCommand(
         ...draft.world,
         deadlines: removeDeadline(draft.world.deadlines, 'mission_close'),
       }
-      resolveMission(draft, now, rng, tuning, 'command')
+      resolveMission(draft, now, rng, tuning, 'command', cause)
     }
   }
 
@@ -994,7 +1014,10 @@ function applyDeadline(
         kind: 'deadline',
         deadlineKind: 'mission_close',
       })
-      resolveMission(draft, now, rng, tuning, 'deadline')
+      resolveMission(draft, now, rng, tuning, 'deadline', {
+        kind: 'deadline',
+        deadlineKind: 'mission_close',
+      })
       return
     case 'choice_close':
       applyChoiceClose(draft, now, rng, tuning)
@@ -1204,4 +1227,47 @@ export function step(
  */
 export function pendingDeadlines(state: WorldState): readonly ScheduledDeadline[] {
   return [...state.world.deadlines, ...paidFallbackDeadlines(state.audit)]
+}
+
+export interface WorldRecovery {
+  readonly state: WorldState
+  readonly plan: DeadlineRecoveryPlan
+}
+
+/**
+ * The world half of the start-up sequence of spec §7.3(3): apply the §10.2
+ * downtime policy to every timer that came due while the process was gone.
+ *
+ * The returned state already has the pending set the policies imply — dropped
+ * occurrences removed, `skip` kinds re-armed — so the engine (T8) does not
+ * mutate the domain itself. It loads the snapshot, calls this once, steps
+ * `plan.deliver` in order, records `plan.expired`, and only then resumes source
+ * intake. Timers that came due are not in the new pending set: a delivered one
+ * is re-armed by its own handler when it is stepped.
+ *
+ * Paid obligations are planned separately because they are derived from the
+ * audit state and must stay out of `world.deadlines` (spec §8.5, see `paid.ts`).
+ * They are `replay`, so all of them are delivered and none is dropped.
+ */
+export function recoverDeadlines(
+  state: WorldState,
+  now: IsoUtcInstant,
+  options: StepOptions = {},
+): WorldRecovery {
+  const tuning = options.tuning ?? DEFAULT_WORLD_TUNING
+  const worldPlan = planDeadlineRecovery(state.world.deadlines, now, tuning)
+  const paidPlan = planDeadlineRecovery(paidFallbackDeadlines(state.audit), now, tuning)
+  const recovered: WorldState = {
+    world: { ...state.world, deadlines: worldPlan.pending },
+    audit: state.audit,
+  }
+  return {
+    state: recovered,
+    plan: {
+      deliver: [...worldPlan.deliver, ...paidPlan.deliver].sort(compareDeadlines),
+      expired: [...worldPlan.expired, ...paidPlan.expired],
+      rescheduled: [...worldPlan.rescheduled, ...paidPlan.rescheduled],
+      pending: pendingDeadlines(recovered),
+    },
+  }
 }

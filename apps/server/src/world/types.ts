@@ -2,6 +2,7 @@ import type {
   CanonicalEvent,
   CommandName,
   DeadlinePolicy,
+  EffectCause as ContractEffectCause,
   EventKey,
   Identifier,
   IsoUtcInstant,
@@ -140,6 +141,18 @@ export interface DeadlineDefinition {
   readonly kind: DeadlineKind
   readonly policy: DeadlinePolicy
   readonly scale: TimeScale
+  /**
+   * How the kind re-arms itself, which is what recovery needs to know:
+   * - `interval` — cadence is a function of the tuning and the current instant,
+   *   so a dropped occurrence can be re-armed without any world state. Every
+   *   `skip` kind must be one of these or the world would stop after downtime
+   *   (spec §2.1); `deadlines.test.ts` asserts exactly that.
+   * - `state`    — the handler schedules the successor when it is delivered.
+   *   `replay` and `coalesce` never drop an occurrence, so the handler always
+   *   runs and the timer always comes back.
+   * - `one_shot` — armed for a single future moment and not repeated.
+   */
+  readonly recurrence: 'interval' | 'state' | 'one_shot'
   /** Why this policy is the right one after downtime. Kept next to the value. */
   readonly rationale: string
 }
@@ -168,15 +181,30 @@ export interface ScheduledDeadline {
 // ---------------------------------------------------------------------------
 
 /**
- * Why an effect exists. Timer-driven staging has no causing event, and the
- * contract's `Effect.causedByEventKey` is non-nullable, so the reducer returns a
- * draft with an explicit cause and T8 assembles `effectId`, `stateRevision` and
- * `causedByEventKey` when it writes the outbox row (coordinator answer to the T7
- * question, 2026-08-17; contract follow-up T1b promotes this discriminator).
+ * Why an effect exists (BOARD A-17, contract `EffectCauseSchema` since T1b).
+ *
+ * The reducer returns drafts and T8 assembles the contract `Effect` with its
+ * `effectId`, `stateRevision` and `causedByEventKey`, so this is the world's
+ * narrower view of the same discriminator:
+ *
+ * - `deadlineKind` is the world's closed vocabulary rather than the contract's
+ *   open `Identifier`, which keeps the exhaustiveness checks in `deadlines.ts`;
+ * - `deadlineId` is **absent by construction**. The contract defines it as the
+ *   persistence-issued deadline row id (T4/T8) and T7 has no row id to give, so
+ *   nothing here can record a plausible-but-false deadline identity. Which beat
+ *   or sub-key produced the staging travels in the draft's `variantId` and in
+ *   the payload's own identifier instead.
+ *
+ * `WorldEffectCauseIsContractCause` below proves the assignability at compile
+ * time, and `reducer.test.ts` parses emitted causes with `EffectCauseSchema`.
  */
 export type EffectCause =
   | { readonly kind: 'event'; readonly eventKey: EventKey }
-  | { readonly kind: 'deadline'; readonly deadlineKind: DeadlineKind; readonly deadlineId?: string }
+  | { readonly kind: 'deadline'; readonly deadlineKind: DeadlineKind }
+
+/** `true` only while every world cause is also a valid contract cause. */
+export type WorldEffectCauseIsContractCause =
+  EffectCause extends ContractEffectCause ? true : false
 
 /** Cause of an effect that must be traceable to a real event (paid audit). */
 export type EventCause = Extract<EffectCause, { kind: 'event' }>
