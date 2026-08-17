@@ -28,7 +28,7 @@
 | T15 | fault matrix·72h soak harness | T11, T12, T13 | — | changes_requested | t15-fault-soak | #18 | `task_f32603eaee51` |
 | T16 | 문서 정합화·운영 런북·Gate 체크리스트 | T12 | — | changes_requested | t16-docs-alignment | #19 | `task_60d68899d24c` |
 | T17 | Windows 운영 스크립트(자동시작·OBS·아카이브) | T2, T12 | — | merged | t17-windows-ops | #17 | `task_e2466b978ebe` |
-| T8b | 엔진 버그픽스: /ingest/simulator inbox write 예외 시 hang(T15 발견) | T8 | — | in_review | t8b-ingest-hang | #20 | `task_f1aeb51337bf` |
+| T8b | 엔진 버그픽스: /ingest/simulator inbox write 예외 시 hang(T15 발견) | T8 | — | merged | t8b-ingest-hang | #20 | `task_f1aeb51337bf` |
 
 디스패치 순서 원칙: `ready` 중 T-ID 낮은 것부터, 동시 2, `[contract]`는 하나만. 리뷰 Task는 `R-<T-ID>-<round>`로 별도 등록하고 아래 이력에만 남긴다.
 
@@ -181,3 +181,4 @@
 | 2026-08-17 18:41 | T8b worker_done(succeeded, PR #20: ingest 실패 분류→503/500, server.ts fail-closed net, 재현 테스트; 1732 tests). R-T8b-1 `task_4a21ac8e6e03` → `ctx_8831ae1c5c06`(review). 진행: R-T17-2(review2), F-T15-1, F-T16-1 |
 | 2026-08-17 18:48 | R-T17-2 verdict **approve** → 최종 게이트(로컬 게이트 E-5, ops/windows에 비밀 없음) → **PR #17 squash merge**(main d171853). T17 worker release·worktree 제거. 남은 open PR: #18(T15, F-T15-1 진행), #19(T16, F-T16-1 진행), #20(T8b, R-T8b-1 진행) |
 | 2026-08-17 18:51 | F-T16-1 완료(6건, .md 11개). R-T16-2 → review2. 진행: R-T8b-1(review), F-T15-1 |
+| 2026-08-17 18:55 | R-T8b-1 verdict **approve** → **PR #20 squash merge**(main 01d8f2a). T8b worker release·worktree 제거. 남은 open PR: #18(T15, F-T15-1 진행), #19(T16, R-T16-2 진행) |
