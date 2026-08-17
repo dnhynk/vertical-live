@@ -125,3 +125,41 @@ node apps/renderer/scripts/preview-server.mjs + 실제 Chrome 138 headless(CDP 1
 - 크리처 placeholder가 4번째 슬롯 카드와 겹친다(스크린샷). 레이아웃·카메라 정리는 T14.
 - 렌더러 번들이 1.2MB(gzip 351KB)로 vite의 500KB 경고를 넘는다. three/R3F가 대부분이며 OBS 로컬 로딩이라 지금은 문제가 아니다. 코드 분할이 필요하면 T14에서.
 - `?ws=` 오버라이드는 loopback만 허용한다. 원격 렌더러 시나리오가 생기면 §10.2의 방화벽 allowlist 정책과 함께 다시 정한다.
+
+## Review round 1
+
+리뷰: https://github.com/dnhynk/vertical-live/pull/9#pullrequestreview-4949779694 (verdict `request_changes`, blocker 2, major 0, minor 0). 게이트 6개는 리뷰어 환경에서도 모두 pass였고, 합격 기준 2·3·4는 met, 1만 unmet이었다.
+
+| finding | 처리(고침 SHA / 반박 근거) |
+|---|---|
+| [blocker] `read-model/store.ts:170` — 이미 아는 effectId 재수신 시 `#pendingEffectAcks`에만 넣고 `#notify()`를 부르지 않아, 화면이 그대로여서 React가 다시 commit하지 않으면 재ACK가 영원히 보류된다. `store.test.ts:107`이 프로덕션에 없는 `markCommitted()`를 수동 호출해 이 경우를 가렸다 | **고침** `d05747b`. 재수신은 화면을 바꾸지 않으므로 알림을 만들지 않고, **이미 commit된 사본의 재ACK는 `#committedEffectAcks`에 바로 넣어** 다음 실제 프레임에 나가게 했다(`store.ts` `receiveEffect` repeat 경로). 첫 commit을 아직 기다리는 사본만 pending에 남는다. 단순히 `#notify()`를 부르는 대안은 시각적 변화가 없는데도 재전송마다 React 렌더를 유발하므로 택하지 않았다. 테스트: `store.test.ts` "starts an effectId once and acks a resend without replaying it"에서 수동 `markCommitted()` 제거(receive→commit→frame→resend→frame), `components/Screen.test.tsx` "re-acknowledges a resent effect without a further React render"가 프로덕션 경로에서 `model.version` 불변(=알림·commit 없음)을 확인한 뒤 다음 프레임에 두 번째 `ack_effect`가 나가는 것을 확인 |
+| [blocker] `read-model/store.ts:231` — 미래 `startsAt` effect가 활성화 projection의 React commit 전에 ACK된다(`ackEffect`가 `#refreshActiveEffects` 앞). `store.test.ts:166-169`가 그 잘못된 순서를 기대로 고정했다 | **고침** `d05747b`. `markCommitted()`가 그 commit이 화면에 올린 활성 effect id 집합(`#committedActiveEffectIds`)을 기록하고, 프레임 루프는 **그 집합에 든 effect만** ACK한다. 창이 열린 프레임은 projection만 활성화하고 알림을 보내며, ACK는 그 commit 다음 프레임에 나간다. 테스트: `store.test.ts`의 잘못된 기대 수정 + "activates, lets React commit, and only then acknowledges (observed order)"가 관측 순서를 `commit:[] → frame → frame → commit:[sample-effect-future] → frame → ack_effect`로 고정, `Screen.test.tsx` "shows a scheduled effect on a committed frame before acknowledging it"가 DOM에 effect가 보인 뒤에야 ACK가 나가는 것을 확인 |
+
+회귀 테스트가 실제로 무는지 확인(수정 없이 실패해야 함):
+
+```text
+git stash push -- apps/renderer/src/read-model/store.ts
+npx vitest run apps/renderer/src/components/Screen.test.tsx apps/renderer/src/read-model/store.test.ts
+  × starts an effectId once and acks a resend without replaying it
+  × waits for the start time before showing and acking a scheduled effect
+  × activates, lets React commit, and only then acknowledges (observed order)
+  × re-acknowledges a resent effect without a further React render
+  × shows a scheduled effect on a committed frame before acknowledging it
+  Tests  5 failed | 18 passed (23)
+git stash pop   -> 23 passed
+```
+
+### Gates (round 1 fix, executed)
+
+```text
+git fetch origin && git rebase origin/main -> origin/main d914f6a. 충돌 2건 해결:
+  vitest.config.ts는 main 버전 채택(@vl/contract/fixtures alias 추가분) + T5의 .test.tsx include만 다시 얹음,
+  package-lock.json은 main 것을 받아 npm install로 재생성
+npm run format:check -> All matched files use Prettier code style!
+npm run lint         -> eslint 0, check-no-legacy-imports: ok, check-install-scripts: ok
+npm run typecheck    -> tsc --build tsconfig.json, 오류 0
+npm run test         -> Test Files 42 passed (42), Tests 725 passed | 1 skipped (726)
+npm run build        -> @vl/contract, @vl/renderer(✓ built), @vl/server, @vl/simulator 성공
+```
+
+라운드 1 이후 재확인: 라운드 0의 미해명 `544 passed / 1 error`는 이번 5개 게이트 실행에서 재현되지 않았다(스위트 전체 실행 2회 모두 오류 0).
