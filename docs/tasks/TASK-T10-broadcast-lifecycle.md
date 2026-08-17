@@ -137,6 +137,16 @@ A18-publish-guard:  exit=1 Tests  1 failed | 49 skipped (50)   (marker_cleared_a
 A18-private-insert: exit=1 Tests  1 failed | 49 skipped (50)   (insert가 config.privacyStatus 사용)
 ```
 
+### Reproduction checks (round 4)
+
+세 변경 모두 되돌린 빌드에서 해당 테스트가 실패함을 확인했다.
+
+```text
+B1-vault-side-effect: exit=1 Tests  1 failed | 54 skipped (55)   (완전성 게이트를 commit 뒤로)
+M1-scheduledEndTime:  exit=1 Tests  1 failed | 54 skipped (55)   (scheduledEndTime 미전송)
+M2-status-member:     exit=1 Tests  1 failed | 54 skipped (55)   (selfDeclaredMadeForKids 재전송)
+```
+
 ### Gates (executed)
 
 ```text
@@ -151,6 +161,8 @@ $ npm run build          -> contract, renderer(vite ✓ built), server(copied 2 
 round 1 수정 후 재실행(base `44fefaa`로 rebase): 위 5개 게이트 모두 통과, 테스트 **1129 passed | 1 skipped (1130)**, `copied 2 migration(s)`(003 재번호 후 dist 정리 확인).
 
 round 3 수정 후 재실행: format pass · lint pass · typecheck pass · test **1289 passed | 1 skipped (1290)** · build pass. `marker_cleared_at` 컬럼을 T13 데이터 맵에 선언하고 생성 스크립트를 다시 돌렸다.
+
+round 4 수정 후 재실행(base `7a858b8`로 rebase): format pass · lint pass · typecheck pass · test **1404 passed | 1 skipped (1405)** · build pass(`copied 5 migration(s)`, `docs/ops/data-map.md up to date`).
 
 그 뒤 **T8(PR #12)이 머지되어 다시 rebase**했다(base `5df160b`). 충돌 2건은 통합 처리했다: (1) T8이 `migrate.test.ts`의 마이그레이션 목록을 디렉터리에서 파생하도록 바꿨으므로(새 마이그레이션이 머지 충돌이 되지 않게) 고정 목록을 버리고 T8 쪽을 채택했다 — 003은 T8의 004·005와 번호가 겹치지 않아 재번호가 필요 없다, (2) 생성물인 `docs/ops/data-map.md`는 손으로 병합하지 않고 `npm run data-map:generate -w @vl/server`로 다시 만들었다. 최종 게이트: format pass · lint pass · typecheck pass · test **1399 passed | 1 skipped (1400)** · build pass(`copied 5 migration(s)`, `docs/ops/data-map.md up to date`).
 
@@ -231,8 +243,32 @@ round 2 수정 후 재실행(`git fetch && git rebase origin/main`): format `All
 | 덮어쓰기 규칙 | "this method will override the existing values for all of the mutable properties that are contained in any parts that the parameter value specifies" / "if your request does not specify a value for a property that already has a value, the property's existing value will be deleted" | 같은 문서 |
 | 필수 본문 | `id`, `snippet.scheduledStartTime`(snippet을 보낼 때), `contentDetails.monitorStream.enableMonitorStream`·`broadcastStreamDelayMs`(contentDetails를 보낼 때) | 같은 문서 |
 | scope | `youtube`, `youtube.force-ssl` | 같은 문서 Authorization |
-| 그래서 코드가 하는 일 | description만 바꿀 때도 `snippet.title`·`scheduledStartTime`을 함께 보내고, privacy를 바꿀 때는 `status.selfDeclaredMadeForKids`를 함께 보낸다. `contentDetails`는 이 경로로 보내지 않는다(추가 필수 필드 + 시작 후 수정 금지 오류) | — |
+| ~~그래서 코드가 하는 일~~ | ~~description만 바꿀 때도 `snippet.title`·`scheduledStartTime`을 함께 보내고, privacy를 바꿀 때는 `status.selfDeclaredMadeForKids`를 함께 보낸다~~ → **round 4에서 정정**: 예외 목록(2023-08-01)을 확인하지 않은 판단이었다. 현재는 title·selfDeclaredMadeForKids를 보내지 않고 `scheduledEndTime`을 보존한다(아래 Review round 4). `contentDetails`는 여전히 이 경로로 보내지 않는다 | — |
 | 비용 | write 50 units(`documented: false`, Data API write 규칙 근거). 방송당 최대 2회(마커 제거 + publish) | https://developers.google.com/youtube/v3/getting-started |
+
+## Review round 4
+
+리뷰: https://github.com/dnhynk/vertical-live/pull/11#pullrequestreview-4951506884 (verdict `request_changes`, blocker 1 · major 2). round 3의 broadcast 절단 규칙·A-18 구조·T3/T13 통합은 리뷰어가 fixed로 확인했다. 커밋 `0338b82`.
+
+| finding | 처리 |
+|---|---|
+| **B1** `lifecycle.ts:1228` `#selectStreamByTitle`이 `search.complete` 검사(792행)보다 **먼저** 첫 가시 same-title stream 키를 vault에 commit → DB는 pending을 유지했지만 vault는 이미 decoy 키를 채택했고 OBS는 그 값을 정본으로 쓴다. 절단 스캔이 여전히 판정을 내린 것(§9.1, round 3 규칙) | 고침 `0338b82`. 완전성 게이트를 **commit 앞으로** 옮겼다: `requireCompleteScan`이 켜진 reconcile 경로에서 목록이 절단되면 staged 키를 `discard()`하고 `{streamId: null, complete: false}`를 돌려 vault에 아무것도 쓰지 않는다(재사용 경로는 판정이 아니라 선택이므로 종전대로). 재현 테스트: 첫 페이지 same-title decoy + 무관 stream 200개 + 실제 insert는 페이지 밖 → `stream_list_truncated` inconclusive, **vault 미기록**(decoy·실제 키 모두 아님), staged 0, `pendingCall` 유지, `streamId` null |
+| **M1** `api.ts:260` 마커 제거 update가 `snippet.scheduledEndTime`을 보존하지 않고 `snippet.title`을 재전송 | 고침 `0338b82`. `LiveBroadcastSummary`·가짜 서버에 `scheduledEndTime`을 추가하고, update 본문은 **`description` + `scheduledStartTime`(+값이 있으면 `scheduledEndTime`)** 뿐이다. `title`은 보내지 않는다. 성공 후 `scheduledEndTime`이 그대로인지 검증하고, 값이 없으면 키 자체를 넣지 않는다. 테스트: 운영자가 Studio에서 고친 제목과 설정한 종료 시각이 모두 살아남고 본문 키가 정확히 3개(또는 2개) |
+| **M2** `lifecycle.ts:291` `publish()`가 `status.selfDeclaredMadeForKids`를 update로 전송하고 가짜 서버가 수용 | 고침 `0338b82`. update 본문은 `status.privacyStatus` 하나뿐이고, 재전송 사유 문구를 삭제했다. 가짜 서버는 `status.selfDeclaredMadeForKids`가 오면 **거부**한다(실제 API는 조용히 무시하고 공개된 reason 문자열도 없으므로, 보내면 안 되는 형태가 production 대신 테스트에서 실패하도록 의도적으로 더 엄격하게 만들었고 그 사실을 코드 주석에 적었다). 테스트: publish 본문의 `status` 키가 `['privacyStatus']`뿐 + 가짜 서버 거부 확인 |
+
+### `liveBroadcasts.update` 생략 규칙 — 예외 두 개 (2026-08-17 확인)
+
+round 3에서 인용한 "생략된 속성은 삭제된다"는 규칙에는 **명시된 예외가 있다.** 리뷰어 지적으로 revision history를 확인했다.
+
+| 항목 | 인용 | 출처 |
+|---|---|---|
+| 기본 규칙 | "this method will override the existing values for all of the mutable properties that are contained in any parts that the parameter value specifies" / "if your request does not specify a value for a property that already has a value, the property's existing value will be deleted" | https://developers.google.com/youtube/v3/live/docs/liveBroadcasts/update |
+| **예외(2023-08-01)** | "The `liveBroadcasts.update` method no longer requires values to be specified for these fields: `snippet.title`, `status.privacyStatus`. **Omitting these fields from the request will leave them unchanged.**" | https://developers.google.com/youtube/v3/live/revision_history#august-1-2023 |
+| `snippet.scheduledEndTime` | update의 writable 목록에 있고 위 예외에는 **없다** → 생략하면 삭제된다. 그래서 읽어서 되돌려 보낸다 | 같은 update 문서 |
+| `status`의 writable 멤버 | `status.privacyStatus` **하나뿐**. `selfDeclaredMadeForKids`는 리소스 문서상 insert·list 전용 | 같은 update 문서 + https://developers.google.com/youtube/v3/live/docs/liveBroadcasts |
+| 여전히 필수 | `snippet`을 보낼 때 `snippet.scheduledStartTime` | 같은 update 문서 |
+
+즉 round 3의 "description만 바꿀 때도 title을 함께 보낸다"는 판단은 **틀렸다**(예외 목록을 확인하지 않았다). 지금은 title을 보내지 않으므로 동시 Studio 편집을 덮어쓰지 않고, 대신 예외가 아닌 `scheduledEndTime`을 보존한다. `docs/ops/broadcast-lifecycle.md`의 해당 절도 표로 다시 썼다.
 
 ## Follow-ups
 
