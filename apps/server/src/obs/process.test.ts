@@ -42,6 +42,9 @@ const config: ObsProcessConfig = {
 const emptySentinel: ObsSentinelFs = {
   isReparsePoint: () => false,
   realPath: (dir) => dir,
+  // The fake canonicalises to itself, so "the root is still the entry its own
+  // parent holds" is exactly "the root came back unchanged".
+  matchesParentEntry: (dir, root) => root === dir,
   list: () => [],
   canonicalFile: (root, name) => `${root}\\${name}`,
   remove: () => {},
@@ -199,6 +202,9 @@ describe('crash sentinel clearing (BOARD D-7)', () => {
       // The fixture directory is a Windows path, so the fake canonicalises to
       // itself and joins with a backslash wherever this runs (T17b).
       realPath: (dir) => dir,
+      // Same answer the real one gives: the root that came back is the entry
+      // this directory's own parent holds under that name.
+      matchesParentEntry: (dir, root) => root === dir,
       list: (dir) => {
         listed.push(dir)
         return names
@@ -274,6 +280,7 @@ describe('crash sentinel clearing (BOARD D-7)', () => {
       sentinel: {
         isReparsePoint: () => false,
         realPath: (dir) => dir,
+        matchesParentEntry: (dir, root) => root === dir,
         list: () => {
           throw Object.assign(new Error('ENOENT: no such file or directory'), { code: 'ENOENT' })
         },
@@ -307,6 +314,9 @@ describe('crash sentinel clearing (BOARD D-7)', () => {
         isReparsePoint: () => false,
         realPath: () => {
           throw Object.assign(new Error('ENOENT: no such file or directory'), { code: 'ENOENT' })
+        },
+        matchesParentEntry: () => {
+          throw new Error('unreachable')
         },
         list: () => {
           throw new Error('unreachable')
@@ -370,6 +380,7 @@ describe('crash sentinel clearing (BOARD D-7)', () => {
       sentinel: {
         isReparsePoint: () => false,
         realPath: (dir) => dir,
+        matchesParentEntry: (dir, root) => root === dir,
         list: () => ['run_1234'],
         canonicalFile: (root, name) => `${root}\\${name}`,
         remove: () => {
@@ -396,6 +407,7 @@ describe('crash sentinel clearing (BOARD D-7)', () => {
       sentinel: {
         isReparsePoint: () => false,
         realPath: (dir) => dir,
+        matchesParentEntry: (dir, root) => root === dir,
         list: () => {
           throw Object.assign(new Error('EACCES: permission denied, scandir'), { code: 'EACCES' })
         },
@@ -442,6 +454,75 @@ describe('crash sentinel clearing (BOARD D-7)', () => {
     })
     // Still a launch: a refusal to clear is never a refusal to start OBS.
     expect(result.pid).toBe(4242)
+    expect(spawns.calls).toHaveLength(1)
+  })
+
+  it('refuses a root that stopped being the entry its own parent holds', () => {
+    const spawns = spawner()
+    const warn = vi.fn()
+    const sentinel = sentinelFs(['not-a-sentinel.txt'])
+    // Review round 3: the reparse check and the `realpath` that approves the
+    // root are two lookups of the same path. Drop a junction between them and
+    // the check answers "not a link" about the real directory while `realpath`
+    // answers with the link's target — which then passes every containment test
+    // as the approved root. Only `realPath` is overridden here; the predicate
+    // that catches it is the fake's honest one.
+    const launcher = new ObsProcessLauncher({
+      config,
+      spawner: spawns,
+      probe: notRunning,
+      exists: () => true,
+      sentinel: { ...sentinel.fs, realPath: () => 'C:\\Users\\test\\outside' },
+      logger: { debug: () => {}, info: () => {}, warn, error: () => {} },
+    })
+
+    const result = launcher.launch()
+
+    // The outside directory is never listed, so nothing in it is ever a
+    // candidate — the refusal lands before anything is read.
+    expect(sentinel.listed).toEqual([])
+    expect(sentinel.checked).toEqual([])
+    expect(sentinel.removed).toEqual([])
+    expect(result.sentinelCleared).toBe(0)
+    expect(result.sentinelFailure).toBe('sentinel_dir_mismatch')
+    expect(warn).toHaveBeenCalledWith('obs.sentinel_clear_failed', {
+      dir: config.sentinelDir,
+      cleared: 0,
+      error: 'sentinel_dir_mismatch',
+    })
+    expect(spawns.calls).toHaveLength(1)
+  })
+
+  it('refuses a root that became a reparse point after it was resolved', () => {
+    const spawns = spawner()
+    const warn = vi.fn()
+    const sentinel = sentinelFs(['run_1234'])
+    // The cheap second half of the round 3 guard: the lexical path is asked
+    // again after the root was resolved. A swap that leaves a link behind is
+    // caught here even where the parent cross-check cannot see it.
+    let checks = 0
+    const launcher = new ObsProcessLauncher({
+      config,
+      spawner: spawns,
+      probe: notRunning,
+      exists: () => true,
+      sentinel: {
+        ...sentinel.fs,
+        isReparsePoint: () => {
+          checks += 1
+          return checks > 1
+        },
+      },
+      logger: { debug: () => {}, info: () => {}, warn, error: () => {} },
+    })
+
+    const result = launcher.launch()
+
+    expect(checks).toBe(2)
+    expect(sentinel.listed).toEqual([])
+    expect(sentinel.removed).toEqual([])
+    expect(result.sentinelCleared).toBe(0)
+    expect(result.sentinelFailure).toBe('sentinel_dir_reparse_point')
     expect(spawns.calls).toHaveLength(1)
   })
 
@@ -638,6 +719,31 @@ describe('nodeObsSentinelFs against real links (review round 1, B1)', () => {
       expect(nodeObsSentinelFs.canonicalFile(root, 'run_link')).toBeNull()
     }
   })
+
+  it('checks a resolved root against its own parent, and allows a junctioned parent', () => {
+    mkdirSync(sentinelDir, { recursive: true })
+    const root = nodeObsSentinelFs.realPath(sentinelDir)
+
+    expect(nodeObsSentinelFs.matchesParentEntry(sentinelDir, root)).toBe(true)
+    // The root a junction dropped in `.sentinel`'s place would have resolved
+    // to: the parent still holds `.sentinel`, and it is not that (round 3).
+    expect(
+      nodeObsSentinelFs.matchesParentEntry(sentinelDir, nodeObsSentinelFs.realPath(outside)),
+    ).toBe(false)
+
+    // A `.sentinel` reached *through* a junctioned parent is an ordinary
+    // placement, not an attack, and must still be cleared: both sides resolve
+    // the parent, so both land on the same real directory.
+    const realParent = join(base, 'roaming')
+    mkdirSync(join(realParent, '.sentinel'), { recursive: true })
+    const linkedParent = join(base, 'roaming-link')
+    symlinkSync(realParent, linkedParent, 'junction')
+    const viaLink = join(linkedParent, '.sentinel')
+
+    expect(nodeObsSentinelFs.matchesParentEntry(viaLink, nodeObsSentinelFs.realPath(viaLink))).toBe(
+      true,
+    )
+  })
 })
 
 /**
@@ -713,6 +819,86 @@ describe('nodeObsSentinelFs when the root is swapped after the listing (review r
     // put it.
     expect(existsSync(join(moved, 'run_1234'))).toBe(true)
     // And a refusal to clear is still not a refusal to start OBS.
+    expect(spawns.calls).toHaveLength(1)
+  })
+})
+
+/**
+ * Review round 3 — the reviewer's reproduction again, one step earlier. The
+ * round 2 fix pinned the root before the listing, but the reparse-point check
+ * and the `realpath` that pins it are two lookups of the same path: rename the
+ * real `.sentinel` away *between* them and drop a junction in its lexical
+ * place, and the check answers "not a link" about the directory that was there
+ * while `realpath` answers with the junction's target. That target becomes the
+ * approved root, every containment test below agrees with it, and a file
+ * outside the configured directory is deleted (`sentinelCleared: 1`,
+ * `outsideFileStillExists: false`).
+ *
+ * The launcher now cross-checks the resolved root against its own parent —
+ * `realpath(dirname)` + the name — and asks the reparse question again on the
+ * lexical path before using either. A root redirected elsewhere no longer
+ * equals the entry its parent holds; a `.sentinel` reached through a junctioned
+ * *parent* still does, because that side resolves the parent too.
+ *
+ * What this does **not** close, and what the docs must not claim it does: the
+ * window itself. Every check names a path, and Node has no
+ * `openat`/`unlinkat` to say "the entry I just checked" — so a swap landing
+ * between one of these checks and its use still wins, as does replacing the
+ * directory with a *real* one at the same path, which no link check can see.
+ * `docs/ops/windows-host.md` 5.7 lists both halves.
+ */
+describe('nodeObsSentinelFs when the root is swapped before it is resolved (review round 3)', () => {
+  const base = join(tmpdir(), `vl-obs-sentinel-root-${String(process.pid)}`)
+  const outside = join(base, 'outside')
+  const sentinelDir = join(base, '.sentinel')
+  const moved = join(base, '.sentinel-moved')
+  const marker = join(sentinelDir, 'run_1234')
+  const outsideFile = join(outside, 'run_1234')
+
+  beforeEach(() => {
+    mkdirSync(outside, { recursive: true })
+    writeFileSync(outsideFile, 'outside')
+    mkdirSync(sentinelDir, { recursive: true })
+    writeFileSync(marker, 'crashed')
+  })
+
+  afterEach(() => {
+    rmSync(base, { recursive: true, force: true })
+  })
+
+  it('deletes nothing when a junction replaces the approved root before it is resolved', () => {
+    let swapped = false
+    const swapping: ObsSentinelFs = {
+      ...nodeObsSentinelFs,
+      isReparsePoint: (dir) => {
+        // The real answer, about the real directory — and then the swap, so the
+        // `realpath` that follows resolves the junction instead. Only the first
+        // call swaps; the second is the launcher's re-check.
+        const answer = nodeObsSentinelFs.isReparsePoint(dir)
+        if (!swapped) {
+          renameSync(sentinelDir, moved)
+          symlinkSync(outside, sentinelDir, 'junction')
+          swapped = true
+        }
+        return answer
+      },
+    }
+    const spawns = spawner()
+
+    const result = new ObsProcessLauncher({
+      config: { ...config, sentinelDir },
+      spawner: spawns,
+      probe: notRunning,
+      exists: () => true,
+      sentinel: swapping,
+    }).launch()
+
+    expect(swapped).toBe(true)
+    expect(result.sentinelCleared).toBe(0)
+    expect(result.sentinelFailure).toBe('sentinel_dir_mismatch')
+    expect(existsSync(outsideFile)).toBe(true)
+    expect(readFileSync(outsideFile, 'utf8')).toBe('outside')
+    expect(existsSync(join(moved, 'run_1234'))).toBe(true)
     expect(spawns.calls).toHaveLength(1)
   })
 })

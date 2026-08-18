@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process'
 import { execFileSync } from 'node:child_process'
 import { existsSync, lstatSync, readdirSync, realpathSync, rmSync } from 'node:fs'
-import { join, win32 as winPath } from 'node:path'
+import { basename, dirname, join, relative, resolve, win32 as winPath } from 'node:path'
 
 // The same containment predicate T17's archive sweeper decides deletions with:
 // one definition of "this canonical path is inside that canonical directory".
@@ -44,13 +44,18 @@ import type { ObsProcessConfig } from './config.js'
  * first (BOARD D-7). A sentinel file left by a crash makes the next start offer
  * Safe Mode, and Safe Mode disables obs-websocket — an unattended host would sit
  * on a modal dialog with the control path switched off. Both launch paths go
- * through here, so that is one place rather than two. It deletes only inside
+ * through here, so that is one place rather than two. It aims its deletions at
  * the configured directory: a `.sentinel` that is a junction or a symlink is
  * refused outright (review round 1, B1), the canonical root is resolved **once**
- * before the listing, and every entry is re-resolved against that fixed root and
- * then deleted by the canonical path that was checked (review round 2, B1). The
- * caveat is in `docs/ops/windows-host.md` 5.7: this is **not** a documented OBS
- * procedure, and it hides the crash marker rather than the crash.
+ * before the listing and cross-checked against its own parent so a root
+ * redirected between the two lookups is refused (review round 3), and every
+ * entry is re-resolved against that fixed root and then deleted by the
+ * canonical path that was checked (review round 2, B1). What that does *not*
+ * amount to is a closed check→use window: Node has no `openat`/`unlinkat`, so
+ * every check names a path that something else may still replace before it is
+ * used. `docs/ops/windows-host.md` 5.7 lists what is and is not guaranteed,
+ * along with the other caveat: this is **not** a documented OBS procedure, and
+ * it hides the crash marker rather than the crash.
  */
 
 export class ObsProcessError extends Error {
@@ -132,6 +137,23 @@ export interface ObsSentinelFs {
    * moment (review round 2, B1). Throws like `realpath(2)`, `ENOENT` included.
    */
   realPath(dir: string): string
+  /**
+   * True when `root` — the value `realPath(dir)` just answered — is still the
+   * entry `dir` names inside `dir`'s **own** canonical parent, i.e. when it
+   * equals `join(realPath(dirname(dir)), basename(dir))` under this host's path
+   * comparison. False when the two differ, and false when the question cannot
+   * be answered.
+   *
+   * This is what is left of the check→use window on the root itself: `lstat`
+   * and `realpath` are two separate lookups, and a junction dropped on the
+   * lexical path between them makes `realpath` answer with the link's target,
+   * which then passes every containment test below as the approved root
+   * (review round 3). Resolving the parent instead of the path itself is the
+   * asymmetry that catches it — a redirected `.sentinel` no longer sits where
+   * its parent says it does, while a normal directory reached through a
+   * junctioned *parent* still does, because the parent is resolved too.
+   */
+  matchesParentEntry(dir: string, root: string): boolean
   /** File names directly inside `dir`. Throws `ENOENT` when `dir` is absent. */
   list(dir: string): readonly string[]
   /**
@@ -162,6 +184,20 @@ export const nodeObsSentinelFs: ObsSentinelFs = {
     }
   },
   realPath: (dir) => realpathSync.native(dir),
+  matchesParentEntry: (dir, root) => {
+    try {
+      const parent = dirname(dir)
+      // A path whose parent is itself (`C:\`, `/`) has no entry to be checked
+      // against, so it is refused rather than approved. It is also not a
+      // sentinel directory.
+      if (parent === dir) return false
+      return samePath(join(realpathSync.native(parent), basename(dir)), root)
+    } catch {
+      // A parent that will not resolve is a question that cannot be answered,
+      // and that is a refusal (`isReparsePoint`, T17 `nodeArchiveFs.isLink`).
+      return false
+    }
+  },
   list: (dir) =>
     readdirSync(dir, { withFileTypes: true })
       .filter((entry) => entry.isFile())
@@ -330,12 +366,7 @@ export class ObsProcessLauncher {
     // (review round 1, B1); it is the same refusal T17's archive sweeper makes
     // for a configured root (`REFUSED (reparse_point)`).
     if (this.#sentinel.isReparsePoint(dir)) {
-      this.#logger.warn('obs.sentinel_clear_failed', {
-        dir,
-        cleared: 0,
-        error: SENTINEL_DIR_REPARSE_POINT,
-      })
-      return { cleared: 0, failure: SENTINEL_DIR_REPARSE_POINT }
+      return this.#sentinelRefused(dir, SENTINEL_DIR_REPARSE_POINT)
     }
 
     // The approved root, canonicalised **once** and before anything is listed.
@@ -345,19 +376,35 @@ export class ObsProcessLauncher {
     // junction points — which is how the reviewer got a file outside the
     // approved directory deleted (review round 2, B1).
     let root: string
-    let names: readonly string[]
     try {
       root = this.#sentinel.realPath(dir)
+    } catch (error) {
+      return this.#sentinelReadFailed(dir, error)
+    }
+
+    // …but the check above and that `realpath` are two lookups of the same
+    // path, and a junction installed between them makes `realpath` hand back
+    // the link's target as the "approved" root — after which every containment
+    // test below agrees, because it is measuring against the wrong root. The
+    // reviewer deleted an outside file exactly there (review round 3). So the
+    // root is cross-checked against its own parent before it is used, and the
+    // reparse check is repeated on the lexical path: a `.sentinel` that was
+    // redirected elsewhere no longer equals `parent/.sentinel`, while a real
+    // directory reached through a junctioned parent still does. Neither closes
+    // the window — nothing without `openat` can — they narrow it to a swap that
+    // lands between these calls and their use (`docs/ops/windows-host.md` 5.7).
+    if (!this.#sentinel.matchesParentEntry(dir, root)) {
+      return this.#sentinelRefused(dir, SENTINEL_DIR_MISMATCH)
+    }
+    if (this.#sentinel.isReparsePoint(dir)) {
+      return this.#sentinelRefused(dir, SENTINEL_DIR_REPARSE_POINT)
+    }
+
+    let names: readonly string[]
+    try {
       names = this.#sentinel.list(root)
     } catch (error) {
-      // No directory at all is the normal state of a host that has never
-      // crashed, not a fault.
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-        return { cleared: 0, failure: null }
-      }
-      const failure = errorCode(error)
-      this.#logger.warn('obs.sentinel_clear_failed', { dir, cleared: 0, error: failure })
-      return { cleared: 0, failure }
+      return this.#sentinelReadFailed(dir, error)
     }
 
     let cleared = 0
@@ -392,10 +439,45 @@ export class ObsProcessLauncher {
     }
     return { cleared, failure }
   }
+
+  /** A policy refusal: nothing was read, nothing was deleted, OBS still starts. */
+  #sentinelRefused(
+    dir: string,
+    token: string,
+  ): { readonly cleared: number; readonly failure: string } {
+    this.#logger.warn('obs.sentinel_clear_failed', { dir, cleared: 0, error: token })
+    return { cleared: 0, failure: token }
+  }
+
+  /** The directory could not be resolved or read. Absent is not a fault. */
+  #sentinelReadFailed(
+    dir: string,
+    error: unknown,
+  ): { readonly cleared: number; readonly failure: string | null } {
+    // No directory at all is the normal state of a host that has never crashed.
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return { cleared: 0, failure: null }
+    }
+    const failure = errorCode(error)
+    this.#logger.warn('obs.sentinel_clear_failed', { dir, cleared: 0, error: failure })
+    return { cleared: 0, failure }
+  }
+}
+
+/**
+ * Two spellings of one location, decided the way the running host decides it:
+ * `path.relative` is case- and separator-insensitive on Windows and neither on
+ * POSIX, which is the same primitive the containment predicate above is built
+ * on (`isInside`) rather than a second, differently-normalising comparison.
+ */
+function samePath(left: string, right: string): boolean {
+  return relative(resolve(left), resolve(right)) === ''
 }
 
 /** The configured sentinel directory is a junction or a symlink. */
 const SENTINEL_DIR_REPARSE_POINT = 'sentinel_dir_reparse_point'
+/** The canonical root is not the entry its own parent holds under that name. */
+const SENTINEL_DIR_MISMATCH = 'sentinel_dir_mismatch'
 /** A listed entry stopped resolving inside the sentinel directory. */
 const SENTINEL_ENTRY_ESCAPED = 'sentinel_entry_escaped_dir'
 
