@@ -118,6 +118,7 @@ export class RestartSupervisor {
   #abort: AbortController | undefined
   #lastAttemptAt: string | null = null
   #lastError: string | null = null
+  #lastNote: string | null = null
 
   constructor(options: RestartSupervisorOptions) {
     this.#options = options
@@ -186,7 +187,19 @@ export class RestartSupervisor {
       inFlight: this.#inFlight,
       lastAttemptAt: this.#lastAttemptAt,
       lastError: this.#lastError,
+      lastNote: this.#lastNote,
     }
+  }
+
+  /**
+   * Records what the restart action itself observed, for `/health`. A
+   * `RestartAction` returns `void` — it cannot hand anything back — so the
+   * action calls this instead (`Supervisor.noteComponent()`). It is not cleared
+   * by `noteHealthy()`: the OBS launcher's sentinel count (BOARD D-7) is a fact
+   * about the last launch, and a healthy component has not un-launched it.
+   */
+  note(note: string): void {
+    this.#lastNote = note
   }
 
   /**

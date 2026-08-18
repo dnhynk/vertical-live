@@ -88,6 +88,30 @@ describe('RestartSupervisor', () => {
     expect(supervisor.exhausted).toBe(false)
   })
 
+  it('carries what the action recorded onto /health, and keeps it once healthy', async () => {
+    // The channel BOARD D-7 needs: `RestartAction` returns void, so the OBS
+    // launcher's sentinel count reaches the health document through `note()`.
+    const clock = new FakeClock()
+    const supervisor = new RestartSupervisor({
+      component: 'obs-process',
+      clock,
+      backoff: backoff(3),
+      restart: () => {
+        supervisor.note('sentinel_cleared=2')
+      },
+    })
+
+    expect(supervisor.health().lastNote).toBeNull()
+    supervisor.request('escalated_from:obs-connection')
+    await clock.advance(1000)
+
+    expect(supervisor.health().lastNote).toBe('sentinel_cleared=2')
+    // A recovered component has not un-launched OBS: unlike `lastError` the note
+    // describes what happened, so it stays until the next launch replaces it.
+    supervisor.noteHealthy()
+    expect(supervisor.health().lastNote).toBe('sentinel_cleared=2')
+  })
+
   it('reports exhaustion after the last attempt fails (spec §9.2)', async () => {
     const clock = new FakeClock()
     const exhausted: RestartExhaustedEvent[] = []

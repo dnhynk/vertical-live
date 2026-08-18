@@ -569,7 +569,18 @@ const supervisor: Supervisor = new Supervisor({
         )
       }
       if (signal.aborted) return Promise.resolve()
-      obsLauncher.launch()
+      const launched = obsLauncher.launch()
+      // BOARD D-7: the launcher empties OBS's crash sentinel before spawning, so
+      // an unattended restart is not met by the Safe Mode dialog (which disables
+      // obs-websocket). The count goes onto the component the supervisor already
+      // reports, because a clearing that keeps finding files is a crash loop the
+      // operator has to see — the dialog is hidden, the fault is not.
+      supervisor.noteComponent(
+        'obs-process',
+        launched.sentinelFailure === null
+          ? `sentinel_cleared=${String(launched.sentinelCleared)}`
+          : `sentinel_cleared=${String(launched.sentinelCleared)} sentinel_failure=${launched.sentinelFailure}`,
+      )
       return Promise.resolve()
     },
     obsConnectionAttempts: () => obsClient?.reconnectAttempts ?? 0,

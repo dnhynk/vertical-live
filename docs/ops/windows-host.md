@@ -87,13 +87,15 @@ powershell -ExecutionPolicy Bypass -File ops\windows\Unregister-VerticalLive.ps1
   "executablePath": "C:\\Program Files\\obs-studio\\bin\\64bit\\obs64.exe",
   "profile": "vertical-live",
   "sceneCollection": "vertical-live",
-  "extraArgs": ["--disable-updater", "--disable-missing-files-check"]
+  "extraArgs": ["--disable-updater", "--disable-missing-files-check"],
+  "sentinelDir": ""
 }
 ```
 
 - 기본값이 `enabled: false`인 이유는 실행 파일 경로가 호스트마다 다르기 때문이다. 켜기 전에 경로를 확인한다(`VL_OBS_PROCESS_ENABLED=true`, `VL_OBS_EXECUTABLE=...`로도 덮어쓸 수 있다).
 - 인자는 **공식 launch parameter만** 쓴다([OBS Knowledge Base, Launch Parameters](https://obsproject.com/kb/launch-parameters), 2026-08-17 확인). `--disable-updater`는 업데이트 대화상자를, `--disable-missing-files-check`는 누락 파일 대화상자를 막는다 — 둘 다 무인 시작을 붙잡는 모달이다.
 - **obs-websocket 비밀번호는 명령행에 넣지 않는다.** 명령행은 같은 호스트의 다른 프로세스가 읽을 수 있다(스펙 §10.2). 비밀번호는 vault에 있고 서버가 접속할 때 쓴다.
+- **실행 직전에 OBS의 크래시 표식(`.sentinel`)을 비운다**(BOARD D-7, 5.7). `sentinelDir`가 비어 있으면 `%APPDATA%\obs-studio\.sentinel`로 파생하고 `VL_OBS_SENTINEL_DIR`로 덮어쓸 수 있다. 그 경로가 junction/심볼릭 링크면 아무것도 지우지 않고 거부한다(5.7). 지운 개수는 자동시작 로그 한 줄과 `/health`의 `obs-process` `lastNote`에 남으며, 지우지 못해도 기동은 계속한다.
 - 같은 실행기를 supervisor의 `obs-process` 복구 동작도 쓴다(`docs/ops/supervisor.md` 3장). 실행기는 **이미 OBS가 떠 있으면 거부한다**: 두 번째 인스턴스는 "이미 실행 중" 대화상자만 띄우고 응답 없는 OBS를 되살리지 못한다. 그 상황은 사람이 처리한다(7장).
 - OBS는 자기 `bin\64bit` 디렉터리를 작업 디렉터리로 요구하므로 실행기가 그렇게 띄운다.
 
@@ -199,25 +201,53 @@ Windows는 GPU가 응답하지 않으면 드라이버를 재시작한다(TDR). �
 | 대상 | 위험 | 조치 |
 |---|---|---|
 | Windows Update | 예고 없는 재부팅 | 활성 시간(Active hours)을 설정하고, 재부팅 후 5.1·5.2로 스택이 스스로 복귀하는지 확인한다. **재부팅을 막는 것보다 재부팅에서 회복하는 것이 목표다.** |
-| OBS 내장 업데이터 | 시작 시 업데이트 대화상자 | 실행기가 `--disable-updater`로 띄운다(3장). 버전 고정은 E-2(사용자 승인 대기) |
+| OBS 내장 업데이터 | 시작 시 업데이트 대화상자 | 실행기가 `--disable-updater`로 띄운다(3장). 버전은 **32.0.2 / obs-websocket 5.6.3으로 고정**(BOARD D-6, 2026-08-18 사용자 승인, `docs/ops/obs-setup.md` §1) |
 | Node.js / npm | 런타임 교체 | 자동 업데이트하지 않는다. 올릴 때는 손으로, `npm ci && npm run build` 뒤 5.1을 다시 시험한다 |
 | GPU 드라이버 | TDR 동작 변화 | 올린 뒤 5.4를 다시 시험한다 |
 
 시험: 업데이트를 하나 적용해 재부팅시키고, 사람 손 없이 방송이 돌아오는지 확인한다. 이것이 §11이 요구하는 "자동 업데이트 시험"이다.
 
-### 5.7 OBS 32의 safe-mode 프롬프트 (미해결 위험)
+### 5.7 OBS 32의 safe-mode 프롬프트 (BOARD D-7, 2026-08-18 채택)
 
-**사실**: OBS는 비정상 종료를 감지하면 시작할 때 "Safe Mode로 시작할까요?" 대화상자를 띄운다. Safe Mode는 서드파티 플러그인과 **obs-websocket을 비활성화**한다([Add Safe Mode, obsproject/obs-studio#8455](https://github.com/obsproject/obs-studio/pull/8455), 2026-08-17 확인) — 즉 우리 제어 경로 전체가 죽는다. 이 대화상자를 끄던 `--disable-shutdown-check`는 **OBS 32.0.0에서 제거됐다**([issue #12650, closed as not planned](https://github.com/obsproject/obs-studio/issues/12650); [OBS 포럼 스레드](https://obsproject.com/forum/threads/obs-version-32-0-0-removed-disable-shutdown-check.190590/), 둘 다 2026-08-17 확인). 우리 고정 후보 버전이 32.0.2다(E-2).
+**사실**: OBS는 비정상 종료를 감지하면 시작할 때 "Safe Mode로 시작할까요?" 대화상자를 띄운다. Safe Mode는 서드파티 플러그인과 **obs-websocket을 비활성화**한다([Add Safe Mode, obsproject/obs-studio#8455](https://github.com/obsproject/obs-studio/pull/8455), 2026-08-17 확인) — 즉 우리 제어 경로 전체가 죽는다. 이 대화상자를 끄던 `--disable-shutdown-check`는 **OBS 32.0.0에서 제거됐다**([issue #12650, closed as not planned](https://github.com/obsproject/obs-studio/issues/12650); [OBS 포럼 스레드](https://obsproject.com/forum/threads/obs-version-32-0-0-removed-disable-shutdown-check.190590/), 둘 다 2026-08-17 확인). 우리 고정 버전이 32.0.2다(D-6).
 
-**결과**: 호스트가 정전·BSOD·강제 종료로 죽으면, 다음 로그온에서 OBS는 사람이 대화상자를 눌러야 정상 모드로 뜬다. 자동시작은 3단계에서 obs-websocket 포트를 기다리다 타임아웃하고 실패로 기록한다(조용히 성공하지 않는다).
+**결정(D-7, 사용자 2026-08-18)**: 우리가 OBS를 띄우는 경로가 **실행 직전에 `%APPDATA%\obs-studio\.sentinel` 안의 파일을 지운다.** 디렉터리 자체는 남긴다.
 
-**선택지**(승인 필요, Gate 0/2 또는 사용자 결정):
+- **한 곳에서만 한다**: `ObsProcessLauncher.launch()`. 자동시작 3단계(`obs-launch`)와 supervisor의 `obs-process` 재시작이 같은 실행기를 쓰므로 두 경로가 함께 닫힌다. 세 거부(미설정·실행 파일 없음·이미 실행 중)를 모두 통과한 **뒤** spawn 직전에만 지운다 — 일어나지도 않을 기동을 위해 OBS의 파일을 건드리지 않는다.
+- **설정**: `obs.process.sentinelDir`. 비워 두면 `%APPDATA%`에서 파생하고, 포터블 설치 등은 `VL_OBS_SENTINEL_DIR`로 지정한다. `APPDATA`가 없는 호스트(CI·POSIX)에서는 지울 것이 없다고 보고 그대로 진행한다.
+- **승인한 디렉터리로 삭제를 겨눈다**(리뷰 round 1·2·3, B1). 네 단계다.
+  1. `sentinelDir` **자체가 junction/심볼릭 링크(reparse point)면 아무것도 지우지 않고 거부한다**(`sentinel_dir_reparse_point`) — 링크가 오늘 가리키는 곳은 운영자가 config에서 검토한 디렉터리가 아니고, 그 안의 파일은 OBS의 크래시 표식이 아니다. T17 아카이브가 루트에 대해 하는 거부(`REFUSED (reparse_point)`, 4장)와 같은 판단이다.
+  2. 그 검사를 통과하면 **목록을 읽기 전에 실경로(realpath)를 한 번 고정하고, 그 값을 부모 기준으로 대조한다**: 고정된 루트가 `realpath(부모) + 이름`과 같고(호스트 native 경로 비교) lexical 경로가 **여전히** reparse point가 아닐 때만 진행한다. 어긋나면 `sentinel_dir_mismatch`로 거부한다.
+  3. 목록은 그 고정된 루트에서 읽는다. 이후 모든 판단도 그 고정값에 대해 한다.
+  4. 목록에 오른 항목은 **삭제 직전에** 그 고정된 루트에 대해 다시 확인하고(실경로가 루트 바로 안에 있는 일반 파일인가), **확인된 그 실경로로** 지운다 — config에 적힌 경로를 다시 이어 붙이지 않는다. 하위 디렉터리와 링크 항목은 처음부터 대상이 아니다.
 
-1. OBS 31.1.2로 고정하고 `--disable-shutdown-check`를 쓴다 — 공식 지원 플래그이지만 옛 버전에 묶인다.
-2. 32.0.2를 유지하고, 비정상 종료 뒤에는 사람이 한 번 개입한다 — 무인성이 그만큼 깎인다.
-3. 시작 전에 `%APPDATA%\obs-studio\.sentinel`(이 호스트에서 디렉터리로 확인, 2026-08-17)을 지운다 — 커뮤니티에서 쓰는 방법이고 **공식 문서에 없다**. 크래시 표식을 지우는 것이므로 반복 크래시를 감춘다. 채택한다면 자동시작이 아니라 사람이 확인한 뒤 실행하는 절차로 둔다.
+  3・4가 없던 round 1 구현은 삭제 시점에 `realpath(sentinelDir)`를 **다시** 계산했다. 그래서 목록을 읽은 직후 진짜 `.sentinel`을 다른 이름으로 옮기고 같은 자리에 junction을 놓으면 비교의 양쪽이 함께 junction 대상 아래로 풀려 검사를 통과했고, 리뷰어가 실제 NTFS에서 디렉터리 밖 파일을 지웠다(round 2, B1). 2의 부모 대조가 없던 round 2 구현은 한 단계 **앞**에서 같은 방식으로 뚫렸다: 1의 `lstat`과 2의 `realpath`는 같은 경로를 두 번 조회하는 것이라, 그 사이에 junction이 끼어들면 1은 그때 거기 있던 진짜 디렉터리를 보고 "링크 아님"을 답하고 2는 링크 대상을 **승인된 루트로** 돌려준다. 그러면 이후 봉쇄 검사는 전부 그 잘못된 루트를 기준으로 통과하고, 리뷰어가 다시 디렉터리 밖 파일을 지웠다(round 3). 부모를 푸는 쪽은 그 자리가 여전히 `부모/.sentinel`이라고 답하므로 어긋나서 거부된다. 부모 자체가 junction인 정상 배치는 양쪽 다 부모를 풀어 같은 곳에 닿으므로 통과한다.
 
-자동시작 스크립트는 **어느 것도 자동으로 하지 않는다.** 문서에 없는 플래그를 붙이거나 남의 상태 파일을 지우는 것은 이 스크립트가 스스로 정할 일이 아니다.
+  **보장하는 것**(테스트로 고정):
+  - 검사 시점에 `sentinelDir`이 reparse point가 아니었다(1, 그리고 2에서 한 번 더).
+  - 승인된 루트는 검사 시점에 그 **부모가 그 이름으로 들고 있던 바로 그 항목**이다(2).
+  - 후보의 일반 파일 여부와 봉쇄는 그 **고정된** 루트를 기준으로 판단한다(4).
+  - 지우는 경로는 **확인한 바로 그 canonical 경로**다. config에 적힌 경로를 다시 잇지 않는다(4).
+
+  **보장하지 못하는 것**(닫지 못했고, 닫았다고 쓰지 않는다):
+  - 위 검사들과 그 값을 **쓰는 순간** 사이의 교체. 부모 대조와 reparse 재확인은 창을 좁힐 뿐 닫지 않는다.
+  - `realpath(후보)`를 확인한 뒤 `unlink`이 실행되기까지의 항목 교체.
+  - 링크가 아니라 **진짜 디렉터리**를 rename으로 같은 경로에 갖다 놓는 교체. 어떤 링크 검사도 이것을 보지 못하고, 부모 대조도 통과한다 — 그 자리에 진짜로 있기 때문이다.
+
+  **이유**: Node에는 `openat`/`unlinkat`이 없어 "검사한 그 핸들의 디렉터리 항목을 지운다"를 표현할 방법이 없고, `fs.rm`은 언제나 경로를 다시 해석한다. 경로 기반 API만으로는 check→use 창이 원리적으로 남는다. 이 경로가 지우는 대상이 `%APPDATA%` 아래 사용자 소유 디렉터리이고 그 안에 쓸 수 있는 주체는 이미 이 계정의 프로세스라는 점에서, 남은 창의 실질 위험은 그 계정이 이미 침해된 경우로 한정된다.
+- **남는 기록**: 지운 게 있을 때만 로그 `obs.sentinel_cleared`(개수·경로만), 실패는 `obs.sentinel_clear_failed`(warn). `/health`의 `components[]`에서 `obs-process`의 `lastNote`가 `sentinel_cleared=<n>`이다. 자동시작 경로는 `obs launched: pid … (crash sentinels cleared: n)` 한 줄로 `data\ops\logs\autostart-*.log`에 남고, 실패가 있으면 바로 다음 줄에 `obs sentinel clearing incomplete: <사유>`가 **같은 로그에** 남는다(리뷰 round 1, M1 — 이전에는 stderr로 나가 숨겨진 예약 작업 로그에 남지 않았다).
+- **사유는 값이 아니라 토큰이다**(리뷰 round 1, m1). `sentinel_dir_reparse_point`(위 1단계 거부, 그리고 2단계의 reparse 재확인), `sentinel_dir_mismatch`(위 2단계 부모 대조 실패 — 고정된 루트가 부모가 그 이름으로 들고 있는 항목이 아니다), `sentinel_entry_escaped_dir`(위 4단계 확인 실패 — 항목이 링크가 됐거나 사라졌거나 루트 밖으로 풀린다), 그 외에는 errno 코드(`EACCES`, `EPERM`, …) 또는 `unknown`. Node의 오류 메시지는 실패한 **파일 이름을 포함**하는데 이 값은 로그와 `/health`로 흘러가므로, 원인은 남기고 파일 이름은 남기지 않는다.
+- **실패해도 기동은 계속한다.** 파일이 잠겨 있거나, 디렉터리를 읽지 못하거나, 위의 거부에 걸려도 warn만 남기고 OBS를 띄운다. 그때의 동작은 D-7 이전과 같다: 대화상자가 뜨고, 3단계가 obs-websocket 포트를 기다리다 타임아웃해 **실패로 기록**한다(조용히 성공하지 않는다).
+
+**근거**
+
+1. **Safe Mode가 지키려는 위험이 우리 위험이 아니다.** 우리는 서드파티 플러그인을 설치하지 않는다(스펙 §10.3, `docs/ops/obs-setup.md` §1). Safe Mode가 막아 주는 것은 플러그인 때문에 못 뜨는 OBS인데, 그 대가로 끄는 obs-websocket은 우리의 유일한 제어 경로다.
+2. **크래시를 감추지 않는다.** 표식을 지워도 크래시 자체는 남는다. OBS가 계속 죽으면 `obs-process` 재시작 예산이 소진돼 fault matrix F-18대로 `safe_stopped` + 알림이 되고(`docs/ops/fault-matrix.md`), 매 기동 `sentinel_cleared`가 0보다 크다는 것 자체가 크래시 루프의 증거다. 크래시 로그(`%APPDATA%\obs-studio\crashes\`)도 그대로 쌓인다.
+3. **무인성**: 정전·BSOD 뒤 사람이 대화상자를 눌러야 방송이 돌아오는 상태는 스펙 §11이 요구하는 "재부팅에서 스스로 회복"과 맞지 않는다.
+
+**caveat — 공식 문서에 없는 방법이다.** `.sentinel` 삭제는 OBS Knowledge Base·릴리스 노트 어디에도 없다. 이 파일의 의미는 소스(PR #8455)와 이 호스트 관측으로만 확인했다. OBS가 이름·위치·의미를 바꾸면 이 조치는 **조용히 무력화되고**, 그때 동작은 위의 "실패해도 기동은 계속한다"와 같다(대화상자 → 3단계 타임아웃 → 실패 기록). 그래서 OBS를 올릴 때는 5.6 절차로 이 항목을 다시 시험한다.
+
+**2026-08-18 관측(이 호스트, BOARD E-7)**: 사용자 기본 씬 컬렉션(WASAPI 마이크·데스크탑 오디오 포함)으로 OBS 32.0.2를 **정상 종료**시켰는데 종료 도중 크래시했다(`obs.dll!copy_audio_data` ← `win-wasapi`가 `obs-browser`의 `obs_module_unload`와 경합; `%APPDATA%\obs-studio\crashes\Crash 2026-08-18 13-58-03.txt`). `.sentinel\run_*`가 남았고, 그 파일을 지운 뒤 다시 띄우니 대화상자 없이 정상 기동해 `npm run obs:probe`가 통과했다. 즉 이 위험은 정전·BSOD에서만 오는 것이 아니라 **정상 종료 경로에서도** 온다.
 
 ## 6. 비밀정보 custody (BOARD A-16)
 
@@ -261,11 +291,11 @@ icacls "$env:APPDATA\obs-studio\basic\profiles\vertical-live" /inheritance:e
 |---|---|---|
 | 재부팅 후 아무것도 안 뜬다 | `schtasks /Query /TN \VerticalLive\vl-autostart /V /FO LIST` | 자동 로그온이 안 됨(5.2), task가 없음, `Last Result`≠0 |
 | autostart 로그에 `missing build artifact` | 로그 | `npm run build`를 안 했다 |
-| 1·2단계는 되고 OBS만 실패 | `data\ops\logs\autostart-*.log` | `obs.process.enabled=false`(경고만 남긴다), 실행 파일 경로, safe-mode 대화상자(5.7), OBS WebSocket 서버 꺼짐(`docs/ops/obs-setup.md` §2) |
+| 1·2단계는 되고 OBS만 실패 | `data\ops\logs\autostart-*.log` | `obs.process.enabled=false`(경고만 남긴다), 실행 파일 경로, OBS WebSocket 서버 꺼짐(`docs/ops/obs-setup.md` §2), safe-mode 대화상자(5.7 — `obs sentinel clearing incomplete: <사유>` 줄이 함께 있으면 표식을 지우지 못한 것이다. `sentinel_dir_reparse_point`면 `obs.process.sentinelDir`가 junction/심볼릭 링크라 거부한 것이니 실제 디렉터리 경로로 바꾼다. `sentinel_dir_mismatch`면 실경로가 부모가 그 이름으로 들고 있는 항목과 어긋난 것이다 — 그 경로에 링크가 섞였거나, 기동 중에 누가 그 디렉터리를 갈아치우고 있다) |
 | `port … answers but belongs to pid … outside <repo>` | 그 PID의 명령행 | 다른 worktree나 무관한 프로세스가 같은 loopback 포트를 잡고 있다. 그 프로세스를 멈추거나, 이 호스트의 포트를 `VL_PORT`/`VL_RENDERER_STATIC_PORT`로 옮긴다 |
 | `port … is held by pid … and does not answer` | 그 PID | 포트는 잡혔는데 프로토콜 응답이 없다(죽어가는 프로세스, 무관한 리스너). 준비로 치지 않는 것이 정상 동작이다 |
 | `root …: REFUSED (reparse_point)` | `archive.roots[].path` | 그 경로가 junction/심볼릭 링크다. 실제 디렉터리 경로로 바꾼다(4장) |
-| `obs launch refused (already_running)` | 작업 관리자 | OBS는 살아 있는데 websocket이 죽었다. 사람이 OBS를 닫고 다시 띄운다 — 서버는 남의 OBS를 죽이지 않는다 |
+| `obs launch refused (already_running)` | 작업 관리자 | OBS는 살아 있는데 websocket이 죽었다. 사람이 OBS를 닫고 다시 띄운다 — 서버는 남의 OBS를 죽이지 않는다. **`--minimize-to-tray`로 띄운 OBS는 창 닫기(WM_CLOSE) 요청으로 닫히지 않는 경우가 있다(2026-08-18 이 호스트 관측)** — 트레이 아이콘의 "종료"를 쓴다 |
 | 화면은 도는데 렌더러가 안 붙는다 | 서버 로그의 `4401` | 토큰 주입 실패. vault에 `server.rendererToken`이 있는지(`npm run secrets -w @vl/server -- list`) |
 | 디스크가 계속 찬다 | `npm run archive -w @vl/server`(dry run) | 루트·확장자가 실제 녹화 경로와 다르거나, 아카이브가 아닌 것이 디스크를 채우고 있다(`WARNING: ... still unmet`) |
 | 방송을 즉시 멈춰야 한다 | `docs/ops/supervisor.md` 2장 | `npm run kill -w @vl/server -- --reason "..."` |
@@ -278,4 +308,5 @@ icacls "$env:APPDATA\obs-studio\basic\profiles\vertical-live" /inheritance:e
 | 아카이브 dry run·`--apply` | 이 호스트에서 실행 확인(합성 파일) — 같은 티켓 |
 | 자동시작 등록·해제 1사이클 | 티켓 `## Result` 참조 |
 | 5장 체크리스트(재부팅·자동 로그온·sleep·GPU reset·remote-session·자동 업데이트) | **사용자 실행 항목.** 이 PR은 절차와 확인 방법만 고정한다(§11은 72시간 soak 전 시험을 요구한다) |
-| OBS 32 safe-mode(5.7) | **미해결 위험. 선택지 3개 중 승인 필요** |
+| OBS 32 safe-mode(5.7) | **해결(BOARD D-7, 2026-08-18)** — 실행기가 기동 직전 `.sentinel`을 비운다. 단위 테스트 `apps/server/src/obs/process.test.ts`; 이 호스트에서 "정상 종료 중 크래시 → 표식 잔존 → 제거 후 대화상자 없이 기동"을 관측(BOARD E-7). 공식 문서에 없는 방법이라는 caveat는 5.7 |
+| OBS·obs-websocket 버전 고정 | **고정(BOARD D-6, 2026-08-18)** — 32.0.2 / 5.6.3, `docs/ops/obs-setup.md` §1 |

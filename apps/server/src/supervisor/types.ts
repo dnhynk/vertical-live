@@ -177,6 +177,15 @@ export interface ComponentHealth {
   readonly inFlight: boolean
   readonly lastAttemptAt: string | null
   readonly lastError: string | null
+  /**
+   * What the last restart action recorded about itself, `token=value` style, or
+   * null when it recorded nothing. A `RestartAction` returns `void`, so this is
+   * the one channel an action has back to the health document — today its only
+   * user is the OBS launcher reporting how many crash sentinels it cleared
+   * before starting OBS (`sentinel_cleared=<n>`, BOARD D-7). Unlike `lastError`
+   * it survives `noteHealthy()`: it describes what happened, not what is wrong.
+   */
+  readonly lastNote: string | null
 }
 
 /** Spec §9.2 `starting`: 자격·비밀정보·상태·API·렌더러·인코더 사전 점검. */

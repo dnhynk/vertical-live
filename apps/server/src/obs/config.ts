@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs'
+import { win32 } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 /**
@@ -43,6 +44,19 @@ export interface ObsProcessConfig {
    * removed in OBS 32.0.0), and an ops script must not depend on it.
    */
   readonly extraArgs: readonly string[]
+  /**
+   * OBS's crash-sentinel directory, emptied immediately before the spawn
+   * (BOARD D-7). OBS writes a file here while it runs and removes it on a clean
+   * exit; a file left behind is what makes the next start offer Safe Mode, and
+   * Safe Mode disables obs-websocket — the whole control path
+   * (https://github.com/obsproject/obs-studio/pull/8455, 확인 2026-08-18).
+   *
+   * Empty means "no sentinel directory on this host": `%APPDATA%` is a Windows
+   * variable and this is a Windows-first host (BOARD D-2), so a host without it
+   * (CI, a POSIX box) simply has nothing to clear. This is an observed path, not
+   * a tuning number — it is not in `provisional`.
+   */
+  readonly sentinelDir: string
 }
 
 export interface ObsConfig {
@@ -171,9 +185,31 @@ export function loadObsConfig(options: LoadObsConfigOptions = {}): ObsConfig {
       profile: readString(obsProcess['profile'], 'obs.process.profile'),
       sceneCollection: readString(obsProcess['sceneCollection'], 'obs.process.sceneCollection'),
       extraArgs: Object.freeze(readStringArray(obsProcess['extraArgs'], 'obs.process.extraArgs')),
+      sentinelDir: resolveSentinelDir(obsProcess['sentinelDir'], env),
     }),
     provisional: Object.freeze(readStringArray(section['provisional'], 'obs.provisional')),
   })
+}
+
+/**
+ * `VL_OBS_SENTINEL_DIR` → config value → `%APPDATA%\obs-studio\.sentinel` → none.
+ *
+ * The derived form is built with `win32.join` rather than the host's separator:
+ * `APPDATA` only exists on Windows, so the value is a Windows path wherever this
+ * code happens to run (the same lesson as T17b's executable paths).
+ */
+function resolveSentinelDir(configured: unknown, env: NodeJS.ProcessEnv): string {
+  if (typeof configured !== 'string') {
+    throw new ObsConfigError(
+      'obs.process.sentinelDir must be a string ("" derives it from APPDATA)',
+    )
+  }
+  const override = env['VL_OBS_SENTINEL_DIR']
+  if (override !== undefined && override !== '') return override
+  if (configured !== '') return configured
+  const appData = env['APPDATA']
+  if (appData === undefined || appData === '') return ''
+  return win32.join(appData, 'obs-studio', '.sentinel')
 }
 
 /** obs-websocket must stay on loopback unless the operator opted out (spec §10.2). */
