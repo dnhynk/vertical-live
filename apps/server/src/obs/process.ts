@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process'
 import { execFileSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { basename, dirname } from 'node:path'
+import { win32 as winPath } from 'node:path'
 
 import { silentLogger, type Logger } from '../secrets/redaction.js'
 import type { ObsProcessConfig } from './config.js'
@@ -29,6 +29,13 @@ import type { ObsProcessConfig } from './config.js'
  * passed (checked 2026-08-17). Notably **not** passed: the obs-websocket
  * password — it is a vault secret and a command line is readable by every
  * process on the host (spec §10.2).
+ *
+ * `obs.process.executablePath` is a Windows path by contract (BOARD D-2), so it
+ * is split with `path.win32` rather than with whatever the host platform is.
+ * The default export is the running platform's implementation, and on POSIX a
+ * backslash is an ordinary character: `dirname` of the shipped default answers
+ * `'.'` there, which would launch OBS from the wrong working directory. Same
+ * result on this Windows host, defined everywhere else.
  */
 
 export class ObsProcessError extends Error {
@@ -69,7 +76,7 @@ export interface ObsProcessProbe {
 export const tasklistObsProcessProbe: ObsProcessProbe = {
   running: (executablePath) => {
     if (process.platform !== 'win32') return false
-    const image = basename(executablePath)
+    const image = winPath.basename(executablePath)
     try {
       const output = execFileSync(
         'tasklist',
@@ -137,7 +144,7 @@ export class ObsProcessLauncher {
         this.#config.sceneCollection,
         ...this.#config.extraArgs,
       ],
-      cwd: dirname(this.#config.executablePath),
+      cwd: winPath.dirname(this.#config.executablePath),
     }
   }
 
@@ -158,7 +165,7 @@ export class ObsProcessLauncher {
     if (this.#probe.running(plan.command)) {
       throw new ObsProcessError(
         'already_running',
-        `${basename(plan.command)} is already running; a second instance would not recover an unresponsive OBS (docs/ops/windows-host.md)`,
+        `${winPath.basename(plan.command)} is already running; a second instance would not recover an unresponsive OBS (docs/ops/windows-host.md)`,
       )
     }
 
