@@ -216,7 +216,7 @@ Windows는 GPU가 응답하지 않으면 드라이버를 재시작한다(TDR). �
 - **한 곳에서만 한다**: `ObsProcessLauncher.launch()`. 자동시작 3단계(`obs-launch`)와 supervisor의 `obs-process` 재시작이 같은 실행기를 쓰므로 두 경로가 함께 닫힌다. 세 거부(미설정·실행 파일 없음·이미 실행 중)를 모두 통과한 **뒤** spawn 직전에만 지운다 — 일어나지도 않을 기동을 위해 OBS의 파일을 건드리지 않는다.
 - **설정**: `obs.process.sentinelDir`. 비워 두면 `%APPDATA%`에서 파생하고, 포터블 설치 등은 `VL_OBS_SENTINEL_DIR`로 지정한다. `APPDATA`가 없는 호스트(CI·POSIX)에서는 지울 것이 없다고 보고 그대로 진행한다.
 - **승인한 디렉터리 안에서만 지운다**(리뷰 round 1, B1). `sentinelDir` **자체가 junction/심볼릭 링크(reparse point)면 아무것도 지우지 않고 거부한다** — 링크가 오늘 가리키는 곳은 운영자가 config에서 검토한 디렉터리가 아니고, 그 안의 파일은 OBS의 크래시 표식이 아니다. T17 아카이브가 루트에 대해 하는 거부(`REFUSED (reparse_point)`, 4장)와 같은 판단이다. 목록에 오른 항목도 **삭제 직전에** 다시 확인한다(실경로가 그 디렉터리 바로 안에 있는 일반 파일인가) — 목록과 삭제 사이에 링크로 바뀔 수 있기 때문이다. 하위 디렉터리와 링크 항목은 처음부터 대상이 아니다.
-- **남는 기록**: 지운 게 있을 때만 로그 `obs.sentinel_cleared`(개수·경로만), 실패는 `obs.sentinel_clear_failed`(warn). `/health`의 `components[]`에서 `obs-process`의 `lastNote`가 `sentinel_cleared=<n>`이다. 자동시작 경로는 `obs launched: pid … (crash sentinels cleared: n)` 한 줄로 `data\ops\logs\autostart-*.log`에 남는다.
+- **남는 기록**: 지운 게 있을 때만 로그 `obs.sentinel_cleared`(개수·경로만), 실패는 `obs.sentinel_clear_failed`(warn). `/health`의 `components[]`에서 `obs-process`의 `lastNote`가 `sentinel_cleared=<n>`이다. 자동시작 경로는 `obs launched: pid … (crash sentinels cleared: n)` 한 줄로 `data\ops\logs\autostart-*.log`에 남고, 실패가 있으면 바로 다음 줄에 `obs sentinel clearing incomplete: <사유>`가 **같은 로그에** 남는다(리뷰 round 1, M1 — 이전에는 stderr로 나가 숨겨진 예약 작업 로그에 남지 않았다).
 - **사유는 값이 아니라 토큰이다**(리뷰 round 1, m1). `sentinel_dir_reparse_point`(위의 거부), `sentinel_entry_escaped_dir`(삭제 직전 확인 실패), 그 외에는 errno 코드(`EACCES`, `EPERM`, …) 또는 `unknown`. Node의 오류 메시지는 실패한 **파일 이름을 포함**하는데 이 값은 로그와 `/health`로 흘러가므로, 원인은 남기고 파일 이름은 남기지 않는다.
 - **실패해도 기동은 계속한다.** 파일이 잠겨 있거나, 디렉터리를 읽지 못하거나, 위의 거부에 걸려도 warn만 남기고 OBS를 띄운다. 그때의 동작은 D-7 이전과 같다: 대화상자가 뜨고, 3단계가 obs-websocket 포트를 기다리다 타임아웃해 **실패로 기록**한다(조용히 성공하지 않는다).
 
@@ -272,7 +272,7 @@ icacls "$env:APPDATA\obs-studio\basic\profiles\vertical-live" /inheritance:e
 |---|---|---|
 | 재부팅 후 아무것도 안 뜬다 | `schtasks /Query /TN \VerticalLive\vl-autostart /V /FO LIST` | 자동 로그온이 안 됨(5.2), task가 없음, `Last Result`≠0 |
 | autostart 로그에 `missing build artifact` | 로그 | `npm run build`를 안 했다 |
-| 1·2단계는 되고 OBS만 실패 | `data\ops\logs\autostart-*.log` | `obs.process.enabled=false`(경고만 남긴다), 실행 파일 경로, OBS WebSocket 서버 꺼짐(`docs/ops/obs-setup.md` §2), safe-mode 대화상자(5.7 — `obs sentinel clearing incomplete` 줄이 함께 있으면 표식을 지우지 못한 것이다) |
+| 1·2단계는 되고 OBS만 실패 | `data\ops\logs\autostart-*.log` | `obs.process.enabled=false`(경고만 남긴다), 실행 파일 경로, OBS WebSocket 서버 꺼짐(`docs/ops/obs-setup.md` §2), safe-mode 대화상자(5.7 — `obs sentinel clearing incomplete: <사유>` 줄이 함께 있으면 표식을 지우지 못한 것이다. `sentinel_dir_reparse_point`면 `obs.process.sentinelDir`가 junction/심볼릭 링크라 거부한 것이니 실제 디렉터리 경로로 바꾼다) |
 | `port … answers but belongs to pid … outside <repo>` | 그 PID의 명령행 | 다른 worktree나 무관한 프로세스가 같은 loopback 포트를 잡고 있다. 그 프로세스를 멈추거나, 이 호스트의 포트를 `VL_PORT`/`VL_RENDERER_STATIC_PORT`로 옮긴다 |
 | `port … is held by pid … and does not answer` | 그 PID | 포트는 잡혔는데 프로토콜 응답이 없다(죽어가는 프로세스, 무관한 리스너). 준비로 치지 않는 것이 정상 동작이다 |
 | `root …: REFUSED (reparse_point)` | `archive.roots[].path` | 그 경로가 junction/심볼릭 링크다. 실제 디렉터리 경로로 바꾼다(4장) |
