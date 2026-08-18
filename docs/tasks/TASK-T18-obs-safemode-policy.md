@@ -50,15 +50,15 @@
 
 | # | 기준 | 상태 | 근거(테스트 파일·명령·출력) |
 |---|---|---|---|
-| 1 | `launch()`가 spawn 직전에 `.sentinel` 안 파일을 지운다(디렉터리는 남김), 자동시작·supervisor 두 경로가 한 곳을 쓴다 | met (리뷰 round 1에서 B1 고침) | `apps/server/src/obs/process.test.ts` "removes the sentinel files and reports how many, before the spawn"(remove·remove·spawn 순서까지 단언). 두 경로는 `apps/server/src/bin/obs-launch.ts`(자동시작 3단계)와 `apps/server/src/main.ts`의 `actions.obsProcess`가 같은 `ObsProcessLauncher`를 쓰는 기존 구조 그대로다. **승인한 디렉터리 밖으로 나가지 않는다는 부분은 처음 구현이 틀렸다**(루트가 junction이면 따라 들어갔다) — 고침과 실 파일시스템 근거는 아래 `## Review round 1` |
+| 1 | `launch()`가 spawn 직전에 `.sentinel` 안 파일을 지운다(디렉터리는 남김), 자동시작·supervisor 두 경로가 한 곳을 쓴다 | met (리뷰 round 1·2에서 B1 고침) | `apps/server/src/obs/process.test.ts` "removes the sentinel files and reports how many, before the spawn"(remove·remove·spawn 순서까지 단언). 두 경로는 `apps/server/src/bin/obs-launch.ts`(자동시작 3단계)와 `apps/server/src/main.ts`의 `actions.obsProcess`가 같은 `ObsProcessLauncher`를 쓰는 기존 구조 그대로다. **승인한 디렉터리 밖으로 나가지 않는다는 부분은 두 번 틀렸다** — round 1은 루트가 junction이면 따라 들어갔고, round 2는 목록을 읽은 뒤 루트가 junction으로 교체되면 따라갔다. 지금은 목록 전에 실루트를 고정하고 확인된 실경로로 지운다. **완전히 닫히지 않은 창이 하나 남는다**(실경로 확인 → `unlink` 사이) — 아래 `## Review round 2`에 근거와 함께 적었다 |
 | 2 | 경로는 config(`obs.process.sentinelDir`, `APPDATA` 파생), provisional 아님 | met | `apps/server/src/obs/config.ts` `resolveSentinelDir()`; 테스트 "derives the sentinel directory from APPDATA, with Windows separators" / "has no sentinel directory on a host without APPDATA" / "takes an explicit sentinel directory for a portable OBS install" / "does not call the sentinel path provisional" |
-| 3 | fs 주입 가능 | met | `ObsSentinelFs`(`isReparsePoint`/`list`/`isContainedFile`/`remove`) + `ObsProcessLauncherOptions.sentinel`. 모든 새 테스트가 주입해서 돈다. 실 구현(`nodeObsSentinelFs`)은 실 junction/symlink로 따로 검증한다(round 1, B1) |
+| 3 | fs 주입 가능 | met | `ObsSentinelFs`(`isReparsePoint`/`realPath`/`list`/`canonicalFile`/`remove`) + `ObsProcessLauncherOptions.sentinel`. 모든 새 테스트가 주입해서 돈다. 실 구현(`nodeObsSentinelFs`)은 실 junction/symlink로 따로 검증한다(round 1·2, B1) |
 | 4 | 결과에 `sentinelCleared`(+ 실패 사유), 로그 `obs.sentinel_cleared`(개수·경로만) | met (리뷰 round 1에서 m1 고침) | `ObsLaunchResult.sentinelCleared` / `.sentinelFailure`; 로그 단언은 같은 테스트의 `expect(info).toHaveBeenCalledWith('obs.sentinel_cleared', { dir, cleared: 2 })`. **실패 사유는 처음엔 raw `Error.message`라 파일 이름이 섞였다** — 지금은 토큰(errno 코드·`unknown`·두 거부)뿐이다. 아래 `## Review round 1` m1 |
 | 5 | supervisor의 기존 health detail에 값이 보인다(최소 배선) | met | `apps/server/src/supervisor/supervisor.test.ts` "puts what a restart action recorded on the health document (BOARD D-7)"(`/health`의 `components[]`에서 `obs-process.lastNote = sentinel_cleared=1`, 다른 컴포넌트는 null), `restart.test.ts` "carries what the action recorded onto /health, and keeps it once healthy" |
 | 6 | 디렉터리 없음 → 0·정상 진행 | met | `process.test.ts` "treats a missing sentinel directory as nothing to clear"(ENOENT → cleared 0, failure null, spawn 1회, `obs.sentinel_cleared` 미출력) |
 | 7 | 삭제 실패 → warn 후 launch 계속(= 기존 동작으로 강등) | met (리뷰 round 1에서 M1 고침) | "starts OBS anyway when a file will not go, and says which ones did"(EACCES 1건 → cleared 1, failure 기록, warn, pid 반환), "starts OBS anyway when the directory itself cannot be read". **자동시작 경로에서는 그 사유가 로그에 남지 않았다**(stderr로 나갔다) — 지금은 stdout이라 `autostart-*.log`에 남는다. 아래 `## Review round 1` M1 |
 | 8 | `plan()` 불변(dry run이 아무것도 지우지 않는다) | met | "leaves the sentinel alone on every refusal, and in a dry run"(`plan()` + 세 거부 경로 모두에서 `list`·`remove` 호출 0) |
-| 9 | 문서: `windows-host.md` §5.7·§8, `obs-setup.md` §1·§6 | met | 아래 "문서 변경" |
+| 9 | 문서: `windows-host.md` §5.7·§8, `obs-setup.md` §1·§6 | met (리뷰 round 2에서 고침) | 아래 "문서 변경". §5.7이 "목록과 삭제 사이의 창을 닫는다"고 단언했는데 그것이 사실이 아니었다 — 지금은 3단계 절차와 **남는 창**을 함께 적는다(`78983f4`) |
 | 10 | `private` → public 정정 | met | `CLAUDE.md` §2, `docs/runbooks/agent-orchestration.md` 머리말·0장 표, `docs/tasks/TASK_SPECS.md` 공통 규약 머리말 |
 | 11 | 게이트 5개 + PR CI 녹색 | met | T17b(PR #23)가 `b414970`으로 머지된 뒤 rebase해서 둘 다 녹색이다. 로컬 게이트 5개 전부 통과(`1896 passed | 1 skipped`), PR CI [run 32107232734](https://github.com/dnhynk/vertical-live/actions/runs/32107232734) **pass**. 아래 "Rebase onto T17b" 참조 |
 
@@ -259,6 +259,59 @@ $ npm run build          → vite + tsc --build (all workspaces), exit 0
 ```
 
 `git fetch origin && git rebase origin/main`(base `6342ac9`, 충돌 없음) 후 위 5개를 다시 돌렸고 결과는 같다. push는 `--force-with-lease`(`a6f0a30...4291d8e`). PR CI [run 32110335065](https://github.com/dnhynk/vertical-live/actions/runs/32110335065) **pass** — head `4291d8e`.
+
+## Review round 2
+
+리뷰어 판정 `request_changes`(blocker 1). round 1의 M1·m1과 정적 junction 시나리오는 리뷰어가 직접 재현해 **해소 확인**했고, 합격 기준 2·3·4·5·6·7·8·10·11도 리뷰어가 게이트를 직접 돌려 통과를 확인했다. 남은 것은 아래 하나다.
+
+| 지적 | 고침 |
+|---|---|
+| **[blocker] `apps/server/src/obs/process.ts:165`** — `isContainedFile()`이 **삭제 시점에** `realpath(dir)`를 다시 계산해 비교한다. `list()` 직후 진짜 `.sentinel`을 다른 이름으로 옮기고 같은 lexical 경로에 sibling junction을 놓으면 `realpath(dir)`도 `realpath(path)`도 junction 대상 아래로 풀려 165줄이 true를 답하고 348–353줄이 **디렉터리 밖 파일을 지운다**. 리뷰어가 빌드 산출물 + 실 NTFS로 재현: `{"swapped":true,"sentinelCleared":1,"sentinelFailure":null,"originalMarkerStillExists":true,"outsideFileStillExists":false}` | **고침 `6e7d529`.** 판정의 기준점을 **움직이지 않는 값**으로 바꿨다. (1) reparse-point 검사를 통과한 직후, **목록을 읽기 전에** `realPath(dir)`로 승인된 루트를 한 번 고정한다(`list()`도 그 고정값으로 부른다). (2) 각 후보는 `canonicalFile(root, name)`이 그 고정 루트에 대해서만 판단한다 — `lstat`으로 일반 파일인지 보고, `realpath(후보)`가 `isInside(고정 루트, …)`일 때만 **그 canonical 경로를 돌려준다**. 여기서 루트를 다시 `realpath`하지 않는 것이 핵심이다. (3) 삭제는 `remove(그 canonical 경로)` — `join(config 경로, name)`을 다시 만들지 않으므로 config에 적힌 자리가 링크로 바뀌어도 그 링크를 타지 않는다. 모양은 T17 `sweep.ts`의 `canonicalTarget`(고정 `realRoot` + "확인한 그 경로를 지운다")과 같다 |
+
+### 남는 창 — 닫지 못했고, 닫았다고 쓰지 않는다
+
+`realpath(후보)`를 확인한 뒤 `unlink`이 실행되기까지의 순간은 **여전히 열려 있다.** Node는 `openat`/`unlinkat`을 노출하지 않아 "검사한 그 핸들의 디렉터리 항목을 지운다"를 표현할 방법이 없고, `fs.rm`은 언제나 경로를 다시 해석한다. 그 사이에 정확히 끼어드는 교체는 이긴다.
+
+막히는 것은 리뷰어가 실제로 쓴 두 가지다 — **루트 교체**(round 2 B1)와 **항목의 링크 교체**(round 1 B1) — 그리고 주장하는 것도 딱 그만큼이다. `windows-host.md` 5.7도 같은 문장으로 고쳤다. 덧붙이자면 이 경로가 지우는 대상은 `%APPDATA%` 아래 사용자 소유 디렉터리이고 거기에 쓸 수 있는 주체는 이미 이 계정의 프로세스이므로, 남은 창이 실제 위험이 되는 상황은 그 계정이 이미 침해된 경우다. 그래도 "닫았다"고는 쓰지 않는다.
+
+### 새 테스트 (`apps/server/src/obs/process.test.ts`, 29 → 31건)
+
+- **실 파일시스템 1건 (리뷰어 시나리오 그대로)** — `describe('nodeObsSentinelFs when the root is swapped after the listing (review round 2, B1)')`. 실제 `.sentinel`과 sibling `outside`를 만들고 **양쪽에 같은 이름(`run_1234`)**을 둔다. `list`만 감싼 wrapper(나머지는 `nodeObsSentinelFs` 그대로)가 실제 목록을 읽은 **직후** `renameSync(.sentinel → .sentinel-moved)` + `symlinkSync(outside, .sentinel, 'junction')`으로 루트를 바꿔치기한다. 기대: `sentinelCleared` 0, `sentinelFailure` `sentinel_entry_escaped_dir`, `outside\run_1234` 내용까지 그대로, 옮겨진 진짜 표식도 그대로, 그리고 **spawn은 1회**(지우기 거부가 기동 거부가 되지 않는다).
+- **주입 fs 1건** — `realPath`가 `ENOENT`를 던지는 경우도 "지울 것 없음"이다(고정 루트를 목록보다 먼저 잡으니, 크래시한 적 없는 호스트에서는 `list`가 아니라 `realPath`가 부재를 알린다).
+- 기존 실 파일시스템 4건·주입 5건은 그대로 남기고 포트 시그니처 변경만 반영했다. `isContainedFile`의 실 파일시스템 단언은 `canonicalFile`로 옮겨 **돌려주는 경로가 곧 지워지는 경로**임을 단언한다(`toBe(join(root, 'run_1234'))`).
+
+### 이 테스트가 실제로 그 버그를 잡는지 확인
+
+새 테스트가 회귀를 진짜로 잡는지 보려고, 프로덕션 코드만 round 1 의미(`isInside(realpathSync.native(root), real)` — 즉 삭제 시점에 루트를 다시 푸는 것)로 되돌리고 같은 테스트를 돌렸다:
+
+```text
+$ npx vitest run apps/server/src/obs/process.test.ts -t "replaced by a junction after the listing"
+ × deletes nothing when the approved root is replaced by a junction after the listing
+AssertionError: expected 1 to be +0        // result.sentinelCleared
+```
+
+단언 순서를 바꿔 파일 쪽을 먼저 보면 리뷰어가 본 값이 그대로 나온다:
+
+```text
+AssertionError: expected false to be true  // existsSync(outside\run_1234)
+```
+
+즉 되돌린 코드에서는 **디렉터리 밖 `run_1234`가 실제로 삭제됐다**(리뷰어의 `outsideFileStillExists:false`와 같다). 고친 코드에서는 31건 전부 통과한다. 두 실험 뒤 코드와 단언 순서는 원래대로 되돌렸다.
+
+### 게이트 재실행 (round 2 고침 후)
+
+`git fetch origin && git rebase origin/main`(base `427e7b5`, 충돌 없음) 후 5개를 돌렸다.
+
+```text
+$ npm run format:check   → All matched files use Prettier code style!
+$ npm run lint           → eslint exit 0; legacy imports 0; install scripts 4 reviewed
+$ npm run typecheck      → tsc --build tsconfig.json, exit 0
+$ npm run test           → Test Files 138 passed (138)
+                           Tests 1905 passed | 1 skipped (1906)
+$ npm run build          → contract schema up to date, renderer/server/simulator/soak 빌드, exit 0
+```
+
+push는 `--force-with-lease`(`e08c489...<head>`). PR CI <!-- CI_ROUND2 -->
 
 ## Not done / out of scope
 
