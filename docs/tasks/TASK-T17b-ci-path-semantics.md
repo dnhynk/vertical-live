@@ -172,6 +172,7 @@ $ npx vitest run apps/server/src/obs/client.test.ts
 | [32101426867](https://github.com/dnhynk/vertical-live/actions/runs/32101426867) | `75d4995` (경로 수정) | **success** — build·soak:ci 포함 (ubuntu에서 처음 실행) |
 | [32101772379](https://github.com/dnhynk/vertical-live/actions/runs/32101772379) | `3f8f211` (마지막 코드 커밋) | **success** — 10 step 전부 success |
 | [32102043923](https://github.com/dnhynk/vertical-live/actions/runs/32102043923) | `50e5d9b` (티켓 문서만) | **success** |
+| [32104370395](https://github.com/dnhynk/vertical-live/actions/runs/32104370395) | `f0ce292` (round 1 리뷰 반영, 티켓 문서만) | **success** — 10 step 전부 success |
 
 `build`·`soak:ci`는 PR #18에서 추가된 뒤 E-5로 한 번도 ubuntu에서 돈 적이 없었다. 이번에 처음 돌았고
 둘 다 통과했으므로 추가 수정은 필요 없었다.
@@ -199,7 +200,7 @@ Windows 호스트에서는 수정 전에도 통과했으므로 로컬로는 재�
 
 | finding | 처리(고침 SHA / 반박 근거) |
 |---|---|
-| [minor] `docs/tasks/TASK-T17b-ci-path-semantics.md` — Result/합격 기준 3이 조사표를 "14행"이라 했지만 실제는 **12행(14파일)**이고, 줄 번호 anchor가 현재 코드와 어긋난다(`obs/process.ts:72/140/161` → `:79/:147/:168`, `ops/ops-config.ts:91` → `:96`, `obs/process.test.ts:1,57` → `:55`/`:58`). 재현 가능한 evidence가 아니다 | **고침(이 커밋, 문서만).** (1) 표 앞에 **"12행 / 14개 파일"**과 왜 행≠파일인지(`obs/process.ts` 3행·`ops/ops-config.ts` 2행, tmp 테스트 6파일이 1행)를 명시. (2) anchor를 줄 번호에서 **심볼 이름**으로 교체 — 줄 번호는 이 PR의 diff가 옮기므로 애초에 안정적인 anchor가 아니다. `tasklistObsProcessProbe.running` / `ObsProcessLauncher.plan()` / `ObsProcessLauncher.launch()`의 `already_running` 메시지 / `describeOpsConfig()`의 `obs.executableName`·`repoRoot` / `nodeKillSwitchFs.write` / `ObsProcessLauncher > launches with the documented profile and collection parameters`, 나머지는 파일별 `node:path` import. (3) 표 아래에 **재현 `rg` 명령 2개**를 넣고 각 명령이 몇 건을 내는지 적었다(아래 실행 출력). (4) 합격 기준 3의 근거를 "표 14행(변경 4곳 / 변경 없음 10곳)" → "12행 / 14개 파일, 고친 곳 5(프로덕션 호출 4 + 테스트 기대값 1 = 파일 3개), 변경 없음 7행(11파일)"로 정정. 리뷰어가 지적한 줄 번호는 전부 이 호스트에서 재확인했다(`:79/:147/:168`, `:96`, `:55`/`:58` 모두 일치). 코드 변경 없음 |
+| [minor] `docs/tasks/TASK-T17b-ci-path-semantics.md` — Result/합격 기준 3이 조사표를 "14행"이라 했지만 실제는 **12행(14파일)**이고, 줄 번호 anchor가 현재 코드와 어긋난다(`obs/process.ts:72/140/161` → `:79/:147/:168`, `ops/ops-config.ts:91` → `:96`, `obs/process.test.ts:1,57` → `:55`/`:58`). 재현 가능한 evidence가 아니다 | **고침 `f0ce292`(문서만).** (1) 표 앞에 **"12행 / 14개 파일"**과 왜 행≠파일인지(`obs/process.ts` 3행·`ops/ops-config.ts` 2행, tmp 테스트 6파일이 1행)를 명시. (2) anchor를 줄 번호에서 **심볼 이름**으로 교체 — 줄 번호는 이 PR의 diff가 옮기므로 애초에 안정적인 anchor가 아니다. `tasklistObsProcessProbe.running` / `ObsProcessLauncher.plan()` / `ObsProcessLauncher.launch()`의 `already_running` 메시지 / `describeOpsConfig()`의 `obs.executableName`·`repoRoot` / `nodeKillSwitchFs.write` / `ObsProcessLauncher > launches with the documented profile and collection parameters`, 나머지는 파일별 `node:path` import. (3) 표 아래에 **재현 `rg` 명령 2개**를 넣고 각 명령이 몇 건을 내는지 적었다(아래 실행 출력). (4) 합격 기준 3의 근거를 "표 14행(변경 4곳 / 변경 없음 10곳)" → "12행 / 14개 파일, 고친 곳 5(프로덕션 호출 4 + 테스트 기대값 1 = 파일 3개), 변경 없음 7행(11파일)"로 정정. 리뷰어가 지적한 줄 번호는 전부 이 호스트에서 재확인했다(`:79/:147/:168`, `:96`, `:55`/`:58` 모두 일치). 코드 변경 없음 |
 
 ### 재현 출력 (round 2, 이 호스트)
 
@@ -228,4 +229,4 @@ $ npm run test            -> exit 0   Test Files 138 passed (138) / Tests 1884 p
 $ npm run build           -> exit 0   tsc --build + copy-migrations(5) + data-map up to date
 ```
 
-GitHub Actions: round 2 커밋의 run은 push 후 확인해 위 "GitHub Actions" 표에 추가했다(마지막 문서 커밋의 최신 상태는 `gh pr checks 23`).
+GitHub Actions: `f0ce292`의 run [32104370395](https://github.com/dnhynk/vertical-live/actions/runs/32104370395)이 10 step 전부 success(위 "GitHub Actions" 표에도 추가). 이 표를 갱신하는 커밋의 run은 `gh pr checks 23`으로 확인한다.
