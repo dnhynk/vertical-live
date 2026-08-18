@@ -95,7 +95,7 @@ powershell -ExecutionPolicy Bypass -File ops\windows\Unregister-VerticalLive.ps1
 - 기본값이 `enabled: false`인 이유는 실행 파일 경로가 호스트마다 다르기 때문이다. 켜기 전에 경로를 확인한다(`VL_OBS_PROCESS_ENABLED=true`, `VL_OBS_EXECUTABLE=...`로도 덮어쓸 수 있다).
 - 인자는 **공식 launch parameter만** 쓴다([OBS Knowledge Base, Launch Parameters](https://obsproject.com/kb/launch-parameters), 2026-08-17 확인). `--disable-updater`는 업데이트 대화상자를, `--disable-missing-files-check`는 누락 파일 대화상자를 막는다 — 둘 다 무인 시작을 붙잡는 모달이다.
 - **obs-websocket 비밀번호는 명령행에 넣지 않는다.** 명령행은 같은 호스트의 다른 프로세스가 읽을 수 있다(스펙 §10.2). 비밀번호는 vault에 있고 서버가 접속할 때 쓴다.
-- **실행 직전에 OBS의 크래시 표식(`.sentinel`)을 비운다**(BOARD D-7, 5.7). `sentinelDir`가 비어 있으면 `%APPDATA%\obs-studio\.sentinel`로 파생하고 `VL_OBS_SENTINEL_DIR`로 덮어쓸 수 있다. 지운 개수는 자동시작 로그 한 줄과 `/health`의 `obs-process` `lastNote`에 남으며, 지우지 못해도 기동은 계속한다.
+- **실행 직전에 OBS의 크래시 표식(`.sentinel`)을 비운다**(BOARD D-7, 5.7). `sentinelDir`가 비어 있으면 `%APPDATA%\obs-studio\.sentinel`로 파생하고 `VL_OBS_SENTINEL_DIR`로 덮어쓸 수 있다. 그 경로가 junction/심볼릭 링크면 아무것도 지우지 않고 거부한다(5.7). 지운 개수는 자동시작 로그 한 줄과 `/health`의 `obs-process` `lastNote`에 남으며, 지우지 못해도 기동은 계속한다.
 - 같은 실행기를 supervisor의 `obs-process` 복구 동작도 쓴다(`docs/ops/supervisor.md` 3장). 실행기는 **이미 OBS가 떠 있으면 거부한다**: 두 번째 인스턴스는 "이미 실행 중" 대화상자만 띄우고 응답 없는 OBS를 되살리지 못한다. 그 상황은 사람이 처리한다(7장).
 - OBS는 자기 `bin\64bit` 디렉터리를 작업 디렉터리로 요구하므로 실행기가 그렇게 띄운다.
 
@@ -215,8 +215,10 @@ Windows는 GPU가 응답하지 않으면 드라이버를 재시작한다(TDR). �
 
 - **한 곳에서만 한다**: `ObsProcessLauncher.launch()`. 자동시작 3단계(`obs-launch`)와 supervisor의 `obs-process` 재시작이 같은 실행기를 쓰므로 두 경로가 함께 닫힌다. 세 거부(미설정·실행 파일 없음·이미 실행 중)를 모두 통과한 **뒤** spawn 직전에만 지운다 — 일어나지도 않을 기동을 위해 OBS의 파일을 건드리지 않는다.
 - **설정**: `obs.process.sentinelDir`. 비워 두면 `%APPDATA%`에서 파생하고, 포터블 설치 등은 `VL_OBS_SENTINEL_DIR`로 지정한다. `APPDATA`가 없는 호스트(CI·POSIX)에서는 지울 것이 없다고 보고 그대로 진행한다.
+- **승인한 디렉터리 안에서만 지운다**(리뷰 round 1, B1). `sentinelDir` **자체가 junction/심볼릭 링크(reparse point)면 아무것도 지우지 않고 거부한다** — 링크가 오늘 가리키는 곳은 운영자가 config에서 검토한 디렉터리가 아니고, 그 안의 파일은 OBS의 크래시 표식이 아니다. T17 아카이브가 루트에 대해 하는 거부(`REFUSED (reparse_point)`, 4장)와 같은 판단이다. 목록에 오른 항목도 **삭제 직전에** 다시 확인한다(실경로가 그 디렉터리 바로 안에 있는 일반 파일인가) — 목록과 삭제 사이에 링크로 바뀔 수 있기 때문이다. 하위 디렉터리와 링크 항목은 처음부터 대상이 아니다.
 - **남는 기록**: 지운 게 있을 때만 로그 `obs.sentinel_cleared`(개수·경로만), 실패는 `obs.sentinel_clear_failed`(warn). `/health`의 `components[]`에서 `obs-process`의 `lastNote`가 `sentinel_cleared=<n>`이다. 자동시작 경로는 `obs launched: pid … (crash sentinels cleared: n)` 한 줄로 `data\ops\logs\autostart-*.log`에 남는다.
-- **실패해도 기동은 계속한다.** 파일이 잠겨 있거나 디렉터리를 읽지 못하면 warn만 남기고 OBS를 띄운다. 그때의 동작은 D-7 이전과 같다: 대화상자가 뜨고, 3단계가 obs-websocket 포트를 기다리다 타임아웃해 **실패로 기록**한다(조용히 성공하지 않는다).
+- **사유는 값이 아니라 토큰이다**(리뷰 round 1, m1). `sentinel_dir_reparse_point`(위의 거부), `sentinel_entry_escaped_dir`(삭제 직전 확인 실패), 그 외에는 errno 코드(`EACCES`, `EPERM`, …) 또는 `unknown`. Node의 오류 메시지는 실패한 **파일 이름을 포함**하는데 이 값은 로그와 `/health`로 흘러가므로, 원인은 남기고 파일 이름은 남기지 않는다.
+- **실패해도 기동은 계속한다.** 파일이 잠겨 있거나, 디렉터리를 읽지 못하거나, 위의 거부에 걸려도 warn만 남기고 OBS를 띄운다. 그때의 동작은 D-7 이전과 같다: 대화상자가 뜨고, 3단계가 obs-websocket 포트를 기다리다 타임아웃해 **실패로 기록**한다(조용히 성공하지 않는다).
 
 **근거**
 

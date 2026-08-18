@@ -1,8 +1,11 @@
 import { spawn } from 'node:child_process'
 import { execFileSync } from 'node:child_process'
-import { existsSync, readdirSync, rmSync } from 'node:fs'
+import { existsSync, lstatSync, readdirSync, realpathSync, rmSync } from 'node:fs'
 import { join, win32 as winPath } from 'node:path'
 
+// The same containment predicate T17's archive sweeper decides deletions with:
+// one definition of "this canonical path is inside that canonical directory".
+import { isInside } from '../ops/archive/sweep.js'
 import { silentLogger, type Logger } from '../secrets/redaction.js'
 import type { ObsProcessConfig } from './config.js'
 
@@ -41,9 +44,12 @@ import type { ObsProcessConfig } from './config.js'
  * first (BOARD D-7). A sentinel file left by a crash makes the next start offer
  * Safe Mode, and Safe Mode disables obs-websocket — an unattended host would sit
  * on a modal dialog with the control path switched off. Both launch paths go
- * through here, so that is one place rather than two. The caveat is in
- * `docs/ops/windows-host.md` 5.7: this is **not** a documented OBS procedure,
- * and it hides the crash marker rather than the crash.
+ * through here, so that is one place rather than two. It deletes only inside
+ * the configured directory: a `.sentinel` that is a junction or a symlink is
+ * refused outright, and every entry is re-checked immediately before it goes
+ * (review round 1, B1). The caveat is in `docs/ops/windows-host.md` 5.7: this
+ * is **not** a documented OBS procedure, and it hides the crash marker rather
+ * than the crash.
  */
 
 export class ObsProcessError extends Error {
@@ -102,24 +108,65 @@ export const tasklistObsProcessProbe: ObsProcessProbe = {
 }
 
 /**
- * The two file operations the sentinel clearing needs, injected so the policy is
+ * The file operations the sentinel clearing needs, injected so the policy is
  * testable without a real `%APPDATA%`. Names rather than paths cross this
  * boundary: joining them is the implementation's business, and a Windows path
- * must not be assembled with the test host's separator (T17b).
+ * must not be assembled with the test host's separator (T17b). The two
+ * questions beside `list`/`remove` are what keeps the deletions inside the
+ * approved directory, so an injected port answers them too rather than
+ * defaulting to "allowed".
  */
 export interface ObsSentinelFs {
+  /**
+   * True when `dir` itself is a symlink or a Windows junction (both are reparse
+   * points; libuv reports both through `lstat().isSymbolicLink()`), and also
+   * true when the check cannot be answered. False when `dir` is simply absent —
+   * that case belongs to `list()`'s `ENOENT`. Must not follow the link.
+   */
+  isReparsePoint(dir: string): boolean
   /** File names directly inside `dir`. Throws `ENOENT` when `dir` is absent. */
   list(dir: string): readonly string[]
+  /**
+   * True only when `name` is still a regular file whose canonical path is
+   * directly inside the canonical `dir`. Asked immediately before each removal,
+   * so a listing that was replaced by a link in the meantime is refused rather
+   * than deleted. Must answer false when it cannot decide.
+   */
+  isContainedFile(dir: string, name: string): boolean
   /** Removes one entry of `dir` by name. */
   remove(dir: string, name: string): void
 }
 
 /** Files only: the directory itself stays, and so does anything nested in it. */
 export const nodeObsSentinelFs: ObsSentinelFs = {
+  isReparsePoint: (dir) => {
+    try {
+      return lstatSync(dir).isSymbolicLink()
+    } catch (error) {
+      // A directory that is not there is the ordinary state of a host that has
+      // never crashed, and `list()` already answers that with `ENOENT`. Any
+      // other unreadable result is a check that could not answer, and a check
+      // that cannot answer is a refusal rather than a permission to delete
+      // (T17 `nodeArchiveFs.isLink`).
+      return (error as NodeJS.ErrnoException).code !== 'ENOENT'
+    }
+  },
   list: (dir) =>
     readdirSync(dir, { withFileTypes: true })
       .filter((entry) => entry.isFile())
       .map((entry) => entry.name),
+  isContainedFile: (dir, name) => {
+    const path = join(dir, name)
+    try {
+      // `lstat` rather than `stat`: a symlink whose target is a regular file
+      // must not pass as one. Then both sides are canonicalised, which is what
+      // catches a link the name alone does not reveal.
+      if (!lstatSync(path).isFile()) return false
+      return isInside(realpathSync.native(dir), realpathSync.native(path))
+    } catch {
+      return false
+    }
+  },
   remove: (dir, name) => {
     rmSync(join(dir, name))
   },
@@ -150,10 +197,16 @@ export interface ObsLaunchResult extends ObsLaunchPlan {
    */
   readonly sentinelCleared: number
   /**
-   * Why the clearing did not finish (an EACCES on a file, an unreadable
-   * directory), or null when nothing went wrong. A failure here never fails the
-   * launch: OBS then behaves as it did before D-7 — the dialog appears, the
-   * start-up step waits for a port that never opens and records the failure.
+   * Why the clearing did not finish, or null when nothing went wrong. Always a
+   * token, never a message: an `errno` code (`EACCES`), `unknown`, or one of
+   * the two refusals below. Node's own message for a file operation carries the
+   * path it failed on, and this string is logged and copied into `/health`
+   * (`main.ts`), so the fault stays identifiable here and the file name does not
+   * travel with it (review round 1, m1).
+   *
+   * A failure here never fails the launch: OBS then behaves as it did before
+   * D-7 — the dialog appears, the start-up step waits for a port that never
+   * opens and records the failure.
    */
   readonly sentinelFailure: string | null
 }
@@ -254,6 +307,22 @@ export class ObsProcessLauncher {
     const dir = this.#config.sentinelDir
     if (dir === '') return { cleared: 0, failure: null }
 
+    // A `.sentinel` that is itself a junction or a symlink is refused before it
+    // is even read. Following it would make "inside the sentinel directory"
+    // mean "inside whatever that link points at today" — not the directory the
+    // operator approved in config, and its entries are not OBS's crash markers.
+    // The reviewer deleted a file outside the approved directory this way
+    // (review round 1, B1); it is the same refusal T17's archive sweeper makes
+    // for a configured root (`REFUSED (reparse_point)`).
+    if (this.#sentinel.isReparsePoint(dir)) {
+      this.#logger.warn('obs.sentinel_clear_failed', {
+        dir,
+        cleared: 0,
+        error: SENTINEL_DIR_REPARSE_POINT,
+      })
+      return { cleared: 0, failure: SENTINEL_DIR_REPARSE_POINT }
+    }
+
     let names: readonly string[]
     try {
       names = this.#sentinel.list(dir)
@@ -263,7 +332,7 @@ export class ObsProcessLauncher {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
         return { cleared: 0, failure: null }
       }
-      const failure = describeError(error)
+      const failure = errorCode(error)
       this.#logger.warn('obs.sentinel_clear_failed', { dir, cleared: 0, error: failure })
       return { cleared: 0, failure }
     }
@@ -271,12 +340,21 @@ export class ObsProcessLauncher {
     let cleared = 0
     let failure: string | null = null
     for (const name of names) {
+      // Listing and removing are two moments, and an entry can be replaced by a
+      // link between them. So containment is asked again here instead of being
+      // trusted from the listing, and an entry that no longer resolves inside
+      // the directory is reported rather than removed (review round 1, B1 —
+      // T17 guards its deletions the same way).
+      if (!this.#sentinel.isContainedFile(dir, name)) {
+        failure ??= SENTINEL_ENTRY_ESCAPED
+        continue
+      }
       try {
         this.#sentinel.remove(dir, name)
         cleared += 1
       } catch (error) {
         // Keep going: one locked file must not leave the others behind.
-        failure ??= describeError(error)
+        failure ??= errorCode(error)
       }
     }
     if (failure !== null) {
@@ -289,6 +367,18 @@ export class ObsProcessLauncher {
   }
 }
 
-function describeError(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
+/** The configured sentinel directory is a junction or a symlink. */
+const SENTINEL_DIR_REPARSE_POINT = 'sentinel_dir_reparse_point'
+/** A listed entry stopped resolving inside the sentinel directory. */
+const SENTINEL_ENTRY_ESCAPED = 'sentinel_entry_escaped_dir'
+
+/**
+ * The failure token, never the message. `Error.message` from a file operation
+ * contains the path it failed on (`EACCES: permission denied, unlink
+ * 'run_1234'`), and this value reaches the log and `/health`, so only the code
+ * crosses the boundary (review round 1, m1).
+ */
+function errorCode(error: unknown): string {
+  const code = (error as NodeJS.ErrnoException | null)?.code
+  return typeof code === 'string' && code !== '' ? code : 'unknown'
 }
