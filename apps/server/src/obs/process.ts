@@ -46,10 +46,11 @@ import type { ObsProcessConfig } from './config.js'
  * on a modal dialog with the control path switched off. Both launch paths go
  * through here, so that is one place rather than two. It deletes only inside
  * the configured directory: a `.sentinel` that is a junction or a symlink is
- * refused outright, and every entry is re-checked immediately before it goes
- * (review round 1, B1). The caveat is in `docs/ops/windows-host.md` 5.7: this
- * is **not** a documented OBS procedure, and it hides the crash marker rather
- * than the crash.
+ * refused outright (review round 1, B1), the canonical root is resolved **once**
+ * before the listing, and every entry is re-resolved against that fixed root and
+ * then deleted by the canonical path that was checked (review round 2, B1). The
+ * caveat is in `docs/ops/windows-host.md` 5.7: this is **not** a documented OBS
+ * procedure, and it hides the crash marker rather than the crash.
  */
 
 export class ObsProcessError extends Error {
@@ -109,12 +110,12 @@ export const tasklistObsProcessProbe: ObsProcessProbe = {
 
 /**
  * The file operations the sentinel clearing needs, injected so the policy is
- * testable without a real `%APPDATA%`. Names rather than paths cross this
- * boundary: joining them is the implementation's business, and a Windows path
- * must not be assembled with the test host's separator (T17b). The two
- * questions beside `list`/`remove` are what keeps the deletions inside the
- * approved directory, so an injected port answers them too rather than
- * defaulting to "allowed".
+ * testable without a real `%APPDATA%`. Only `realPath` hands a whole path back
+ * across this boundary; a listing crosses as names, because joining them is the
+ * implementation's business and a Windows path must not be assembled with the
+ * test host's separator (T17b). The two questions beside `list`/`remove` are
+ * what keeps the deletions inside the approved directory, so an injected port
+ * answers them too rather than defaulting to "allowed".
  */
 export interface ObsSentinelFs {
   /**
@@ -124,17 +125,26 @@ export interface ObsSentinelFs {
    * that case belongs to `list()`'s `ENOENT`. Must not follow the link.
    */
   isReparsePoint(dir: string): boolean
+  /**
+   * The canonical path of `dir`. Resolved once, before the listing, and every
+   * later decision is made against that value rather than against the
+   * configured path — which another process can replace with a link at any
+   * moment (review round 2, B1). Throws like `realpath(2)`, `ENOENT` included.
+   */
+  realPath(dir: string): string
   /** File names directly inside `dir`. Throws `ENOENT` when `dir` is absent. */
   list(dir: string): readonly string[]
   /**
-   * True only when `name` is still a regular file whose canonical path is
-   * directly inside the canonical `dir`. Asked immediately before each removal,
-   * so a listing that was replaced by a link in the meantime is refused rather
-   * than deleted. Must answer false when it cannot decide.
+   * The canonical path of `name` when it is still a regular file directly
+   * inside the already-canonical `root`, and `null` otherwise — including when
+   * the answer cannot be decided. Asked immediately before each removal, so a
+   * listing that was replaced by a link in the meantime is refused rather than
+   * deleted, and what it returns is what the caller deletes (T17
+   * `canonicalTarget`).
    */
-  isContainedFile(dir: string, name: string): boolean
-  /** Removes one entry of `dir` by name. */
-  remove(dir: string, name: string): void
+  canonicalFile(root: string, name: string): string | null
+  /** Removes one file by the canonical path `canonicalFile` returned. */
+  remove(path: string): void
 }
 
 /** Files only: the directory itself stays, and so does anything nested in it. */
@@ -151,24 +161,29 @@ export const nodeObsSentinelFs: ObsSentinelFs = {
       return (error as NodeJS.ErrnoException).code !== 'ENOENT'
     }
   },
+  realPath: (dir) => realpathSync.native(dir),
   list: (dir) =>
     readdirSync(dir, { withFileTypes: true })
       .filter((entry) => entry.isFile())
       .map((entry) => entry.name),
-  isContainedFile: (dir, name) => {
-    const path = join(dir, name)
+  canonicalFile: (root, name) => {
+    const path = join(root, name)
     try {
       // `lstat` rather than `stat`: a symlink whose target is a regular file
-      // must not pass as one. Then both sides are canonicalised, which is what
-      // catches a link the name alone does not reveal.
-      if (!lstatSync(path).isFile()) return false
-      return isInside(realpathSync.native(dir), realpathSync.native(path))
+      // must not pass as one. Then the entry is canonicalised and compared
+      // against the **fixed** root, which is what catches a root that became a
+      // link after the listing — resolving the root again here would follow it
+      // instead, and that is exactly how the reviewer deleted an outside file
+      // (review round 2, B1).
+      if (!lstatSync(path).isFile()) return null
+      const real = realpathSync.native(path)
+      return isInside(root, real) ? real : null
     } catch {
-      return false
+      return null
     }
   },
-  remove: (dir, name) => {
-    rmSync(join(dir, name))
+  remove: (path) => {
+    rmSync(path)
   },
 }
 
@@ -323,9 +338,17 @@ export class ObsProcessLauncher {
       return { cleared: 0, failure: SENTINEL_DIR_REPARSE_POINT }
     }
 
+    // The approved root, canonicalised **once** and before anything is listed.
+    // Every decision below is made against this value: the configured path can
+    // be renamed away and replaced by a junction while this loop runs, and
+    // asking `realpath` again at deletion time answers with wherever that new
+    // junction points — which is how the reviewer got a file outside the
+    // approved directory deleted (review round 2, B1).
+    let root: string
     let names: readonly string[]
     try {
-      names = this.#sentinel.list(dir)
+      root = this.#sentinel.realPath(dir)
+      names = this.#sentinel.list(root)
     } catch (error) {
       // No directory at all is the normal state of a host that has never
       // crashed, not a fault.
@@ -340,17 +363,21 @@ export class ObsProcessLauncher {
     let cleared = 0
     let failure: string | null = null
     for (const name of names) {
-      // Listing and removing are two moments, and an entry can be replaced by a
-      // link between them. So containment is asked again here instead of being
-      // trusted from the listing, and an entry that no longer resolves inside
-      // the directory is reported rather than removed (review round 1, B1 —
-      // T17 guards its deletions the same way).
-      if (!this.#sentinel.isContainedFile(dir, name)) {
+      // Listing and removing are two moments, and an entry — or the directory
+      // it was listed from — can be replaced by a link between them. So the
+      // entry is resolved again here against the fixed root instead of being
+      // trusted from the listing, and one that no longer resolves inside it is
+      // reported rather than removed (review round 1 and 2, B1 — T17 guards its
+      // deletions the same way).
+      const path = this.#sentinel.canonicalFile(root, name)
+      if (path === null) {
         failure ??= SENTINEL_ENTRY_ESCAPED
         continue
       }
       try {
-        this.#sentinel.remove(dir, name)
+        // The checked path, not `join(dir, name)`: rejoining the configured
+        // root would walk through whatever it points at now.
+        this.#sentinel.remove(path)
         cleared += 1
       } catch (error) {
         // Keep going: one locked file must not leave the others behind.

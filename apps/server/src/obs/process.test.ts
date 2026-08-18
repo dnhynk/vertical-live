@@ -1,4 +1,12 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -33,8 +41,9 @@ const config: ObsProcessConfig = {
 /** Nothing to clear, and nothing that can be blamed for a failure. */
 const emptySentinel: ObsSentinelFs = {
   isReparsePoint: () => false,
+  realPath: (dir) => dir,
   list: () => [],
-  isContainedFile: () => true,
+  canonicalFile: (root, name) => `${root}\\${name}`,
   remove: () => {},
 }
 
@@ -187,21 +196,24 @@ describe('crash sentinel clearing (BOARD D-7)', () => {
     const checked: string[] = []
     const fs: ObsSentinelFs = {
       isReparsePoint: () => false,
+      // The fixture directory is a Windows path, so the fake canonicalises to
+      // itself and joins with a backslash wherever this runs (T17b).
+      realPath: (dir) => dir,
       list: (dir) => {
         listed.push(dir)
         return names
       },
-      isContainedFile: (dir, name) => {
-        checked.push(`${dir}|${name}`)
-        return name !== escaped
+      canonicalFile: (root, name) => {
+        checked.push(`${root}|${name}`)
+        return name === escaped ? null : `${root}\\${name}`
       },
-      remove: (dir, name) => {
-        if (name === failOn) {
-          throw Object.assign(new Error(`EACCES: permission denied, unlink '${name}'`), {
+      remove: (path) => {
+        if (failOn !== undefined && path.endsWith(`\\${failOn}`)) {
+          throw Object.assign(new Error(`EACCES: permission denied, unlink '${failOn}'`), {
             code: 'EACCES',
           })
         }
-        removed.push(`${dir}|${name}`)
+        removed.push(path)
       },
     }
     return { fs, removed, listed, checked }
@@ -225,12 +237,10 @@ describe('crash sentinel clearing (BOARD D-7)', () => {
       probe: notRunning,
       exists: () => true,
       sentinel: {
-        isReparsePoint: (dir) => sentinel.fs.isReparsePoint(dir),
-        list: (dir) => sentinel.fs.list(dir),
-        isContainedFile: (dir, name) => sentinel.fs.isContainedFile(dir, name),
-        remove: (dir, name) => {
+        ...sentinel.fs,
+        remove: (path) => {
           order.push('remove')
-          sentinel.fs.remove(dir, name)
+          sentinel.fs.remove(path)
         },
       },
       logger: { debug: () => {}, info, warn: () => {}, error: () => {} },
@@ -241,8 +251,8 @@ describe('crash sentinel clearing (BOARD D-7)', () => {
     expect(result.sentinelCleared).toBe(2)
     expect(result.sentinelFailure).toBeNull()
     expect(sentinel.removed).toEqual([
-      `${config.sentinelDir}|run_1234`,
-      `${config.sentinelDir}|run_5678`,
+      `${config.sentinelDir}\\run_1234`,
+      `${config.sentinelDir}\\run_5678`,
     ])
     // The dialog is decided when OBS starts, so the clearing has to be finished
     // by then — not merely attempted at some point during the launch.
@@ -263,10 +273,11 @@ describe('crash sentinel clearing (BOARD D-7)', () => {
       exists: () => true,
       sentinel: {
         isReparsePoint: () => false,
+        realPath: (dir) => dir,
         list: () => {
           throw Object.assign(new Error('ENOENT: no such file or directory'), { code: 'ENOENT' })
         },
-        isContainedFile: () => true,
+        canonicalFile: () => null,
         remove: () => {
           throw new Error('unreachable')
         },
@@ -280,6 +291,38 @@ describe('crash sentinel clearing (BOARD D-7)', () => {
     expect(result.sentinelFailure).toBeNull()
     expect(spawns.calls).toHaveLength(1)
     expect(info).not.toHaveBeenCalledWith('obs.sentinel_cleared', expect.anything())
+  })
+
+  it('treats a sentinel directory that will not resolve as nothing to clear', () => {
+    // Same outcome from the other end of the same `try`: the canonical root is
+    // taken before the listing (review round 2, B1), so on a host that never
+    // crashed it is `realPath` and not `list` that reports the absence.
+    const spawns = spawner()
+    const launcher = new ObsProcessLauncher({
+      config,
+      spawner: spawns,
+      probe: notRunning,
+      exists: () => true,
+      sentinel: {
+        isReparsePoint: () => false,
+        realPath: () => {
+          throw Object.assign(new Error('ENOENT: no such file or directory'), { code: 'ENOENT' })
+        },
+        list: () => {
+          throw new Error('unreachable')
+        },
+        canonicalFile: () => null,
+        remove: () => {
+          throw new Error('unreachable')
+        },
+      },
+    })
+
+    const result = launcher.launch()
+
+    expect(result.sentinelCleared).toBe(0)
+    expect(result.sentinelFailure).toBeNull()
+    expect(spawns.calls).toHaveLength(1)
   })
 
   it('starts OBS anyway when a file will not go, and says which ones did', () => {
@@ -309,7 +352,7 @@ describe('crash sentinel clearing (BOARD D-7)', () => {
     // (`main.ts`), so the file name must not travel with it (review round 1, m1).
     expect(result.sentinelFailure).toBe('EACCES')
     expect(result.sentinelFailure).not.toContain('run_locked')
-    expect(sentinel.removed).toEqual([`${config.sentinelDir}|run_free`])
+    expect(sentinel.removed).toEqual([`${config.sentinelDir}\\run_free`])
     expect(warn).toHaveBeenCalledWith('obs.sentinel_clear_failed', {
       dir: config.sentinelDir,
       cleared: 1,
@@ -326,8 +369,9 @@ describe('crash sentinel clearing (BOARD D-7)', () => {
       exists: () => true,
       sentinel: {
         isReparsePoint: () => false,
+        realPath: (dir) => dir,
         list: () => ['run_1234'],
-        isContainedFile: () => true,
+        canonicalFile: (root, name) => `${root}\\${name}`,
         remove: () => {
           throw new Error("cannot remove 'run_1234'")
         },
@@ -351,10 +395,11 @@ describe('crash sentinel clearing (BOARD D-7)', () => {
       exists: () => true,
       sentinel: {
         isReparsePoint: () => false,
+        realPath: (dir) => dir,
         list: () => {
           throw Object.assign(new Error('EACCES: permission denied, scandir'), { code: 'EACCES' })
         },
-        isContainedFile: () => true,
+        canonicalFile: () => null,
         remove: () => {},
       },
       logger: { debug: () => {}, info: () => {}, warn, error: () => {} },
@@ -423,8 +468,8 @@ describe('crash sentinel clearing (BOARD D-7)', () => {
       `${config.sentinelDir}|run_5678`,
     ])
     expect(sentinel.removed).toEqual([
-      `${config.sentinelDir}|run_1234`,
-      `${config.sentinelDir}|run_5678`,
+      `${config.sentinelDir}\\run_1234`,
+      `${config.sentinelDir}\\run_5678`,
     ])
     expect(result.sentinelCleared).toBe(2)
     expect(result.sentinelFailure).toBe('sentinel_entry_escaped_dir')
@@ -573,20 +618,102 @@ describe('nodeObsSentinelFs against real links (review round 1, B1)', () => {
     expect(spawns.calls).toHaveLength(1)
   })
 
-  it('answers containment for a real file, a link entry and an absent name', () => {
+  it('resolves a real file to a canonical path and refuses a link entry or an absent name', () => {
     mkdirSync(sentinelDir, { recursive: true })
     writeFileSync(join(sentinelDir, 'run_1234'), 'crashed')
     symlinkSync(outside, join(sentinelDir, 'junction-out'), 'junction')
     const fileLinkMade = trySymlinkFile(outsideFile, join(sentinelDir, 'run_link'))
+    // The root the launcher pins before the listing, not the configured
+    // spelling: on a host whose temp directory is itself a link the two differ.
+    const root = nodeObsSentinelFs.realPath(sentinelDir)
 
-    expect(nodeObsSentinelFs.isContainedFile(sentinelDir, 'run_1234')).toBe(true)
-    expect(nodeObsSentinelFs.isContainedFile(sentinelDir, 'junction-out')).toBe(false)
-    expect(nodeObsSentinelFs.isContainedFile(sentinelDir, 'gone')).toBe(false)
+    // What comes back is the path that gets deleted, so it has to be the one
+    // that was checked (review round 2, B1).
+    expect(nodeObsSentinelFs.canonicalFile(root, 'run_1234')).toBe(join(root, 'run_1234'))
+    expect(nodeObsSentinelFs.canonicalFile(root, 'junction-out')).toBeNull()
+    expect(nodeObsSentinelFs.canonicalFile(root, 'gone')).toBeNull()
     // A link whose target *is* a regular file is the case `lstat` catches and
     // `stat` would not: the name is inside, the bytes are not.
     if (fileLinkMade) {
-      expect(nodeObsSentinelFs.isContainedFile(sentinelDir, 'run_link')).toBe(false)
+      expect(nodeObsSentinelFs.canonicalFile(root, 'run_link')).toBeNull()
     }
+  })
+})
+
+/**
+ * Review round 2, B1 — the reviewer's own reproduction, kept as a test. The
+ * round 1 fix re-checked each entry immediately before removing it, but it
+ * asked the question against `realpath(dir)` *computed at that moment*: rename
+ * the real `.sentinel` away after `list()` and drop a junction in its lexical
+ * place, and both sides of the comparison resolve under the junction's target,
+ * so the check passes and a file outside the approved directory is deleted
+ * (`sentinelCleared: 1`, `outsideFileStillExists: false`).
+ *
+ * The launcher now pins the canonical root once, before the listing, and
+ * resolves every candidate against that fixed value. The swap is injected
+ * through the port — the operations underneath are the real ones — because the
+ * timing is what is under test, not the filesystem.
+ *
+ * What this does **not** close: the moment between `realpath(entry)` and the
+ * `unlink`. Node exposes no `openat`/`unlinkat`, so there is no way to delete
+ * the directory entry a handle was checked through; a swap landing inside that
+ * window still wins. Both halves the reviewer used — replacing the root, and
+ * replacing an entry with a link — are refused, and that is what is claimed.
+ */
+describe('nodeObsSentinelFs when the root is swapped after the listing (review round 2, B1)', () => {
+  const base = join(tmpdir(), `vl-obs-sentinel-swap-${String(process.pid)}`)
+  const outside = join(base, 'outside')
+  const sentinelDir = join(base, '.sentinel')
+  const moved = join(base, '.sentinel-moved')
+  // The same name on both sides: after the swap the listed entry's lexical path
+  // lands on a real regular file outside the approved directory, which is
+  // exactly what the round 1 check let through.
+  const marker = join(sentinelDir, 'run_1234')
+  const outsideFile = join(outside, 'run_1234')
+
+  beforeEach(() => {
+    mkdirSync(outside, { recursive: true })
+    writeFileSync(outsideFile, 'outside')
+    mkdirSync(sentinelDir, { recursive: true })
+    writeFileSync(marker, 'crashed')
+  })
+
+  afterEach(() => {
+    rmSync(base, { recursive: true, force: true })
+  })
+
+  it('deletes nothing when the approved root is replaced by a junction after the listing', () => {
+    let swapped = false
+    const swapping: ObsSentinelFs = {
+      ...nodeObsSentinelFs,
+      list: (dir) => {
+        const names = nodeObsSentinelFs.list(dir)
+        renameSync(sentinelDir, moved)
+        symlinkSync(outside, sentinelDir, 'junction')
+        swapped = true
+        return names
+      },
+    }
+    const spawns = spawner()
+
+    const result = new ObsProcessLauncher({
+      config: { ...config, sentinelDir },
+      spawner: spawns,
+      probe: notRunning,
+      exists: () => true,
+      sentinel: swapping,
+    }).launch()
+
+    expect(swapped).toBe(true)
+    expect(result.sentinelCleared).toBe(0)
+    expect(result.sentinelFailure).toBe('sentinel_entry_escaped_dir')
+    expect(existsSync(outsideFile)).toBe(true)
+    expect(readFileSync(outsideFile, 'utf8')).toBe('outside')
+    // Nothing was deleted anywhere: the real marker is still where the rename
+    // put it.
+    expect(existsSync(join(moved, 'run_1234'))).toBe(true)
+    // And a refusal to clear is still not a refusal to start OBS.
+    expect(spawns.calls).toHaveLength(1)
   })
 })
 
