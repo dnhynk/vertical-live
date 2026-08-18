@@ -50,15 +50,15 @@
 
 | # | 기준 | 상태 | 근거(테스트 파일·명령·출력) |
 |---|---|---|---|
-| 1 | `launch()`가 spawn 직전에 `.sentinel` 안 파일을 지운다(디렉터리는 남김), 자동시작·supervisor 두 경로가 한 곳을 쓴다 | met (리뷰 round 1·2에서 B1 고침) | `apps/server/src/obs/process.test.ts` "removes the sentinel files and reports how many, before the spawn"(remove·remove·spawn 순서까지 단언). 두 경로는 `apps/server/src/bin/obs-launch.ts`(자동시작 3단계)와 `apps/server/src/main.ts`의 `actions.obsProcess`가 같은 `ObsProcessLauncher`를 쓰는 기존 구조 그대로다. **승인한 디렉터리 밖으로 나가지 않는다는 부분은 두 번 틀렸다** — round 1은 루트가 junction이면 따라 들어갔고, round 2는 목록을 읽은 뒤 루트가 junction으로 교체되면 따라갔다. 지금은 목록 전에 실루트를 고정하고 확인된 실경로로 지운다. **완전히 닫히지 않은 창이 하나 남는다**(실경로 확인 → `unlink` 사이) — 아래 `## Review round 2`에 근거와 함께 적었다 |
+| 1 | `launch()`가 spawn 직전에 `.sentinel` 안 파일을 지운다(디렉터리는 남김), 자동시작·supervisor 두 경로가 한 곳을 쓴다 | met (리뷰 round 1·2·3에서 B1 고침) | `apps/server/src/obs/process.test.ts` "removes the sentinel files and reports how many, before the spawn"(remove·remove·spawn 순서까지 단언). 두 경로는 `apps/server/src/bin/obs-launch.ts`(자동시작 3단계)와 `apps/server/src/main.ts`의 `actions.obsProcess`가 같은 `ObsProcessLauncher`를 쓰는 기존 구조 그대로다. **승인한 디렉터리 밖으로 나가지 않는다는 부분은 세 번 틀렸다** — round 1은 루트가 junction이면 따라 들어갔고, round 2는 목록을 읽은 뒤 루트가 junction으로 교체되면 따라갔고, round 3은 reparse 검사와 `realPath` **사이에** 루트가 교체되면 그 링크 대상을 승인된 루트로 삼았다. 지금은 목록 전에 실루트를 고정하고 그 값을 부모 기준으로 대조한 뒤 확인된 실경로로 지운다. **check→use 창은 닫히지 않았고, 닫았다고 쓰지 않는다** — 보장하는 것과 보장하지 못하는 것의 전체 목록은 `docs/ops/windows-host.md` 5.7과 아래 `## Review round 3`에 있다 |
 | 2 | 경로는 config(`obs.process.sentinelDir`, `APPDATA` 파생), provisional 아님 | met | `apps/server/src/obs/config.ts` `resolveSentinelDir()`; 테스트 "derives the sentinel directory from APPDATA, with Windows separators" / "has no sentinel directory on a host without APPDATA" / "takes an explicit sentinel directory for a portable OBS install" / "does not call the sentinel path provisional" |
-| 3 | fs 주입 가능 | met | `ObsSentinelFs`(`isReparsePoint`/`realPath`/`list`/`canonicalFile`/`remove`) + `ObsProcessLauncherOptions.sentinel`. 모든 새 테스트가 주입해서 돈다. 실 구현(`nodeObsSentinelFs`)은 실 junction/symlink로 따로 검증한다(round 1·2, B1) |
+| 3 | fs 주입 가능 | met | `ObsSentinelFs`(`isReparsePoint`/`realPath`/`matchesParentEntry`/`list`/`canonicalFile`/`remove`) + `ObsProcessLauncherOptions.sentinel`. 모든 새 테스트가 주입해서 돈다. 실 구현(`nodeObsSentinelFs`)은 실 junction/symlink로 따로 검증한다(round 1·2·3, B1) |
 | 4 | 결과에 `sentinelCleared`(+ 실패 사유), 로그 `obs.sentinel_cleared`(개수·경로만) | met (리뷰 round 1에서 m1 고침) | `ObsLaunchResult.sentinelCleared` / `.sentinelFailure`; 로그 단언은 같은 테스트의 `expect(info).toHaveBeenCalledWith('obs.sentinel_cleared', { dir, cleared: 2 })`. **실패 사유는 처음엔 raw `Error.message`라 파일 이름이 섞였다** — 지금은 토큰(errno 코드·`unknown`·두 거부)뿐이다. 아래 `## Review round 1` m1 |
 | 5 | supervisor의 기존 health detail에 값이 보인다(최소 배선) | met | `apps/server/src/supervisor/supervisor.test.ts` "puts what a restart action recorded on the health document (BOARD D-7)"(`/health`의 `components[]`에서 `obs-process.lastNote = sentinel_cleared=1`, 다른 컴포넌트는 null), `restart.test.ts` "carries what the action recorded onto /health, and keeps it once healthy" |
 | 6 | 디렉터리 없음 → 0·정상 진행 | met | `process.test.ts` "treats a missing sentinel directory as nothing to clear"(ENOENT → cleared 0, failure null, spawn 1회, `obs.sentinel_cleared` 미출력) |
 | 7 | 삭제 실패 → warn 후 launch 계속(= 기존 동작으로 강등) | met (리뷰 round 1에서 M1 고침) | "starts OBS anyway when a file will not go, and says which ones did"(EACCES 1건 → cleared 1, failure 기록, warn, pid 반환), "starts OBS anyway when the directory itself cannot be read". **자동시작 경로에서는 그 사유가 로그에 남지 않았다**(stderr로 나갔다) — 지금은 stdout이라 `autostart-*.log`에 남는다. 아래 `## Review round 1` M1 |
 | 8 | `plan()` 불변(dry run이 아무것도 지우지 않는다) | met | "leaves the sentinel alone on every refusal, and in a dry run"(`plan()` + 세 거부 경로 모두에서 `list`·`remove` 호출 0) |
-| 9 | 문서: `windows-host.md` §5.7·§8, `obs-setup.md` §1·§6 | met (리뷰 round 2에서 고침) | 아래 "문서 변경". §5.7이 "목록과 삭제 사이의 창을 닫는다"고 단언했는데 그것이 사실이 아니었다 — 지금은 3단계 절차와 **남는 창**을 함께 적는다(`78983f4`) |
+| 9 | 문서: `windows-host.md` §5.7·§8, `obs-setup.md` §1·§6 | met (리뷰 round 2·3에서 고침) | 아래 "문서 변경". §5.7은 두 번 과장했다 — round 1까지는 "목록과 삭제 사이의 창을 닫는다"(`78983f4`에서 고침), round 2까지는 "남는 창은 후보 realpath→`unlink` 하나뿐이고 루트 교체는 막힌다"(round 3에서 틀렸음이 재현됨). 지금은 4단계 절차와 함께 **보장하는 것 / 보장하지 못하는 것**을 목록으로 나열한다 |
 | 10 | `private` → public 정정 | met | `CLAUDE.md` §2, `docs/runbooks/agent-orchestration.md` 머리말·0장 표, `docs/tasks/TASK_SPECS.md` 공통 규약 머리말 |
 | 11 | 게이트 5개 + PR CI 녹색 | met | T17b(PR #23)가 `b414970`으로 머지된 뒤 rebase해서 둘 다 녹색이다. 로컬 게이트 5개 전부 통과(`1896 passed | 1 skipped`), PR CI [run 32107232734](https://github.com/dnhynk/vertical-live/actions/runs/32107232734) **pass**. 아래 "Rebase onto T17b" 참조 |
 
@@ -270,6 +270,8 @@ $ npm run build          → vite + tsc --build (all workspaces), exit 0
 
 ### 남는 창 — 닫지 못했고, 닫았다고 쓰지 않는다
 
+> **round 3에서 이 절의 서술이 틀렸음이 드러났다.** 여기서는 "남는 창은 후보 realpath → `unlink` 하나뿐이고 루트 교체는 막힌다"고 썼는데, 리뷰어는 그보다 **앞** 단계(reparse 검사 ↔ `realPath`)에서 루트를 교체해 다시 디렉터리 밖 파일을 지웠다. 정확한 목록은 아래 `## Review round 3`과 `windows-host.md` 5.7에 있다. 이 절은 당시 판단을 기록으로 남긴다.
+
 `realpath(후보)`를 확인한 뒤 `unlink`이 실행되기까지의 순간은 **여전히 열려 있다.** Node는 `openat`/`unlinkat`을 노출하지 않아 "검사한 그 핸들의 디렉터리 항목을 지운다"를 표현할 방법이 없고, `fs.rm`은 언제나 경로를 다시 해석한다. 그 사이에 정확히 끼어드는 교체는 이긴다.
 
 막히는 것은 리뷰어가 실제로 쓴 두 가지다 — **루트 교체**(round 2 B1)와 **항목의 링크 교체**(round 1 B1) — 그리고 주장하는 것도 딱 그만큼이다. `windows-host.md` 5.7도 같은 문장으로 고쳤다. 덧붙이자면 이 경로가 지우는 대상은 `%APPDATA%` 아래 사용자 소유 디렉터리이고 거기에 쓸 수 있는 주체는 이미 이 계정의 프로세스이므로, 남은 창이 실제 위험이 되는 상황은 그 계정이 이미 침해된 경우다. 그래도 "닫았다"고는 쓰지 않는다.
@@ -312,6 +314,52 @@ $ npm run build          → contract schema up to date, renderer/server/simulat
 ```
 
 push는 `--force-with-lease`(`e08c489...4ac7f48`). PR CI [run 32113320622](https://github.com/dnhynk/vertical-live/actions/runs/32113320622) **pass** — head `4ac7f48`, job `ci` 성공. 그 뒤에 붙는 것은 이 CI 결과를 적어 넣는 문서 커밋 하나뿐이고, 그 head에서도 CI를 다시 돌려 녹색을 확인했다(worker_done에 run URL).
+
+## Review round 3
+
+리뷰어 판정 `request_changes`(blocker 1). round 2의 "목록 이후 루트 교체" 시나리오는 리뷰어가 직접 재현해 **해소 확인**했고, 합격 기준 2·3·4·5·6·7·8·10·11도 리뷰어가 게이트 5개와 PR CI(run 32113620990, head `1f536e1`)를 직접 돌려 통과를 확인했다. 남은 것은 하나이며, 그 하나가 **기준 1과 9를 동시에** 무너뜨렸다(코드가 틀렸고, 문서가 그 틀린 것을 맞다고 썼다).
+
+| 지적 | 고침 |
+|---|---|
+| **[blocker] `apps/server/src/obs/process.ts:332`** — 루트 reparse `lstat`과 승인용 `realPath(dir)`는 **서로 다른 두 번의 경로 조회**다. `isReparsePoint`가 답한 뒤 `realPath` 전에 진짜 `.sentinel`을 옮기고 그 자리에 바깥으로 가는 junction을 놓으면, 검사는 그때 거기 있던 진짜 디렉터리를 보고 "링크 아님"을 답하고 `realPath`는 **링크 대상을 승인된 루트로** 돌려준다. 그 뒤 봉쇄 검사는 전부 그 잘못된 루트 기준이라 통과하고 바깥 파일이 지워진다. 리뷰어가 실 NTFS로 재현: `{"swapped":true,"sentinelCleared":1,"sentinelFailure":null,"originalMarkerStillExists":true,"outsideFileStillExists":false}`. 이는 코디네이터가 수용한 `realpath(후보)`→`unlink` 창과 **다른, 더 이른** 창이다. 따라서 `windows-host.md:218-225`·이 티켓 `53,271-275`·PR 본문의 "남는 창은 하나뿐이고 루트 교체는 막힌다"는 서술도 과장이다 | **고침 `0079faa`.** (1) **완화** — `realPath(dir)`로 루트를 고정한 **직후**, 그 값을 **부모 기준으로 대조**한다: 새 포트 메서드 `matchesParentEntry(dir, root)`가 `root === join(realPath(dirname(dir)), basename(dir))`인지 답한다(비교는 실행 호스트의 `path.relative(resolve(a), resolve(b)) === ''` — Windows에서는 대소문자·구분자 무시, POSIX에서는 아님. 봉쇄 술어 `isInside`가 이미 쓰는 바로 그 primitive다). 이어서 lexical 경로에 `isReparsePoint`를 **한 번 더** 묻는다. 둘 중 하나라도 어긋나면 삭제 0 · 토큰 `sentinel_dir_mismatch`(부모 대조 실패) 또는 `sentinel_dir_reparse_point`(재확인 실패) · warn, **launch는 계속**한다. 루트가 다른 곳으로 재지정되면 부모 쪽은 여전히 `부모/.sentinel`이라 답해 어긋난다. 부모 체인 자체가 junction인 정상 배치는 양쪽 다 부모를 풀어 같은 곳에 닿으므로 통과한다. (2) **공개** — 아래 목록대로 `windows-host.md` 5.7·이 티켓·PR 본문을 코드와 맞췄다. (3) **회귀 테스트** — 주입 fs 2건 + 실 파일시스템 2건(아래) |
+
+### 이번 라운드가 하는 일과 하지 않는 일
+
+핸들 기반 디렉터리 API(`openat`/`unlinkat`) 없이는 check→use 창을 **닫을 수 없다.** Node는 그것을 노출하지 않고 `fs.rm`은 언제나 경로를 다시 해석한다. 그래서 이번 라운드는 창을 닫았다고 주장하지 않고, **값싼 완화 + 정확한 공개 + 회귀 테스트**로 끝낸다.
+
+**보장하는 것**
+
+- 검사 시점에 `sentinelDir`이 reparse point가 아니었다(1단계, 그리고 부모 대조 직후 한 번 더).
+- 승인된 루트는 검사 시점에 그 **부모가 그 이름으로 들고 있던 항목**이다(부모 대조).
+- 후보의 일반 파일 여부와 봉쇄는 **고정된** 루트 기준으로 판단한다.
+- 지우는 경로는 **확인한 바로 그 canonical 경로**다. config 경로를 다시 잇지 않는다.
+
+**보장하지 못하는 것**
+
+- `lstat`/`realPath`와 그 값을 **쓰는 순간** 사이의 교체. 부모 대조와 reparse 재확인은 창을 좁힐 뿐이다.
+- `realpath(후보)`와 `unlink` 사이의 항목 교체(round 2에서 이미 공개, 코디네이터 수용).
+- 링크가 아니라 **진짜 디렉터리**를 rename으로 같은 경로에 갖다 놓는 교체. 어떤 링크 검사도 보지 못하고 부모 대조도 통과한다 — 그 자리에 진짜로 있기 때문이다.
+
+실질 위험의 범위는 round 2와 같다: 대상이 `%APPDATA%` 아래 사용자 소유 디렉터리이고 거기에 쓸 수 있는 주체는 이미 이 계정의 프로세스이므로, 남은 창이 위험이 되는 상황은 그 계정이 이미 침해된 경우다. 그래도 "닫았다"고는 쓰지 않는다.
+
+### 새 테스트 (`apps/server/src/obs/process.test.ts`, 31 → 35건)
+
+- **실 파일시스템 1건 (리뷰어 시나리오 그대로)** — `describe('nodeObsSentinelFs when the root is swapped before it is resolved (review round 3)')`. `isReparsePoint`만 감싼 wrapper(나머지는 `nodeObsSentinelFs` 그대로)가 **진짜 답을 돌려주기 직전에** `renameSync(.sentinel → .sentinel-moved)` + `symlinkSync(outside, .sentinel, 'junction')`을 실행한다. 기대: `sentinelCleared` 0, `sentinelFailure` `sentinel_dir_mismatch`, `outside\run_1234`는 내용까지 그대로, 옮겨진 진짜 표식도 그대로, **spawn 1회**.
+- **실 파일시스템 1건 (술어 자체)** — `matchesParentEntry`가 실 디렉터리에 대해 true, junction이 가리켰을 바깥 루트에 대해 false, 그리고 **부모가 junction인 정상 배치**(`roaming-link/.sentinel` → `roaming/.sentinel`)에 대해 true. 마지막 단언이 이 완화가 정상 배치를 깨지 않는다는 근거다.
+- **주입 fs 2건** — `realPath`만 바깥 경로를 돌려주게 바꾼 경우(`isReparsePoint`는 통과) → 목록·확인·삭제 호출 0, cleared 0, `sentinel_dir_mismatch`, warn, spawn 1회. 그리고 두 번째 `isReparsePoint`만 true가 되는 경우 → 호출 2회, 목록 0, cleared 0, `sentinel_dir_reparse_point`.
+- 기존 31건은 그대로 두고 포트에 메서드가 하나 늘어난 것만 fake에 반영했다(fake는 `realPath`가 항등이므로 `root === dir`로 정직하게 답한다).
+
+### 이 테스트가 실제로 그 버그를 잡는지 확인
+
+새 회귀 테스트가 리뷰어의 관측을 진짜로 재현하는지 보려고, 프로덕션 코드에서 **부모 대조와 reparse 재확인 두 줄만 지우고** 같은 테스트를 돌렸다:
+
+```text
+$ npx.cmd vitest run apps/server/src/obs/process.test.ts -t "before it is resolved"
+ × deletes nothing when a junction replaces the approved root before it is resolved
+AssertionError: expected 1 to be +0        // result.sentinelCleared
+```
+
+리뷰어가 본 `sentinelCleared: 1`이 그대로 나온다(같은 실행에서 `outside\run_1234`는 실제로 삭제된다 — 그 단언은 바로 다음 줄이다). 고친 코드에서는 35건 전부 통과한다. 실험 뒤 코드는 원래대로 되돌렸다(`cp /tmp/process.ts.bak`).
 
 ## Not done / out of scope
 
