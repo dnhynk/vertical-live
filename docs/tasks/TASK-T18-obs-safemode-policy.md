@@ -177,6 +177,8 @@ FAIL apps/server/src/ops/ops-config.test.ts > describeOpsConfig > honours VL_OBS
   AssertionError: expected 'D:\obs\bin\obs64.exe' to be 'obs64.exe'
 ```
 
+origin/main `cb3db6b`(코디네이터 BOARD 커밋)으로 rebase한 뒤 다시 돌린 [run 32103798353](https://github.com/dnhynk/vertical-live/actions/runs/32103798353)도 **같은 3건**으로 실패한다(`3 failed | 1892 passed | 2 skipped`). 목록이 늘지도 줄지도 않았다.
+
 셋 다 posix 호스트에서 `dirname`/`basename`을 Windows 경로에 쓴 결과다(`'.'`, 경로 전체). BOARD E-5가 기록한 main의 ubuntu 실패 3건과 같은 목록이며, 내가 추가한 sentinel 테스트는 CI에서 전부 통과했다(`ops-config`는 sentinel을 읽지도 않는다: `rg sentinel apps/server/src/ops/` 0건). 로컬 Windows에서는 이 3건이 통과하고 대신 `client.test.ts` 1건이 호스트 vault 때문에 실패한다 — 같은 T17b가 함께 고친다.
 
 **CI 대기 중**: PR을 연 시점(2026-08-18)에 #23은 OPEN이었다. 내가 건드린 `apps/server/src/obs/process.ts`는 T17b도 손대는 파일(`dirname` → `win32.dirname`)이라 rebase에서 충돌 가능성이 있고, 그때는 T17b의 의미론(Windows 경로는 `path.win32`)을 그대로 살린다 — 이번 PR의 `resolveSentinelDir()`도 같은 이유로 `win32.join`을 쓴다.
