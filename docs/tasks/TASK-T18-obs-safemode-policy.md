@@ -60,7 +60,7 @@
 | 8 | `plan()` 불변(dry run이 아무것도 지우지 않는다) | met | "leaves the sentinel alone on every refusal, and in a dry run"(`plan()` + 세 거부 경로 모두에서 `list`·`remove` 호출 0) |
 | 9 | 문서: `windows-host.md` §5.7·§8, `obs-setup.md` §1·§6 | met (리뷰 round 2·3에서 고침) | 아래 "문서 변경". §5.7은 두 번 과장했다 — round 1까지는 "목록과 삭제 사이의 창을 닫는다"(`78983f4`에서 고침), round 2까지는 "남는 창은 후보 realpath→`unlink` 하나뿐이고 루트 교체는 막힌다"(round 3에서 틀렸음이 재현됨). 지금은 4단계 절차와 함께 **보장하는 것 / 보장하지 못하는 것**을 목록으로 나열한다 |
 | 10 | `private` → public 정정 | met | `CLAUDE.md` §2, `docs/runbooks/agent-orchestration.md` 머리말·0장 표, `docs/tasks/TASK_SPECS.md` 공통 규약 머리말 |
-| 11 | 게이트 5개 + PR CI 녹색 | met | T17b(PR #23)가 `b414970`으로 머지된 뒤 rebase해서 둘 다 녹색이다. 로컬 게이트 5개 전부 통과(`1896 passed | 1 skipped`), PR CI [run 32107232734](https://github.com/dnhynk/vertical-live/actions/runs/32107232734) **pass**. 아래 "Rebase onto T17b" 참조 |
+| 11 | 게이트 5개 + PR CI 녹색 | met | round 3 고침 후 rebase(base `422a11f`) → 로컬 게이트 5개 전부 통과(`Test Files 138 passed`, `Tests 1909 passed | 1 skipped`), PR CI [run 32119405164](https://github.com/dnhynk/vertical-live/actions/runs/32119405164) **pass**(head `f824225`). 라운드별 이력은 아래 "Rebase onto T17b"·`## Review round 1·2·3` |
 
 ### 문서 변경
 
@@ -360,6 +360,21 @@ AssertionError: expected 1 to be +0        // result.sentinelCleared
 ```
 
 리뷰어가 본 `sentinelCleared: 1`이 그대로 나온다(같은 실행에서 `outside\run_1234`는 실제로 삭제된다 — 그 단언은 바로 다음 줄이다). 고친 코드에서는 35건 전부 통과한다. 실험 뒤 코드는 원래대로 되돌렸다(`cp /tmp/process.ts.bak`).
+
+### 게이트 재실행 (round 3 고침 후)
+
+`git fetch origin && git rebase origin/main`(base `422a11f`, 충돌 없음) 후 5개를 돌렸다.
+
+```text
+$ npm run format:check   → All matched files use Prettier code style!
+$ npm run lint           → eslint exit 0; legacy imports 0; install scripts 4 reviewed
+$ npm run typecheck      → tsc --build tsconfig.json, exit 0
+$ npm run test           → Test Files 138 passed (138)
+                           Tests 1909 passed | 1 skipped (1910)
+$ npm run build          → contract schema up to date, renderer/server/simulator/soak 빌드, exit 0
+```
+
+push는 `--force-with-lease`(`1f536e1...f824225`). PR CI [run 32119405164](https://github.com/dnhynk/vertical-live/actions/runs/32119405164) **pass** — head `f824225`, job `ci` 2m9s 성공. 그 뒤에 붙는 것은 이 CI 결과를 적어 넣는 문서 커밋 하나뿐이고, 그 head에서도 CI를 다시 돌려 녹색을 확인했다(worker_done에 run URL).
 
 ## Not done / out of scope
 
