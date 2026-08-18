@@ -124,7 +124,7 @@ environment when no provider is injected`가 **이 Windows 호스트에서만** 
 | # | 기준 | 상태(met/unmet/unverifiable) | 근거(테스트 파일·명령·출력) |
 |---|---|---|---|
 | 1 | 로컬 게이트 5개 통과 | met | 아래 Gates 블록. `npm run test` → `138 passed (138)`, `1884 passed · 1 skipped (1885)`, exit 0 |
-| 2 | PR의 GitHub Actions run 녹색(test 이후 build·soak:ci 포함) | met | PR #23 head `3f8f211` run 32101772379 **success** — 10개 step 전부 success(`npm ci`·format:check·lint·typecheck·test·build·**soak:ci**). https://github.com/dnhynk/vertical-live/actions/runs/32101772379 |
+| 2 | PR의 GitHub Actions run 녹색(test 이후 build·soak:ci 포함) | met | 아래 "GitHub Actions" 표. 코드 커밋 `3f8f211`의 run 32101772379가 10개 step 전부 success(`npm ci`·format:check·lint·typecheck·test·build·**soak:ci**). 이후 커밋은 이 티켓 문서뿐이며 그 run도 success다 — 최신 상태는 `gh pr checks 23` |
 | 3 | 같은 부류의 다른 사용처를 전수 조사하고 목록을 남겼다 | met | 위 "조사 결과" 표 14행(변경 4곳 / 변경 없음 10곳), `sep` 0건, `process.platform` 1건 |
 
 ### Gates (executed)
@@ -155,7 +155,8 @@ $ npx vitest run apps/server/src/obs/client.test.ts
 |---|---|---|
 | [32074894450](https://github.com/dnhynk/vertical-live/actions/runs/32074894450) | main `06542ff` (수정 전) | **failure** — `npm run test` 3 failed |
 | [32101426867](https://github.com/dnhynk/vertical-live/actions/runs/32101426867) | `75d4995` (경로 수정) | **success** — build·soak:ci 포함 (ubuntu에서 처음 실행) |
-| [32101772379](https://github.com/dnhynk/vertical-live/actions/runs/32101772379) | `3f8f211` (head) | **success** — 10 step 전부 success |
+| [32101772379](https://github.com/dnhynk/vertical-live/actions/runs/32101772379) | `3f8f211` (마지막 코드 커밋) | **success** — 10 step 전부 success |
+| [32102043923](https://github.com/dnhynk/vertical-live/actions/runs/32102043923) | `50e5d9b` (티켓 문서만) | **success** |
 
 `build`·`soak:ci`는 PR #18에서 추가된 뒤 E-5로 한 번도 ubuntu에서 돈 적이 없었다. 이번에 처음 돌았고
 둘 다 통과했으므로 추가 수정은 필요 없었다.
