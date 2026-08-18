@@ -86,8 +86,45 @@
 
 단위 테스트는 `ObsSentinelFs`를 주입하므로 실제 `readdirSync`/`rmSync` 구현은 따로 확인했다. 빌드 산출물(`apps/server/dist`)의 `ObsProcessLauncher`에 진짜 fs 구현을 쓰게 하고 spawn만 가짜로 둔 스크립트:
 
+```js
+// 저장소 밖(임시 디렉터리)에서 돌린 일회용 확인 스크립트. 산출물을 커밋하지 않았으므로 그대로 옮겨 둔다.
+import { mkdtempSync, writeFileSync, mkdirSync, readdirSync, existsSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { ObsProcessLauncher } from './apps/server/dist/obs/process.js'
+
+const dir = join(mkdtempSync(join(tmpdir(), 'vl-sentinel-')), '.sentinel')
+mkdirSync(dir)
+writeFileSync(join(dir, 'run_1234'), '')
+writeFileSync(join(dir, 'run_5678'), '')
+mkdirSync(join(dir, 'nested')) // 하위 디렉터리는 건드리지 않는 것을 같이 본다
+
+const config = {
+  enabled: true,
+  executablePath: String.raw`C:\Program Files\obs-studio\bin\64bit\obs64.exe`,
+  profile: 'vertical-live',
+  sceneCollection: 'vertical-live',
+  extraArgs: [],
+  sentinelDir: dir,
+}
+const logger = { debug() {}, info: (m, f) => console.log('INFO ', m, JSON.stringify(f)), warn: (m, f) => console.log('WARN ', m, JSON.stringify(f)), error() {} }
+const launcher = new ObsProcessLauncher({
+  config,
+  spawner: { spawn: () => ({ pid: 1234, unref() {} }) }, // 실제 OBS는 띄우지 않는다
+  probe: { running: () => false },
+  exists: () => true,
+  logger,
+})
+
+console.log('before:', readdirSync(dir))
+const result = launcher.launch()
+console.log('after :', readdirSync(dir), '| directory still exists:', existsSync(dir))
+console.log('sentinelCleared =', result.sentinelCleared, '| sentinelFailure =', result.sentinelFailure)
+console.log('second launch sentinelCleared =', launcher.launch().sentinelCleared)
+```
+
 ```text
-$ node scratchpad/sentinel-check.mjs
+$ npm run build && node <위 스크립트>
 before: [ 'nested', 'run_1234', 'run_5678' ]
 INFO  obs.sentinel_cleared {"dir":"C:\Users\dongh\AppData\Local\Temp\vl-sentinel-vaMgHX\.sentinel","cleared":2}
 INFO  obs process launched {"pid":1234,"profile":"vertical-live","collection":"vertical-live"}
@@ -123,6 +160,24 @@ $ git stash pop
 ```
 
 원인은 BOARD E-5·T17b에 적힌 대로 이 테스트가 호스트 vault 상태에 의존하기 때문이고(E-3에서 이 호스트의 Credential Manager에 `obs.websocketPassword`가 들어갔다), **T17b(PR #23, 브랜치 `dnhynk/t17b-ci-path-semantics`)가 고치는 중**이다. T17b가 머지되면 rebase해서 게이트와 PR CI를 다시 돌린다.
+
+### PR CI (2026-08-18)
+
+PR [#24](https://github.com/dnhynk/vertical-live/pull/24)의 첫 CI는 **fail**이다: [run 32103525944](https://github.com/dnhynk/vertical-live/actions/runs/32103525944). 실패 3건은 전부 T17b가 고치는 ubuntu 경로 의미론 문제이고 이 브랜치가 만든 것이 아니다.
+
+```text
+Test Files  2 failed | 136 passed (138)
+     Tests  3 failed | 1892 passed | 2 skipped (1897)
+
+FAIL apps/server/src/obs/process.test.ts > ObsProcessLauncher > runs OBS from its own directory so it finds its data
+  AssertionError: expected '.' to be 'C:\Program Files\obs-studio\bin\64bit'
+FAIL apps/server/src/ops/ops-config.test.ts > describeOpsConfig > describes the shipped defaults
+  AssertionError: expected { …(5) } to match object { …(4) }
+FAIL apps/server/src/ops/ops-config.test.ts > describeOpsConfig > honours VL_OBS_EXECUTABLE and reports the name the port owner should have
+  AssertionError: expected 'D:\obs\bin\obs64.exe' to be 'obs64.exe'
+```
+
+셋 다 posix 호스트에서 `dirname`/`basename`을 Windows 경로에 쓴 결과다(`'.'`, 경로 전체). BOARD E-5가 기록한 main의 ubuntu 실패 3건과 같은 목록이며, 내가 추가한 sentinel 테스트는 CI에서 전부 통과했다(`ops-config`는 sentinel을 읽지도 않는다: `rg sentinel apps/server/src/ops/` 0건). 로컬 Windows에서는 이 3건이 통과하고 대신 `client.test.ts` 1건이 호스트 vault 때문에 실패한다 — 같은 T17b가 함께 고친다.
 
 **CI 대기 중**: PR을 연 시점(2026-08-18)에 #23은 OPEN이었다. 내가 건드린 `apps/server/src/obs/process.ts`는 T17b도 손대는 파일(`dirname` → `win32.dirname`)이라 rebase에서 충돌 가능성이 있고, 그때는 T17b의 의미론(Windows 경로는 `path.win32`)을 그대로 살린다 — 이번 PR의 `resolveSentinelDir()`도 같은 이유로 `win32.join`을 쓴다.
 
