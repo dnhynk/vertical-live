@@ -18,7 +18,15 @@ if (dryRun) {
 } else {
   try {
     const result = launcher.launch()
-    process.stdout.write(`obs launched: pid ${String(result.pid)}\n`)
+    // The sentinel count lands in `data\ops\logs\autostart-*.log` through this
+    // line: the autostart path has no structured logger, and BOARD D-7 asks for
+    // the number to be recorded wherever OBS is started from.
+    process.stdout.write(
+      `obs launched: pid ${String(result.pid)} (crash sentinels cleared: ${String(result.sentinelCleared)})\n`,
+    )
+    if (result.sentinelFailure !== null) {
+      process.stderr.write(`obs sentinel clearing incomplete: ${result.sentinelFailure}\n`)
+    }
   } catch (error) {
     const reason = error instanceof ObsProcessError ? error.reason : 'error'
     process.stderr.write(`obs launch refused (${reason}): ${(error as Error).message}\n`)

@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process'
 import { execFileSync } from 'node:child_process'
-import { existsSync } from 'node:fs'
-import { win32 as winPath } from 'node:path'
+import { existsSync, readdirSync, rmSync } from 'node:fs'
+import { join, win32 as winPath } from 'node:path'
 
 import { silentLogger, type Logger } from '../secrets/redaction.js'
 import type { ObsProcessConfig } from './config.js'
@@ -36,6 +36,14 @@ import type { ObsProcessConfig } from './config.js'
  * backslash is an ordinary character: `dirname` of the shipped default answers
  * `'.'` there, which would launch OBS from the wrong working directory. Same
  * result on this Windows host, defined everywhere else.
+ *
+ * One thing it does besides spawning: it empties OBS's crash-sentinel directory
+ * first (BOARD D-7). A sentinel file left by a crash makes the next start offer
+ * Safe Mode, and Safe Mode disables obs-websocket — an unattended host would sit
+ * on a modal dialog with the control path switched off. Both launch paths go
+ * through here, so that is one place rather than two. The caveat is in
+ * `docs/ops/windows-host.md` 5.7: this is **not** a documented OBS procedure,
+ * and it hides the crash marker rather than the crash.
  */
 
 export class ObsProcessError extends Error {
@@ -93,11 +101,36 @@ export const tasklistObsProcessProbe: ObsProcessProbe = {
   },
 }
 
+/**
+ * The two file operations the sentinel clearing needs, injected so the policy is
+ * testable without a real `%APPDATA%`. Names rather than paths cross this
+ * boundary: joining them is the implementation's business, and a Windows path
+ * must not be assembled with the test host's separator (T17b).
+ */
+export interface ObsSentinelFs {
+  /** File names directly inside `dir`. Throws `ENOENT` when `dir` is absent. */
+  list(dir: string): readonly string[]
+  /** Removes one entry of `dir` by name. */
+  remove(dir: string, name: string): void
+}
+
+/** Files only: the directory itself stays, and so does anything nested in it. */
+export const nodeObsSentinelFs: ObsSentinelFs = {
+  list: (dir) =>
+    readdirSync(dir, { withFileTypes: true })
+      .filter((entry) => entry.isFile())
+      .map((entry) => entry.name),
+  remove: (dir, name) => {
+    rmSync(join(dir, name))
+  },
+}
+
 export interface ObsProcessLauncherOptions {
   readonly config: ObsProcessConfig
   readonly spawner?: ObsProcessSpawner
   readonly probe?: ObsProcessProbe
   readonly exists?: (path: string) => boolean
+  readonly sentinel?: ObsSentinelFs
   readonly logger?: Logger
 }
 
@@ -109,6 +142,20 @@ export interface ObsLaunchPlan {
 
 export interface ObsLaunchResult extends ObsLaunchPlan {
   readonly pid: number
+  /**
+   * Files removed from `obs.process.sentinelDir` immediately before the spawn
+   * (BOARD D-7). Above zero means the previous OBS did not exit cleanly, so a
+   * count that stays above zero launch after launch *is* the crash loop — the
+   * clearing hides the dialog, not the fault (`docs/ops/windows-host.md` 5.7).
+   */
+  readonly sentinelCleared: number
+  /**
+   * Why the clearing did not finish (an EACCES on a file, an unreadable
+   * directory), or null when nothing went wrong. A failure here never fails the
+   * launch: OBS then behaves as it did before D-7 — the dialog appears, the
+   * start-up step waits for a port that never opens and records the failure.
+   */
+  readonly sentinelFailure: string | null
 }
 
 export class ObsProcessLauncher {
@@ -116,6 +163,7 @@ export class ObsProcessLauncher {
   readonly #spawner: ObsProcessSpawner
   readonly #probe: ObsProcessProbe
   readonly #exists: (path: string) => boolean
+  readonly #sentinel: ObsSentinelFs
   readonly #logger: Logger
 
   constructor(options: ObsProcessLauncherOptions) {
@@ -123,6 +171,7 @@ export class ObsProcessLauncher {
     this.#spawner = options.spawner ?? nodeObsProcessSpawner
     this.#probe = options.probe ?? tasklistObsProcessProbe
     this.#exists = options.exists ?? ((path) => existsSync(path))
+    this.#sentinel = options.sentinel ?? nodeObsSentinelFs
     this.#logger = options.logger ?? silentLogger
   }
 
@@ -169,6 +218,10 @@ export class ObsProcessLauncher {
       )
     }
 
+    // Last thing before the spawn, and only once every refusal above has passed:
+    // there is no reason to touch OBS's files on a launch that is not happening.
+    const sentinel = this.#clearSentinel()
+
     const child = this.#spawner.spawn(plan.command, plan.args, plan.cwd)
     if (child.pid === undefined) {
       throw new ObsProcessError('spawn_failed', `spawning ${plan.command} produced no pid`)
@@ -179,6 +232,63 @@ export class ObsProcessLauncher {
       profile: this.#config.profile,
       collection: this.#config.sceneCollection,
     })
-    return { ...plan, pid: child.pid }
+    return {
+      ...plan,
+      pid: child.pid,
+      sentinelCleared: sentinel.cleared,
+      sentinelFailure: sentinel.failure,
+    }
   }
+
+  /**
+   * Empties `obs.process.sentinelDir` (BOARD D-7). Never throws: every outcome
+   * — nothing configured, no directory on disk, a file that will not go — still
+   * launches OBS, because the fallback for a sentinel that survives is the
+   * behaviour we had before D-7, not a host that refuses to start.
+   *
+   * The count is logged only when something was actually removed: an ordinary
+   * start has nothing to say, while a run of non-zero counts is the evidence
+   * that OBS keeps crashing behind the cleared marker.
+   */
+  #clearSentinel(): { readonly cleared: number; readonly failure: string | null } {
+    const dir = this.#config.sentinelDir
+    if (dir === '') return { cleared: 0, failure: null }
+
+    let names: readonly string[]
+    try {
+      names = this.#sentinel.list(dir)
+    } catch (error) {
+      // No directory at all is the normal state of a host that has never
+      // crashed, not a fault.
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        return { cleared: 0, failure: null }
+      }
+      const failure = describeError(error)
+      this.#logger.warn('obs.sentinel_clear_failed', { dir, cleared: 0, error: failure })
+      return { cleared: 0, failure }
+    }
+
+    let cleared = 0
+    let failure: string | null = null
+    for (const name of names) {
+      try {
+        this.#sentinel.remove(dir, name)
+        cleared += 1
+      } catch (error) {
+        // Keep going: one locked file must not leave the others behind.
+        failure ??= describeError(error)
+      }
+    }
+    if (failure !== null) {
+      this.#logger.warn('obs.sentinel_clear_failed', { dir, cleared, error: failure })
+    }
+    if (cleared > 0) {
+      this.#logger.info('obs.sentinel_cleared', { dir, cleared })
+    }
+    return { cleared, failure }
+  }
+}
+
+function describeError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
 }

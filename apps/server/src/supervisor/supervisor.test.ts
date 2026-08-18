@@ -723,6 +723,26 @@ describe('supervisor state machine', () => {
       await Promise.resolve()
     })
 
+    it('puts what a restart action recorded on the health document (BOARD D-7)', () => {
+      // How the OBS launcher's crash-sentinel count reaches `/health`: the
+      // `obs-process` action in `main.ts` calls this after `launch()` returns.
+      const harness = createSupervisorHarness()
+
+      harness.supervisor.noteComponent('obs-process', 'sentinel_cleared=1')
+
+      const obsProcess = harness.supervisor
+        .health()
+        .components.find((entry) => entry.component === 'obs-process')
+      expect(obsProcess?.lastNote).toBe('sentinel_cleared=1')
+      // It belongs to that component only; nothing else grows a note.
+      expect(
+        harness.supervisor
+          .health()
+          .components.filter((entry) => entry.lastNote !== null)
+          .map((entry) => entry.component),
+      ).toEqual(['obs-process'])
+    })
+
     it('gives every component an attempt budget so exhaustion can happen', () => {
       const harness = createSupervisorHarness()
 

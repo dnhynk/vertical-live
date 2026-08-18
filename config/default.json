@@ -95,7 +95,8 @@
       "executablePath": "C:\\Program Files\\obs-studio\\bin\\64bit\\obs64.exe",
       "profile": "vertical-live",
       "sceneCollection": "vertical-live",
-      "extraArgs": ["--disable-updater", "--disable-missing-files-check"]
+      "extraArgs": ["--disable-updater", "--disable-missing-files-check"],
+      "sentinelDir": ""
     },
     "provisional": [
       "pollIntervalMs",

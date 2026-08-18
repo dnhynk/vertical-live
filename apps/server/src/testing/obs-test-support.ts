@@ -31,6 +31,7 @@ export function testObsConfig(url: string, overrides: Partial<ObsConfig> = {}): 
       profile: 'vertical-live',
       sceneCollection: 'vertical-live',
       extraArgs: [],
+      sentinelDir: '',
     },
     provisional: [],
     ...overrides,

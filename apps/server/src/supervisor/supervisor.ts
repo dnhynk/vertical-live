@@ -423,6 +423,18 @@ export class Supervisor {
     return this.registry.all().map((supervisor) => supervisor.health())
   }
 
+  /**
+   * Lets a restart action record something about the attempt it just made, so it
+   * reaches `/health` (`components[].lastNote`). Restart actions return `void`,
+   * which is what keeps the supervisor out of every component's business; this
+   * is the narrow exception D-7 needs — the OBS launcher clearing crash
+   * sentinels has to be visible, and inventing a health family for it would
+   * feed the §9.2 transition table something that is not a fault.
+   */
+  noteComponent(component: SupervisedComponent, note: string): void {
+    this.registry.get(component)?.note(note)
+  }
+
   // ------------------------------------------------------------- internals
 
   #registerComponents(): void {

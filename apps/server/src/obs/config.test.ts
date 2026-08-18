@@ -40,6 +40,9 @@ const validSection = {
     profile: 'vertical-live',
     sceneCollection: 'vertical-live',
     extraArgs: [],
+    // "" means "derive it from APPDATA" (BOARD D-7). The key itself is required
+    // like every other one, so an upgraded host config cannot lose it silently.
+    sentinelDir: '',
   },
   provisional: ['pollIntervalMs'],
 }
