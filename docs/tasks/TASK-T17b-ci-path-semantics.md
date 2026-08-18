@@ -62,23 +62,38 @@ ubuntu runner(posix)에서는 `\`가 평범한 문자라 `dirname` → `'.'`, `b
 
 ### 조사 결과 — `apps/server/src/{obs,ops,bin,supervisor}`의 경로 함수 전수 목록
 
-| 파일:줄 | 호출 | 대상 값의 부류 | 조치 |
-|---|---|---|---|
-| `obs/process.ts:72` | `basename(executablePath)` | 계약상 Windows(`obs.process.executablePath`) | **win32로 변경** (호출은 `process.platform !== 'win32'` 가드 뒤라 런타임 동작은 이미 옳았지만, 값의 의미론을 가드가 아니라 호출이 정하게 한다) |
-| `obs/process.ts:140` | `dirname(this.#config.executablePath)` | 계약상 Windows | **win32로 변경** — CI 실패 (1) |
-| `obs/process.ts:161` | `basename(plan.command)` | 계약상 Windows | **win32로 변경** (오류 문구용. posix 호스트에서는 전체 경로가 찍혔다) |
-| `ops/ops-config.ts:91` | `basename(obs.process.executablePath)` | 계약상 Windows | **win32로 변경** — CI 실패 (2)(3) |
-| `ops/ops-config.ts:74` | `resolve(dirname(configPath), '..')` | 호스트 네이티브(repo 경로, `fileURLToPath`) | 변경 없음 |
-| `ops/archive/sweep.ts:10` | `isAbsolute/join/relative/resolve` | 호스트 네이티브(archive root, config 값은 `data/archive/recordings` 같은 상대 경로 → cwd 기준) | 변경 없음 |
-| `ops/static-server.ts:3` | `isAbsolute/join/relative/resolve` | 호스트 네이티브(`renderer.staticDir`) | 변경 없음 |
-| `bin/serve-renderer.ts:2` | `resolve` | 호스트 네이티브 | 변경 없음 |
-| `supervisor/kill-switch.ts:122` | `mkdirSync(dirname(path))` | 호스트 네이티브(실제 파일시스템 경로) | 변경 없음 |
-| `supervisor/screenshot.ts:2` | `join/resolve` | 호스트 네이티브(진단 디렉터리) | 변경 없음 |
-| `obs/config.test.ts:3`, `obs/profile.test.ts:2`, `ops/archive/config.test.ts:3`, `ops/archive/sweep.test.ts:11`, `ops/static-server.test.ts:3`, `supervisor/config.test.ts:3` | `join/resolve` | 호스트 네이티브(tmp 디렉터리) | 변경 없음 |
-| `obs/process.test.ts:1,57` | `dirname(config.executablePath)` | 계약상 Windows | **리터럴 기대값으로 교체** — 프로덕션과 같은 함수로 기대값을 만들면 결함을 못 잡는다 |
+**12행 / 14개 파일**(한 행이 여러 파일을 묶은 곳이 있다: `obs/process.ts` 3행·`ops/ops-config.ts` 2행,
+tmp 디렉터리를 쓰는 테스트 6파일이 1행). anchor는 줄 번호가 아니라 **심볼 이름**이다 — 이 PR의 diff가
+줄 번호를 옮기기 때문이고, 심볼은 `rg`로 그대로 재현된다(재현 명령은 표 아래).
 
-`sep`·`process.platform` 사용처: `obs/process.ts:71`의 `process.platform !== 'win32'` 가드 1건뿐(그대로 둔다.
-tasklist는 Windows 전용 명령이라 플랫폼 분기가 맞다). `node:path`의 `sep` 사용 0건.
+| 파일 · 심볼 | 호출 | 대상 값의 부류 | 조치 |
+|---|---|---|---|
+| `obs/process.ts` · `tasklistObsProcessProbe.running` | `basename(executablePath)` | 계약상 Windows(`obs.process.executablePath`) | **win32로 변경** (호출은 `process.platform !== 'win32'` 가드 뒤라 런타임 동작은 이미 옳았지만, 값의 의미론을 가드가 아니라 호출이 정하게 한다) |
+| `obs/process.ts` · `ObsProcessLauncher.plan()` | `dirname(this.#config.executablePath)` | 계약상 Windows | **win32로 변경** — CI 실패 (1) |
+| `obs/process.ts` · `ObsProcessLauncher.launch()`의 `already_running` 메시지 | `basename(plan.command)` | 계약상 Windows | **win32로 변경** (오류 문구용. posix 호스트에서는 전체 경로가 찍혔다) |
+| `ops/ops-config.ts` · `describeOpsConfig()` → `obs.executableName` | `basename(obs.process.executablePath)` | 계약상 Windows | **win32로 변경** — CI 실패 (2)(3) |
+| `ops/ops-config.ts` · `describeOpsConfig()` → `repoRoot` | `resolve(dirname(configPath), '..')` | 호스트 네이티브(repo 경로, `fileURLToPath`) | 변경 없음 |
+| `ops/archive/sweep.ts` · `node:path` import(파일 전역) | `isAbsolute/join/relative/resolve` | 호스트 네이티브(archive root, config 값은 `data/archive/recordings` 같은 상대 경로 → cwd 기준) | 변경 없음 |
+| `ops/static-server.ts` · `node:path` import | `isAbsolute/join/relative/resolve` | 호스트 네이티브(`renderer.staticDir`) | 변경 없음 |
+| `bin/serve-renderer.ts` · `node:path` import | `resolve` | 호스트 네이티브 | 변경 없음 |
+| `supervisor/kill-switch.ts` · `nodeKillSwitchFs.write` | `mkdirSync(dirname(path))` | 호스트 네이티브(실제 파일시스템 경로) | 변경 없음 |
+| `supervisor/screenshot.ts` · `node:path` import | `join/resolve` | 호스트 네이티브(진단 디렉터리) | 변경 없음 |
+| `obs/config.test.ts`, `obs/profile.test.ts`, `ops/archive/config.test.ts`, `ops/archive/sweep.test.ts`, `ops/static-server.test.ts`, `supervisor/config.test.ts` (각 `node:path` import) | `join/resolve` | 호스트 네이티브(tmp 디렉터리) | 변경 없음 |
+| `obs/process.test.ts` · `ObsProcessLauncher > launches with the documented profile and collection parameters` | `dirname(config.executablePath)` (기대값 계산) | 계약상 Windows | **리터럴 기대값으로 교체** — 프로덕션과 같은 함수로 기대값을 만들면 결함을 못 잡는다. 파일 첫 줄의 `node:path` import도 함께 사라졌다 |
+
+재현 명령(위 4개 디렉터리 전수). 첫 명령이 호출부 8건(표의 계약상 Windows 4 + 호스트 네이티브 2 +
+`process.platform` 가드 1 + `process.test.ts`의 주석 1)을 내고, 둘째 명령이 `node:path`를 import하는
+13개 파일을 낸다 — 표의 14번째 파일 `obs/process.test.ts`는 이 PR이 그 import를 지웠기 때문에 둘째
+목록에 없다(13 + 1 = 14):
+
+```text
+$ rg -n "basename\(|dirname\(|\bsep\b|process\.platform" apps/server/src/{obs,ops,bin,supervisor}
+$ rg -n "from 'node:path'" apps/server/src/{obs,ops,bin,supervisor}
+```
+
+`sep`·`process.platform` 사용처: `obs/process.ts`의 `tasklistObsProcessProbe.running` 첫 줄
+`if (process.platform !== 'win32') return false` 1건뿐(그대로 둔다. tasklist는 Windows 전용 명령이라
+플랫폼 분기가 맞다). `node:path`의 `sep` 사용 0건.
 
 ### 가설 검증 관측 (호스트 Windows 11, Node 24.11.1)
 
@@ -125,7 +140,7 @@ environment when no provider is injected`가 **이 Windows 호스트에서만** 
 |---|---|---|---|
 | 1 | 로컬 게이트 5개 통과 | met | 아래 Gates 블록. `npm run test` → `138 passed (138)`, `1884 passed · 1 skipped (1885)`, exit 0 |
 | 2 | PR의 GitHub Actions run 녹색(test 이후 build·soak:ci 포함) | met | 아래 "GitHub Actions" 표. 코드 커밋 `3f8f211`의 run 32101772379가 10개 step 전부 success(`npm ci`·format:check·lint·typecheck·test·build·**soak:ci**). 이후 커밋은 이 티켓 문서뿐이며 그 run도 success다 — 최신 상태는 `gh pr checks 23` |
-| 3 | 같은 부류의 다른 사용처를 전수 조사하고 목록을 남겼다 | met | 위 "조사 결과" 표 14행(변경 4곳 / 변경 없음 10곳), `sep` 0건, `process.platform` 1건 |
+| 3 | 같은 부류의 다른 사용처를 전수 조사하고 목록을 남겼다 | met | 위 "조사 결과" 표 **12행 / 14개 파일**. 고친 곳 5(프로덕션 호출 4 + 테스트 기대값 1) = 파일 3개(`obs/process.ts`·`ops/ops-config.ts`·`obs/process.test.ts`). 변경 없음 7행 — 그중 `ops/ops-config.ts`의 `repoRoot`는 위 3개와 겹치므로 여기서 새로 등장하는 파일은 11개(3 + 11 = 14). `sep` 0건, `process.platform` 1건 |
 
 ### Gates (executed)
 
@@ -174,3 +189,43 @@ Windows 호스트에서는 수정 전에도 통과했으므로 로컬로는 재�
 ## Follow-ups
 
 - 없음. (부수 발견의 `obs/client.test.ts`는 코디네이터 답 A에 따라 이 PR에서 처리했다.)
+
+## Review round 1
+
+리뷰: PR #23 리뷰 코멘트(verdict `request_changes`, 인코딩 정정본). 리뷰어는 게이트 5개(+`npm ci`)를
+직접 실행해 전부 pass를 확인했고, 합격 기준 1·2와 win32 호출 4곳·`sep` 0건·`process.platform` 1건을
+독립적으로 재현했으며, 환경 비밀번호를 실제로 주입하는 negative probe로 `client.test.ts` 단언이
+동어반복이 아님도 확인했다. blocker·major 0건, minor 1건.
+
+| finding | 처리(고침 SHA / 반박 근거) |
+|---|---|
+| [minor] `docs/tasks/TASK-T17b-ci-path-semantics.md` — Result/합격 기준 3이 조사표를 "14행"이라 했지만 실제는 **12행(14파일)**이고, 줄 번호 anchor가 현재 코드와 어긋난다(`obs/process.ts:72/140/161` → `:79/:147/:168`, `ops/ops-config.ts:91` → `:96`, `obs/process.test.ts:1,57` → `:55`/`:58`). 재현 가능한 evidence가 아니다 | **고침(이 커밋, 문서만).** (1) 표 앞에 **"12행 / 14개 파일"**과 왜 행≠파일인지(`obs/process.ts` 3행·`ops/ops-config.ts` 2행, tmp 테스트 6파일이 1행)를 명시. (2) anchor를 줄 번호에서 **심볼 이름**으로 교체 — 줄 번호는 이 PR의 diff가 옮기므로 애초에 안정적인 anchor가 아니다. `tasklistObsProcessProbe.running` / `ObsProcessLauncher.plan()` / `ObsProcessLauncher.launch()`의 `already_running` 메시지 / `describeOpsConfig()`의 `obs.executableName`·`repoRoot` / `nodeKillSwitchFs.write` / `ObsProcessLauncher > launches with the documented profile and collection parameters`, 나머지는 파일별 `node:path` import. (3) 표 아래에 **재현 `rg` 명령 2개**를 넣고 각 명령이 몇 건을 내는지 적었다(아래 실행 출력). (4) 합격 기준 3의 근거를 "표 14행(변경 4곳 / 변경 없음 10곳)" → "12행 / 14개 파일, 고친 곳 5(프로덕션 호출 4 + 테스트 기대값 1 = 파일 3개), 변경 없음 7행(11파일)"로 정정. 리뷰어가 지적한 줄 번호는 전부 이 호스트에서 재확인했다(`:79/:147/:168`, `:96`, `:55`/`:58` 모두 일치). 코드 변경 없음 |
+
+### 재현 출력 (round 2, 이 호스트)
+
+```text
+$ rg -n "basename\(|dirname\(|\bsep\b|process\.platform" apps/server/src/{obs,ops,bin,supervisor}
+apps/server/src/ops\ops-config.ts:79:    repoRoot: resolve(dirname(configPath), '..'),
+apps/server/src/ops\ops-config.ts:96:      executableName: winPath.basename(obs.process.executablePath),
+apps/server/src/obs\process.ts:78:    if (process.platform !== 'win32') return false
+apps/server/src/obs\process.ts:79:    const image = winPath.basename(executablePath)
+apps/server/src/obs\process.ts:147:      cwd: winPath.dirname(this.#config.executablePath),
+apps/server/src/obs\process.ts:168:        `${winPath.basename(plan.command)} is already running; ...`,
+apps/server/src/obs\process.test.ts:55:        // Literal, not `dirname(config.executablePath)`: computing the
+apps/server/src/supervisor\kill-switch.ts:122:    mkdirSync(dirname(path), { recursive: true })
+
+$ rg -n "from 'node:path'" apps/server/src/{obs,ops,bin,supervisor} | wc -l
+13          (+ obs/process.test.ts = 14개 파일; 이 PR이 그 파일의 import를 지웠다)
+```
+
+### Gates (round 2, 문서만 바뀌었지만 전부 재실행)
+
+```text
+$ npm run format:check    -> exit 0   All matched files use Prettier code style!
+$ npm run lint            -> exit 0   eslint + check-no-legacy-imports: ok (0) + check-install-scripts: ok (4 reviewed)
+$ npm run typecheck       -> exit 0   tsc --build tsconfig.json
+$ npm run test            -> exit 0   Test Files 138 passed (138) / Tests 1884 passed | 1 skipped (1885)
+$ npm run build           -> exit 0   tsc --build + copy-migrations(5) + data-map up to date
+```
+
+GitHub Actions: round 2 커밋의 run은 push 후 확인해 위 "GitHub Actions" 표에 추가했다(마지막 문서 커밋의 최신 상태는 `gh pr checks 23`).
