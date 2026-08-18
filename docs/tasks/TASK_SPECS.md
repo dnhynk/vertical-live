@@ -2,7 +2,7 @@
 
 > 정본: 제품 요구는 `docs/PROJECT_SPEC.md`(이하 "스펙")가 유일한 근거다. 이 문서는 스펙을 PR 단위 작업으로 나눈 것이며, 스펙과 충돌하면 스펙이 이긴다.
 > 절차: `docs/runbooks/agent-orchestration.md`. 상태: `docs/tasks/BOARD.md`.
-> 고정 결정(2026-08-16, 사용자 확정): TypeScript / Node 24 · SQLite · 이 Windows 11 PC가 1차 호스트 · Discord webhook 알림 · `dnhynk/vertical-live` private, `main`, squash merge만.
+> 고정 결정(2026-08-16, 사용자 확정): TypeScript / Node 24 · SQLite · 이 Windows 11 PC가 1차 호스트 · Discord webhook 알림 · `dnhynk/vertical-live` `main`, squash merge만(저장소는 2026-08-18 public으로 전환 — BOARD D-4).
 
 ## 공통 규약 (모든 task)
 

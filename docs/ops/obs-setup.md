@@ -17,10 +17,10 @@ OBS는 **합성·인코딩 장치**이며 게임 상태를 소유하지 않는�
 
 | 항목 | 값 | 상태 |
 |---|---|---|
-| OBS Studio | 32.0.2 (64-bit, windows) | **고정 버전 후보 — 사용자 승인 대기** |
-| obs-websocket | 5.6.3 (OBS 내장), RPC v1 | **고정 버전 후보 — 사용자 승인 대기** |
+| OBS Studio | 32.0.2 (64-bit, windows) | **고정**(BOARD D-6, 2026-08-18 사용자 승인) |
+| obs-websocket | 5.6.3 (OBS 내장), RPC v1 | **고정**(BOARD D-6, 2026-08-18 사용자 승인) |
 
-이 값은 1차 호스트(BOARD D-2, 이 Windows 11 PC)에 이미 설치된 것을 읽어 확인했다(`%APPDATA%\obs-studio\logs\*.txt`, `%APPDATA%\obs-studio\plugin_config\obs-websocket\config.json`, 2026-08-16 확인). 사용자가 고정 버전을 승인하면 이 표를 "고정"으로 바꾸고 BOARD에 기록한다.
+이 값은 1차 호스트(BOARD D-2, 이 Windows 11 PC)에 이미 설치된 것을 읽어 확인했고(`%APPDATA%\obs-studio\logs\*.txt`, `%APPDATA%\obs-studio\plugin_config\obs-websocket\config.json`, 2026-08-16 확인), 2026-08-18 실제 연결에서 `obsVersion 32.0.2` · `obsWebSocketVersion 5.6.3` · `negotiatedRpcVersion 1`로 재확인했다(§6). 버전을 올릴 때는 `docs/ops/windows-host.md` 5.6·5.7 절차로 다시 시험하고 이 표와 BOARD를 함께 고친다.
 
 **금지**: obs-websocket 4.x plugin을 따로 설치하지 않는다. OBS 28+ 는 obs-websocket 5를 내장하며, 4.x plugin은 protocol이 호환되지 않는다(스펙 §10.3). 서버 클라이언트는 RPC v1만 말하고, 서버가 다른 RPC 버전을 제시하면 연결을 **거부**한다(`apps/server/src/obs/client.ts`).
 
@@ -175,17 +175,25 @@ npm run obs:probe
 
 ## 6. 실제 OBS 스모크 상태
 
-**실제 OBS 스모크 실행하지 않았음: OBS 32.0.2 미실행·obs-websocket 5.6.3 `server_enabled=false`, 호스트 설정 변경은 범위 밖** (2026-08-17 코디네이터 결정 B, 런북 2.5(6): 호스트·계정 조작은 사용자 결정 영역).
+**통과(2026-08-18, 이 호스트, BOARD E-3).** 사용자 승인 아래 코디네이터가 §2를 수행하고(obs-websocket 서버 켬, 인증 필수, 4455; 비밀번호는 Windows Credential Manager의 `obs.websocketPassword`에만 있고 이 저장소·설정·로그·화면 어디에도 없다) `vertical-live` 프로파일·씬 컬렉션을 가져와 선택한 뒤 `npm run obs:probe`를 실행했다. 결과:
 
-대신 검증한 것:
+| 확인 | 값 |
+|---|---|
+| `obsVersion` / `obsWebSocketVersion` / `negotiatedRpcVersion` | 32.0.2 / 5.6.3 / 1 |
+| 출력 해상도·프레임레이트 | `matches 1080x1920@30 yes` (프로파일이 실제로 적용됐다) |
+| 씬 | `standby`, `live` |
+| Browser Source | `vertical-live-renderer` |
+| 건강 신호 4개 | `obs.stream` = degraded(`output_inactive`), `obs.output_progress` = unknown(`output_inactive`), `obs.frames` = **ok**, `obs.congestion` = unknown(`output_inactive`) |
+
+그 전까지 검증한 것(계속 유효하며 CI에서 도는 것은 이쪽이다):
 
 - 가짜 obs-websocket v5 서버(핸드셰이크·인증·요청/응답·이벤트·강제 종료를 wire protocol 수준에서 구현)에 대한 자동 테스트
 - 같은 가짜 서버를 상대로 `npm run obs:probe -- --fake`를 **실제 실행**(출력은 `docs/tasks/TASK-T2-obs-monitor.md`)
 - `ops/obs/`의 프로파일·씬 파일 값을 [S26][S27]·services.json과 대조하는 테스트
 
-사용자가 §2를 수행해 WebSocket 서버를 켠 뒤 `npm run obs:probe`를 돌리면 이 항목이 닫힌다. 그 출력에서 확인할 것:
+프로파일이나 OBS 버전을 바꾼 뒤 다시 확인할 때 볼 것:
 
 1. `negotiatedRpcVersion` = 1
 2. `matches 1080x1920@30` = `yes` (프로파일이 실제로 적용됐다는 뜻)
 3. `browser sources`에 `vertical-live-renderer`가 있다
-4. 건강 신호 4개(`obs.stream`, `obs.output_progress`, `obs.frames`, `obs.congestion`)가 나온다. 방송 전이라면 `obs.stream`은 `degraded (output_inactive)`, 나머지는 `unknown (output_inactive)`가 정상이다
+4. 건강 신호 4개(`obs.stream`, `obs.output_progress`, `obs.frames`, `obs.congestion`)가 나온다. 방송 전이라면 `obs.stream`은 `degraded (output_inactive)`이고, `obs.output_progress`·`obs.congestion`은 송출 통계가 없으므로 `unknown (output_inactive)`다. **`obs.frames`는 송출 전에도 `ok`다** — 이 신호는 `GetStats`의 output/render 프레임 카운터 증분을 보는데(`apps/server/src/obs/health.ts`), 송출이 없어도 OBS는 계속 렌더하므로 render 카운터가 늘고 skip 비율이 임계값 아래면 `ok`가 된다. 2026-08-18 관측으로 정정한 문구다(그전에는 "나머지는 unknown"이라고 적혀 있었다).

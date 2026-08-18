@@ -12,7 +12,7 @@
 
 ## 2. 고정 결정
 
-TypeScript / Node 24 / npm workspaces · SQLite(better-sqlite3) · React + React Three Fiber 렌더러 · vitest · 1차 호스트 Windows 11(OBS Studio) · 알림 Discord webhook · GitHub `dnhynk/vertical-live`(private, `main`, squash merge만).
+TypeScript / Node 24 / npm workspaces · SQLite(better-sqlite3) · React + React Three Fiber 렌더러 · vitest · 1차 호스트 Windows 11(OBS Studio) · 알림 Discord webhook · GitHub `dnhynk/vertical-live`(**public** — 2026-08-18 사용자 전환, BOARD D-4; `main`, squash merge만). 저장소가 공개이므로 비밀정보·개인정보는 티켓·PR·테스트 fixture에도 들어가지 않는다(3장의 vault 규칙이 그대로 강해진다).
 
 ## 3. 코드가 강제해야 하는 불변조건 (스펙 §2 요약 — 위반은 리뷰 blocker)
 

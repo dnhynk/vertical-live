@@ -3,7 +3,7 @@
 > 상태: 운영 중 (2026-08-16 시작)
 > 대상: 이 저장소를 구현하는 코디네이터(Claude, Orca Run 소유), worker(Claude), 리뷰어(Codex)
 > 정본: 작업 명세 `docs/tasks/TASK_SPECS.md`, 상태 `docs/tasks/BOARD.md`, 런타임 상태 Orca(`orca orchestration task-list --json`)
-> 저장소: `https://github.com/dnhynk/vertical-live` (private, 기본 브랜치 `main`, squash merge만, 머지 시 브랜치 삭제)
+> 저장소: `https://github.com/dnhynk/vertical-live` (**public** — 2026-08-18 사용자 전환, BOARD D-4; 기본 브랜치 `main`, squash merge만, 머지 시 브랜치 삭제)
 
 이 문서는 사람이 자리를 비운 동안 **worker가 PR을 올리고, 리뷰어가 검토하고, 코디네이터가 머지한 뒤 다음 작업을 자동으로 지시하는 절차**와 각 역할의 **계약**을 정한다. `CLAUDE.md`와 `~/.claude/CLAUDE.md`의 규칙을 완화하지 않는다. 충돌하면 그쪽이 이긴다.
 
@@ -16,7 +16,7 @@
 | 스택 | TypeScript / Node 24, npm workspaces, SQLite(better-sqlite3), React + R3F 렌더러, vitest |
 | 1차 호스트 | 이 Windows 11 PC(OBS Studio 설치됨). 코어는 OS 무관, 운영 스크립트는 Windows 우선 |
 | 알림 | Discord webhook(`AlertSink` 인터페이스의 첫 구현) |
-| 원격 | `dnhynk/vertical-live` private, `main`, squash merge만, 브랜치 자동 삭제 |
+| 원격 | `dnhynk/vertical-live` **public**(2026-08-18 전환, 원래 private — BOARD D-4·E-5), `main`, squash merge만, 브랜치 자동 삭제 |
 | 동시성 | 구현 worker 최대 **2** + 리뷰어 1(리뷰는 순차). 근거: 2026-08-16 ToneAndMove에서 worker 4 병행 중 호스트 BSOD 2회 → 2로 하향한 이력 |
 | worker | `claude`(Orca `--agent claude` = `claude --dangerously-skip-permissions`) |
 | 리뷰어 | `codex -c model="gpt-5.6-sol" -c model_reasoning_effort="xhigh" -c service_tier="fast" --dangerously-bypass-approvals-and-sandbox` (모델·effort는 `~/.codex/models_cache.json` 카탈로그, `service_tier="fast"`는 Codex 공식 config reference에서 확인: fast→요청값 priority) |
