@@ -60,7 +60,7 @@
 | 8 | `plan()` 불변(dry run이 아무것도 지우지 않는다) | met | "leaves the sentinel alone on every refusal, and in a dry run"(`plan()` + 세 거부 경로 모두에서 `list`·`remove` 호출 0) |
 | 9 | 문서: `windows-host.md` §5.7·§8, `obs-setup.md` §1·§6 | met | 아래 "문서 변경" |
 | 10 | `private` → public 정정 | met | `CLAUDE.md` §2, `docs/runbooks/agent-orchestration.md` 머리말·0장 표, `docs/tasks/TASK_SPECS.md` 공통 규약 머리말 |
-| 11 | 게이트 5개 + PR CI 녹색 | **부분** | 로컬 게이트는 아래. `test`는 T17b가 고치는 중인 기존 실패 1건이 남아 있어 완전 녹색이 아니다(내 변경과 무관, 아래에 재현 근거). PR CI는 T17b 머지 후 rebase해서 받는다 |
+| 11 | 게이트 5개 + PR CI 녹색 | met | T17b(PR #23)가 `b414970`으로 머지된 뒤 rebase해서 둘 다 녹색이다. 로컬 게이트 5개 전부 통과(`1896 passed | 1 skipped`), PR CI [run 32107232734](https://github.com/dnhynk/vertical-live/actions/runs/32107232734) **pass**. 아래 "Rebase onto T17b" 참조 |
 
 ### 문서 변경
 
@@ -159,7 +159,7 @@ $ git stash -u && npx vitest run apps/server/src/obs/client.test.ts
 $ git stash pop
 ```
 
-원인은 BOARD E-5·T17b에 적힌 대로 이 테스트가 호스트 vault 상태에 의존하기 때문이고(E-3에서 이 호스트의 Credential Manager에 `obs.websocketPassword`가 들어갔다), **T17b(PR #23, 브랜치 `dnhynk/t17b-ci-path-semantics`)가 고치는 중**이다. T17b가 머지되면 rebase해서 게이트와 PR CI를 다시 돌린다.
+원인은 BOARD E-5·T17b에 적힌 대로 이 테스트가 호스트 vault 상태에 의존하기 때문이고(E-3에서 이 호스트의 Credential Manager에 `obs.websocketPassword`가 들어갔다), **T17b(PR #23, 브랜치 `dnhynk/t17b-ci-path-semantics`)가 고치는 중**이었다. #23이 `b414970`으로 머지된 뒤 rebase해서 사라졌다(아래 "Rebase onto T17b").
 
 ### PR CI (2026-08-18)
 
@@ -181,7 +181,31 @@ origin/main `cb3db6b`(코디네이터 BOARD 커밋)으로 rebase한 뒤 다시 �
 
 셋 다 posix 호스트에서 `dirname`/`basename`을 Windows 경로에 쓴 결과다(`'.'`, 경로 전체). BOARD E-5가 기록한 main의 ubuntu 실패 3건과 같은 목록이며, 내가 추가한 sentinel 테스트는 CI에서 전부 통과했다(`ops-config`는 sentinel을 읽지도 않는다: `rg sentinel apps/server/src/ops/` 0건). 로컬 Windows에서는 이 3건이 통과하고 대신 `client.test.ts` 1건이 호스트 vault 때문에 실패한다 — 같은 T17b가 함께 고친다.
 
-**CI 대기 중**: PR을 연 시점(2026-08-18)에 #23은 OPEN이었다. 내가 건드린 `apps/server/src/obs/process.ts`는 T17b도 손대는 파일(`dirname` → `win32.dirname`)이라 rebase에서 충돌 가능성이 있고, 그때는 T17b의 의미론(Windows 경로는 `path.win32`)을 그대로 살린다 — 이번 PR의 `resolveSentinelDir()`도 같은 이유로 `win32.join`을 쓴다.
+**해소됨**(아래 "Rebase onto T17b"): PR을 연 시점(2026-08-18)에 #23은 OPEN이었다. 내가 건드린 `apps/server/src/obs/process.ts`는 T17b도 손대는 파일(`dirname` → `win32.dirname`)이라 rebase에서 충돌 가능성이 있고, 그때는 T17b의 의미론(Windows 경로는 `path.win32`)을 그대로 살린다 — 이번 PR의 `resolveSentinelDir()`도 같은 이유로 `win32.join`을 쓴다.
+
+### Rebase onto T17b (2026-08-18)
+
+T17b가 PR #23으로 main `b414970`에 머지된 뒤 `git fetch origin && git rebase origin/main`으로 재배치했다(merge-base는 `cb3db6b`, 내 커밋 7개). 코드 변경 없음.
+
+**충돌 1건**, `apps/server/src/obs/process.ts`. 두 hunk 모두 T17b와 이 브랜치가 같은 자리에 서로 다른 것을 더한 결과이고, 호출부는 git이 이미 자동 병합했다(`winPath.basename`/`winPath.dirname`).
+
+- import: T17b는 `win32 as winPath`를, 이 브랜치는 `basename, dirname, join`을 들여왔다. 자동 병합이 호출부를 전부 `winPath.*`로 바꿔 `basename`/`dirname`은 쓰이지 않게 됐으므로 `import { join, win32 as winPath } from 'node:path'`로 합쳤다(남겼으면 lint 실패). `join`은 `nodeObsSentinelFs.remove`만 쓰는데, 이쪽은 실행 중인 호스트의 실제 파일 경로라 T17b의 규칙("계약상 Windows 경로만 `path.win32`")대로 호스트 native가 맞다. 계약상 Windows 경로인 `sentinelDir` 파생은 원래부터 `config.ts`의 `win32.join`이다.
+- 파일 머리 doc comment: 서로 다른 것을 설명하는 두 문단(T17b의 win32 경로 의미론, D-7의 sentinel 삭제)이라 둘 다 남겼다.
+
+rebase 뒤 로컬 게이트 5개:
+
+```text
+$ npm run format:check     → All matched files use Prettier code style!
+$ npm run lint             → eslint 0 problems; check-no-legacy-imports: ok (0); check-install-scripts: ok (4 reviewed)
+$ npm run typecheck        → tsc --build, exit 0
+$ npm run test             → Test Files 138 passed (138)
+                             Tests 1896 passed | 1 skipped (1897)
+$ npm run build            → vite + tsc --build (all workspaces), exit 0
+```
+
+앞서 남아 있던 `client.test.ts` 실패 1건은 T17b가 고쳤다(호스트 vault 대신 "identify되지 않았음"을 단언하도록 바꿨다). 로컬은 이제 완전 녹색이다.
+
+push는 `--force-with-lease`(`136b437...a5c8e11`). PR CI [run 32107232734](https://github.com/dnhynk/vertical-live/actions/runs/32107232734) **pass** (2m20s): `format:check`·`lint`·`typecheck`·`test`·`build`·`soak:ci` 전부 통과. 위 3건의 ubuntu 경로 실패는 T17b가 main에서 고쳐 사라졌다.
 
 ## Not done / out of scope
 
@@ -192,6 +216,5 @@ origin/main `cb3db6b`(코디네이터 BOARD 커밋)으로 rebase한 뒤 다시 �
 
 ## Follow-ups
 
-- T17b 머지 후 rebase → 게이트 재실행 → PR CI 녹색 확인.
 - OBS를 32.0.2 밖으로 올릴 때 `.sentinel`의 이름·위치·의미가 그대로인지 다시 확인한다(`windows-host.md` 5.7 caveat). 무력화되면 조용히 실패하는 것이 아니라 자동시작 3단계가 타임아웃으로 잡아내지만, 그 시점은 이미 방송이 안 뜬 뒤다.
 - E-7 관측이 가리키는 **진짜** 크래시(WASAPI ↔ obs-browser 종료 경합)는 이 PR이 고치지 않는다. `vertical-live` 씬 컬렉션에는 WASAPI 오디오 입력이 없지만, 오디오를 넣을 때 같은 경합을 다시 만날 수 있다.
