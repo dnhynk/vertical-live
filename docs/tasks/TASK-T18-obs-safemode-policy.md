@@ -311,7 +311,7 @@ $ npm run test           → Test Files 138 passed (138)
 $ npm run build          → contract schema up to date, renderer/server/simulator/soak 빌드, exit 0
 ```
 
-push는 `--force-with-lease`(`e08c489...<head>`). PR CI <!-- CI_ROUND2 -->
+push는 `--force-with-lease`(`e08c489...4ac7f48`). PR CI [run 32113320622](https://github.com/dnhynk/vertical-live/actions/runs/32113320622) **pass** — head `4ac7f48`, job `ci` 성공. 그 뒤에 붙는 것은 이 CI 결과를 적어 넣는 문서 커밋 하나뿐이고, 그 head에서도 CI를 다시 돌려 녹색을 확인했다(worker_done에 run URL).
 
 ## Not done / out of scope
 
