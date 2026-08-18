@@ -1,5 +1,3 @@
-import { dirname } from 'node:path'
-
 import { describe, expect, it, vi } from 'vitest'
 
 import { loadObsConfig, type ObsProcessConfig } from './config.js'
@@ -54,7 +52,10 @@ describe('ObsProcessLauncher', () => {
       {
         command: config.executablePath,
         args: ['--profile', 'vertical-live', '--collection', 'vertical-live', '--disable-updater'],
-        cwd: dirname(config.executablePath),
+        // Literal, not `dirname(config.executablePath)`: computing the
+        // expectation with the function under test made this assertion pass on
+        // a POSIX runner with both sides equal to `'.'` (T17b).
+        cwd: 'C:\\Program Files\\obs-studio\\bin\\64bit',
       },
     ])
   })

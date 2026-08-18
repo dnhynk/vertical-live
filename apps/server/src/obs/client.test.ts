@@ -136,7 +136,12 @@ describe('ObsClient handshake and authentication', () => {
 
       expect(error).toBeInstanceOf(Error)
       expect((error as Error).message).not.toContain(envPassword)
-      expect(server.identifyLog).toEqual([])
+      // Not `expect(server.identifyLog).toEqual([])`: that also asserted the
+      // host's credential vault is empty, so it failed on a host that has an
+      // `obs.websocketPassword` stored. The invariant is that the environment
+      // password is never used, and this server only accepts that password —
+      // so an unidentified client proves it whatever the vault holds (T17b).
+      expect(client.identified).toBe(false)
     } finally {
       delete process.env['VL_OBS_PASSWORD']
     }

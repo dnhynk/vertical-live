@@ -1,4 +1,4 @@
-import { basename, dirname, resolve } from 'node:path'
+import { dirname, resolve, win32 as winPath } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { loadObsConfig } from '../obs/config.js'
@@ -41,7 +41,12 @@ export interface OpsConfigView {
     readonly websocketPort: number
     readonly processEnabled: boolean
     readonly executablePath: string
-    /** `obs64.exe` — what the port owner is expected to be. */
+    /**
+     * `obs64.exe` — what the port owner is expected to be. Taken with
+     * `path.win32` because `executablePath` is a Windows path by contract
+     * (BOARD D-2); the host platform's own implementation would hand
+     * `Start-VerticalLive.ps1` the whole path on a POSIX runner.
+     */
     readonly executableName: string
   }
   readonly archive: {
@@ -88,7 +93,7 @@ export function describeOpsConfig(options: DescribeOpsConfigOptions = {}): OpsCo
       websocketPort: websocketPortOf(obs.url),
       processEnabled: obs.process.enabled,
       executablePath: obs.process.executablePath,
-      executableName: basename(obs.process.executablePath),
+      executableName: winPath.basename(obs.process.executablePath),
     },
     archive: { enabled: archive.enabled },
   }
