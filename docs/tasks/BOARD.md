@@ -7,7 +7,7 @@
 
 상태: `pending`(의존 대기) · `ready` · `dispatched` · `in_review` · `changes_requested` · `merged` · `blocked` · `failed`
 
-> **현재(2026-08-18 UTC): 스펙 v1 구현 task 전부 머지.** T0–T17 + T1b·T8b·T8c·T8d = PR 22개, open PR 0, main `59568bb`. 코디네이터가 main에서 로컬 게이트 5개(format/lint/typecheck/test 138 files·1884 passed·1 skipped/build) + `soak:ci` PASS 확인(E-5로 CI 미실행). 사용자 조치 대기: E-1·E-2·E-3·E-5·E-7(§4). 그 다음 단계는 Gate 0(`docs/ops/gate0-checklist.md`) — 사용자 결정 없이는 진행하지 않는다.
+> **현재(2026-08-18 UTC): 스펙 v1 구현 task 전부 머지 + 사용자 결정 후속(T17b·T18)까지 머지.** T0–T17 + T1b·T8b·T8c·T8d·T17b·T18 = PR 24개, open PR 0, main `34a8f0d`. **main CI 녹색**(run 32121339258: npm ci/format/lint/typecheck/test/build/soak:ci 전부 success — E-5 해제 후 소급 확인 완료). 사용자 결정 반영: D-4 public·D-6 OBS 고정·D-7 sentinel 정책; E-1·E-2·E-3·E-5·E-7 해결. 남은 것: Gate 0(`docs/ops/gate0-checklist.md`) 사용자 승인 항목과 실 YouTube 계정·OAuth·첫 private 기술 방송(사용자 계정 작업) — 사용자 지시 없이는 진행하지 않는다.
 
 | T-ID | 제목 | 의존 | [contract] | 상태 | 브랜치 slug | PR | Orca task |
 |---|---|---|---|---|---|---|---|
@@ -34,7 +34,7 @@
 | T8c | 엔진 버그픽스: 렌더러 ACK 경로 store 실패(disk-full) uncaught(T15 발견) | T8 | — | merged | t8c-ack-store-failure | #21 | `task_658a5641bf1c` |
 | T8d | 엔진 버그픽스: `#publish` markEffectPublished store 실패 시 미발행 row 고아화(T8c 발견) | T8c | — | merged | t8d-publish-store-failure | #22 | `task_43eb61f3968d` |
 | T17b | CI 버그픽스: T17 Windows 경로 의미론(ubuntu CI 실패 3건) + client.test 호스트 vault 의존 | T17 | — | merged | t17b-ci-path-semantics | #23 | `task_70edf8e8feff` |
-| T18 | D-6/D-7 구현·문서(OBS 버전 고정 승인, safe-mode sentinel 정책, public 문구) | T17, T2 | — | changes_requested | t18-obs-safemode-policy | #24 | `task_0d996db3c12a` |
+| T18 | D-6/D-7 구현·문서(OBS 버전 고정 승인, safe-mode sentinel 정책, public 문구) | T17, T2 | — | merged | t18-obs-safemode-policy | #24 | `task_0d996db3c12a` |
 
 디스패치 순서 원칙: `ready` 중 T-ID 낮은 것부터, 동시 2, `[contract]`는 하나만. 리뷰 Task는 `R-<T-ID>-<round>`로 별도 등록하고 아래 이력에만 남긴다.
 
@@ -82,7 +82,7 @@
 | E-2 | **해결(2026-08-18)**: OBS 32.0.2 / obs-websocket 5.6.3 고정 승인 → D-6. 문서 '후보' 표기 제거는 T18 | — | T2, T17 |
 | E-7 | **해결(2026-08-18)**: 선택지 A 채택 → D-7. 구현·문서는 T18. 관측(2026-08-18 코디네이터, 이 호스트): 사용자 기본 씬 컬렉션(WASAPI 마이크/데스크탑 오디오 포함)으로 OBS 32.0.2를 정상 종료시켰을 때 종료 중 crash(`obs.dll!copy_audio_data` ← `win-wasapi` / `obs-browser obs_module_unload` 경합, `crashes/Crash 2026-08-18 13-58-03.txt`) → `.sentinel/run_*` 잔존. 파일 제거 후 재실행 시 safe-mode 대화상자 없이 정상 기동·probe 성공 | — | T17, T12 |
 | E-3 | **해결(2026-08-18, 코디네이터 실행·사용자 승인)**: obs-websocket 서버 활성화(auth 필수, 4455, 비밀번호는 Credential Manager `obs.websocketPassword`에만), `vertical-live` 프로파일·씬 컬렉션 설치·선택 후 `npm run obs:probe`: obsWebSocketVersion 5.6.3 · negotiatedRpcVersion 1 · obsVersion 32.0.2 · `matches 1080x1920@30 yes` · scenes standby/live · browser source `vertical-live-renderer` · 건강 신호 obs.stream degraded(output_inactive)/output_progress unknown/frames ok/congestion unknown → `docs/ops/obs-setup.md` §6 체크 4개 충족(§6 문구 '나머지는 unknown'은 frames=ok 관측으로 T18에서 정정). 참고: `--minimize-to-tray`로 띄운 OBS는 WM_CLOSE(taskkill /F 없이)로 닫히지 않는 경우가 있어 트레이 '종료'가 필요 | — | T2 |
-| E-5 | **해결(2026-08-18)**: 사용자가 저장소를 public으로 전환(D-4 갱신) → GitHub Actions 실행 재개. 첫 실제 run(32074894450, main 06542ff)이 ubuntu에서 test 3건 실패(T17 코드의 Windows 경로 의미론 의존; E-5 동안 CI 근거 없이 머지된 결과) → **T17b** 등록. 그 전 머지(PR #14–#22)는 로컬 게이트 근거만이며 T17b 머지 후 main CI 녹색으로 소급 확인한다 | — | 전체 |
+| E-5 | **해결(2026-08-18)**: 사용자가 저장소를 public으로 전환(D-4 갱신) → GitHub Actions 실행 재개. 첫 실제 run(32074894450, main 06542ff)이 ubuntu에서 test 3건 실패(T17 코드의 Windows 경로 의미론 의존; E-5 동안 CI 근거 없이 머지된 결과) → T17b(PR #23) 머지 → **main CI 녹색 소급 확인 완료**(run 32121339258, main 34a8f0d, soak:ci 포함) | — | 전체 |
 | E-6 | **해결**: PR #16 round 5 approve·머지. 원 항목: PR #16(T12 supervisor) 리뷰 round 4까지 request_changes(round마다 지적 해소, 잔존은 safe-stop 경로의 순서/취소 세부로 계속 좁아짐: 예약 restart→in-flight restart→시작 시퀀스 취소→alert await 순서). 코디네이터는 수렴 중으로 판단해 F-T12-4 진행 | 런북 2.5(4) | T12 |
 | E-4 | **해결(2026-08-17)**: PR #11 round 6에서 approve·머지. 원 항목: PR #11(T10 broadcast lifecycle) 리뷰가 round 4까지 request_changes(각 round의 지적은 해소, 리뷰어가 reconcile·update 경로의 인접 갭을 계속 발견 — 절단 목록 무판정, 마커 생명주기(A-18), update 본문 정확성). 코디네이터는 수렴 중으로 판단해 F-T10-4 진행. 사용자가 중단·재설계를 원하면 지시 | 런북 2.5(4) | T10 |
 
@@ -210,3 +210,4 @@
 | 2026-08-18 07:58 | F-T18-2 완료(6e7d529: pre-list canonical root 고정·canonicalFile·검사된 경로 삭제, real-fs 재현 테스트, 남은 창(realpath→unlink) 정직 명시; CI 32113620990 녹색). R-T18-3 `task_6238dab07bc2` → `ctx_35eb25939bed`(review; 판정 원칙: openat/unlinkat 부재 창은 범위 밖) |
 | 2026-08-18 08:46 | R-T18-3 첫 시도 `task_6238dab07bc2`는 codex 제공자 측 콘텐츠 차단(사이버보안 주의 안내)으로 리뷰 미게시 → failed 처리, 견고성 관점으로 재서술한 `task_5c7aa21d0545`로 재시도 → verdict request_changes(round 2 시나리오 해소 확인; 잔여: isReparsePoint→realPath 사이 root 교체 창 + 문서의 '남는 창' 서술 부정확). 코디네이터 판단: 핸들 기반 API 없이는 못 닫는 창이므로 **완화(부모 기준 canonical root 대조)+정확한 공개+회귀 테스트**로 종결 → **F-T18-3** `task_f2154b4990e8`. 런북 2.5(4) 관찰: round마다 지적이 좁아지며 수렴 중(E-4/E-6 패턴), 별도 에스컬레이션 없이 진행 |
 | 2026-08-18 09:12 | F-T18-3 완료(fb67a6b/f824225: 부모 기준 canonical root 대조 `sentinel_dir_mismatch`, 보장/비보장 목록 공개, 테스트 31→35(리뷰어 NTFS 재현·junction 부모 통과); CI 32119989569 녹색). R-T18-4 `task_fcbdace17b10` → `ctx_d2aef4824f82`(review; 구속력 있는 판정 원칙 명시) |
+| 2026-08-18 09:26 | R-T18-4 verdict **approve**(round 3 재현·junction 부모 정상 배치·guard 무력화 대조 모두 확인) → 최종 게이트(contract·deps 0, supervisor 변경은 lastNote 관측 채널만, config `obs.process.sentinelDir` ""=APPDATA 파생, CLAUDE.md/런북/TASK_SPECS public 문구) → **PR #24 squash merge**(main 34a8f0d). T18 worker release·worktree 제거. **main CI run 32121339258 성공**(7 step 전부). 사용자 결정 5건 처리 완료 — 무인 루프 종료, 남은 것은 Gate 0 사용자 항목 |
