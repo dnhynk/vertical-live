@@ -1,7 +1,7 @@
 # TASK-T18-obs-safemode-policy
 
 - Task: T18 사용자 결정 D-6·D-7 구현과 문서 정합 (`docs/tasks/BOARD.md` §2 D-4/D-6/D-7, §4 E-2·E-3·E-5·E-7; `docs/tasks/TASK_SPECS.md` §T17·§T2)
-- Branch: `dnhynk/t18-obs-safemode-policy` · PR: #<n>
+- Branch: `dnhynk/t18-obs-safemode-policy` · PR: [#24](https://github.com/dnhynk/vertical-live/pull/24)
 - Orca: task `task_0d996db3c12a` · dispatch `ctx_6687d39f7667`
 - Spec sections read: §9.2(safe_stopped·재시작 예산), §10.2(비밀정보·restart supervisor 1개), §10.3(OBS 버전 고정), §11(hosting OS·자동 업데이트 시험)
 - BOARD decisions/assumptions relied on: D-2, D-4(2026-08-18 public 전환), D-6, D-7, A-16, E-3·E-7 관측
