@@ -215,9 +215,16 @@ Windows는 GPU가 응답하지 않으면 드라이버를 재시작한다(TDR). �
 
 - **한 곳에서만 한다**: `ObsProcessLauncher.launch()`. 자동시작 3단계(`obs-launch`)와 supervisor의 `obs-process` 재시작이 같은 실행기를 쓰므로 두 경로가 함께 닫힌다. 세 거부(미설정·실행 파일 없음·이미 실행 중)를 모두 통과한 **뒤** spawn 직전에만 지운다 — 일어나지도 않을 기동을 위해 OBS의 파일을 건드리지 않는다.
 - **설정**: `obs.process.sentinelDir`. 비워 두면 `%APPDATA%`에서 파생하고, 포터블 설치 등은 `VL_OBS_SENTINEL_DIR`로 지정한다. `APPDATA`가 없는 호스트(CI·POSIX)에서는 지울 것이 없다고 보고 그대로 진행한다.
-- **승인한 디렉터리 안에서만 지운다**(리뷰 round 1, B1). `sentinelDir` **자체가 junction/심볼릭 링크(reparse point)면 아무것도 지우지 않고 거부한다** — 링크가 오늘 가리키는 곳은 운영자가 config에서 검토한 디렉터리가 아니고, 그 안의 파일은 OBS의 크래시 표식이 아니다. T17 아카이브가 루트에 대해 하는 거부(`REFUSED (reparse_point)`, 4장)와 같은 판단이다. 목록에 오른 항목도 **삭제 직전에** 다시 확인한다(실경로가 그 디렉터리 바로 안에 있는 일반 파일인가) — 목록과 삭제 사이에 링크로 바뀔 수 있기 때문이다. 하위 디렉터리와 링크 항목은 처음부터 대상이 아니다.
+- **승인한 디렉터리 안에서만 지운다**(리뷰 round 1·2, B1). 세 단계다.
+  1. `sentinelDir` **자체가 junction/심볼릭 링크(reparse point)면 아무것도 지우지 않고 거부한다** — 링크가 오늘 가리키는 곳은 운영자가 config에서 검토한 디렉터리가 아니고, 그 안의 파일은 OBS의 크래시 표식이 아니다. T17 아카이브가 루트에 대해 하는 거부(`REFUSED (reparse_point)`, 4장)와 같은 판단이다.
+  2. 그 검사를 통과하면 **목록을 읽기 전에 실경로(realpath)를 한 번 고정한다.** 이후 모든 판단은 그 고정값에 대해 한다.
+  3. 목록에 오른 항목은 **삭제 직전에** 그 고정된 루트에 대해 다시 확인하고(실경로가 루트 바로 안에 있는 일반 파일인가), **확인된 그 실경로로** 지운다 — config에 적힌 경로를 다시 이어 붙이지 않는다. 하위 디렉터리와 링크 항목은 처음부터 대상이 아니다.
+
+  2・3이 없던 round 1 구현은 삭제 시점에 `realpath(sentinelDir)`를 **다시** 계산했다. 그래서 목록을 읽은 직후 진짜 `.sentinel`을 다른 이름으로 옮기고 같은 자리에 junction을 놓으면 비교의 양쪽이 함께 junction 대상 아래로 풀려 검사를 통과했고, 리뷰어가 실제 NTFS에서 디렉터리 밖 파일을 지웠다(round 2, B1). 지금은 고정된 루트가 움직이지 않으므로 그 항목이 거부된다(`sentinel_entry_escaped_dir`).
+
+  **닫히지 않는 창**: 실경로를 확인한 뒤 `unlink`이 실행되기까지의 짧은 순간. Node에는 `openat`/`unlinkat`이 없어 "검사한 그 핸들의 디렉터리 항목을 지운다"를 표현할 방법이 없으므로, 그 사이에 정확히 끼어드는 교체는 여전히 이긴다. 막히는 것은 **루트 교체**와 **항목의 링크 교체**이고(둘 다 테스트로 고정), 주장하는 것도 딱 그만큼이다. 이 경로가 지우는 대상이 `%APPDATA%` 아래 사용자 소유 디렉터리이고 그 안에 쓸 수 있는 주체는 이미 이 계정의 프로세스라는 점에서, 남은 창의 실질 위험은 그 계정이 이미 침해된 경우로 한정된다.
 - **남는 기록**: 지운 게 있을 때만 로그 `obs.sentinel_cleared`(개수·경로만), 실패는 `obs.sentinel_clear_failed`(warn). `/health`의 `components[]`에서 `obs-process`의 `lastNote`가 `sentinel_cleared=<n>`이다. 자동시작 경로는 `obs launched: pid … (crash sentinels cleared: n)` 한 줄로 `data\ops\logs\autostart-*.log`에 남고, 실패가 있으면 바로 다음 줄에 `obs sentinel clearing incomplete: <사유>`가 **같은 로그에** 남는다(리뷰 round 1, M1 — 이전에는 stderr로 나가 숨겨진 예약 작업 로그에 남지 않았다).
-- **사유는 값이 아니라 토큰이다**(리뷰 round 1, m1). `sentinel_dir_reparse_point`(위의 거부), `sentinel_entry_escaped_dir`(삭제 직전 확인 실패), 그 외에는 errno 코드(`EACCES`, `EPERM`, …) 또는 `unknown`. Node의 오류 메시지는 실패한 **파일 이름을 포함**하는데 이 값은 로그와 `/health`로 흘러가므로, 원인은 남기고 파일 이름은 남기지 않는다.
+- **사유는 값이 아니라 토큰이다**(리뷰 round 1, m1). `sentinel_dir_reparse_point`(위 1단계 거부), `sentinel_entry_escaped_dir`(위 3단계 확인 실패 — 루트가 바뀌었거나 항목이 링크가 됐거나 사라졌다), 그 외에는 errno 코드(`EACCES`, `EPERM`, …) 또는 `unknown`. Node의 오류 메시지는 실패한 **파일 이름을 포함**하는데 이 값은 로그와 `/health`로 흘러가므로, 원인은 남기고 파일 이름은 남기지 않는다.
 - **실패해도 기동은 계속한다.** 파일이 잠겨 있거나, 디렉터리를 읽지 못하거나, 위의 거부에 걸려도 warn만 남기고 OBS를 띄운다. 그때의 동작은 D-7 이전과 같다: 대화상자가 뜨고, 3단계가 obs-websocket 포트를 기다리다 타임아웃해 **실패로 기록**한다(조용히 성공하지 않는다).
 
 **근거**
