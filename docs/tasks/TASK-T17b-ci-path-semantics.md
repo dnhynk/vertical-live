@@ -1,7 +1,7 @@
 # TASK-T17b-ci-path-semantics
 
 - Task: T17b CI 버그픽스 — Windows 경로 의미론을 호스트 플랫폼에 기대는 T17 코드 (`docs/tasks/TASK_SPECS.md` §T17 후속)
-- Branch: `dnhynk/t17b-ci-path-semantics` · PR: #<n>
+- Branch: `dnhynk/t17b-ci-path-semantics` · PR: #23
 - Orca: task `task_70edf8e8feff` · dispatch `ctx_d817d16e052d`
 - Spec sections read: §9.1, §10.2, §11 (T17이 읽은 절), CLAUDE.md §7 검증 게이트
 - BOARD decisions/assumptions relied on: D-2(1차 호스트 = Windows 11), A-16(stream key vault 정본), E-5(GitHub Actions 결제 차단 해제 후 첫 실제 CI)
@@ -49,13 +49,14 @@ ubuntu runner(posix)에서는 `\`가 평범한 문자라 `dirname` → `'.'`, `b
 
 | 질문 | 답(코디네이터) | 반영 |
 |---|---|---|
-| (없음) | | |
+| 로컬 test 게이트에서 발견한 T17b 무관 기존 실패 1건(`obs/client.test.ts > does not read the environment when no provider is injected`, 이 호스트의 credential vault 상태에 의존)을 이 PR에서 함께 고칠지, 별도 task로 넘길지 | **A: T17b PR에서 함께 고친다.** 근거: 같은 부류(호스트 환경 의존 — 이번엔 vault 상태). 원래 불변조건은 "env `VL_OBS_PASSWORD`가 인증에 쓰이지 않는다"이므로 `expect(client.identified).toBe(false)`로 바꾸면 vault가 비었든(Identify 미전송) 차 있든(잘못된 vault 값으로 Identify → close) 동일하게 성립한다. 테스트 주석에 근거 한 줄, 티켓에 이 호스트에서 `obs.websocketPassword`가 존재하게 된 사유를 남기고 값 관련 정보는 로그·티켓에 쓰지 않는다 | `apps/server/src/obs/client.test.ts` 단언 교체 + 주석. 아래 "부수 발견" 절 |
 
 ## Assumptions / provisional values
 
 | 항목 | 값 | 라벨 | 이유 |
 |---|---|---|---|
 | `obs.process.executablePath`는 계약상 **Windows 경로**다 | `C:\Program Files\obs-studio\bin\64bit\obs64.exe` (config 기본값) | 고정 | BOARD D-2(1차 호스트 Windows 11) + `docs/ops/windows-host.md`. `tasklistObsProcessProbe`도 `process.platform !== 'win32'`이면 조회하지 않는다 |
+| 이 호스트의 Windows Credential Manager에 `obs.websocketPassword`가 **존재한다** | (존재 여부만; 값 관련 정보는 기록하지 않는다) | 사실 | 코디네이터가 E-3(실제 OBS 스모크)을 위해 2026-08-18에 저장. 아래 "부수 발견"의 테스트가 이 상태에 의존해 실패했다 |
 
 ## Result
 
@@ -79,19 +80,78 @@ ubuntu runner(posix)에서는 `\`가 평범한 문자라 `dirname` → `'.'`, `b
 `sep`·`process.platform` 사용처: `obs/process.ts:71`의 `process.platform !== 'win32'` 가드 1건뿐(그대로 둔다.
 tasklist는 Windows 전용 명령이라 플랫폼 분기가 맞다). `node:path`의 `sep` 사용 0건.
 
+### 가설 검증 관측 (호스트 Windows 11, Node 24.11.1)
+
+```text
+value          : C:\Program Files\obs-studio\bin\64bit\obs64.exe
+posix.dirname  : "."
+posix.basename : "C:\\Program Files\\obs-studio\\bin\\64bit\\obs64.exe"
+win32.dirname  : "C:\\Program Files\\obs-studio\\bin\\64bit"
+win32.basename : "obs64.exe"
+host default   : "C:\\Program Files\\obs-studio\\bin\\64bit" "obs64.exe" win32
+```
+
+CI 로그의 assertion과 일치한다:
+`AssertionError: expected '.' to be 'C:\Program Files\obs-studio\bin\64bit'`,
+`AssertionError: expected 'D:\obs\bin\obs64.exe' to be 'obs64.exe'`
+(run 32074894450, `Tests 3 failed | 1880 passed | 2 skipped (1885)`).
+
+### 부수 발견 — 같은 부류의 호스트 환경 의존 테스트 1건 (코디네이터 답 A로 이 PR에 포함)
+
+`apps/server/src/obs/client.test.ts > ObsClient handshake and authentication > does not read the
+environment when no provider is injected`가 **이 Windows 호스트에서만** 실패했다.
+
+- **이 PR의 diff 때문이 아니다**: `git stash`로 diff를 뺀 상태에서 같은 파일을 돌려도 같은 1건이 실패한다.
+- **ubuntu CI에서는 통과한다**: run 32074894450에서 `apps/server/src/obs/client.test.ts (13 tests) ✓`.
+- **원인**: 이 테스트는 provider를 주입하지 않은 `ObsClient`(= `defaultSecretProvider()` = Windows
+  Credential Manager)를 만들고 "Identify가 아예 전송되지 않음"(`server.identifyLog`가 빈 배열)을 단언했다.
+  이 호스트의 Credential Manager에는 `obs.websocketPassword`가 실제로 저장돼 있어(코디네이터가 E-3 실제
+  OBS 스모크를 위해 2026-08-18에 저장) `requireSecret`이 성공하고, 클라이언트가 Identify를 보낸 뒤 fake
+  서버가 auth 불일치로 close한다. `connect()`는 여전히 reject되지만 `identifyLog`가 비어있지 않다.
+  즉 그 단언은 **운영자 호스트의 vault가 비어 있을 것**까지 요구하고 있었다.
+  (확인은 존재 여부만 했고 값 관련 정보는 어디에도 기록하지 않았다.)
+- **수정**: `expect(server.identifyLog).toEqual([])` → `expect(client.identified).toBe(false)`.
+  원래 불변조건("env `VL_OBS_PASSWORD`는 인증에 쓰이지 않는다")은 그대로 강제된다 — 이 fake 서버는 env
+  비밀번호만 받아들이므로, 클라이언트가 identified가 아니라는 것이 곧 env 비밀번호를 쓰지 않았다는 증거다.
+  vault가 비어 있든(Identify 미전송) 차 있든(잘못된 값으로 Identify → close) 동일하게 성립한다.
+- **동어반복 아님을 확인(negative probe)**: 임시로 `secrets: new EnvSecretProvider({ VL_OBS_PASSWORD:
+  envPassword })`를 주입해 env 비밀번호를 쓰게 만들면 이 테스트가 실패한다 —
+  `AssertionError: expected undefined to be an instance of Error`(연결이 성공해 `connect()`가 reject되지
+  않음). 관측 후 주입은 되돌렸다(`git diff`에는 주석 6줄만 남는다).
+
 ### Acceptance criteria
 
 | # | 기준 | 상태(met/unmet/unverifiable) | 근거(테스트 파일·명령·출력) |
 |---|---|---|---|
-| 1 | 로컬 게이트 5개 통과 | | |
-| 2 | PR의 GitHub Actions run 녹색(test 이후 build·soak:ci 포함) | | |
-| 3 | 같은 부류의 다른 사용처를 전수 조사하고 목록을 남겼다 | | |
+| 1 | 로컬 게이트 5개 통과 | met | 아래 Gates 블록. `npm run test` → `138 passed (138)`, `1884 passed · 1 skipped (1885)`, exit 0 |
+| 2 | PR의 GitHub Actions run 녹색(test 이후 build·soak:ci 포함) | <채움> | <채움> |
+| 3 | 같은 부류의 다른 사용처를 전수 조사하고 목록을 남겼다 | met | 위 "조사 결과" 표 14행(변경 4곳 / 변경 없음 10곳), `sep` 0건, `process.platform` 1건 |
 
 ### Gates (executed)
 
 ```text
-<채움>
+$ npm run format:check    -> exit 0   All matched files use Prettier code style!
+$ npm run lint            -> exit 0   eslint + check-no-legacy-imports: ok (0) + check-install-scripts: ok (4 reviewed)
+$ npm run typecheck       -> exit 0   tsc --build tsconfig.json
+$ npm run test            -> exit 0   Test Files 138 passed (138) / Tests 1884 passed | 1 skipped (1885)
+$ npm run build           -> exit 0   tsc --build + copy-migrations(5) + generate-data-map --check(up to date)
+$ npm run soak:ci         -> exit 0   verdict PASS (CI가 build 뒤에 도는 단계라 함께 돌렸다)
 ```
+
+수정 대상 파일만:
+
+```text
+$ npx vitest run apps/server/src/obs/process.test.ts apps/server/src/ops/ops-config.test.ts
+  Test Files  2 passed (2)
+        Tests  19 passed (19)
+$ npx vitest run apps/server/src/obs/client.test.ts
+  Test Files  1 passed (1)
+        Tests  13 passed (13)
+```
+
+수정 전 재현(참고): 같은 두 파일이 ubuntu CI run 32074894450에서 3건 실패
+(`obs/process.test.ts` 1 failed, `ops/ops-config.test.ts` 2 failed).
+Windows 호스트에서는 수정 전에도 통과했으므로 로컬로는 재현되지 않는다 — 이 결함의 재현 환경은 POSIX다.
 
 ## Not done / out of scope
 
@@ -101,4 +161,4 @@ tasklist는 Windows 전용 명령이라 플랫폼 분기가 맞다). `node:path`
 
 ## Follow-ups
 
-- (없으면 비움)
+- 없음. (부수 발견의 `obs/client.test.ts`는 코디네이터 답 A에 따라 이 PR에서 처리했다.)
