@@ -50,13 +50,13 @@
 
 | # | 기준 | 상태 | 근거(테스트 파일·명령·출력) |
 |---|---|---|---|
-| 1 | `launch()`가 spawn 직전에 `.sentinel` 안 파일을 지운다(디렉터리는 남김), 자동시작·supervisor 두 경로가 한 곳을 쓴다 | met | `apps/server/src/obs/process.test.ts` "removes the sentinel files and reports how many, before the spawn"(remove·remove·spawn 순서까지 단언). 두 경로는 `apps/server/src/bin/obs-launch.ts`(자동시작 3단계)와 `apps/server/src/main.ts`의 `actions.obsProcess`가 같은 `ObsProcessLauncher`를 쓰는 기존 구조 그대로다. 실 파일시스템 검증은 아래 "수동 확인" |
+| 1 | `launch()`가 spawn 직전에 `.sentinel` 안 파일을 지운다(디렉터리는 남김), 자동시작·supervisor 두 경로가 한 곳을 쓴다 | met (리뷰 round 1에서 B1 고침) | `apps/server/src/obs/process.test.ts` "removes the sentinel files and reports how many, before the spawn"(remove·remove·spawn 순서까지 단언). 두 경로는 `apps/server/src/bin/obs-launch.ts`(자동시작 3단계)와 `apps/server/src/main.ts`의 `actions.obsProcess`가 같은 `ObsProcessLauncher`를 쓰는 기존 구조 그대로다. **승인한 디렉터리 밖으로 나가지 않는다는 부분은 처음 구현이 틀렸다**(루트가 junction이면 따라 들어갔다) — 고침과 실 파일시스템 근거는 아래 `## Review round 1` |
 | 2 | 경로는 config(`obs.process.sentinelDir`, `APPDATA` 파생), provisional 아님 | met | `apps/server/src/obs/config.ts` `resolveSentinelDir()`; 테스트 "derives the sentinel directory from APPDATA, with Windows separators" / "has no sentinel directory on a host without APPDATA" / "takes an explicit sentinel directory for a portable OBS install" / "does not call the sentinel path provisional" |
-| 3 | fs 주입 가능 | met | `ObsSentinelFs`(`list`/`remove`) + `ObsProcessLauncherOptions.sentinel`. 모든 새 테스트가 주입해서 돈다 |
-| 4 | 결과에 `sentinelCleared`(+ 실패 사유), 로그 `obs.sentinel_cleared`(개수·경로만) | met | `ObsLaunchResult.sentinelCleared` / `.sentinelFailure`; 로그 단언은 같은 테스트의 `expect(info).toHaveBeenCalledWith('obs.sentinel_cleared', { dir, cleared: 2 })`. 파일 이름은 로그에 넣지 않는다 |
+| 3 | fs 주입 가능 | met | `ObsSentinelFs`(`isReparsePoint`/`list`/`isContainedFile`/`remove`) + `ObsProcessLauncherOptions.sentinel`. 모든 새 테스트가 주입해서 돈다. 실 구현(`nodeObsSentinelFs`)은 실 junction/symlink로 따로 검증한다(round 1, B1) |
+| 4 | 결과에 `sentinelCleared`(+ 실패 사유), 로그 `obs.sentinel_cleared`(개수·경로만) | met (리뷰 round 1에서 m1 고침) | `ObsLaunchResult.sentinelCleared` / `.sentinelFailure`; 로그 단언은 같은 테스트의 `expect(info).toHaveBeenCalledWith('obs.sentinel_cleared', { dir, cleared: 2 })`. **실패 사유는 처음엔 raw `Error.message`라 파일 이름이 섞였다** — 지금은 토큰(errno 코드·`unknown`·두 거부)뿐이다. 아래 `## Review round 1` m1 |
 | 5 | supervisor의 기존 health detail에 값이 보인다(최소 배선) | met | `apps/server/src/supervisor/supervisor.test.ts` "puts what a restart action recorded on the health document (BOARD D-7)"(`/health`의 `components[]`에서 `obs-process.lastNote = sentinel_cleared=1`, 다른 컴포넌트는 null), `restart.test.ts` "carries what the action recorded onto /health, and keeps it once healthy" |
 | 6 | 디렉터리 없음 → 0·정상 진행 | met | `process.test.ts` "treats a missing sentinel directory as nothing to clear"(ENOENT → cleared 0, failure null, spawn 1회, `obs.sentinel_cleared` 미출력) |
-| 7 | 삭제 실패 → warn 후 launch 계속(= 기존 동작으로 강등) | met | "starts OBS anyway when a file will not go, and says which ones did"(EACCES 1건 → cleared 1, failure 기록, warn, pid 반환), "starts OBS anyway when the directory itself cannot be read" |
+| 7 | 삭제 실패 → warn 후 launch 계속(= 기존 동작으로 강등) | met (리뷰 round 1에서 M1 고침) | "starts OBS anyway when a file will not go, and says which ones did"(EACCES 1건 → cleared 1, failure 기록, warn, pid 반환), "starts OBS anyway when the directory itself cannot be read". **자동시작 경로에서는 그 사유가 로그에 남지 않았다**(stderr로 나갔다) — 지금은 stdout이라 `autostart-*.log`에 남는다. 아래 `## Review round 1` M1 |
 | 8 | `plan()` 불변(dry run이 아무것도 지우지 않는다) | met | "leaves the sentinel alone on every refusal, and in a dry run"(`plan()` + 세 거부 경로 모두에서 `list`·`remove` 호출 0) |
 | 9 | 문서: `windows-host.md` §5.7·§8, `obs-setup.md` §1·§6 | met | 아래 "문서 변경" |
 | 10 | `private` → public 정정 | met | `CLAUDE.md` §2, `docs/runbooks/agent-orchestration.md` 머리말·0장 표, `docs/tasks/TASK_SPECS.md` 공통 규약 머리말 |
@@ -206,6 +206,57 @@ $ npm run build            → vite + tsc --build (all workspaces), exit 0
 앞서 남아 있던 `client.test.ts` 실패 1건은 T17b가 고쳤다(호스트 vault 대신 "identify되지 않았음"을 단언하도록 바꿨다). 로컬은 이제 완전 녹색이다.
 
 push는 `--force-with-lease`(`136b437...a5c8e11`). PR CI [run 32107232734](https://github.com/dnhynk/vertical-live/actions/runs/32107232734) **pass** (2m20s): `format:check`·`lint`·`typecheck`·`test`·`build`·`soak:ci` 전부 통과. 위 3건의 ubuntu 경로 실패는 T17b가 main에서 고쳐 사라졌다.
+
+## Review round 1
+
+리뷰어 판정 `request_changes`(blocker 1 · major 1 · minor 1). 게이트 7개와 합격 기준 2·3·4·5·6·8·10·11은 리뷰어가 직접 돌려 통과를 확인했고, 아래 셋만 고쳤다.
+
+| 지적 | 고침 |
+|---|---|
+| **[blocker] `apps/server/src/obs/process.ts:118`** — 프로덕션 `list()`가 `.sentinel` 루트를 따라 들어가서, 루트가 junction/symlink면 `remove()`가 승인된 디렉터리 **밖** 파일을 지운다. 리뷰어 재현: sibling `outside-target`으로 가는 junction → `{targetFileStillExists:false, sentinelCleared:1}` | **고침 `b2579aa`.** 판정을 `ObsSentinelFs`로 올리고 두 곳에서 거부한다. (1) `isReparsePoint(dir)` — 루트가 reparse point면 **읽지도 않고** 거부(`sentinel_dir_reparse_point`, cleared 0, warn). 링크가 오늘 가리키는 곳은 운영자가 config에서 검토한 디렉터리가 아니다. lstat을 못 읽으면 링크로 간주하고(답을 못 하는 검사는 허용이 아니다), 디렉터리가 아예 없는 경우(ENOENT)만 false — 그 경로는 기존대로 `list()`의 ENOENT가 결정한다. (2) `isContainedFile(dir, name)` — **삭제 직전에** 다시 확인한다(`lstat`으로 일반 파일 + 실경로가 실루트 바로 안). 목록과 삭제 사이에 링크로 바뀌는 창(TOCTOU)을 닫는다. 실패 시 삭제 대신 `sentinel_entry_escaped_dir`. 판정 술어는 T17 `sweep.ts`의 `isInside`를 **그대로 재사용**한다(정의를 둘로 늘리지 않는다). 항목 심볼릭 링크·하위 디렉터리는 기존대로 `list()`의 `isFile()`이 애초에 거른다 |
+| **[major] `ops/windows/Start-VerticalLive.ps1:201`** — `obs-launch.ts`가 sentinel-clear 실패를 stderr로 쓰는데 스크립트는 stdout만 `$launch`로 잡아 로그에 붙이므로, 숨겨진 예약 작업의 `data\ops\logs\autostart-*.log`에 원인이 남지 않고 `windows-host.md` 7장 절차를 따를 수 없다 | **고침 `d78e87d`.** 두 선택지 중 **`obs-launch.ts`가 stdout에 쓰도록** 했다(스크립트는 손대지 않았다). 근거: T17 스크립트 규약은 "그 단계가 찍은 것을 그대로 로그에 붙인다"(`Write-VLLog -Message (($launch | Out-String).TrimEnd())`)이고, Windows PowerShell 5.1에서 네이티브 명령의 stderr를 `2>&1`로 합치면 줄마다 ErrorRecord로 감싸이며 `$?`가 뒤집힌다 — 스크립트에 리다이렉션을 넣는 쪽이 더 큰 변경이자 더 위험하다. 기동 자체는 성공이므로 exit code는 0 그대로다. 값은 계약상 토큰이라 경로·파일명이 로그에 새로 생기지 않는다 |
+| **[minor] `apps/server/src/obs/process.ts:279`** — remove 실패의 raw `Error.message`가 `sentinelFailure`→warn→`/health` `lastNote`로 흘러 파일명(`unlink 'run_locked'`)이 노출된다. PR 본문의 "파일명 미노출" 서술과 불일치 | **고침 `b2579aa`.** `describeError`(메시지) → `errorCode`(`err.code ?? 'unknown'`). 나가는 값은 errno 코드(`EACCES`…)·`unknown`·`sentinel_dir_reparse_point`·`sentinel_entry_escaped_dir` 넷뿐이다. 테스트가 `sentinelFailure`를 `toBe('EACCES')`로 못박고 `.not.toContain('run_locked')`를 함께 단언한다(fake가 던지는 오류 메시지에는 그 파일명이 들어 있다). PR 본문과 `windows-host.md` 5.7 서술도 실제와 맞췄다 |
+
+### 새 테스트 (`apps/server/src/obs/process.test.ts`, 22 → 29건)
+
+주입 fs 5건 — 루트 reparse point 거부(list·remove 호출 0, 토큰, warn, **그래도 spawn 1회**), 삭제 직전 containment 재확인(3개 중 1개가 링크로 바뀐 상황 → 확인 3회·삭제 2회·`sentinel_entry_escaped_dir`), code 없는 오류 → `unknown`, EACCES 토큰 단언 2건.
+
+실 파일시스템 4건 — `describe('nodeObsSentinelFs against real links (review round 1, B1)')`. 리뷰어가 손으로 한 재현을 테스트로 고정했다: 실제 junction을 reparse point로 보고하는지 / 실 디렉터리·없는 디렉터리는 아닌지, **`.sentinel`이 sibling `outside`로 가는 junction일 때 `not-a-sentinel.txt`가 살아남고 cleared 0·`sentinel_dir_reparse_point`인지**, 실 디렉터리에서는 `run_1234`만 지우고 하위 디렉터리·junction 항목·파일 심볼릭 링크는 남기는지, `isContainedFile`이 실 파일 true / junction 항목 false / 없는 이름 false / 파일 심볼릭 링크 false인지.
+
+링크 종류: junction은 권한 없이 만들어지고, 파일 심볼릭 링크는 호스트가 허용할 때만 만들어 그 단언을 켠다(`trySymlinkFile`). **이 호스트에서는 둘 다 만들어졌다** — `node -e` 확인 결과 `file symlink: OK`, `junction: OK`. 따라서 위 단언은 전부 실제로 돌았다.
+
+### 실행 근거 (M1·B1, 실제 실행)
+
+`Start-VerticalLive.ps1`은 바뀌지 않았지만, 그 201–202줄이 하는 것과 **같은 캡처 모양**을 빌드 산출물로 재현했다(리뷰어의 실험과 같은 형태). `where.exe`를 실행 파일로 세워 실제 spawn까지 가게 하고, `.sentinel`을 sibling `outside`로 가는 junction으로 만들었다 — 즉 blocker의 재현 조건 그대로다:
+
+```powershell
+cmd /c mklink /J "$base\.sentinel" "$base\outside"
+$env:VL_OBS_PROCESS_ENABLED='true'; $env:VL_OBS_EXECUTABLE='C:\Windows\System32\where.exe'
+$env:VL_OBS_SENTINEL_DIR="$base\.sentinel"
+$launch = & node apps\server\dist\bin\obs-launch.js
+($launch | Out-String).TrimEnd()
+```
+
+```text
+--- captured stdout (what Write-VLLog appends to autostart-*.log) ---
+obs launched: pid 37632 (crash sentinels cleared: 0)
+obs sentinel clearing incomplete: sentinel_dir_reparse_point
+--- exit=0 ---
+outside file still exists: True
+```
+
+두 줄 모두 `$launch`에 잡히고(= 로그에 그대로 붙는다), junction 밖 파일은 지워지지 않았으며, exit code는 0이라 기동 실패로 오인되지 않는다. 스크립트 자체도 `-WhatIf`로 돌려 그대로 도는 것을 확인했다(`obsProcessEnabled=False`라 OBS 분기는 경고 경로, `start sequence complete`). 실제 OBS를 띄운 확인은 아니다 — 이 워크스테이션에서 OBS를 기동시키지 않았다.
+
+### 게이트 재실행 (round 1 고침 후)
+
+```text
+$ npm run format:check   → All matched files use Prettier code style!
+$ npm run lint           → eslint exit 0; legacy imports 0; install scripts 4 reviewed
+$ npm run typecheck      → tsc --build, exit 0
+$ npm run test           → Test Files 138 passed (138)
+                           Tests 1903 passed | 1 skipped (1904)
+$ npm run build          → vite + tsc --build (all workspaces), exit 0
+```
 
 ## Not done / out of scope
 
