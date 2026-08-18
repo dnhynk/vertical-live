@@ -36,14 +36,16 @@
 
 디스패치 순서 원칙: `ready` 중 T-ID 낮은 것부터, 동시 2, `[contract]`는 하나만. 리뷰 Task는 `R-<T-ID>-<round>`로 별도 등록하고 아래 이력에만 남긴다.
 
-## 2. 결정 (사용자 확정, 2026-08-16)
+## 2. 결정 (사용자 확정, 2026-08-16 / 2026-08-18 추가)
 
 | # | 결정 | 근거·출처 |
 |---|---|---|
 | D-1 | 백엔드 TypeScript / Node 24 | 렌더러와 계약 타입 공유(`packages/contract`), googleapis·@grpc/grpc-js·obs-websocket-js·better-sqlite3 단일 툴체인 |
 | D-2 | 1차 호스트 = 이 Windows 11 PC(OBS 설치됨) | 스펙 §11 hosting OS 결정. 클라우드 이전은 별도 결정 |
 | D-3 | 알림 = Discord webhook(`AlertSink` 첫 구현) | 스펙 §9.1·§12.3 사람 호출 경로 |
-| D-4 | 저장소 `dnhynk/vertical-live` private, `main`, squash merge만, 브랜치 자동 삭제; 구현 worker 2 + 리뷰어 1 | 오케스트레이션 안전(2026-08-16 BSOD 이력) |
+| D-4 | 저장소 `dnhynk/vertical-live` **public(2026-08-18 사용자 전환; 원래 private)**, `main`, squash merge만, 브랜치 자동 삭제; 구현 worker 2 + 리뷰어 1 | 오케스트레이션 안전(2026-08-16 BSOD 이력) |
+| D-6 | OBS Studio **32.0.2** / obs-websocket **5.6.3**(RPC v1) 고정 승인(E-2, 2026-08-18) | 사용자 승인; `docs/ops/obs-setup.md` §1 |
+| D-7 | OBS 32 safe-mode 프롬프트(E-7): **선택지 A** — 우리가 OBS를 띄우는 경로(자동시작·supervisor obs-process 재시작)에서 실행 직전 `%APPDATA%\obs-studio\.sentinel\*` 파일을 지우고 로그·health detail에 남긴다. OBS 반복 크래시는 obs-process 재시작 예산(F-18→safe_stopped)이 표면화한다. 공식 문서에 없는 방법임을 문서에 명시하고, 무력화되면 기존 동작(포트 대기 타임아웃 + 실패 기록)으로 떨어진다 | 사용자 결정 2026-08-18; `docs/ops/windows-host.md` §5.7 |
 | D-5 | 리뷰어 = Codex `gpt-5.6-sol` / `xhigh` / `service_tier=fast` | 사용자 지정("sol xhigh fast"); 카탈로그·공식 config reference로 값 확인 |
 
 ## 3. 가정 (코디네이터, 스펙이 방향을 정했거나 플래그로 양쪽을 구현하는 항목 — 사용자가 뒤집을 수 있음)
@@ -74,11 +76,11 @@
 
 | # | 항목 | 필요한 결정 | 관련 |
 |---|---|---|---|
-| E-1 | 호스트 BSOD 0x00000050 2회(2026-08-16 14:47 UTC, 2026-08-17 03:24 UTC; minidump `081626-14718-01.dmp`, `081726-14937-01.dmp`) | 사용자가 minidump 분석(WinDbg `!analyze -v`)·메모리 진단·드라이버 갱신을 수행할지, 동시 에이전트 상한을 D-4(2+1)에서 낮출지 | 런북 2.8 |
-| E-2 | OBS 32.0.2 / obs-websocket 5.6.3을 고정 버전으로 승인 | 승인 시 docs/ops/obs-setup.md의 '후보' 표기 제거 | T2, T17 |
-| E-7 | OBS 32.0.0부터 `--disable-shutdown-check`가 제거되어 비정상 종료 뒤 safe-mode 프롬프트를 공식 방법으로 끌 수 없음(T17 발견) — docs/ops/windows-host.md의 선택지 3개 중 사용자 결정 필요(E-2 버전 고정과 함께) | T17 | T17, T12 |
-| E-3 | 실제 OBS 스모크(`npm run obs:probe`) — 사용자가 OBS WebSocket 서버(loopback·비밀번호)를 켠 뒤 실행 | Gate 2 호스트 검증 항목 | T2 |
-| E-5 | **차단(2026-08-17 13:45 UTC~)**: GitHub Actions 결제 차단 — 모든 CI run이 2초 만에 실패, annotation: "The job was not started because recent account payments have failed or your spending limit needs to be increased. Please check the 'Billing & plans' section in your settings". **사용자 조치 필요**: GitHub Settings → Billing & plans에서 결제수단/지출 한도 복구. 그동안 코디네이터 정책: 리뷰어와 worker가 로컬에서 실행한 동일 게이트 5개(format/lint/typecheck/test/build) 결과를 CI 대신 최종 게이트 근거로 사용하고, 결제 복구 후 main CI를 재실행해 녹색을 확인한다(미확인 머지 목록: PR #14 이후) | 런북 2.5(6), 2.6(1) | 전체 |
+| E-1 | **해결(2026-08-18, 사용자)**: 호스트 BSOD 0x00000050 2회 — 사용자가 처리 완료로 확정 | — | 런북 2.8 |
+| E-2 | **해결(2026-08-18)**: OBS 32.0.2 / obs-websocket 5.6.3 고정 승인 → D-6. 문서 '후보' 표기 제거는 T18 | — | T2, T17 |
+| E-7 | **해결(2026-08-18)**: 선택지 A 채택 → D-7. 구현·문서는 T18. 관측(2026-08-18 코디네이터, 이 호스트): 사용자 기본 씬 컬렉션(WASAPI 마이크/데스크탑 오디오 포함)으로 OBS 32.0.2를 정상 종료시켰을 때 종료 중 crash(`obs.dll!copy_audio_data` ← `win-wasapi` / `obs-browser obs_module_unload` 경합, `crashes/Crash 2026-08-18 13-58-03.txt`) → `.sentinel/run_*` 잔존. 파일 제거 후 재실행 시 safe-mode 대화상자 없이 정상 기동·probe 성공 | — | T17, T12 |
+| E-3 | **해결(2026-08-18, 코디네이터 실행·사용자 승인)**: obs-websocket 서버 활성화(auth 필수, 4455, 비밀번호는 Credential Manager `obs.websocketPassword`에만), `vertical-live` 프로파일·씬 컬렉션 설치·선택 후 `npm run obs:probe`: obsWebSocketVersion 5.6.3 · negotiatedRpcVersion 1 · obsVersion 32.0.2 · `matches 1080x1920@30 yes` · scenes standby/live · browser source `vertical-live-renderer` · 건강 신호 obs.stream degraded(output_inactive)/output_progress unknown/frames ok/congestion unknown → `docs/ops/obs-setup.md` §6 체크 4개 충족(§6 문구 '나머지는 unknown'은 frames=ok 관측으로 T18에서 정정). 참고: `--minimize-to-tray`로 띄운 OBS는 WM_CLOSE(taskkill /F 없이)로 닫히지 않는 경우가 있어 트레이 '종료'가 필요 | — | T2 |
+| E-5 | **해결(2026-08-18)**: 사용자가 저장소를 public으로 전환(D-4 갱신) → GitHub Actions 실행 재개. 첫 실제 run(32074894450, main 06542ff)이 ubuntu에서 test 3건 실패(T17 코드의 Windows 경로 의미론 의존; E-5 동안 CI 근거 없이 머지된 결과) → **T17b** 등록. 그 전 머지(PR #14–#22)는 로컬 게이트 근거만이며 T17b 머지 후 main CI 녹색으로 소급 확인한다 | — | 전체 |
 | E-6 | **해결**: PR #16 round 5 approve·머지. 원 항목: PR #16(T12 supervisor) 리뷰 round 4까지 request_changes(round마다 지적 해소, 잔존은 safe-stop 경로의 순서/취소 세부로 계속 좁아짐: 예약 restart→in-flight restart→시작 시퀀스 취소→alert await 순서). 코디네이터는 수렴 중으로 판단해 F-T12-4 진행 | 런북 2.5(4) | T12 |
 | E-4 | **해결(2026-08-17)**: PR #11 round 6에서 approve·머지. 원 항목: PR #11(T10 broadcast lifecycle) 리뷰가 round 4까지 request_changes(각 round의 지적은 해소, 리뷰어가 reconcile·update 경로의 인접 갭을 계속 발견 — 절단 목록 무판정, 마커 생명주기(A-18), update 본문 정확성). 코디네이터는 수렴 중으로 판단해 F-T10-4 진행. 사용자가 중단·재설계를 원하면 지시 | 런북 2.5(4) | T10 |
 
@@ -198,3 +200,4 @@
 | 2026-08-17 21:12 | R-T8c-3 verdict **approve**(round 2 blocker·major 해소, A-19대로 e2e 검증, UnknownEffect drop 근거 확인) → 최종 게이트(engine.ts/publisher.ts/test/티켓 4파일, supervisor·contract·deps 변경 0) → **PR #21 squash merge**(main 8dd7540). T8c worker release·worktree 제거. **T8d 등록·디스패치** `ctx_f8e5bd22e56b`(publish 경로 mark-first 권고, 불명확하면 ask; 선택: T15 pauseEffectAcks 제거). 코디네이터가 main 8dd7540에서 게이트 5개+soak:ci 로컬 재실행 중(E-5 대체 근거) |
 | 2026-08-17 21:54 | 코디네이터 main 8dd7540 로컬 게이트: format/lint/typecheck/test(137 files, 1880 passed, 1 skipped)/build 모두 exit 0, soak:ci verdict PASS(E-5 대체 근거). T8d worker_done(succeeded, PR #22: #publish mark-first·#unrecordedEffects latch·pass마다 mark 재시도·adoptRecoveredEffect 동일 경로; 발견: max_page_count로는 in-place update(published_at)가 거부되지 않아 live 경로는 실제 SQLITE_BUSY로 재현; 새 테스트 4개 수정 전 실패; 1884 tests; (b) pauseEffectAcks 제거 chore(soak) 포함, soak:ci PASS). R-T8d-1 `task_24cf94e11081` → `ctx_4fe5f4ea2d91`(review) |
 | 2026-08-17 22:11 | R-T8d-1 verdict **approve**(수정 전 4/4 실패 재현, SQLITE_BUSY fixture 20회 반복 안정, max_page_count 주장 독립 검증, soak:ci·matrix 20 PASS) → 최종 게이트(engine.ts·테스트·soak 주입 도구·티켓, supervisor·contract·deps 변경 0) → **PR #22 squash merge**(main 59568bb). T8d worker release·worktree 제거. **스펙 v1 구현 task 22개 전부 머지, open PR 0.** 코디네이터 main 59568bb 로컬 게이트: format/lint/typecheck/test(1884 passed, 1 skipped)/build exit 0, soak:ci PASS. 무인 운영 루프 종료 — 남은 것은 사용자 결정(E-1·E-2·E-3·E-5·E-7)과 Gate 0 |
+| 2026-08-18 05:04 | 사용자 결정 5건: E-5 저장소 public 전환(D-4 갱신) → CI 재실행 → ubuntu test 3건 실패 발견 → **T17b** `task_70edf8e8feff` 디스패치 `ctx_d817d16e052d`(worker 질문: client.test.ts 'no provider' 테스트가 호스트 vault 상태 의존 → A: 같은 PR에서 `identified=false` 단언으로 수정). E-2 승인 → D-6. E-7 → 선택지 A → D-7. E-1 사용자 해결. E-3 코디네이터가 실행(위 표) — 실 OBS 스모크 통과. 저장소 public 전환에 따른 비밀 패턴 grep 0건 확인. 다음: **T18**(D-6/D-7 구현·문서, CLAUDE.md/런북의 'private' 문구 갱신) 디스패치 |
