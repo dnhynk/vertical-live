@@ -33,6 +33,8 @@
 | T8b | 엔진 버그픽스: /ingest/simulator inbox write 예외 시 hang(T15 발견) | T8 | — | merged | t8b-ingest-hang | #20 | `task_f1aeb51337bf` |
 | T8c | 엔진 버그픽스: 렌더러 ACK 경로 store 실패(disk-full) uncaught(T15 발견) | T8 | — | merged | t8c-ack-store-failure | #21 | `task_658a5641bf1c` |
 | T8d | 엔진 버그픽스: `#publish` markEffectPublished store 실패 시 미발행 row 고아화(T8c 발견) | T8c | — | merged | t8d-publish-store-failure | #22 | `task_43eb61f3968d` |
+| T17b | CI 버그픽스: T17 Windows 경로 의미론(ubuntu CI 실패 3건) + client.test 호스트 vault 의존 | T17 | — | in_review | t17b-ci-path-semantics | #23 | `task_70edf8e8feff` |
+| T18 | D-6/D-7 구현·문서(OBS 버전 고정 승인, safe-mode sentinel 정책, public 문구) | T17, T2 | — | dispatched | t18-obs-safemode-policy | | `task_0d996db3c12a` |
 
 디스패치 순서 원칙: `ready` 중 T-ID 낮은 것부터, 동시 2, `[contract]`는 하나만. 리뷰 Task는 `R-<T-ID>-<round>`로 별도 등록하고 아래 이력에만 남긴다.
 
@@ -201,3 +203,4 @@
 | 2026-08-17 21:54 | 코디네이터 main 8dd7540 로컬 게이트: format/lint/typecheck/test(137 files, 1880 passed, 1 skipped)/build 모두 exit 0, soak:ci verdict PASS(E-5 대체 근거). T8d worker_done(succeeded, PR #22: #publish mark-first·#unrecordedEffects latch·pass마다 mark 재시도·adoptRecoveredEffect 동일 경로; 발견: max_page_count로는 in-place update(published_at)가 거부되지 않아 live 경로는 실제 SQLITE_BUSY로 재현; 새 테스트 4개 수정 전 실패; 1884 tests; (b) pauseEffectAcks 제거 chore(soak) 포함, soak:ci PASS). R-T8d-1 `task_24cf94e11081` → `ctx_4fe5f4ea2d91`(review) |
 | 2026-08-17 22:11 | R-T8d-1 verdict **approve**(수정 전 4/4 실패 재현, SQLITE_BUSY fixture 20회 반복 안정, max_page_count 주장 독립 검증, soak:ci·matrix 20 PASS) → 최종 게이트(engine.ts·테스트·soak 주입 도구·티켓, supervisor·contract·deps 변경 0) → **PR #22 squash merge**(main 59568bb). T8d worker release·worktree 제거. **스펙 v1 구현 task 22개 전부 머지, open PR 0.** 코디네이터 main 59568bb 로컬 게이트: format/lint/typecheck/test(1884 passed, 1 skipped)/build exit 0, soak:ci PASS. 무인 운영 루프 종료 — 남은 것은 사용자 결정(E-1·E-2·E-3·E-5·E-7)과 Gate 0 |
 | 2026-08-18 05:04 | 사용자 결정 5건: E-5 저장소 public 전환(D-4 갱신) → CI 재실행 → ubuntu test 3건 실패 발견 → **T17b** `task_70edf8e8feff` 디스패치 `ctx_d817d16e052d`(worker 질문: client.test.ts 'no provider' 테스트가 호스트 vault 상태 의존 → A: 같은 PR에서 `identified=false` 단언으로 수정). E-2 승인 → D-6. E-7 → 선택지 A → D-7. E-1 사용자 해결. E-3 코디네이터가 실행(위 표) — 실 OBS 스모크 통과. 저장소 public 전환에 따른 비밀 패턴 grep 0건 확인. 다음: **T18**(D-6/D-7 구현·문서, CLAUDE.md/런북의 'private' 문구 갱신) 디스패치 |
+| 2026-08-18 05:23 | **T18** `task_0d996db3c12a` 디스패치 `ctx_6687d39f7667`. T17b worker_done(succeeded, PR #23: path.win32 4곳·전수 조사표 14행·client.test 단언 교체; **CI run 32101772379/32102268412 녹색**(build·soak:ci ubuntu 통과), 로컬 1884 tests). R-T17b-1 `task_0c8378ceecce` → `ctx_5c463a3dac04`(review) |
