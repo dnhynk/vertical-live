@@ -258,6 +258,8 @@ $ npm run test           → Test Files 138 passed (138)
 $ npm run build          → vite + tsc --build (all workspaces), exit 0
 ```
 
+`git fetch origin && git rebase origin/main`(base `6342ac9`, 충돌 없음) 후 위 5개를 다시 돌렸고 결과는 같다. push는 `--force-with-lease`(`a6f0a30...4291d8e`). PR CI [run 32110335065](https://github.com/dnhynk/vertical-live/actions/runs/32110335065) **pass** — head `4291d8e`.
+
 ## Not done / out of scope
 
 - safe-mode 대화상자를 UI 자동화로 누르는 것, OBS 재설치, 씬/프로파일 파일 변경 — 명세의 범위 밖.
