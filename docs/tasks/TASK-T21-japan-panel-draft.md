@@ -39,7 +39,8 @@ Gate 0 §1.4의 네 항목(일본 패널 모집 조건 · 5초 무음 이해 테
 | Prolific 참가자 국가 | https://researcher-help.prolific.com/en/articles/445224-who-are-the-participants-on-prolific | 2026-08-19 | 참가자는 대부분 OECD 회원국 거주, **일본 포함**. 모집 경로 후보 1개 확인 |
 | Analytics `country` 차원 | https://developers.google.com/youtube/analytics/dimensions | 2026-08-19 | `country`는 ISO-3166-1 alpha-2(일본 `JP`), 식별 불가 행은 `ZZ`. 일본 시장 증빙의 기본 차원 |
 | Analytics limited data | https://support.google.com/youtube/answer/9101241 | 2026-08-19 | "국가/지역 관련 지표·차원은 limited될 수 있다", **임계치는 비공개이며 변경 가능**. §15 Gate 4의 "국가 데이터 없으면 선언하지 않음"과 직접 연결 |
-| traffic source 값 | https://developers.google.com/youtube/analytics/dimensions#Traffic_Source_Dimensions | 2026-08-19 | `BROWSE`, `SHORTS`, `LIVE_REDIRECT` 등. **세로 Live 피드 유입이 어느 값인지는 문서에서 확정 못 함** → "확인 필요" |
+| traffic source 값 | https://developers.google.com/youtube/analytics/dimensions#Traffic_Source_Dimensions | 2026-08-19 | `insightTrafficSourceType`에 `SHORTS`·`LIVE_REDIRECT` 등. **세로 Live 피드 유입이 어느 값인지는 문서에서 확정 못 함** → "확인 필요" |
+| playback location 값 | https://developers.google.com/youtube/analytics/dimensions#Playback_Location_Dimensions | 2026-08-19 | `BROWSE`(홈·구독 피드 등 탐색 기능에서의 재생)는 traffic source가 아니라 **`insightPlaybackLocationType`** 값이다. 리뷰 round 1 m1에서 정정 |
 | engaged views 정의 | https://support.google.com/youtube/answer/9313698 | 2026-08-19 | 이 페이지에 engaged views의 **독립 정의가 없다**(평균 시청 지속시간 설명 안에서 1회 언급). 세로 Live 제공 여부 → "확인 필요" |
 
 ## Questions asked (orca ask) and answers
@@ -68,7 +69,7 @@ Gate 0 §1.4의 네 항목(일본 패널 모집 조건 · 5초 무음 이해 테
 
 | # | 기준 | 상태 | 근거 |
 |---|---|---|---|
-| 1 | 모든 숫자에 '제안' 라벨과 근거/무근거 표기; 외부 주장에 URL·확인 날짜 | met | 문서 §0이 라벨 규약을 정의하고, §1–§4의 모든 수치 표에 `제안(근거: …)` / `제안(근거 없음)` / `측정값(…)` / `확인 필요(출처 없음)` 중 하나가 붙어 있다. 외부 주장은 §6 출처 표([P1]–[P8])에 URL과 확인일 2026-08-19로 있다 |
+| 1 | 모든 숫자에 '제안' 라벨과 근거/무근거 표기; 외부 주장에 URL·확인 날짜 | met | 문서 §0이 라벨 규약을 정의하고, §1–§4의 모든 수치 표에 `제안(근거: …)` / `제안(근거 없음)` / `측정값(…)` / `확인 필요(출처 없음)` 중 하나가 붙어 있다. 외부 주장은 §6 출처 표([P1]–[P9])에 URL과 확인일 2026-08-19로 있다 |
 | 2 | 콘텐츠 목록의 사건명이 T7 코드의 실제 사건 식별자와 일치(grep 증빙) | met | 문서 §3.1(a)에 grep 명령 3개, §3.2에 식별자마다 `파일:줄`. 아래 "재현한 명령" 참조 |
 
 ### 재현한 명령과 출력 (요약)
@@ -115,7 +116,7 @@ seed_day_1 타임라인 발췌(JST):
 npm run format:check  -> pass ("All matched files use Prettier code style!")
 npm run lint          -> pass (eslint 0, check-no-legacy-imports: ok (0), check-install-scripts: ok (4 reviewed))
 npm run typecheck     -> pass (tsc --build, 출력 없음)
-npm run test          -> pass (Test Files 139 passed (139), Tests 1955 passed | 1 skipped (1956), 108.81s)
+npm run test          -> pass (Test Files 139 passed (139), Tests 1955 passed | 1 skipped (1956), 120.38s)
 npm run build         -> pass (전 워크스페이스 tsc --build, data-map up to date)
 ```
 
@@ -150,3 +151,24 @@ docs/tasks/TASK-T21-japan-panel-draft.md
 - 사용자 승인 뒤: 승인값을 BOARD `D-*`에 기록하고 `gate0-checklist.md` §1.4 체크박스를 채우는 후속 task.
   승인된 반복 장면 기준은 `world/content/tuning.ts`의 `FRESHNESS_MINIMUMS`를 교체하고 `provisional`에서 뺀다.
 - T19(PR #25)가 같은 `gate0-checklist.md`를 고치고 있다. #25가 먼저 머지되면 이 브랜치를 rebase한다.
+
+## Review round 1
+
+리뷰 verdict `request_changes`(major 1 + minor 5, 전부 문서). 지적 6건 전부 `45d0319`에서 고쳤다. 이 절 자체와
+티켓 §"Sources consulted" 표에 남아 있던 같은 m1 오기(`BROWSE`를 traffic source로 적어 둔 행)의 정정은 바로 다음
+커밋에 있다. 코드 변경 없음.
+
+| # | 지적 | 확인한 사실 | 고친 내용 | SHA |
+|---|---|---|---|---|
+| M1 | `japan-panel-plan.md:398`(·`:431`)의 명령 성공률 절대 하한 `≥ 70%`와 `:390`의 가동률 `≥ 90%`가 스펙 §14.1(기준선 수집 뒤 결과 보기 전 고정) 및 문서 자신의 §4.4 서두·티켓 서술과 모순 | 지적이 맞다. §4.4 서두가 "이 문서는 절대 숫자를 정할 수 없다"고 써 놓고 표에서 두 개를 제안하고 있었다 | 두 숫자를 삭제했다. 남긴 것은 **지표·계산식·freeze 절차**뿐이다: 가동률 = 실제 방송 시간 ÷ 구간 총 시간, 명령 성공률 = `accepted ÷ commandLike`(`apps/server/src/input/metrics.ts:15`–`25`), 절차는 baseline 14일 → freeze → 겹치지 않는 validation 14일. §4.4 서두에 "판정 숫자는 ② freeze에서 처음 정해진다"는 인용 블록을 넣고, ①③의 "14일"은 구간 길이 제안이지 합격선이 아님을 명시했다. §5 A-7 행과 티켓 Assumptions 표의 같은 숫자도 함께 제거했다 | `45d0319` |
+| m1 | `:360-362` P7 enum 귀속 오류 | 공식 문서 확인(2026-08-19): `BROWSE`는 `insightPlaybackLocationType`("views that took place on the YouTube home page or home screen, in the user's subscription feed, or in another YouTube browsing feature"), `SHORTS`·`LIVE_REDIRECT`는 `insightTrafficSourceType` 값 | §4.2를 두 차원으로 분리하고 "두 차원을 한 표에 섞어 읽지 않는다"를 추가. 재생 위치 차원 출처 `[P9]`(`#Playback_Location_Dimensions`, 앵커 존재 확인)를 6장에 추가하고 `[P7]` 설명을 traffic source로 한정. §4.5 항목 2도 "어느 차원의 어떤 값인가"로 고쳤다 | `45d0319` |
+| m2 | `:273` `crisis_sleeping`이 `apps/server/src/world`에 없음 | `grep -rn crisis_sleeping` 결과는 renderer 2곳(`preview-states.ts:302`, `palette.test.ts:189`)의 textKey·iconId뿐이고 world에는 0건. 실제 식별자는 crisis id `sleeping`(`world/types.ts:43`), 전이 `crisis_entered`(`world/reducer.ts:215`), 연출 변형 `crisis_sleep_curl`(`world/content/variants.ts:492`) | night 행을 `crisis_entered -> sleeping`(임계 판정 `world/creature.ts:102`, 연출 변형 `crisis_sleep_curl`)로 바꾸고 file:line을 붙였다 | `45d0319` |
+| m3 | `:58` `cost 0 (no source)`에 §0 라벨이 없음 | 지적이 맞다. §0은 "라벨 없는 숫자는 이 문서에 없다"고 선언해 놓았다 | `경로 자체의 비용 **0원** \`제안(근거 없음)\` — 견적을 받아본 적이 없다`로 고쳤다 | `45d0319` |
+| m4 | `:171-172` previewLeadMs grep 주장이 거짓(`config/default.json:279`에도 정의) | 지적이 맞다. `previewLeadMs` 전체 출현은 정의 3곳(`tuning.ts:79` 타입, `tuning.ts:168` 기본값, `config/default.json:279` 설정값)이고, 이 값을 읽는 코드는 0곳이다(`world` 섹션을 읽는 config 로더도 없다) | 세 정의 위치를 그대로 적고, 사실로 유지되는 부분("런타임·reducer 소비처 0곳 → 30분 예고는 동작하지 않는다")만 남겼다. 같은 줄의 잘못된 상호참조 `5장 A-5`(반복 장면 기준)를 `A-8`(후속 코드 작업)로 정정했다 — 리뷰 지적 밖이지만 같은 두 줄 안의 오기다. 티켓 Follow-up의 같은 서술도 맞췄다 | `45d0319` |
+| m5 | 티켓 Result의 변경 파일 수 2 ≠ 실제 3 | `git diff --name-only origin/main...HEAD` = checklist·plan·ticket 3개 | 숫자 대신 `--name-only` 실제 출력을 붙였다 | `45d0319` |
+
+### Round 1 이후 재확인
+
+- rebase: `origin/main` `c6bbf0d` 위로 충돌 없이 rebase됐다. T19(PR #25)는 아직 `gate0-checklist.md`를 바꾸지 않았고, 이 브랜치의 §1.4 3줄은 그대로다(`git diff origin/main...HEAD -- docs/ops/gate0-checklist.md` = 3줄 추가).
+- 게이트 5개 재실행 결과는 위 "Gates (executed)"에 있다.
+- 문서 전체에 남은 `70%`·`90%`는 5초 테스트(§2·A-2)의 통과선뿐이며, 이는 Gate 0 승인 대상이지 Gate 4 절대값이 아니다.
