@@ -41,6 +41,7 @@
 | T20c | identity (B) 렌더러: 동의자 표시명·고지 CTA | T20a, T14 | — | merged | t20c-identity-renderer | #29 | `task_f15883c91c9d` |
 | T21 | 일본 패널·5초 테스트·24h 콘텐츠 목록·증빙 초안(D-15) | T14, T16 | — | merged | t21-japan-panel-draft | #27 | `task_5ccfd178a887` |
 | T22 | 모더레이션 사유 보고 경로(사람 트리거 admin 엔드포인트 + filter_evasion_surge 휴리스틱; D-13 토큰 4개) | T12, T19 | — | pending | t22-moderation-report | | |
+| T8e | 엔진: StateEngine.pump()가 31일 가상 시계 점프 후 미반환(184s timeout; T20b 리뷰 관측) + engine/ingest.test.ts:442 SQLite write lock flaky(T21 관측) 조사·수정 | T8 | — | pending | t8e-clock-jump-flaky | | |
 
 디스패치 순서 원칙: `ready` 중 T-ID 낮은 것부터, 동시 2, `[contract]`는 하나만. 리뷰 Task는 `R-<T-ID>-<round>`로 별도 등록하고 아래 이력에만 남긴다.
 
@@ -248,3 +249,4 @@
 | 2026-08-19 16:11 | F-T20c-1 완료(fd75fcb/7c57c97/709f82e: 커밋(stateRevision) 기반 이름 조인·후보 1개 규칙·영어 고지 보강·code point 상한; 회귀 7종; 2006 tests; CI 32273948150 녹색; T20d [contract] 후보(lastAppliedAction.stateRevision) 기록) → R-T20c-2 `task_90ca27829f2d` → `ctx_6ae1c19e4a5e`(review2). 진행: F-T20b-2 |
 | 2026-08-19 16:38 | R-T20c-2 **approve** → 최종 게이트(renderer 23파일, contract·server·deps 0, CI 32273948150 녹색) → **PR #29 squash merge**(main 93540b4). T20c worker release·worktree 제거. 정리 강화: `terminal stop`이 남기는 유휴 review/review2 pane 27개 close, cleanup_review.py가 pane close까지 수행. T21 워크트리 디렉터리(비어 있음)는 다른 프로세스 lock으로 삭제 대기. 진행: F-T20b-2 |
 | 2026-08-19 16:47 | F-T20b-2 완료(411549a/2338cdd/35c5bb8: chatRuntimeDeps() 배선으로 훅 유실 불가 + wiring.test, duringCommit 스테이징·sweeper identity port, 고지 6필드·notice version 2026-08-20; 2082 tests; CI 32277356904 녹색; 무관 관측: StateEngine.pump()가 31일 가상 시계 점프 후 미반환 — 확인 후 T8e 후보) → R-T20b-3 `task_40147c5d566d` → `ctx_e1c1765f564b`(review2) |
+| 2026-08-19 17:11 | R-T20b-3 request_changes(round 2 해소 확인; 잔여 blocker 1: RetentionSweeper가 consent 삭제 후 다음 field abort 시 forgetDeleted 누락 → pending 재노출) → **F-T20b-3** `task_ab81fb91a508`. **T8e 등록**(pump() 31일 점프 미반환 + ingest.test flaky). review2 정리 |
