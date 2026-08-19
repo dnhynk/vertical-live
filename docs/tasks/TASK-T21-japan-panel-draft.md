@@ -217,3 +217,43 @@ write lock")가 1건 실패했고, **이어서 돌린 2회는 모두 통과**했
 `db_locked` 두 reason을 다룬다), 이 테스트 파일은 `origin/main`의 `01d8f2a`(#20)에서 온 것으로 이 PR이
 건드리지 않았다. **재현 1/3회**이며 근본 원인까지 규명하지는 않았다 — 코디네이터 판단용으로만 남긴다.
 
+
+## Review round 3
+
+리뷰 verdict `request_changes`. **round 1의 major 1 + minor 5와 round 2의 minor 1은 리뷰어가 전부 해소 확인**했고
+(회귀 점검 통과), **수락 기준 1·2가 모두 `met`으로 바뀌었다.** 신규 지적은 minor 2건이고 **둘 다 문서 내부
+상호참조의 추적성 문제**다 — 리뷰어도 두 건 모두 "실질 주장은 여전히 맞다"고 명시했다. 바뀐 것은 **가리키는
+위치뿐**이며 사실·숫자·결론은 하나도 바뀌지 않았다. **코드·config·의존성 변경 없음, 새 숫자·합격선·게이트·출처 없음.**
+
+| # | 지적 | 확인한 사실 (직접 재확인) | 고친 내용 | SHA |
+|---|---|---|---|---|
+| m1 | `japan-panel-plan.md:439`와 티켓 `:150`이 명령 성공률 배선 후속을 "§5 A-6"이라 가리키지만, A-6은 일본 시장 증빙 결정이고 실제 항목은 A-8 | 지적이 맞다. §5 표를 직접 확인: `A-6`(`japan-panel-plan.md:455`) = "일본 시장 증빙 방식", `A-8`(`:457`) = "후속 코드 작업 착수 여부 — (a) 명령 성공률을 `GET /metrics`에 노출, (b) `choice.previewLeadMs`를 실제 예고에 쓰기". `GET /metrics` 노출을 덮는 항목은 A-8이다 | 후속 참조 **2곳만** `A-8`로 고쳤다(`japan-panel-plan.md:439`, 티켓 `:150`). 나머지 `A-6` 언급 2곳은 **정당하므로 그대로 뒀다**: §5의 A-6 행 자체(`:455`)와, round 2에서 Reporting API 경로를 실제로 A-6에 추가했다는 기록(티켓 `:187`) | `ae86325` |
+| m2 | `previewLeadMs` 참조가 `config/default.json:279`인데 이 PR head 기준 정의는 `:278` | 지적이 맞다(`grep -n previewLeadMs config/default.json` → `278`). 추가로 **줄 밀림이 아님을 확인했다**: 이 브랜치의 모든 커밋과 `origin/main`에서 전부 278이었다(`for c in ...; do git show $c:config/default.json \| grep -n previewLeadMs; done`). 즉 round 1 리뷰 텍스트의 `:279`가 처음부터 off-by-one이었고, 내가 검증 없이 옮겨 적어 전파한 것이다 | 3곳 전부 `:278`로 고쳤다(`japan-panel-plan.md:173`, 티켓 `:152`, 티켓 round 1 표 `:171`의 2회). round 1 표 "지적" 칸의 숫자도 함께 고쳤다 — 그 칸은 영문 리뷰의 한국어 요약이지 인용문이 아니고, 틀린 줄 번호를 남기면 그 표를 따라간 독자가 똑같이 잘못된 줄로 가기 때문이다. 줄 밀림이 아니라 원래 틀린 값이었으므로 `file:line` 표기 방식 자체는 문서 관례대로 유지했다 | `ae86325` |
+
+### Round 3 이후 재확인
+
+- rebase: `origin/main`이 `fc402f3` → `00ebc42`로 움직여 그 위로 rebase했다. **충돌 없음**(round 2와 달리
+  checklist 충돌도 없었다). main이 움직였으므로 **인용 위치를 전부 다시 확인**했다: `previewLeadMs`는 새 base에서도
+  `config/default.json:278`, `A-8` 행은 여전히 `japan-panel-plan.md:457`, 변경 파일은 여전히 3개
+  (`git diff --name-only origin/main...HEAD` → checklist·plan·ticket), `gate0-checklist.md` 변경은 여전히
+  **§1.4 3줄 추가뿐**(`git diff --stat origin/main...HEAD -- docs/ops/gate0-checklist.md` → `3 +++`).
+- 이번 라운드 diff는 **문서 5줄**이 전부다(plan 2줄, 티켓 3줄). 코드·config·의존성 0.
+- 사실 주장은 그대로다: `previewLeadMs` 정의 3곳·소비처 0곳, 명령 성공률은 `GET /metrics`에 노출되지 않아 배선 필요.
+
+### Gates (round 3)
+
+리뷰 round 3 수정 뒤 `origin/main` `00ebc42` 위로 rebase한 상태에서 돌린 결과다(5개 전부 exit 0).
+
+```text
+npm run format:check  -> pass ("All matched files use Prettier code style!")
+npm run lint          -> pass (eslint 0, check-no-legacy-imports: ok (0 legacy imports),
+                               check-install-scripts: ok (4 reviewed, better-sqlite3 binding loads))
+npm run typecheck     -> pass (tsc --build tsconfig.json, 출력 없음, exit 0)
+npm run test          -> pass (Test Files 139 passed (139), Tests 1957 passed | 1 skipped (1958), 139.15s)
+npm run build         -> pass (schema up to date (6 files), renderer 733 modules, migrations 5,
+                               data-map up to date, simulator/soak 빌드, exit 0)
+```
+
+실행하지 않은 게이트: 없음. round 2에서 1/3 확률로 관측했던 `ingest.test.ts` write-lock 실패는 이번 실행에서
+재현되지 않았다(리뷰어 round 3 실행에서도 재현되지 않음). 여전히 근본 원인을 규명하지 못했으므로 해결됐다고
+쓰지 않는다.
