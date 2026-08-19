@@ -81,7 +81,7 @@ kill-cli는 파일 fallback이 있다. 이유가 "**프로세스가 응답하지
 1. 보고의 효과(CTA off, alert, safe-stop 판정)는 **살아 있는 supervisor 안에서만** 일어난다. 서버가 죽어 있으면 끌 CTA도, 멈출 방송도 없다 — 그 상황에서 운영자가 할 일은 모더레이션 보고가 아니라 kill switch다.
 2. 파일을 두면 "모더레이션 degraded"가 디스크에 남아 다음 기동에서 되살아나는데, 그 상태를 **해제하는 프로토콜이 없다**(§12.3은 사람이 판단해 보고하고 사람이 해제한다). 채팅이 멀쩡한 새 프로세스를 과거의 파일이 멈추는 것은 §9.2가 말하는 안전 정지가 아니라 오탐이다.
 
-그래서 CLI는 HTTP만 쓰고, 실패하면 **명확히 실패**한다(exit 1 + `http_<status>`/`ECONNREFUSED` 같은 기계 토큰 + "서버가 죽었으면 `npm run kill`" 안내).
+그래서 CLI는 HTTP만 쓰고, 실패하면 **명확히 실패**한다(exit 1 + `http_<status>`/`ECONNREFUSED` 같은 기계 토큰 + "서버가 죽었으면 `npm run kill -w @vl/server -- --reason \"<why>\"`" 안내).
 
 ## Sources consulted (official docs)
 
@@ -113,18 +113,18 @@ kill-cli는 파일 fallback이 있다. 이유가 "**프로세스가 응답하지
 | # | 기준 | 상태 | 근거(테스트 파일·명령·출력) |
 |---|---|---|---|
 | 1a | 엔드포인트 테스트: 인증 실패 | **met** | `supervisor/moderation-report.test.ts` — 비-loopback 403, 토큰 없음/틀림/미설정 401(3케이스), 모두 `onReport` 미호출. 라우팅 수준은 `server.test.ts` "refuses an unauthenticated or unknown-token moderation report" |
-| 1b | 잘못된 토큰 | **met** | 같은 파일 "refuses a token that is not on the approved table, without echoing it" — 400, 응답에 허용 토큰만, `JSON.stringify(body)`에 제출값 미포함, supervisor 미도달. 본문 없음/빈 문자열/배열도 400 |
+| 1b | 잘못된 토큰 | **met** | 같은 파일 "refuses a token that is not on the approved table, without echoing it" — 400, 응답에 허용 토큰만, `JSON.stringify(body)`에 제출값 미포함, supervisor 미도달. 본문 없음/빈 문자열/배열도 400. **round 1 M1 이후** "compares the reason as sent, so no variant launders into an approved token" — 승인 토큰의 근접 변형 12개(제어문자 `\u0000`·`\n`·`\t`, 서식문자 `\u200b`, 리뷰어의 원본 프로브, 괄호·`!`·`?`, 앞뒤·중간 공백, 대문자)를 전부 400으로 고정 |
 | 1c | 정상 보고 | **met** | 같은 파일 202 + `{source:'http', reason, at}`; 라우팅은 `server.test.ts` "routes POST /admin/moderation to the report endpoint" |
 | 1d | clear | **met** | 같은 파일 "clears on the same admission rules…" (202, `resumesRun:false`); 라우팅 `server.test.ts` "routes POST /admin/moderation/clear" |
-| 1e | CLI 테스트 | **met** | `supervisor/moderation-cli.test.ts` 7케이스 — 정상 보고(URL·헤더·본문 검증), 미승인 토큰(요청 자체를 보내지 않음), clear, 서버 미응답(exit 1 + `ECONNREFUSED` + `npm run kill` 안내), `http_401`, 토큰 미설정, 잘못된 인자 |
-| 1f | 보고 시 CTA off + safe_stopped + alert 1회 (T12 전이 테스트 재사용) | **met** | `supervisor/supervisor.test.ts` "stops the run for an approved token from POST /admin/moderation (§T22)" — T12의 `createSupervisorHarness`/`goLive` 그대로 사용. `inputHealth='degraded'`, `interactionEnabled=false`, `state='safe_stopped'`, `safeStop.kind='moderation_unhealthy'`, `ofKind('supervisor.safe_stopped')` 길이 **1**, severity critical. 해제 경로는 "turns the CTA back on when a report is cleared" |
+| 1e | CLI 테스트 | **met** | `supervisor/moderation-cli.test.ts` 7케이스 — 정상 보고(URL·헤더·본문 검증), 미승인 토큰(요청 자체를 보내지 않음), clear, 서버 미응답(exit 1 + `ECONNREFUSED` + `npm run kill -w @vl/server -- --reason` 안내 — round 1 M2), `http_401`, 토큰 미설정, 잘못된 인자 |
+| 1f | 보고 시 CTA off + safe_stopped + alert 1회 (T12 전이 테스트 재사용) | **met** | `supervisor/supervisor.test.ts` "stops the run for an approved token from POST /admin/moderation (§T22)" — T12의 `createSupervisorHarness`/`goLive` 그대로 사용. `inputHealth='degraded'`, `interactionEnabled=false`, `state='safe_stopped'`, `safeStop.kind='moderation_unhealthy'`. **round 1 B1 이후** §12.3의 2단계를 함께 고정한다 — `ofKind('moderation.unhealthy')` 길이 **1**(severity warning, `reason='targeted_harassment'`, `detail.safeStopConditionMatched=true`)와 `ofKind('supervisor.safe_stopped')` 길이 **1**(severity critical), 그리고 전달 순서가 warning → critical임을 `alerts.alerts`의 index로 확인. 해제 경로는 "turns the CTA back on when a report is cleared" |
 | 2a | 합성 입력으로 창별 비율 계산 | **met** | `supervisor/moderation-heuristic.test.ts` "computes the ratio over messages that reached the parser" — 실제 `parseMessage`에 합성 문자열을 넣어 messages=60, evasion=35, ratio≈0.583. 창별 delta는 "counts only differences" |
 | 2b | 연속 N창 진입 / M창 해제 | **met** | 같은 파일 "reports only after enterWindows consecutive exceeding windows", "clears after clearWindows consecutive quiet windows", "one quiet window in the middle restarts the count" |
 | 2c | 임계 미만에서 오탐 없음 | **met** | 같은 파일 4케이스 — 평범한 채팅 20창, 비율 0.12로 10창, `minMessages` 미만(비율 1.0인데도 진입 안 함), 빈 창. supervisor 수준의 대조군은 `supervisor.test.ts` "leaves an ordinary chat alone however long it runs" (10창 후 `live` 유지) |
 | 2d | identity 닫힘/열림 무관 | **met** | 같은 파일 "reaches the same verdict with the consent gate open and closed" — 두 모드 모두 `report`, 같은 messages/evasion 수치 |
 | 2e | 우회 사유 집합의 근거 | **met** | 같은 파일 "is exactly the set `moderate()` produces" + "partitions every T6 rejection code exactly once" + 티켓 (a) 전수표 |
 | 3a | 게이트 5개 | **met** | 아래 Gates |
-| 3b | CI 녹색 | **met** | PR CI run(아래 Gates에 URL) |
+| 3b | CI 녹색 | **met** | round 1 fix 이후 `45f67d6`에서 통과 — <https://github.com/dnhynk/vertical-live/actions/runs/32293554124> (`gh pr checks 30`: ci pass 2m5s) |
 | 3c | 문서의 모든 임계가 provisional 표기 | **met** | `config/default.json`의 `supervisor.provisional`에 5개 키 추가 + 테스트로 강제(`moderation-heuristic.test.ts` "carries the heuristic thresholds as provisional values"). 문서 3곳(`moderation-call-table.md` 2·3·5장, `runbook-operations.md` 3.1, `supervisor.md` 4.3)에 "합격선이 아니다 / Gate 2 baseline 뒤 잠금" 명시 |
 
 ### Gates (executed)
@@ -147,8 +147,8 @@ $ npm run typecheck
 $ npm run test
 > vitest run
  Test Files  148 passed (148)
-      Tests  2132 passed | 1 skipped (2133)
-   Duration  84.34s
+      Tests  2133 passed | 1 skipped (2134)
+   Duration  62.48s
 
 $ npm run build
 > tsc --build (contract/server/renderer/simulator/soak) + copy-migrations + generate-data-map --check
@@ -157,7 +157,7 @@ docs/ops/data-map.md up to date
 ✓ built in 9.12s
 ```
 
-`origin/main` rebase 후 실행했다(base `7e56fe4`). 신규 테스트 파일 3개 = 35 tests, 그 밖에 `supervisor.test.ts` +5,
+`origin/main` rebase 후 실행했다(round 1 fix 뒤 base `ccf2ab4`에서 다시 실행, 5개 모두 통과). 신규 테스트 파일 3개 = 35 tests, 그 밖에 `supervisor.test.ts` +5,
 `server.test.ts` +5, `wiring.test.ts` +1.
 
 ### 추가로 실행한 end-to-end 스모크 (mock 없음)
@@ -176,7 +176,7 @@ moderation reported: filter_evasion_surge
 unknown reason token: not in the approved call table
 allowed: targeted_harassment, pii_exposure, sexual_or_self_harm_risk, filter_evasion_surge
 moderation cleared: the CTA comes back on the next evaluation. ...
-moderation report failed: ECONNRESET (server not reachable; use `npm run kill` to stop the broadcast)
+moderation report failed: ECONNRESET (server not reachable; stop the broadcast with `npm run kill -w @vl/server -- --reason "<why>"`)
 ```
 
 이 스모크가 **단위 테스트가 놓친 결함 하나를 찾았다**: Node의 `fetch`는 연결 거부를 `TypeError`로 감싸고 실제
@@ -193,6 +193,66 @@ moderation report failed: ECONNRESET (server not reachable; use `npm run kill` t
 3. **결과**: `coordinatorHeartbeatTimeoutMs=15000`, `evaluateIntervalMs=2000`. 가설 성립.
 4. **수정**: `tickFor()` 헬퍼로 production처럼 2초마다 평가하며 진행. 이제 평범한 채팅 10창은 `live`를 유지하고
    (대조군), 우회 폭증 3창은 `safe_stopped`가 된다 — 정지의 원인이 휴리스틱임이 대조로 분리된다.
+
+## Review round 1
+
+리뷰 verdict `request_changes` — blocker 1 + major 2. **셋 다 타당했다.** 게이트 5개와 CI는 리뷰 시점에도
+통과하고 있었으므로, 세 지적은 모두 "통과하는 테스트가 잘못된 것을 고정하고 있었다"는 종류다.
+
+| 지적 | 무엇이 틀렸나 | 고침 | SHA |
+|---|---|---|---|
+| **[blocker] B1** `supervisor.ts:265` — 승인표 토큰이면 `requestSafeStop()` 후 `return`해서 1단계 `moderation.unhealthy` warning을 건너뜀 | §12.3의 1단계는 2단계의 전제 조건이지 대체물이 아니다. 리뷰어의 하네스 프로브에서 warning 0 / critical 1이 나왔고, `supervisor.test.ts:288`은 critical만 고정하고 있어서 이 누락을 못 잡았다 | 조건 분기를 `safeStopConditionMatched` 값으로 바꾸고 **warning을 항상 먼저** 보낸 뒤, 매치된 경우에만 `requestSafeStop()`을 호출한다. `#alert`가 `deliver()`를 동기적으로 부르므로 순서는 결정적이다. warning의 `detail.safeStopConditionMatched`도 하드코딩 `false`에서 실제 값으로 바뀌어, 멈춘 경우와 멈추지 않은 경우가 같은 필드로 구분된다 | `45f67d6` |
+| **[major] M1** `moderation-report.ts:104` — 제출 reason을 `readTokenField()`로 정제한 뒤 allowlist 비교 | 정제 후 비교는 sanitizer를 **세탁기**로 만든다. 비승인 원문이 승인 토큰이 되어 202로 통과한다 | allowlist는 **원문 그대로 exact match**한다(`readReason()`). `readTokenField()`는 경계가 필요한 자유 텍스트(kill의 reason)에 그대로 남는다 | `45f67d6` |
+| **[major] M2** `moderation-cli.ts:139`·`moderation-call-table.md:65` — 서버 미응답 시 안내하는 `npm run kill`이 루트에 없음 | 방송이 도는 중에 붙여넣으면 `Missing script: kill`이 난다. 즉 **가장 급할 때 동작하지 않는 안내**다 | CLI 3곳(모듈 주석·`--help`·실패 메시지)과 문서 4곳을 실행 가능한 workspace 형식으로 정정. 테스트도 `'npm run kill'`이 아니라 `'npm run kill -w @vl/server -- --reason'`을 요구한다 | `45f67d6` |
+
+### 재현 → 수정 → 확인 (CLAUDE.md 디버깅 절차)
+
+**B1** — 가설: `return`이 warning을 건너뛴다. 반증 관측: 승인 토큰 경로에서 `ofKind('moderation.unhealthy')` 길이가
+1이면 가설이 틀린다. 관측 결과 **0**(테스트를 먼저 추가해 실패를 확인):
+
+```text
+$ npx vitest run apps/server/src/supervisor/supervisor.test.ts -t "approved token"
+AssertionError: expected [] to have a length of 1 but got +0
+ ❯ apps/server/src/supervisor/supervisor.test.ts:292:24
+```
+
+수정 후 같은 파일 32 tests 통과. 순서(warning → critical)까지 `alerts.alerts`의 index로 고정했다.
+
+**M1** — 리뷰어의 프로브를 그대로 재현했다(빌드된 엔드포인트, mock 없음):
+
+```text
+$ node -e "... ep.report({... body:{ reason:'targeted_harassment\^@' }}) ..."
+status= 202 onReport= "targeted_harassment"
+```
+
+수정 후 같은 입력은 400이고 `onReport`는 호출되지 않는다(`moderation-report.test.ts` 11 tests 통과).
+
+**M2** — 루트에 script가 없다는 것을 먼저 확인하고:
+
+```text
+$ npm run kill -- --help
+npm error Missing script: "kill"
+```
+
+고친 뒤, **CLI가 출력하는 문자열을 그대로 실행**해 동작을 확인했다:
+
+```text
+$ $env:VL_PORT='8799'; npm run moderation -w @vl/server -- --reason targeted_harassment --note "round 2 probe"
+moderation report failed: ECONNREFUSED (server not reachable; stop the broadcast with `npm run kill -w @vl/server -- --reason "<why>"`)
+EXIT=1
+
+$ npm run kill -w @vl/server -- --help
+usage:
+  kill [--reason <text>] [--via auto|http|file]   stop the run (spec §9.2 safe_stopped)
+  kill --clear                                    remove the local flag file
+EXIT=0
+```
+
+### 리뷰의 "ticket Result honesty" 지적
+
+리뷰어는 acceptance 1이 met으로 적혀 있으나 B1·M1을 반영하지 않았다고 지적했다. 위 세 건을 고치고 **1b·1e·1f의
+근거 칸을 새 단언으로 교체**했다(이 커밋). 1은 이제 met이다 — 그 근거는 새로 고정된 warning+critical 2단 단언과
+세탁 변형 12개의 400 고정이다.
 
 ## Not done / out of scope
 
