@@ -37,7 +37,7 @@
 | T18 | D-6/D-7 구현·문서(OBS 버전 고정 승인, safe-mode sentinel 정책, public 문구) | T17, T2 | — | merged | t18-obs-safemode-policy | #24 | `task_0d996db3c12a` |
 | T19 | Gate 0 승인 반영(체크리스트·config·모더레이션 호출표) | T16, T18 | — | merged | t19-gate0-apply | #25 | `task_8633302d4f33` |
 | T20a | identity (B) 계약: 동의자 한정 actor·join/leave 명령 | T1b, T6 | ✔ | merged | t20a-identity-contract | #26 | `task_a7a6d0666e7c` |
-| T20b | identity (B) 서버: 동의 저장·authorDetails 처리·삭제·보존·compliance 문서 | T20a, T9, T13, T8 | — | in_review | t20b-identity-server | #28 | `task_d221f62c9dae` |
+| T20b | identity (B) 서버: 동의 저장·authorDetails 처리·삭제·보존·compliance 문서 | T20a, T9, T13, T8 | — | changes_requested | t20b-identity-server | #28 | `task_d221f62c9dae` |
 | T20c | identity (B) 렌더러: 동의자 표시명·고지 CTA | T20a, T14 | — | dispatched | t20c-identity-renderer | | `task_f15883c91c9d` |
 | T21 | 일본 패널·5초 테스트·24h 콘텐츠 목록·증빙 초안(D-15) | T14, T16 | — | changes_requested | t21-japan-panel-draft | #27 | `task_5ccfd178a887` |
 | T22 | 모더레이션 사유 보고 경로(사람 트리거 admin 엔드포인트 + filter_evasion_surge 휴리스틱; D-13 토큰 4개) | T12, T19 | — | pending | t22-moderation-report | | |
@@ -238,3 +238,4 @@
 | 2026-08-19 12:45 | R-T21-2 request_changes(round 1 전부 해소; 신규 minor 1: Reporting API 공식 문서(traffic_source_type 31 'Vertical live feed', channel_traffic_source_a3의 country_code·engaged_views)를 '확인 불가'로 잘못 서술) → **F-T21-2** `task_650aeed25249`. 진행: T20b |
 | 2026-08-19 12:54 | T20b worker_done(succeeded, PR #28: migration 006 viewer_consent 단일 저장소, gate→authorDetails part 파생, JOIN/LEAVE 파서 상태, identity/ 패키지 1곳 읽기, ACTION_REACTION actor, channelRef cooldown·한 표, LEAVE/요청 즉시 삭제, 30일 sweep(loader가 30 초과 거부), identity-consent.md 고지문·[S41] 체크리스트; 2009 tests; CI 32254297204 녹색). R-T20b-1 `task_4449b60004db` → `ctx_dad3c1acae34`(review2). **T20c** `task_f15883c91c9d` 디스패치(`ctx_b0d6f01bf847`, runtime blip 후 터미널 확인). 진행: F-T21-2 |
 | 2026-08-19 13:12 | F-T21-2 완료(c961f32/78a35aa: Reporting API bulk 경로 확인 사실화·Query API/Studio만 '확인 필요'; CI 32256076514 녹색; 관측: engine/ingest.test.ts:442 SQLite write lock 1/3 flaky — **T8e 후보**) → R-T21-3 `task_4484d83a5a66` → `ctx_926982e8fafc`(review). 진행: R-T20b-1(review2), T20c |
+| 2026-08-19 13:36 | R-T20b-1 request_changes(blocker 3: JOIN replay가 dedupe 전 consent 부활, 삭제 요청 handler가 directory pending 이름 미제거, 실패한 LEAVE가 checkpoint 뒤로 사라지고 health/metrics 신호 없음; major 4: 닫힘 모드 /metrics shape 변경, 고지문에 cooldown/한 표 용도 누락, compliance 표 과장(III.E.4.b reverify·III.E.4.d 매핑), arbiter votedScope 잔존) → **F-T20b-1** `task_d635f549c3e3`(철회·삭제 fail-closed 원칙). 진행: R-T21-3, T20c |
