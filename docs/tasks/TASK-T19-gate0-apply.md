@@ -1,7 +1,7 @@
 # TASK-T19-gate0-apply
 
 - Task: T19 Gate 0 승인 반영: 체크리스트·설정·모더레이션 호출표 (`docs/tasks/TASK_SPECS.md` §T19)
-- Branch: `dnhynk/t19-gate0-apply` · PR: #(미생성)
+- Branch: `dnhynk/t19-gate0-apply` · PR: #25
 - Orca: task `task_8633302d4f33` · dispatch `ctx_e3bb7d6ceff7`
 - Spec sections read: §12.3, §15, §17 (경유: `docs/ops/gate0-checklist.md`, `docs/ops/moderation-call-table.md`, `docs/ops/supervisor.md` 4.3)
 - BOARD decisions/assumptions relied on: D-8, D-9, D-10, D-11, D-12, D-13, D-14, D-15, D-16; A-1(D-9로 부분 뒤집힘), A-3, A-4, A-15
@@ -64,35 +64,84 @@ BOARD는 코디네이터 소유이므로 건드리지 않는다.
 
 | 질문 | 답(코디네이터) | 반영 |
 |---|---|---|
-| D-13의 safe-stop 토큰 4개(`targeted_harassment`·`pii_exposure`·`sexual_or_self_harm_risk`·`filter_evasion_surge`)가 코드에 없다. `reportModerationHealth()`는 임의 문자열 `reason`을 받고 production 호출부가 없으며, 존재하는 토큰은 테스트의 예시값 `block_control_unavailable`(supervisor.test.ts:186,220)과 config.test.ts:138의 `'moderation control unreachable'`뿐이다. config에 D-13 4개를 넣고 "V1에는 아직 이 토큰을 보고하는 경로가 없음"을 문서에 명시 + follow-up으로 남기는 것을 권장한다. | (대기) | (대기) |
+| **msg 미회신(제출 2026-08-19, `--timeout-ms 1800000`)**: D-13의 safe-stop 토큰 4개(`targeted_harassment`·`pii_exposure`·`sexual_or_self_harm_risk`·`filter_evasion_surge`)가 코드에 없다. `reportModerationHealth()`(`apps/server/src/supervisor/supervisor.ts:232`)는 임의 문자열 `reason`을 받고 **production 호출부가 0건**이며, 저장소에 존재하는 토큰 문자열은 테스트 예시값 `block_control_unavailable`(`supervisor.test.ts:186,220`)과 `'moderation control unreachable'`(`config.test.ts:138`)뿐이다. 권장 옵션 A = config에 D-13 4개 토큰을 그대로 넣고(코드 변경 0), "V1에 이 토큰을 보고하는 production 경로가 없음"을 문서에 정직 표기 + follow-up. | **회신 없음** (worker_done 시점까지 답이 오지 않음) | **옵션 A로 진행.** TASK_SPECS §T19가 "코드 쪽 토큰을 바꾸지 말라"만 지시하고 config 값은 D-13이 정본이므로, 코드는 손대지 않고 config·문서에만 반영했다. 코디네이터가 다른 처리를 지시하면 fix task로 되돌릴 수 있다(문서 3곳 + config 1곳) |
 
 ## Assumptions / provisional values
 
 | 항목 | 값 | 라벨 | 이유 |
 |---|---|---|---|
+| `supervisor.moderation.onCallOwner` | `"owner-operator"` | 승인값의 **역할명 표기** | D-13의 호출 책임자는 사용자 본인이지만 개인 식별자는 저장소·alert 본문·`/health`에 두지 않는다(§10.2, §12.4, `CLAUDE.md` §3). 호출표 템플릿 1번이 허용한 "역할명" 표기다. 사람이 읽는 정본은 `moderation-call-table.md` 1장 |
+| `supervisor.moderation.escalationChannel` | `"discord-webhook"` | 승인값의 **1차 채널 토큰** | 필드가 문자열 1개라 자동 경로(1차)를 담았다. D-13의 2차(본인 휴대폰 문자/전화)는 **수동**이고 번호를 적지 않으므로 config가 아니라 호출표 1장 3번에 적었다 |
+| `supervisor.moderation.autoBlockScope` | `"youtube-default-filters"` | 승인값의 **기계 토큰** | D-13 "YouTube 기본 필터 전부(blocked words·URL hold·hold for review·slow mode)"의 축약. 항목 나열은 호출표 1장 4번 |
+| safe-stop 토큰 4개 | D-13 문자열 그대로 | 승인값 | 보고하는 쪽과 문자열이 같아야 하므로 축약·변형하지 않았다. **보고 경로는 아직 없다**(Follow-up) |
 
 ## Result
 
 ### Acceptance criteria
 
-| # | 기준 | 상태(met/unmet/unverifiable) | 근거(테스트 파일·명령·출력) |
+| # | 기준 | 상태 | 근거(테스트 파일·명령·출력) |
 |---|---|---|---|
-| 1 | `assertModerationCallTableApproved()` 통과 + 거부 경로 테스트 유지 | (진행 중) | |
-| 2 | `input.provisional`에 `window.*` 없음, 값이 D-11과 일치 | (진행 중) | |
-| 3 | 게이트 5개 + CI 녹색, 문서 값이 D-번호 인용 | (진행 중) | |
+| 1 | `assertModerationCallTableApproved()` 통과 + 거부 경로 테스트(빈 칸 하나라도 있으면 이름을 대고 throw) 유지 | met | `apps/server/src/supervisor/config.test.ts` — `accepts the repository config as approved`(저장소 config로 통과), `still refuses an unapproved table, and names what is missing`(`/onCallOwner/`·`/safeStopConditions/`), `names the one field that was blanked out of an otherwise approved table`(`missing: safeStopConditions`, `missing: approved`). `npx vitest run apps/server/src/supervisor/config.test.ts apps/server/src/supervisor/supervisor.test.ts` → **2 files, 39 tests passed** |
+| 2 | `input.provisional`에 `window.*`가 없고 값이 D-11과 일치 | met | `apps/server/src/input/config.test.ts` — `reads the repository config with the Gate 0 approved window values (D-11)`(5000/20/30/10 정확 비교), `lists only maxRawLength as provisional now that D-11 approved the window`(`toEqual(['maxRawLength'])` + `window.` 접두 0건). `npx vitest run apps/server/src/input/config.test.ts` → **9 tests passed** |
+| 3 | 게이트 5개 + CI 녹색; 문서의 모든 값이 BOARD D-번호를 인용 | met(로컬) / CI는 PR에서 확인 | 아래 Gates 블록. 문서 인용: `gate0-checklist.md` 1.1~1.8·3장이 항목마다 D-8~D-16과 승인일 2026-08-19을 적었고, `moderation-call-table.md` 1·2·3·5장이 D-13, `ROADMAP.md` Gate 0 표가 D-8~D-16, `README.md`·`runbook-operations.md`·`supervisor.md`가 D-13을 인용한다 |
 
 ### Gates (executed)
 
+2026-08-19, `dnhynk/t19-gate0-apply` @ `e5a593d`(rebase 후), Node 24 / Windows 11.
+
 ```text
-(미실행)
+$ npm run format:check
+> prettier --check .
+Checking formatting...
+All matched files use Prettier code style!
+
+$ npm run lint
+> eslint . && node scripts/check-no-legacy-imports.mjs && node scripts/check-install-scripts.mjs
+check-no-legacy-imports: ok (0 legacy imports)
+check-install-scripts: ok (4 reviewed, better-sqlite3 binding loads)
+(eslint: 위반 0건)
+
+$ npm run typecheck
+> tsc --build tsconfig.json
+(출력 없음 = 통과)
+
+$ npm run test
+> vitest run
+ Test Files  138 passed (138)
+      Tests  1911 passed | 1 skipped (1912)
+   Duration  56.59s
+
+$ npm run build
+> @vl/renderer: ✓ built in 9.89s
+> @vl/server: copied 5 migration(s) to dist/db/migrations · docs/ops/data-map.md up to date
+> @vl/simulator, @vl/soak: tsc --build (출력 없음 = 통과)
 ```
+
+실행하지 않은 게이트: 없음.
 
 ## Not done / out of scope
 
 - BOARD(`docs/tasks/BOARD.md`) 갱신 — 코디네이터 소유(TASK_SPECS §T19).
-- identity (B) 구현 — T20a/b/c. 이 PR은 D-9를 **체크리스트에 기록만** 하고 코드 동작(`engine.identityGateOpen=false`)은 바꾸지 않는다.
-- 일본 패널·5초 테스트·콘텐츠 목록 초안 — T21.
+- identity (B) 구현 — T20a/b/c. 이 PR은 D-9를 **체크리스트·ROADMAP에 기록만** 하고 코드 동작
+  (`engine.identityGateOpen: false`)은 바꾸지 않는다.
+- 일본 패널·5초 테스트·콘텐츠 목록 초안 — T21. `gate0-checklist.md` §1.4는 "T21 초안 → 승인 대기" 상태만 적었다.
+- **체크하지 않은 Gate 0 항목 4건**(승인이 없으므로 닫지 않았다):
+  1. §1.2 Studio audit 8개 — 전용 채널이 아직 없어 실제 값·증빙이 없다(D-10).
+  2. §1.4 4개 — T21 초안 승인 전(D-15).
+  3. §1.7 운영 합격선 — provisional 유지, Gate 2 baseline 후 잠금(D-14).
+  4. §1.5 `direct↔vote 실험 순서` — **D-8~D-16에 이 항목의 결정이 없다.** 코디네이터 명세는 잔여를 3건으로
+     봤지만 체크리스트 항목 기준으로는 이것이 4번째다. 임의로 채우지 않고 상태만 적었다.
+- `supervisor.provisional`·`world.*.provisional`·`soak.thresholds` 등 나머지 잠정치 — D-14가 provisional 유지를
+  명시했으므로 손대지 않았다.
+- 코드 로직 변경 0건. 바뀐 `.ts`는 테스트 2개와 `input/config.ts`의 **주석 1개**뿐이다(주석이 "이 절의 모든 숫자는
+  provisional"이라고 단언하고 있어 D-11 반영 후 거짓이 되므로 최소 수정).
 
 ## Follow-ups
 
-- (Questions 답변에 따라 기입)
+- **[중요] safe-stop 4개 토큰을 보고하는 production 경로가 없다.** `reportModerationHealth()`는 진입점만 있고
+  `targeted_harassment`·`pii_exposure`·`sexual_or_self_harm_risk`·`filter_evasion_surge`를 실제로 보고하는
+  코드가 저장소에 0건이다. D-13은 **호출 책임자 부재 구간을 자동 safe-stop이 덮는다**고 승인했으므로, 그 커버리지는
+  이 경로가 구현되어야 실제로 성립한다. Gate 3 public 파일럿 전 별도 task 필요(`moderation-call-table.md` 2장에
+  정직 표기해 뒀다).
+- §1.2 audit 값 기입: 전용 채널·Google Cloud·OAuth 개설(D-16, 사용자) 후 체크리스트 §1.2를 닫는 후속 작업.
+- §1.5 `direct↔vote 실험 순서` 결정: identity 개방(T20) 이후 사용자 결정 필요.
