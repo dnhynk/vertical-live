@@ -1,4 +1,5 @@
 import type { HealthDetailValue, HealthStatus } from '../health/types.js'
+import type { FilterEvasionState } from './moderation-heuristic.js'
 
 /**
  * The supervisor's vocabulary (spec §9.2, §9.4, §10.2).
@@ -150,6 +151,22 @@ export interface SafeStopTrigger {
   readonly detail: Readonly<Record<string, HealthDetailValue>>
 }
 
+/**
+ * Moderation control health on `/health` (spec §12.3, TASK_SPECS §T22).
+ *
+ * Tokens, an instant and integers — never the operator's note and never
+ * anything derived from a chat message. The note a human types into
+ * `POST /admin/moderation` stays in this host's log (`moderation-report.ts`).
+ */
+export interface ModerationHealthSummary {
+  readonly status: HealthStatus
+  /** Approved reason token (`moderation-call-table.md` §2), or null. */
+  readonly reason: string | null
+  /** When the current status was reported, UTC ISO 8601; null while `ok`. */
+  readonly reportedAtUtc: string | null
+  readonly filterEvasion: FilterEvasionState
+}
+
 /** `/health` summary of the state machine (TASK_SPECS §T12 범위). */
 export interface SupervisorHealthSummary {
   readonly state: SupervisorState
@@ -157,6 +174,7 @@ export interface SupervisorHealthSummary {
   readonly lastTransitionReason: string
   readonly safeStop: SafeStopTrigger | null
   readonly interactionEnabled: boolean
+  readonly moderation: ModerationHealthSummary
   readonly families: readonly (FamilyVerdict & { readonly specItem: number })[]
   readonly components: readonly ComponentHealth[]
   readonly preflight: readonly PreflightCheckResult[]

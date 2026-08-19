@@ -148,7 +148,38 @@ npm run secrets -w @vl/server -- set alerts.discordWebhookUrl   # 값은 stdin�
 1. **CTA를 끈다** — 항상. 그리고 `moderation.unhealthy` warning alert를 보낸다(리뷰 round 1 M2: 조용히 CTA만 끄는 것은 사람 호출이 아니다).
 2. **안전을 보장할 수 없으면 멈춘다** — 보고된 사유가 `supervisor.moderation.safeStopConditions`에 있으면 `moderation_unhealthy` → `safe_stopped` + critical alert.
 
-어떤 사유가 2단계인지는 사람의 판단이라 코드가 정하지 않는다. 목록에 없는 사유(그리고 Gate 0 승인 전이라 목록이 비어 있는 배포)의 불건전 보고는 CTA를 끄고 알림만 보내며, alert 본문의 `safeStopConditionMatched=false`가 왜 멈추지 않았는지 알려준다. 사유 토큰은 보고하는 쪽과 호출표가 같은 문자열을 쓴다. D-13이 승인한 4개 토큰(`targeted_harassment`·`pii_exposure`·`sexual_or_self_harm_risk`·`filter_evasion_surge`)은 [`moderation-call-table.md`](moderation-call-table.md) 2장이 정본이고, **그 토큰을 실제로 보고하는 production 경로는 아직 없다**(같은 절의 정직 표기 참조).
+어떤 사유가 2단계인지는 사람의 판단이라 코드가 정하지 않는다. 목록에 없는 사유(그리고 Gate 0 승인 전이라 목록이 비어 있는 배포)의 불건전 보고는 CTA를 끄고 알림만 보내며, alert 본문의 `safeStopConditionMatched=false`가 왜 멈추지 않았는지 알려준다. 사유 토큰은 보고하는 쪽과 호출표가 같은 문자열을 쓴다. D-13이 승인한 4개 토큰(`targeted_harassment`·`pii_exposure`·`sexual_or_self_harm_risk`·`filter_evasion_surge`)은 [`moderation-call-table.md`](moderation-call-table.md) 2장이 정본이다.
+
+#### 보고 경로 (T22, 2026-08-20)
+
+토큰을 실제로 보고하는 경로는 **둘**이다. 목록·문자열 정본은 여전히 호출표 2장이고, 코드의 사본은 `apps/server/src/supervisor/moderation-report.ts`의 `MODERATION_REASON_TOKENS`다(둘이 어긋나면 테스트가 깨진다).
+
+| 경로 | 무엇이 트리거하는가 | 어떤 토큰 |
+|---|---|---|
+| **사람** `POST /admin/moderation` + `npm run moderation -w @vl/server` | 사람이 Studio에서 채팅을 읽고 판단한다 | 4개 전부 |
+| **자동** `filter_evasion_surge` 휴리스틱 | 입력 metrics의 집계창 통계 | `filter_evasion_surge` **하나만** |
+
+나머지 세 토큰에 자동 탐지가 **없는 것은 의도한 것**이다. '표적 혐오·협박', '개인정보 노출', '성적·자해 위험'은 메시지가 무엇을 *뜻하는지*에 대한 판단인데, 이 프로세스는 §7.3(1)·§12.3에 따라 판단할 메시지를 보관하지 않는다. 없는 근거로 방송을 멈추는 자동 판정을 만드는 것보다, 사람이 누르는 경로를 확실히 두는 쪽이 §12.3의 설계다.
+
+**사람 경로**(`moderation-report.ts`, `moderation-cli.ts`):
+
+- 인증·거부 규칙은 kill switch와 **같은 코드**다(`admin-auth.ts`: loopback + bearer `server.adminToken`, 상수시간 비교). 403 `loopback_only` / 401 `unauthorized`.
+- 승인표에 없는 토큰은 **400**이고, 응답에는 허용 토큰 이름만 담긴다. 보낸 값은 되돌려 주지 않는다(운영자 입력을 화면·로그로 되돌리지 않는다).
+- 승인되지 않은 사유를 supervisor까지 통과시키지 않는 이유: 그런 사유는 `safeStopConditions`와 영원히 일치하지 않아 "멈추지 않는 warning"으로 조용히 격하된다.
+- `note`(자유 텍스트)는 **이 호스트의 로그에만** 남는다. alert·`/health`·world state 어디에도 가지 않는다(§12.3 raw chat 금지). 200자·제어문자 제거.
+- `POST /admin/moderation/clear`는 보고를 철회해 CTA를 되돌린다. **이미 `safe_stopped`인 run을 되살리지 않는다** — 그것은 프로세스를 다시 시작하는 일이다(§9.2). 응답의 `resumesRun: false`가 그 말이다.
+- CLI에는 **플래그 파일 fallback이 없다**(kill CLI와 다른 점). 보고의 효과는 살아 있는 supervisor 안에서만 일어나므로 서버가 응답하지 않으면 끌 CTA도 멈출 방송도 없고, 그때 쓰는 명령은 `npm run kill -w @vl/server -- --reason "<why>"`다. 게다가 파일은 "모더레이션 degraded"를 디스크에 남겨 채팅이 멀쩡한 다음 run을 오탐으로 멈추게 만든다. 그래서 HTTP만 쓰고, 실패하면 기계 토큰(`ECONNREFUSED`, `http_401` …)과 함께 **실패로 끝난다**.
+
+**자동 경로**(`moderation-heuristic.ts`): 입력 metrics를 `windowMs` 창마다 표본 추출해 창별 delta를 낸다.
+
+- 분자 = '우회형' 거부 건수. T6 파서의 거부 사유 14개 중 `moderate()`가 내는 7개(`url`·`personal_data`·`banned_hate`·`banned_sexual`·`banned_self_harm`·`banned_violence`·`banned_ads_scam`)다. 이 7개는 **난독화를 되돌린 뒤**(`example(dot)com`→`example.com`, homoglyph·결합문자·반복 접기) 매치되므로, 그 코드가 붙었다는 것 자체가 "필터를 우회하는 변형 입력"의 관측이다. 승인표 4번이 자동 차단을 YouTube 기본 필터로 정해 두었으므로 그런 메시지가 파서까지 왔다는 것은 그 차단이 새고 있다는 뜻이다.
+- 분모 = **파서에 도달한 메시지 수**(accepted + consent accepted + rejected). `commandLike`가 아니다 — 우회 시도는 대개 명령이 아니어서 두 모집단을 나누게 되고 비율이 1을 넘을 수 있다. 전체 메시지로 나누면 비율은 [0,1]의 실제 비중이고 채널 규모에 대해 정규화된다.
+- 형식·게이트 사유(`no_command`·`too_long`·`extraneous_text`·`invalid_argument`·`vote_disabled`·`consent_disabled`·`empty`)는 **세지 않는다.** 평범한 채팅과 오타라서, 세면 이 탐지기는 항상 켜져 있게 된다 — 그리고 D-13이 이 토큰을 safe-stop으로 만들었으므로 오탐은 곧 방송 정지다.
+- 진입: `messages >= minMessages`이고 비율 >= `rejectRatio`인 창이 연속 `enterWindows`개. 해제: 그렇지 않은 창이 연속 `clearWindows`개.
+- 임계값은 **전부 provisional**이다(`supervisor.provisional`, BOARD A-15/D-14). 실트래픽이 없어 근거가 없는 시작값이며 **합격선이 아니다**. Gate 2 baseline 뒤에 잠근다.
+- supervisor의 평가 루프가 돌린다. `safe_stopped`에서 그 루프가 서면 탐지기도 함께 선다.
+
+`/health`의 `supervisor.moderation`은 `status`·`reason`(토큰)·`reportedAtUtc`와 탐지기 상태(창 수·연속 카운트·마지막 창의 정수들)만 싣는다. 운영자가 쓴 문장은 실리지 않는다.
 
 ### 4.4 진단 screenshot (§9.4)
 

@@ -35,6 +35,7 @@
     "auth:login": "npm run build && node dist/bin/auth-login.js",
     "secrets": "npm run build && node dist/bin/secrets.js",
     "kill": "npm run build && node dist/bin/kill.js",
+    "moderation": "npm run build && node dist/bin/moderation.js",
     "archive": "npm run build && node dist/bin/archive.js",
     "obs:launch": "npm run build && node dist/bin/obs-launch.js",
     "ops:config": "npm run build && node dist/bin/ops-config.js",

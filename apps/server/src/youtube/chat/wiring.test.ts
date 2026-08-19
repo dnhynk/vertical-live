@@ -7,12 +7,18 @@ import {
   TEST_EPOCH_MS,
 } from '../../engine/testing/harness.js'
 import { ConsentDirectory } from '../../identity/directory.js'
-import { createCommandParserPort, loadInputConfig, parserLimits } from '../../input/index.js'
+import {
+  CommandMetrics,
+  createCommandParserPort,
+  loadInputConfig,
+  parserLimits,
+} from '../../input/index.js'
 import { loadRetentionConfig } from '../../privacy/config.js'
 import { silentLogger } from '../../secrets/redaction.js'
 import { testChatConfig } from '../../testing/chat-test-support.js'
 import { FakeClock } from '../../testing/fake-clock.js'
 import { ChatIngestSink } from './sink.js'
+import { chatParserPort } from './runtime.js'
 import { chatRuntimeDeps, type ChatWiring } from './wiring.js'
 
 /**
@@ -36,6 +42,7 @@ const VIEWER_NAME = 'synthetic-viewer-wiring'
 
 interface Wired {
   readonly deps: ReturnType<typeof chatRuntimeDeps>
+  readonly commandMetrics: CommandMetrics
   readonly harness: ReturnType<typeof createEngineHarness>
   readonly directory: ConsentDirectory | null
   dispose(): void
@@ -64,11 +71,13 @@ function wire(identityGateOpen: boolean): Wired {
     clock,
     ...(directory === null ? {} : { identity: directory }),
   })
+  const commandMetrics = new CommandMetrics({ consentGateOpen: identityGateOpen })
   const wiring: ChatWiring = {
     store: temp.store,
     engine: harness.engine,
     clock,
     inputConfig: loadInputConfig({ env: {} }),
+    commandMetrics,
     identityGateOpen,
     consent: directory,
     config: testChatConfig({ enabled: true }),
@@ -79,6 +88,7 @@ function wire(identityGateOpen: boolean): Wired {
   harness.engine.start()
   return {
     deps: chatRuntimeDeps(wiring),
+    commandMetrics,
     harness,
     directory,
     dispose: () => {
@@ -124,6 +134,30 @@ function sinkFor(active: Wired): ChatIngestSink {
 }
 
 describe('chatRuntimeDeps', () => {
+  it('counts every parse through the port the process actually builds (§14.1, §T22)', () => {
+    // The same class of defect as the commit hook above, in the counter: a
+    // production parser port built without `metrics` counts nothing, and the
+    // `filter_evasion_surge` heuristic then watches a chat that never speaks
+    // (spec §12.3). So the port is built the way `createChatSource` builds it —
+    // `chatParserPort(deps)` — over the deps `main.ts` passes.
+    const active = wire(false)
+    wired = active
+    const parse = chatParserPort(active.deps)
+
+    expect(parse('feed')).toMatchObject({ name: 'FEED' })
+    // A link spelled to get past a blocked-words filter: rejected, and counted
+    // under the code the heuristic reads.
+    expect(parse('feed example(dot)invalid')).toBeNull()
+    expect(parse('ただいま')).toBeNull()
+
+    const snapshot = active.commandMetrics.snapshot()
+    expect(snapshot.commandLike).toBe(2)
+    expect(snapshot.accepted).toBe(1)
+    expect(snapshot.rejected).toBe(2)
+    expect(snapshot.rejectedByReason.url).toBe(1)
+    expect(snapshot.rejectedByReason.no_command).toBe(1)
+  })
+
   it('runs JOIN and LEAVE through the inbox the process actually passes', () => {
     const active = wire(true)
     wired = active

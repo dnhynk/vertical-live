@@ -7,6 +7,7 @@ import type { EngineHealth } from './engine/engine.js'
 import type { EngineMetricsSnapshot } from './engine/metrics.js'
 import type { HealthSignal } from './health/types.js'
 import { AdminKillEndpoint, type KillSwitchRequest } from './supervisor/kill-switch.js'
+import { AdminModerationEndpoint, type ModerationReport } from './supervisor/moderation-report.js'
 import type { SupervisorHealthSummary } from './supervisor/types.js'
 
 describe('resolvePort', () => {
@@ -192,6 +193,11 @@ describe('engine-backed routes', () => {
   it('has no /admin/kill until something can be stopped', async () => {
     expect((await fetch(`${baseUrl}/admin/kill`, { method: 'POST' })).status).toBe(404)
   })
+
+  it('has no /admin/moderation until there is a supervisor to report to', async () => {
+    expect((await fetch(`${baseUrl}/admin/moderation`, { method: 'POST' })).status).toBe(404)
+    expect((await fetch(`${baseUrl}/admin/moderation/clear`, { method: 'POST' })).status).toBe(404)
+  })
 })
 
 /**
@@ -223,6 +229,19 @@ describe('supervisor routes', () => {
     lastTransitionReason: 'signals:all_families_ok',
     safeStop: null,
     interactionEnabled: true,
+    moderation: {
+      status: 'ok',
+      reason: null,
+      reportedAtUtc: null,
+      filterEvasion: {
+        enabled: true,
+        reported: false,
+        consecutiveExceeding: 0,
+        consecutiveBelow: 0,
+        windowsClosed: 2,
+        lastWindow: null,
+      },
+    },
     families: [
       {
         family: 'obs_output',
@@ -247,12 +266,16 @@ describe('supervisor routes', () => {
   }
 
   const killed: KillSwitchRequest[] = []
+  const reported: ModerationReport[] = []
+  const cleared: string[] = []
   let state: SupervisorHealthSummary = summary
   let server: Server
   let baseUrl: string
 
   beforeEach(async () => {
     killed.length = 0
+    reported.length = 0
+    cleared.length = 0
     state = summary
     server = createServer({
       engine: { health: () => health, metrics: () => ({}) as EngineMetricsSnapshot },
@@ -260,6 +283,11 @@ describe('supervisor routes', () => {
       adminKill: new AdminKillEndpoint({
         token: 'synthetic-admin-token',
         onKill: (request) => killed.push(request),
+      }),
+      adminModeration: new AdminModerationEndpoint({
+        token: 'synthetic-admin-token',
+        onReport: (report) => reported.push(report),
+        onClear: (at) => cleared.push(at),
       }),
     })
     await new Promise<void>((resolve) => {
@@ -341,6 +369,60 @@ describe('supervisor routes', () => {
   it('rejects a non-POST method on /admin/kill', async () => {
     expect((await fetch(`${baseUrl}/admin/kill`)).status).toBe(405)
     expect(killed).toHaveLength(0)
+  })
+
+  it('routes POST /admin/moderation to the report endpoint (§12.3, §T22)', async () => {
+    const response = await fetch(`${baseUrl}/admin/moderation`, {
+      method: 'POST',
+      headers: { authorization: 'Bearer synthetic-admin-token' },
+      body: JSON.stringify({ reason: 'pii_exposure', note: 'synthetic' }),
+    })
+
+    expect(response.status).toBe(202)
+    expect(reported).toHaveLength(1)
+    expect(reported[0]?.reason).toBe('pii_exposure')
+  })
+
+  it('routes POST /admin/moderation/clear to the clear endpoint', async () => {
+    const response = await fetch(`${baseUrl}/admin/moderation/clear`, {
+      method: 'POST',
+      headers: { authorization: 'Bearer synthetic-admin-token' },
+    })
+
+    expect(response.status).toBe(202)
+    expect(cleared).toHaveLength(1)
+    expect(reported).toHaveLength(0)
+  })
+
+  it('refuses an unauthenticated or unknown-token moderation report', async () => {
+    expect((await fetch(`${baseUrl}/admin/moderation`, { method: 'POST' })).status).toBe(401)
+    const unknown = await fetch(`${baseUrl}/admin/moderation`, {
+      method: 'POST',
+      headers: { authorization: 'Bearer synthetic-admin-token' },
+      body: JSON.stringify({ reason: 'chat_is_bad' }),
+    })
+
+    expect(unknown.status).toBe(400)
+    expect(await unknown.json()).toMatchObject({ error: 'unknown_reason' })
+    expect(reported).toHaveLength(0)
+  })
+
+  it('refuses an unreadable body rather than reporting without a reason', async () => {
+    const response = await fetch(`${baseUrl}/admin/moderation`, {
+      method: 'POST',
+      headers: { authorization: 'Bearer synthetic-admin-token' },
+      body: 'not json',
+    })
+
+    expect(response.status).toBe(400)
+    expect(reported).toHaveLength(0)
+  })
+
+  it('rejects a non-POST method on the moderation routes', async () => {
+    expect((await fetch(`${baseUrl}/admin/moderation`)).status).toBe(405)
+    expect((await fetch(`${baseUrl}/admin/moderation/clear`)).status).toBe(405)
+    expect(reported).toHaveLength(0)
+    expect(cleared).toHaveLength(0)
   })
 })
 

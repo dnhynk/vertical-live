@@ -2,6 +2,7 @@ import type { Clock, TimerHandle } from '../clock.js'
 import type { EngineHealth, InputHealth } from '../engine/engine.js'
 import type { RendererHealthReport } from '../engine/publisher.js'
 import type { HealthSignal, HealthStatus } from '../health/types.js'
+import type { CommandMetricsSnapshot } from '../input/metrics.js'
 import { silentLogger, type Logger } from '../secrets/redaction.js'
 import type { AuthEvent, AuthEventSink } from '../youtube/auth/events.js'
 import type { SafeStopRequest } from '../youtube/broadcast/alerts.js'
@@ -10,6 +11,7 @@ import { nullAlertSink, type Alert, type AlertSeverity, type AlertSink } from '.
 import type { SupervisorConfig } from './config.js'
 import type { DeadManMonitor } from './deadman.js'
 import type { KillSwitchRequest } from './kill-switch.js'
+import { FilterEvasionDetector, type FilterEvasionState } from './moderation-heuristic.js'
 import { runPreflight, type PreflightProbes } from './preflight.js'
 import {
   RestartSupervisor,
@@ -26,6 +28,7 @@ import {
   HEALTH_FAMILY_SPEC_ITEM,
   type ComponentHealth,
   type HealthAggregate,
+  type ModerationHealthSummary,
   type PreflightResult,
   type SafeStopKind,
   type SafeStopTrigger,
@@ -105,6 +108,13 @@ export interface SupervisorOptions {
   readonly random?: () => number
   /** Schedule the evaluation loop on `start()`. Off in tests (fake clocks). */
   readonly autoEvaluate?: boolean
+  /**
+   * Cumulative input counters (`CommandMetrics.snapshot()`), read by the
+   * `filter_evasion_surge` heuristic of §12.3 (TASK_SPECS §T22). Absent when
+   * nothing in this process parses chat — then the heuristic reports itself as
+   * not running rather than as quiet.
+   */
+  readonly commandMetrics?: () => CommandMetricsSnapshot
 }
 
 const OWNER_OBS_CLIENT = 'obs.ObsClient'
@@ -128,12 +138,17 @@ export class Supervisor {
   #startupResult: StartupResult | null = null
   #startupAttempts = 0
   #moderation: ModerationHealth = MODERATION_HEALTHY
+  #moderationReportedAt: string | null = null
+  readonly #filterEvasion: FilterEvasionDetector | null
+  #observingHeuristics = false
   #lastEvaluationMonotonicMs: number | null = null
   #lastPreflightMonotonicMs: number | null = null
   #lastAggregate: HealthAggregate | null = null
   #interactionEnabled = true
   #timer: TimerHandle | undefined
   #stopped = false
+  /** Tail of the alert delivery queue — see `#alert` (review round 2, B1). */
+  #alertQueue: Promise<void> = Promise.resolve()
 
   constructor(options: SupervisorOptions) {
     this.#options = options
@@ -142,6 +157,14 @@ export class Supervisor {
     this.#logger = options.logger ?? silentLogger
     this.#alerts = options.alerts ?? nullAlertSink
     this.#aggregator = new HealthAggregator(options.config)
+    this.#filterEvasion =
+      options.commandMetrics === undefined
+        ? null
+        : new FilterEvasionDetector({
+            config: options.config.moderation.heuristics.filterEvasion,
+            clock: options.clock,
+            metrics: options.commandMetrics,
+          })
     this.#since = options.clock.nowUtcIso()
     this.#startupBackoff = createExponentialBackoff({
       initialDelayMs: options.config.restart.initialDelayMs,
@@ -222,39 +245,55 @@ export class Supervisor {
    * Moderation control health (spec §12.3). Reported by whoever observes it.
    *
    * §12.3 defines two levels and this method implements both (review round 1,
-   * M2): an unhealthy display filter or block control turns the CTA off first,
-   * and when safety **cannot be assured** the run stops. Which reasons mean the
-   * second level is a human decision, so it is read from the Gate 0 call table
-   * (`supervisor.moderation.safeStopConditions`) rather than invented here —
-   * while that list is empty, an unhealthy control turns the CTA off and alerts,
-   * and nothing stops the run on its own.
+   * M2): an unhealthy display filter or block control turns the CTA off and
+   * warns, and when safety **cannot be assured** the run stops on top of that.
+   * Which reasons mean the second level is a human decision, so it is read from
+   * the Gate 0 call table (`supervisor.moderation.safeStopConditions`) rather
+   * than invented here — while that list is empty, an unhealthy control turns
+   * the CTA off and alerts, and nothing stops the run on its own.
    */
   reportModerationHealth(status: HealthStatus, reason: string | null = null): void {
     const previous = this.#moderation
+    const changed = previous.status !== status || previous.reason !== reason
     this.#moderation = { status, reason }
+    // The instant belongs to the report, not to the reading of it: a repeat of
+    // the same status leaves it where it was, so `/health` keeps saying when the
+    // condition actually started (TASK_SPECS §T22: "토큰·시각만").
+    if (changed) this.#moderationReportedAt = status === 'ok' ? null : this.#clock.nowUtcIso()
     if (status === 'ok') return
-    if (previous.status === status && previous.reason === reason) return
+    if (!changed) return
 
     const token = reason ?? 'moderation_unhealthy'
-    if (reason !== null && this.#config.moderation.safeStopConditions.includes(reason)) {
+    const safeStopConditionMatched =
+      reason !== null && this.#config.moderation.safeStopConditions.includes(reason)
+    // Stage 1 runs even when stage 2 follows (review round 1, B1). An approved
+    // token used to return straight out of `requestSafeStop`, so the run stopped
+    // with a critical alert and no warning — but §12.3's first stage is not
+    // conditional on the second, and the warning is the record of *which*
+    // control went unhealthy.
+    //
+    // Raising it before the stop is what fixes its place in the queue `#alert`
+    // keeps (review round 2, B1): the operator reads the warning first however
+    // slow the sink is, while the stop below happens at the speed of the
+    // process, not of the webhook.
+    void this.#alert('warning', 'moderation.unhealthy', {
+      reason: token,
+      detail: {
+        status,
+        // Says plainly whether this also stops the run, so an operator reading
+        // the alert knows the Gate 0 table is what decides that (spec §12.3).
+        safeStopConditionMatched,
+        approvedCallTable: this.#config.moderation.approved,
+      },
+    })
+    if (safeStopConditionMatched) {
       void this.requestSafeStop({
         kind: 'moderation_unhealthy',
         at: this.#clock.nowUtcIso(),
         reason: token,
         detail: { status, approvedCallTable: this.#config.moderation.approved },
       })
-      return
     }
-    void this.#alert('warning', 'moderation.unhealthy', {
-      reason: token,
-      detail: {
-        status,
-        // Says plainly why this did not stop the run, so an operator reading the
-        // alert knows the Gate 0 table is what decides that (spec §12.3).
-        safeStopConditionMatched: false,
-        approvedCallTable: this.#config.moderation.approved,
-      },
-    })
   }
 
   /** Adapter for T10's `SafeStopRequestSink` (spec §9.1). */
@@ -395,6 +434,7 @@ export class Supervisor {
       lastTransitionReason: this.#lastTransitionReason,
       safeStop: this.#safeStop,
       interactionEnabled: this.#interactionEnabled,
+      moderation: this.moderationHealth(),
       families: HEALTH_FAMILIES.map((family) => ({
         ...(aggregate?.families[family] ?? {
           family,
@@ -421,6 +461,16 @@ export class Supervisor {
 
   components(): readonly ComponentHealth[] {
     return this.registry.all().map((supervisor) => supervisor.health())
+  }
+
+  /** Spec §12.3 on `/health`: the reported token, when, and the detector. */
+  moderationHealth(): ModerationHealthSummary {
+    return {
+      status: this.#moderation.status,
+      reason: this.#moderation.reason,
+      reportedAtUtc: this.#moderationReportedAt,
+      filterEvasion: this.#filterEvasion?.state() ?? NO_FILTER_EVASION_DETECTOR,
+    }
   }
 
   /**
@@ -648,6 +698,7 @@ export class Supervisor {
   }
 
   async #evaluate(cause: string): Promise<HealthAggregate> {
+    this.#observeModerationHeuristics()
     await this.#maybeRetryPreflight()
     const nowMonotonicMs = this.#clock.monotonicMs()
     for (const signal of this.#options.sources?.() ?? []) this.#aggregator.report(signal)
@@ -696,6 +747,35 @@ export class Supervisor {
 
     if (this.#state !== 'safe_stopped') this.#driveRecovery(aggregate)
     return aggregate
+  }
+
+  /**
+   * Runs the automatic `filter_evasion_surge` detector for one evaluation
+   * (spec §12.3, TASK_SPECS §T22).
+   *
+   * Re-entrant on purpose-proofing: reporting an approved token reaches
+   * `requestSafeStop`, which evaluates again synchronously, and the detector
+   * must not be asked for a second verdict inside its own. The nested pass skips
+   * it and the outer one has already applied the verdict.
+   */
+  #observeModerationHeuristics(): void {
+    if (this.#filterEvasion === null || this.#observingHeuristics) return
+    this.#observingHeuristics = true
+    try {
+      const verdict = this.#filterEvasion.observe()
+      if (verdict === 'report') {
+        this.reportModerationHealth('degraded', 'filter_evasion_surge')
+      } else if (verdict === 'clear') {
+        // Only the detector's own report is cleared here. A person's report of
+        // another token is theirs to clear (`POST /admin/moderation/clear`), and
+        // a run already stopped stays stopped either way (spec §9.2).
+        if (this.#moderation.reason === 'filter_evasion_surge') {
+          this.reportModerationHealth('ok')
+        }
+      }
+    } finally {
+      this.#observingHeuristics = false
+    }
   }
 
   #applyInteractionGate(aggregate: HealthAggregate): void {
@@ -783,23 +863,73 @@ export class Supervisor {
     }
   }
 
-  async #alert(
+  /**
+   * Hands one alert to the sink, after every alert raised before it.
+   *
+   * Round 2 (B1) found why the order has to be enforced here. §12.3's two
+   * stages were started concurrently — `void this.#alert(warning)` and then the
+   * safe stop, whose own critical alert is raised a few `await`s later — so a
+   * sink that takes any time at all could deliver `supervisor.safe_stopped`
+   * first and an operator would read the stop before the reason for it. The
+   * reviewer's probe, with a sink that blocked only `moderation.unhealthy`:
+   * `before_warning_release=["supervisor.safe_stopped"]`. Delivery order is now
+   * call order, because each delivery waits for the queue ahead of it.
+   *
+   * Reporting still never gates safety (spec §9.1, §9.2). Everything that stops
+   * work — `#haltOutwardWork()`, the state assignment, the CTA gate — runs
+   * before any of these promises is awaited, so a slow sink delays the telling
+   * and never the stopping.
+   */
+  #alert(
     severity: AlertSeverity,
     kind: string,
     body: { readonly reason: string; readonly detail: Alert['detail'] },
   ): Promise<void> {
-    try {
-      await this.#alerts.deliver({
-        kind,
-        severity,
-        at: this.#clock.nowUtcIso(),
-        reason: body.reason,
-        detail: body.detail,
+    // Stamped when the condition was observed, not when the queue reaches it.
+    const alert: Alert = {
+      kind,
+      severity,
+      at: this.#clock.nowUtcIso(),
+      reason: body.reason,
+      detail: body.detail,
+    }
+    const delivered = this.#alertQueue.then(() => this.#deliverAlert(alert))
+    this.#alertQueue = delivered
+    return delivered
+  }
+
+  /**
+   * One queued delivery, bounded by `alerts.deliveryTimeoutMs`. The bound is
+   * what keeps the queue from becoming a new way to lose an alert: a transport
+   * that never answers stops holding the alerts behind it, so the critical one
+   * still reaches a human. Never rejects — `#deliverOnce` absorbs the failure.
+   */
+  async #deliverAlert(alert: Alert): Promise<void> {
+    let timer: TimerHandle | undefined
+    const timedOut = new Promise<'timeout'>((resolve) => {
+      timer = this.#clock.setTimeout(() => {
+        resolve('timeout')
+      }, this.#config.alerts.deliveryTimeoutMs)
+    })
+    const outcome = await Promise.race([this.#deliverOnce(alert), timedOut])
+    if (timer !== undefined) this.#clock.clearTimeout(timer)
+    if (outcome === 'timeout') {
+      this.#logger.error('alert delivery timed out', {
+        kind: alert.kind,
+        sink: this.#alerts.name,
+        timeoutMs: this.#config.alerts.deliveryTimeoutMs,
       })
+    }
+  }
+
+  /** The sink call itself. Never rejects: a sink that throws is logged. */
+  async #deliverOnce(alert: Alert): Promise<void> {
+    try {
+      await this.#alerts.deliver(alert)
     } catch (error) {
       // An alert sink that throws must not take the supervisor with it.
       this.#logger.error('alert sink threw', {
-        kind,
+        kind: alert.kind,
         error: error instanceof Error ? error.message : String(error),
       })
     }
@@ -815,5 +945,15 @@ export class Supervisor {
     }, this.#config.evaluateIntervalMs)
   }
 }
+
+/** What `/health` shows when no chat parser feeds the detector. */
+const NO_FILTER_EVASION_DETECTOR: FilterEvasionState = Object.freeze({
+  enabled: false,
+  reported: false,
+  consecutiveExceeding: 0,
+  consecutiveBelow: 0,
+  windowsClosed: 0,
+  lastWindow: null,
+})
 
 export type { SafeStopKind }

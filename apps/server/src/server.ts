@@ -12,6 +12,7 @@ import type { EngineMetricsSnapshot } from './engine/metrics.js'
 import type { RendererHealthReport } from './engine/publisher.js'
 import type { HealthSignal } from './health/types.js'
 import type { AdminKillEndpoint } from './supervisor/kill-switch.js'
+import type { AdminModerationEndpoint } from './supervisor/moderation-report.js'
 import type { SupervisorHealthSummary } from './supervisor/types.js'
 
 /** Loopback only: the server is never bound to a routable interface (spec §10.2). */
@@ -64,6 +65,12 @@ export interface ServerOptions {
   readonly supervisorHealth?: () => SupervisorHealthSummary | null
   /** `POST /admin/kill` (loopback + `server.adminToken`, spec §10.2). */
   readonly adminKill?: AdminKillEndpoint
+  /**
+   * `POST /admin/moderation` and `/admin/moderation/clear` — the human call path
+   * of spec §12.3 (TASK_SPECS §T22), on the same admission rules as the kill
+   * switch.
+   */
+  readonly adminModeration?: AdminModerationEndpoint
 }
 
 /**
@@ -263,6 +270,51 @@ export function handleRequest(
       // The kill switch reaches the supervisor, so `handle()` can throw for
       // reasons this route cannot enumerate. An operator killing a wedged
       // broadcast must not be left holding an open socket either.
+      .catch(() => {
+        failClosed(res)
+      })
+    return
+  }
+
+  if (pathname === '/admin/moderation' || pathname === '/admin/moderation/clear') {
+    const adminModeration = options.adminModeration
+    // Like the kill switch and unlike the simulator endpoint, this is not a
+    // feature flag: it is absent only when this process has no supervisor to
+    // report to.
+    if (adminModeration === undefined) {
+      sendJson(res, 404, { error: 'not_found' })
+      return
+    }
+    if (method !== 'POST') {
+      sendJson(res, 405, { error: 'method_not_allowed' })
+      return
+    }
+    const clearing = pathname === '/admin/moderation/clear'
+    const answer = (body: unknown): void => {
+      const request = {
+        authorization: headerValue(req, 'authorization'),
+        remoteAddress: req.socket.remoteAddress ?? null,
+        body,
+      }
+      // A report *needs* its reason, so an unreadable body is not waved through
+      // the way the kill switch's optional one is: it falls to the 400 that
+      // names the approved vocabulary.
+      const result = clearing ? adminModeration.clear(request) : adminModeration.report(request)
+      sendJson(res, result.status, result.body)
+    }
+    void readJsonBody(req)
+      .then(
+        (body) => {
+          if (body === BODY_TOO_LARGE) {
+            sendJson(res, 413, { error: 'body_too_large' })
+            return
+          }
+          answer(body === BODY_UNPARSEABLE ? null : body)
+        },
+        () => {
+          answer(null)
+        },
+      )
       .catch(() => {
         failClosed(res)
       })

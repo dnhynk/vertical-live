@@ -6,6 +6,7 @@ import { SimulatorIngestEndpoint } from './engine/ingest.js'
 import { RendererHub } from './engine/publisher.js'
 import { ConsentDirectory } from './identity/directory.js'
 import { loadInputConfig } from './input/config.js'
+import { CommandMetrics } from './input/metrics.js'
 import { loadRetentionConfig } from './privacy/config.js'
 import { RetentionSweeper } from './privacy/retention.js'
 import {
@@ -33,6 +34,7 @@ import { loadSupervisorConfig } from './supervisor/config.js'
 import { classifyStoreFailure } from './supervisor/db-integrity.js'
 import { DeadManMonitor } from './supervisor/deadman.js'
 import { AdminKillEndpoint, KillSwitchFileWatcher } from './supervisor/kill-switch.js'
+import { AdminModerationEndpoint } from './supervisor/moderation-report.js'
 import {
   buildPreflightProbes,
   buildStartupSteps,
@@ -164,7 +166,7 @@ const rendererToken = await requireSecret(
 const adminToken = await requireSecret(
   secrets,
   'server.adminToken',
-  'set it with `npm run secrets -w @vl/server -- set server.adminToken`; it authenticates POST /admin/kill (spec §10.2)',
+  'set it with `npm run secrets -w @vl/server -- set server.adminToken`; it authenticates POST /admin/kill and POST /admin/moderation (spec §10.2, §12.3)',
 )
 
 // The simulator token is only read when the endpoint is enabled: a production
@@ -208,6 +210,19 @@ const httpServer = createServer({
       supervisor.onKillSwitch(request)
     },
   }),
+  // The human call path of spec §12.3: a person reads the chat, decides, and
+  // presses this. The four approved tokens are BOARD D-13's.
+  adminModeration: new AdminModerationEndpoint({
+    token: adminToken,
+    clock: systemClock,
+    logger: stdoutLogger,
+    onReport: (report) => {
+      supervisor.reportModerationHealth('degraded', report.reason)
+    },
+    onClear: () => {
+      supervisor.reportModerationHealth('ok')
+    },
+  }),
 })
 
 const hub = new RendererHub({
@@ -243,6 +258,16 @@ const consentDirectory = config.engine.identityGateOpen
       logger: stdoutLogger,
     })
   : null
+
+/**
+ * The process's command counters (spec §14.1). One instance, shared by the
+ * parser port that fills it and the supervisor heuristic that reads it: a second
+ * collector would count a different chat than the one being judged (§12.3,
+ * TASK_SPECS §T22).
+ */
+const commandMetrics = new CommandMetrics({
+  consentGateOpen: config.engine.identityGateOpen,
+})
 
 const engine = new StateEngine({
   store,
@@ -559,6 +584,7 @@ const supervisor: Supervisor = new Supervisor({
   deadMan,
   ...(screenshots === undefined ? {} : { screenshots }),
   logger: stdoutLogger,
+  commandMetrics: () => commandMetrics.snapshot(),
   startup: buildStartupSteps(runtimeDeps),
   preflight: buildPreflightProbes({ ...runtimeDeps, secrets }),
   actions: {
@@ -648,6 +674,7 @@ chatSource = await createChatSource(
     engine,
     clock: systemClock,
     inputConfig,
+    commandMetrics,
     identityGateOpen: config.engine.identityGateOpen,
     consent: consentDirectory,
     config: chatConfig,

@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
+import type { FilterEvasionHeuristicConfig } from './moderation-heuristic.js'
 import { HEALTH_FAMILIES, SUPERVISED_COMPONENTS } from './types.js'
 import type { HealthFamily, SupervisedComponent } from './types.js'
 
@@ -68,6 +69,11 @@ export interface SupervisorAlertConfig {
     readonly warning: number
     readonly critical: number
   }
+  /**
+   * How long one delivery may hold the supervisor's alert queue before the next
+   * alert goes out without it (`Supervisor#deliverAlert`, review round 2 B1);
+   * the Discord sink also aborts its own request at it.
+   */
   readonly deliveryTimeoutMs: number
   /** Discord webhook sink (BOARD D-3). The URL itself lives in the vault. */
   readonly discordEnabled: boolean
@@ -114,6 +120,17 @@ export interface ModerationCallTableConfig {
   readonly escalationChannel: string | null
   readonly autoBlockScope: string | null
   readonly safeStopConditions: readonly string[]
+  /**
+   * Automatic reporters for the call table's reason tokens (TASK_SPECS §T22).
+   * Only `filter_evasion_surge` has one: the other three reasons are judgements
+   * about what a message means, and this process keeps no message to judge
+   * (§12.3). Thresholds are provisional — see `supervisor.provisional`.
+   */
+  readonly heuristics: ModerationHeuristicsConfig
+}
+
+export interface ModerationHeuristicsConfig {
+  readonly filterEvasion: FilterEvasionHeuristicConfig
 }
 
 export interface SupervisorConfig {
@@ -189,6 +206,11 @@ export function loadSupervisorConfig(options: LoadSupervisorConfigOptions = {}):
   const killSwitch = readObject(section['killSwitch'], 'supervisor.killSwitch')
   const screenshot = readObject(section['screenshot'], 'supervisor.screenshot')
   const moderation = readObject(section['moderation'], 'supervisor.moderation')
+  const heuristics = readObject(moderation['heuristics'], 'supervisor.moderation.heuristics')
+  const filterEvasion = readObject(
+    heuristics['filterEvasion'],
+    'supervisor.moderation.heuristics.filterEvasion',
+  )
 
   return Object.freeze({
     evaluateIntervalMs: readPositiveInt(
@@ -335,6 +357,34 @@ export function loadSupervisorConfig(options: LoadSupervisorConfigOptions = {}):
           'supervisor.moderation.safeStopConditions',
         ),
       ),
+      heuristics: Object.freeze({
+        filterEvasion: Object.freeze({
+          enabled: readBoolean(
+            filterEvasion['enabled'],
+            'supervisor.moderation.heuristics.filterEvasion.enabled',
+          ),
+          windowMs: readPositiveInt(
+            filterEvasion['windowMs'],
+            'supervisor.moderation.heuristics.filterEvasion.windowMs',
+          ),
+          minMessages: readPositiveInt(
+            filterEvasion['minMessages'],
+            'supervisor.moderation.heuristics.filterEvasion.minMessages',
+          ),
+          rejectRatio: readRatio(
+            filterEvasion['rejectRatio'],
+            'supervisor.moderation.heuristics.filterEvasion.rejectRatio',
+          ),
+          enterWindows: readPositiveInt(
+            filterEvasion['enterWindows'],
+            'supervisor.moderation.heuristics.filterEvasion.enterWindows',
+          ),
+          clearWindows: readPositiveInt(
+            filterEvasion['clearWindows'],
+            'supervisor.moderation.heuristics.filterEvasion.clearWindows',
+          ),
+        }),
+      }),
     }),
     provisional: Object.freeze(readStringArray(section['provisional'], 'supervisor.provisional')),
   })

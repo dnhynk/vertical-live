@@ -146,6 +146,49 @@ npm run kill -w @vl/server -- --clear                          # 플래그 제�
 `POST /admin/kill`은 loopback이 아니면 403, 토큰이 없거나 틀리면 401이다. 본문은 선택이며 `{"reason":"..."}`만 읽고
 사유는 잘라서 저장한다.
 
+### 3.1 모더레이션 보고 (§12.3, BOARD D-13) — kill switch와 다른 것
+
+kill switch는 **방송을 멈추는** 스위치다. 모더레이션 보고는 **"채팅이 위험하다"고 서버에 알리는** 것이고, 멈출지
+말지는 Gate 0 승인표가 정한다([`moderation-call-table.md`](moderation-call-table.md) 1장 5번 — D-13은 네 사유
+**전부** safe-stop으로 승인했다). 즉 지금 설정에서는 넷 중 무엇을 보고하든 결과적으로 방송이 멈춘다. 그래도 두
+명령을 나눠 두는 이유는 **기록**이다: 사후에 "왜 멈췄나"가 `kill_switch/operator stop`이 아니라
+`moderation_unhealthy/pii_exposure`로 남는다.
+
+```bash
+npm run moderation -w @vl/server -- --reason pii_exposure --note "3건, 같은 계정"
+npm run moderation -w @vl/server -- --clear
+```
+
+승인된 사유 토큰은 이 넷뿐이고, 문자열도 그대로여야 한다(오타는 400으로 거부된다):
+
+`targeted_harassment` · `pii_exposure` · `sexual_or_self_harm_risk` · `filter_evasion_surge`
+
+**절차 — 알림 수신에서 해제까지**
+
+1. **알림을 받는다.** Discord로 `moderation.unhealthy`(warning) 또는 `supervisor.safe_stopped`(critical)가 온다.
+   D-13 승인표 2번의 **60분** 안에 응답한다. 자동 경로(`filter_evasion_surge`)가 먼저 보고했을 수도 있다 —
+   `GET /health`의 `supervisor.moderation.filterEvasion`을 보면 어느 쪽인지 알 수 있다.
+2. **판단한다.** YouTube Studio에서 실제 채팅을 본다. **이 저장소에는 볼 채팅이 없다** — raw chat을 보관하지 않기
+   때문이다(§12.3). 필요하면 Studio/API에서 timeout·ban을 한다(승인표 4번: timeout·ban은 사람이 한다).
+3. **보고한다(CLI 한 줄).** 위 명령. 서버가 응답하지 않으면 이 명령은 **실패로 끝난다** — 플래그 파일 fallback이
+   없다. 그때는 3장의 `npm run kill -w @vl/server -- --reason "<why>"`로 방송을 멈춘다.
+4. **결과를 확인한다.** `GET /health`:
+   - `supervisor.moderation.status = "degraded"`, `.reason = "<토큰>"`, `.reportedAtUtc = <시각>`
+   - `supervisor.interactionEnabled = false` (화면 CTA off)
+   - 승인표 5번에 있는 토큰이면 `supervisor.state = "safe_stopped"` + critical alert 1회
+5. **해제한다.** 채팅이 안전해진 것을 사람이 확인한 뒤 `--clear`. CTA는 다음 평가에서 돌아온다.
+   **`--clear`는 `safe_stopped`를 풀지 않는다** — 그것은 4.2의 재시작 절차다(§9.2).
+6. **기록한다.** 7장. 사건 시각·토큰·조치·재발 방지. `--note`에 쓴 문장은 이 호스트의 로그에만 남고 alert·`/health`
+   에는 가지 않으므로, 사건 기록은 별도로 남긴다.
+
+**자동으로 탐지되는 것은 `filter_evasion_surge` 하나뿐이다.** 나머지 세 토큰은 메시지의 *의미*에 대한 판단이라
+자동 판정을 두지 않았다([`supervisor.md`](supervisor.md) 4.3). 즉 승인표 1번의 "부재 구간"을 자동으로 덮는 것은
+필터 우회 폭증뿐이며, 나머지는 사람이 깨어 있을 때만 걸린다 — 이 한계는 D-13이 감수하기로 한 것이다.
+
+**임계값은 잠정치다.** `supervisor.moderation.heuristics.filterEvasion`의 숫자는 실트래픽 없이 정한 시작값이고
+`supervisor.provisional`에 올라 있다(BOARD A-15/D-14). Gate 2의 72시간 baseline 뒤에 잠근다. 그 전까지 오탐이
+보이면 숫자를 고치기 전에 관측을 기록한다.
+
 ---
 
 ## 4. 복구
@@ -180,7 +223,7 @@ curl -s http://127.0.0.1:8787/health | jq '.supervisor.families[] | select(.stat
 | `rights_or_policy` | 권리·정책·약관 문제, 방송 한도에서 복구 불가 | **자동으로 재개하지 않는다.** 권리·정책 판단이 먼저다(§9.1) |
 | `data_integrity` | DB 파일 손상(`SQLITE_CORRUPT`/`SQLITE_NOTADB`) 또는 검증 불가한 마이그레이션 이력 | 4.4 |
 | `account_action` | 계정 정지·strike·재동의 필요, grant 철회 | Studio·Google 계정 상태 확인 후 재동의([`youtube-auth-setup.md`](youtube-auth-setup.md)) |
-| `moderation_unhealthy` | 승인된 호출표(BOARD D-13, 2026-08-19)의 safe-stop 조건에 해당 | [`moderation-call-table.md`](moderation-call-table.md) 4장 |
+| `moderation_unhealthy` | 승인된 호출표(BOARD D-13, 2026-08-19)의 safe-stop 조건에 해당. `safeStop.reason`이 사유 토큰이고, 사람이 보고했는지 휴리스틱이 보고했는지는 `/health`의 `supervisor.moderation.filterEvasion.reported`로 구분한다 | **3.1** 절차 → 채팅이 안전해진 것을 확인 → `npm run moderation -w @vl/server -- --clear` → 재시작. clear만으로는 재개되지 않는다 |
 | `restart_budget_exhausted` | 컴포넌트 재시도 예산 또는 시작 순서 재시도 소진 | 로그에서 마지막 실패 원인을 찾고 그것을 고친 뒤 재시작 |
 
 재개 절차(공통):
@@ -239,10 +282,10 @@ npm run start -w @vl/server
 | `supervisor.preflight_failed` | warning | 사전 점검 실패(자동 재시도 중) | 실패 항목 이름 확인(1.4) |
 | `supervisor.startup_failed` | warning | 시작 순서 실패 | 로그의 실패 step |
 | `supervisor.restart_escalated` | warning | 예산 소진 → 상위 컴포넌트로 escalation | 4.3 |
-| `moderation.unhealthy` | warning | 모더레이션 제어 불건전, CTA off | [`moderation-call-table.md`](moderation-call-table.md) 4장(승인표 2번의 최대 응답시간 안에 응답). `safeStopConditionMatched`를 본다 |
+| `moderation.unhealthy` | warning | 모더레이션 제어 불건전, CTA off | **3.1**(승인표 2번의 60분 안에 응답). `safeStopConditionMatched`를 본다 — `false`면 방송은 계속 돈다 |
 | `retention.sweep_incomplete` / `retention.sweep_failed` | warning | 보존 sweep 미완·실패 | [`data-map.md`](data-map.md). 기한(§12.4)을 넘기기 전에 해소 |
 | `privacy.revocation_incomplete` | critical | 철회 후 삭제 기한 위험 | **즉시.** §12.4의 7일·30일 규칙 |
-| `supervisor.safe_stopped` | critical | 안전 정지 | 4.2 |
+| `supervisor.safe_stopped` | critical | 안전 정지 | 4.2. `safeStop.kind = moderation_unhealthy`면 채팅 사건이다 → 3.1 |
 | `store.unavailable` | critical | DB를 열지 못함 | 4.4 |
 
 알림 전달 실패는 로그로 남고 throw하지 않는다 — 알림이 실패했다고 방송을 멈추지 않는다. 그래서 **알림 부재를

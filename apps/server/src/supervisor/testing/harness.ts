@@ -1,6 +1,7 @@
 import type { EngineHealth, InputHealth } from '../../engine/engine.js'
 import type { RendererHealthReport } from '../../engine/publisher.js'
 import type { HealthSignal } from '../../health/types.js'
+import type { CommandMetricsSnapshot } from '../../input/metrics.js'
 import { FakeClock } from '../../testing/fake-clock.js'
 import { RecordingAlertSink, type AlertSink } from '../alerts.js'
 import { loadSupervisorConfig, type SupervisorConfig } from '../config.js'
@@ -126,6 +127,12 @@ export interface HarnessOptions {
   readonly alerts?: AlertSink
   /** Replaces individual component actions, e.g. with one that can be gated. */
   readonly actions?: Partial<ComponentActions>
+  /**
+   * Input counters for the `filter_evasion_surge` heuristic (§12.3, §T22).
+   * Absent by default, which is how every pre-T22 test keeps its behaviour: no
+   * sampler means no detector.
+   */
+  readonly commandMetrics?: () => CommandMetricsSnapshot
 }
 
 /** All six pre-checks passing; a test that cares overrides the ones it tests. */
@@ -210,6 +217,7 @@ export function createSupervisorHarness(options: HarnessOptions = {}): Superviso
     ...(options.onSafeStop === undefined ? {} : { onSafeStop: options.onSafeStop }),
     ...(options.deadMan === undefined ? {} : { deadMan: options.deadMan }),
     ...(options.screenshots === undefined ? {} : { screenshots: options.screenshots }),
+    ...(options.commandMetrics === undefined ? {} : { commandMetrics: options.commandMetrics }),
   })
 
   return {
