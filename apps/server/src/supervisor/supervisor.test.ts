@@ -1,11 +1,15 @@
 import { describe, expect, it } from 'vitest'
 
+import { loadInputConfig, parserLimits } from '../input/config.js'
+import { CommandMetrics } from '../input/metrics.js'
+import { parseMessage } from '../input/parse.js'
 import { testChatConfig } from '../testing/chat-test-support.js'
 import { FakeClock, flushMicrotasks } from '../testing/fake-clock.js'
 import { buildChatHealthSignals } from '../youtube/chat/health.js'
 import { ChatSourceState } from '../youtube/chat/state.js'
 import { DELIVERED, type AlertSink } from './alerts.js'
 import { DeadManMonitor } from './deadman.js'
+import { AdminModerationEndpoint } from './moderation-report.js'
 import { STARTUP_STEP_ORDER, type StartupStep, type StartupSteps } from './startup.js'
 import { SUPERVISED_COMPONENTS } from './types.js'
 import {
@@ -30,6 +34,29 @@ async function goLive(harness: SupervisorHarness): Promise<void> {
 }
 
 const OBS_OUTPUT_SIGNALS = ['obs.stream', 'obs.output_progress'] as const
+
+/** Synthetic; the real one lives in the vault and never in a test (§10.2). */
+const ADMIN_TOKEN = 'synthetic-admin-token'
+
+/**
+ * Runs the evaluation loop the way production does — one pass every
+ * `evaluateIntervalMs`, with fresh signals — for `totalMs` of fake time.
+ *
+ * A test that jumps a whole minute in one `advance()` instead gets a supervisor
+ * that has not heard from itself in a minute: `coordinatorHeartbeatTimeoutMs` is
+ * 15s, so the coordinator family degrades, the engine is restarted until its
+ * budget is spent, and the run reaches `safe_stopped` for a reason the test was
+ * not about. That is exactly what the first draft of the heuristic tests below
+ * measured.
+ */
+async function tickFor(harness: SupervisorHarness, totalMs: number): Promise<void> {
+  const step = harness.config.evaluateIntervalMs
+  for (let elapsed = 0; elapsed < totalMs; elapsed += step) {
+    await harness.clock.advance(step)
+    harness.pushHealthy()
+    await harness.supervisor.evaluate()
+  }
+}
 
 /**
  * OBS answering nothing at all: every one of its signals is `unknown`, held
@@ -223,6 +250,156 @@ describe('supervisor state machine', () => {
       expect(harness.supervisor.state).toBe('safe_stopped')
       expect(harness.supervisor.health().safeStop?.kind).toBe('moderation_unhealthy')
       expect(harness.inputHealth).toBe('degraded')
+    })
+
+    it('stops the run for an approved token from POST /admin/moderation (§T22)', async () => {
+      // The whole T22 path in one test, on T12's own transition harness: a human
+      // presses the endpoint, the endpoint hands the token to the supervisor, and
+      // §12.3's two steps happen — CTA off, then `safe_stopped` because BOARD
+      // D-13 put this token on the approved safe-stop list.
+      const harness = createSupervisorHarness({ preflight: passingPreflight() })
+      await goLive(harness)
+      const endpoint = new AdminModerationEndpoint({
+        token: ADMIN_TOKEN,
+        clock: harness.clock,
+        onReport: (report) => {
+          harness.supervisor.reportModerationHealth('degraded', report.reason)
+        },
+        onClear: () => {
+          harness.supervisor.reportModerationHealth('ok')
+        },
+      })
+
+      const response = endpoint.report({
+        authorization: `Bearer ${ADMIN_TOKEN}`,
+        remoteAddress: '127.0.0.1',
+        body: { reason: 'targeted_harassment', note: 'synthetic operator note' },
+      })
+      await flushMicrotasks()
+
+      expect(response.status).toBe(202)
+      expect(harness.inputHealth).toBe('degraded')
+      expect(harness.supervisor.health().interactionEnabled).toBe(false)
+      expect(harness.supervisor.state).toBe('safe_stopped')
+      expect(harness.supervisor.health().safeStop).toMatchObject({
+        kind: 'moderation_unhealthy',
+        reason: 'targeted_harassment',
+      })
+      // One alert, not one per evaluation (spec §11 알림).
+      const alerts = harness.alerts.ofKind('supervisor.safe_stopped')
+      expect(alerts).toHaveLength(1)
+      expect(alerts[0]?.severity).toBe('critical')
+      // `/health` carries the token and the instant, and nothing an operator
+      // typed (TASK_SPECS §T22: "토큰·시각만").
+      const moderation = harness.supervisor.health().moderation
+      expect(moderation).toMatchObject({
+        status: 'degraded',
+        reason: 'targeted_harassment',
+        reportedAtUtc: harness.clock.nowUtcIso(),
+      })
+      expect(JSON.stringify(harness.supervisor.health())).not.toContain('synthetic operator note')
+    })
+
+    it('turns the CTA back on when a report is cleared (§T22)', async () => {
+      // A reason the Gate 0 table does not list: the CTA goes off, the run keeps
+      // going, and `/admin/moderation/clear` puts it back.
+      const harness = createSupervisorHarness({ preflight: passingPreflight() })
+      await goLive(harness)
+
+      harness.supervisor.reportModerationHealth('degraded', 'block_control_unavailable')
+      await harness.clock.advance(1000)
+      harness.pushHealthy()
+      await harness.supervisor.evaluate()
+      expect(harness.inputHealth).toBe('degraded')
+      expect(harness.supervisor.health().moderation.reportedAtUtc).not.toBeNull()
+
+      harness.supervisor.reportModerationHealth('ok')
+      await harness.clock.advance(1000)
+      harness.pushHealthy()
+      await harness.supervisor.evaluate()
+
+      expect(harness.inputHealth).toBe('ok')
+      expect(harness.supervisor.state).toBe('live')
+      expect(harness.supervisor.health().moderation).toMatchObject({
+        status: 'ok',
+        reason: null,
+        reportedAtUtc: null,
+      })
+    })
+
+    it('stops the run when the filter-evasion heuristic reports (§12.3, §T22)', async () => {
+      // Same two steps, reached by the automatic reporter instead of a person.
+      // The counters are driven through the real parser so the codes being
+      // counted are the ones T6 actually produces.
+      const metrics = new CommandMetrics()
+      const limits = parserLimits(loadInputConfig({ env: {} }))
+      const harness = createSupervisorHarness({
+        preflight: passingPreflight(),
+        commandMetrics: () => metrics.snapshot(),
+      })
+      await goLive(harness)
+      const { windowMs, enterWindows } = harness.config.moderation.heuristics.filterEvasion
+      const flood = (): void => {
+        for (let index = 0; index < 30; index += 1) {
+          metrics.recordParse(
+            parseMessage(
+              'feed example(dot)invalid',
+              { identityGateOpen: false, voteWindowOpen: false },
+              limits,
+            ),
+          )
+        }
+      }
+
+      for (let window = 0; window < enterWindows; window += 1) {
+        flood()
+        await tickFor(harness, windowMs)
+      }
+      await flushMicrotasks()
+
+      expect(harness.supervisor.health().moderation).toMatchObject({
+        status: 'degraded',
+        reason: 'filter_evasion_surge',
+      })
+      expect(harness.supervisor.health().moderation.filterEvasion.reported).toBe(true)
+      expect(harness.inputHealth).toBe('degraded')
+      expect(harness.supervisor.state).toBe('safe_stopped')
+      expect(harness.alerts.ofKind('supervisor.safe_stopped')).toHaveLength(1)
+    })
+
+    it('leaves an ordinary chat alone however long it runs (§T22 오탐 없음)', async () => {
+      const metrics = new CommandMetrics()
+      const limits = parserLimits(loadInputConfig({ env: {} }))
+      const harness = createSupervisorHarness({
+        preflight: passingPreflight(),
+        commandMetrics: () => metrics.snapshot(),
+      })
+      await goLive(harness)
+      const { windowMs } = harness.config.moderation.heuristics.filterEvasion
+
+      for (let window = 0; window < 10; window += 1) {
+        for (let index = 0; index < 30; index += 1) {
+          metrics.recordParse(
+            parseMessage('feed', { identityGateOpen: false, voteWindowOpen: false }, limits),
+          )
+        }
+        await tickFor(harness, windowMs)
+      }
+
+      expect(harness.supervisor.state).toBe('live')
+      expect(harness.supervisor.health().moderation.status).toBe('ok')
+      expect(harness.supervisor.health().moderation.filterEvasion.windowsClosed).toBe(10)
+      expect(harness.inputHealth).toBe('ok')
+    })
+
+    it('reports no detector at all when nothing in the process parses chat', () => {
+      const harness = createSupervisorHarness()
+
+      expect(harness.supervisor.health().moderation.filterEvasion).toMatchObject({
+        enabled: false,
+        windowsClosed: 0,
+        lastWindow: null,
+      })
     })
 
     it('will not go live for an idle chat source that only reports bookkeeping (round 2)', async () => {

@@ -152,6 +152,9 @@ function readNote(body: unknown): string | null {
   if (typeof body !== 'object' || body === null || Array.isArray(body)) return null
   const note = (body as Record<string, unknown>)['note']
   if (typeof note !== 'string' || note === '') return null
-  const cleaned = note.slice(0, MAX_NOTE_LENGTH).replace(/\p{Cc}|\p{Cf}/gu, ' ').trim()
+  const cleaned = note
+    .slice(0, MAX_NOTE_LENGTH)
+    .replace(/\p{Cc}|\p{Cf}/gu, ' ')
+    .trim()
   return cleaned === '' ? null : cleaned
 }

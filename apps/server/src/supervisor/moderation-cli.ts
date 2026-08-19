@@ -134,7 +134,10 @@ async function post(
   } catch (error) {
     // The server is not answering. Say so plainly instead of writing a file
     // that would silently degrade the next run (see the module comment).
-    return { ok: false, error: `${errorToken(error)} (server not reachable; use \`npm run kill\` to stop the broadcast)` }
+    return {
+      ok: false,
+      error: `${errorToken(error)} (server not reachable; use \`npm run kill\` to stop the broadcast)`,
+    }
   }
 }
 

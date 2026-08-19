@@ -183,9 +183,7 @@ export class FilterEvasionDetector {
 
     const ratio = messages === 0 ? null : evasion / messages
     const exceeded =
-      messages >= this.#config.minMessages &&
-      ratio !== null &&
-      ratio >= this.#config.rejectRatio
+      messages >= this.#config.minMessages && ratio !== null && ratio >= this.#config.rejectRatio
     this.#lastWindow = {
       atUtc: this.#clock.nowUtcIso(),
       elapsedMs,

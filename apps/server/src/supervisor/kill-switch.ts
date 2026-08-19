@@ -3,7 +3,12 @@ import { dirname } from 'node:path'
 
 import { systemClock, type Clock, type TimerHandle } from '../clock.js'
 import { silentLogger, type Logger } from '../secrets/redaction.js'
-import { authorizeAdmin, readTokenField, type AdminRequest, type AdminResponse } from './admin-auth.js'
+import {
+  authorizeAdmin,
+  readTokenField,
+  type AdminRequest,
+  type AdminResponse,
+} from './admin-auth.js'
 import type { KillSwitchConfig } from './config.js'
 
 /**
