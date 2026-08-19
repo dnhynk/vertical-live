@@ -90,9 +90,43 @@ T20b, 렌더러 표시는 T20c이며 이 PR은 계약만 바꾼다.
 
 ### Gates (executed)
 
+전부 통과. `origin/main`(7b425c8) rebase 후 실행한 결과 그대로:
+
 ```text
-(아래는 최종 실행 결과로 갱신)
+$ git log --oneline -1 origin/main
+7b425c8 docs(board): T19/T20a dispatched, T20b/c/T21 registered
+
+$ npm run format:check
+Checking formatting...
+All matched files use Prettier code style!
+
+$ npm run lint
+[baseline-browser-mapping] The data in this module is over two months old.  To ensure accurate Baseline data, please update: `npm i baseline-browser-mapping@latest -D`
+check-no-legacy-imports: ok (0 legacy imports)
+check-install-scripts: ok (4 reviewed, better-sqlite3 binding loads)
+
+$ npm run typecheck
+> tsc --build tsconfig.json
+
+
+$ npm run test
+      Tests  1955 passed | 1 skipped (1956)
+   Start at  19:33:29
+   Duration  51.45s (transform 36.71s, setup 0ms, import 94.18s, tests 126.93s, environment 17.31s)
+
+
+$ npm run build
+> @vl/renderer@0.0.0 build
+[32m✓ built in 7.43s[39m
+> @vl/server@0.0.0 build
+> tsc --build && node scripts/copy-migrations.mjs && node scripts/generate-data-map.mjs --check
+copied 5 migration(s) to dist/db/migrations
+docs/ops/data-map.md up to date
+> @vl/simulator@0.0.0 build
+> @vl/soak@0.0.0 build
 ```
+
+`npm run test` 139 test files / 1955 passed / 1 skipped(기존부터 skip). 게이트 5개를 모두 실행했으며 "실행하지 않았음" 항목은 없다.
 
 ## Not done / out of scope
 
