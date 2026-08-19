@@ -102,8 +102,17 @@ function graphemesOf(value: string): string[] {
 export function sanitizeDisplayName(raw: string): string | null {
   // A value longer than the contract allows never validated, so it did not come
   // in over the socket. Refusing it is cheaper than reasoning about where it did
-  // come from.
-  if (raw.length > DISPLAY_NAME_MAX_LENGTH) return null
+  // come from — but only if "longer" is measured the way the contract measures
+  // it. `DisplayNameSchema`'s quantifier runs under the `u` flag, so its 100 is
+  // 100 *code points*; `String.length` is UTF-16 code units and counts every
+  // astral character twice. Spreading the string iterates code points, so a name
+  // of 60 emoji (120 code units, 60 code points) is now accepted here exactly as
+  // the contract accepted it, and shortened below by grapheme cluster instead of
+  // being refused outright. The character cleanup that follows stays a second
+  // lock rather than becoming the first one: parsing with the schema instead
+  // would turn a control character into a rejected name rather than a cleaned
+  // one, which is the opposite of what this function is for.
+  if ([...raw].length > DISPLAY_NAME_MAX_LENGTH) return null
 
   let cleaned = ''
   for (const character of raw.normalize('NFC')) {

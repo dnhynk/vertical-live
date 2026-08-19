@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { DISPLAY_NAME_MAX_LENGTH, type Effect, type WorldSnapshot } from '@vl/contract'
+import {
+  DISPLAY_NAME_MAX_LENGTH,
+  DisplayNameSchema,
+  type Effect,
+  type WorldSnapshot,
+} from '@vl/contract'
 
 import {
   SAMPLE_CONSENTED_ACTOR,
@@ -109,6 +114,28 @@ describe('sanitizeDisplayName (spec §12.3)', () => {
   it('refuses a value longer than the contract can carry', () => {
     expect(sanitizeDisplayName('a'.repeat(DISPLAY_NAME_MAX_LENGTH))).not.toBeNull()
     expect(sanitizeDisplayName('a'.repeat(DISPLAY_NAME_MAX_LENGTH + 1))).toBeNull()
+  })
+
+  it('measures that bound in code points, the unit the contract measures it in', () => {
+    // An astral character is two UTF-16 code units and one code point, and
+    // `DisplayNameSchema`'s quantifier runs under the `u` flag, so it counts
+    // code points. A name of 60 emoji is 120 code units: the contract accepts it
+    // and the screen must shorten it, not refuse it.
+    const emoji = '\u{1f600}'
+    const sixty = emoji.repeat(60)
+    expect(sixty.length).toBe(120)
+    expect([...sixty].length).toBe(60)
+    expect(DisplayNameSchema.safeParse(sixty).success).toBe(true)
+    expect(sanitizeDisplayName(sixty)).toBe(emoji.repeat(DISPLAY_NAME_SCREEN_MAX_GRAPHEMES) + '…')
+
+    // And the bound itself is still a bound, drawn on the same boundary the
+    // contract draws it on.
+    const atBound = emoji.repeat(DISPLAY_NAME_MAX_LENGTH)
+    const overBound = emoji.repeat(DISPLAY_NAME_MAX_LENGTH + 1)
+    expect(DisplayNameSchema.safeParse(atBound).success).toBe(true)
+    expect(DisplayNameSchema.safeParse(overBound).success).toBe(false)
+    expect(sanitizeDisplayName(atBound)).not.toBeNull()
+    expect(sanitizeDisplayName(overBound)).toBeNull()
   })
 
   it('returns text, never markup', () => {
