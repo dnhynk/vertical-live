@@ -1,5 +1,11 @@
 import type { Alias, Translate } from '../i18n/index'
-import { commandLabel, type CtaState } from '../read-model/cta'
+import {
+  CONSENT_COMMANDS,
+  commandLabel,
+  consentCommandLabel,
+  type CtaState,
+} from '../read-model/cta'
+import { CONSENT_RETENTION_DAYS } from '../read-model/identity'
 
 /**
  * The free-command call to action (spec §5.2(3), §7.1) and the open decision
@@ -14,10 +20,22 @@ import { commandLabel, type CtaState } from '../read-model/cta'
  * - that everything is reachable for free (spec §8.5) — the note sits with the
  *   CTA, not only next to a paid surface, and nothing on this screen offers a
  *   paid alternative to it;
+ * - how a name gets onto the screen and how it comes off again (BOARD D-9). The
+ *   notice is one line — only a viewer who sends the consent command is named,
+ *   the withdrawal command deletes the record immediately, and 30 days without
+ *   activity deletes it by itself — and the two commands are shown next to it in
+ *   the same spellings the parser accepts. **Both languages say all three
+ *   things**: the English alias is not a shorter notice but the same one
+ *   (`docs/ops/identity-consent.md` §2.1, `JOIN = show my name · LEAVE = delete
+ *   it`, plus the 30 days), because a viewer who reads only the English line
+ *   would otherwise be told how to give a name and not how to take it back. The
+ *   full text lives in the channel description and the pinned comment (§2.2);
+ *   what has to be *on air* is the line and the two commands;
  * - nothing at all, when the server reports `interactionEnabled: false`. Input or
  *   renderer ACK is unhealthy then, so the CTA disappears and the screen shows
  *   `ui.interactionPaused` instead (spec §9.2). The renderer never decides this
- *   itself.
+ *   itself. The consent notice goes with it: an invitation to hand over a name
+ *   while commands are not being applied would be an invitation to nothing.
  */
 export interface CtaProps {
   cta: CtaState
@@ -79,6 +97,42 @@ export default function Cta({ cta, translate, alias }: CtaProps) {
       <p className="cta-free-note" data-testid="cta-free-note">
         {translate('ui.cta.freeNote')}
       </p>
+
+      <div className="cta-identity" data-testid="cta-identity">
+        <p className="cta-identity-notice">
+          <span className="cta-identity-ja" data-testid="cta-identity-notice">
+            {translate('ui.identity.notice', {
+              join: consentCommandLabel('JOIN').ja,
+              leave: consentCommandLabel('LEAVE').ja,
+              days: CONSENT_RETENTION_DAYS,
+            })}
+          </span>
+          <span className="cta-identity-en" data-testid="cta-identity-notice-en">
+            {alias('ui.identity.notice', {
+              join: consentCommandLabel('JOIN').en,
+              leave: consentCommandLabel('LEAVE').en,
+              days: CONSENT_RETENTION_DAYS,
+            })}
+          </span>
+        </p>
+
+        <ul className="cta-identity-commands">
+          {CONSENT_COMMANDS.map((name) => {
+            const label = consentCommandLabel(name)
+            return (
+              <li
+                key={name}
+                className="cta-identity-command"
+                data-testid={`cta-consent-command-${name}`}
+              >
+                <span className="cta-text">{label.ja}</span>
+                <span className="cta-en">{label.en}</span>
+                <span className="cta-identity-meaning">{translate(label.meaningKey)}</span>
+              </li>
+            )
+          })}
+        </ul>
+      </div>
     </div>
   )
 }

@@ -11,7 +11,8 @@ import { describe, expect, it } from 'vitest'
  * TASK_SPECS §T5 acceptance 4 and the CLAUDE.md §3 invariants, checked over the
  * renderer sources themselves:
  *
- * 1. no identity field can be read, stored or displayed (spec §7.3(1), §12.3),
+ * 1. no identity field can be read, stored or displayed, except the one BOARD
+ *    D-9 opened — see below (spec §7.3(1), §12.3),
  * 2. no browser storage, so a refresh recovers from the server snapshot alone
  *    (spec §10.2),
  * 3. randomness exists only as an injected seam, so nothing can invent a value,
@@ -67,8 +68,30 @@ function offenders(files: readonly { path: string; source: string }[], pattern: 
     .sort()
 }
 
+/**
+ * The one identity field BOARD D-9 let through, and the only files that may
+ * name it (TASK_SPECS §T20c).
+ *
+ * Everything else on the original list is still absent everywhere. `displayName`
+ * moved from "nowhere" to "here and nowhere else" because D-9 reversed A-1 for
+ * viewers who opt in — the display name of a consented viewer is shown in the
+ * "just applied action" slot. What did **not** change is where it may come from
+ * or go: the channel id never reaches the renderer at all (the contract carries
+ * an opaque `channelRef` instead, T20a), and only `read-model/identity.ts`
+ * decides whether a name may be drawn — `read-model/identity-confinement.test.ts`
+ * checks that separately, over `actor` itself.
+ */
+const MAY_NAME_DISPLAY_NAME = new Set([
+  'read-model/identity.ts',
+  'read-model/identity.test.ts',
+  'read-model/identity-confinement.test.ts',
+  'components/Screen.test.tsx',
+  'testing/fixtures.ts',
+  'testing/preview-states.ts',
+])
+
 describe('renderer source invariants', () => {
-  it('has no identity field anywhere', () => {
+  it('has no identity field anywhere but the consented display name', () => {
     expect(FILES.length).toBeGreaterThan(10)
     expect(
       offenders(
@@ -77,9 +100,17 @@ describe('renderer source invariants', () => {
         // `authorChannelId`. `authoriz…` is excluded because it is the HTTP
         // `Authorization` header and the `unauthorized` outcome of the T11
         // injection client — access control, not an identity field.
-        /author(?!iz)|display_?name|channel_?id|user_?name|nick_?name|profile_?image/i,
+        /author(?!iz)|channel_?id|user_?name|nick_?name|profile_?image/i,
       ),
     ).toEqual([])
+  })
+
+  it('names the display name only where D-9 allows it', () => {
+    const found = offenders(FILES, /display_?name/i)
+    expect(found.filter((path) => !MAY_NAME_DISPLAY_NAME.has(path))).toEqual([])
+    // The selector really is one of them: an empty result would pass the line
+    // above while meaning the feature had been deleted.
+    expect(found).toContain('read-model/identity.ts')
   })
 
   it('never displays raw chat or accepts free text from the wire', () => {

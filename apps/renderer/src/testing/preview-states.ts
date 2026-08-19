@@ -7,8 +7,9 @@ import {
 } from '@vl/contract'
 
 /**
- * The six representative screens of TASK_SPECS §T14 acceptance 1, as contract
- * values the preview harness can send over a real WebSocket.
+ * The six representative screens of TASK_SPECS §T14 acceptance 1, plus the
+ * consented-viewer screen of §T20c, as contract values the preview harness can
+ * send over a real WebSocket.
  *
  * Two kinds of identifier meet here and they are treated differently:
  *
@@ -20,8 +21,10 @@ import {
  * - **anything that stands for participation** — broadcast, message and event
  *   keys — is plainly synthetic (`simulator:` source, `sample-` ids). Nothing
  *   here may look like a real viewer, a real message or a real payment
- *   (spec §2.6, CLAUDE.md §3), and there is no field for a name in the first
- *   place (spec §7.4).
+ *   (spec §2.6, CLAUDE.md §3). The one screen that carries a name carries
+ *   `SAMPLE_CONSENTED_ACTOR`, which says what it is and holds an opaque
+ *   `channelRef` rather than anything a channel id could be mistaken for
+ *   (BOARD D-9, T20a).
  *
  * This module is test/preview scaffolding: `no-fabrication.test.ts` checks that
  * no application module imports it, so it cannot reach the broadcast bundle.
@@ -35,6 +38,22 @@ function at(offsetMs: number): string {
 
 /** Every event key here names the simulator, never a broadcast (spec §2.6). */
 const SAMPLE_EVENT_KEY = 'simulator:sample-broadcast:sample-message-1'
+
+/**
+ * The one consented viewer any preview shows (BOARD D-9). Declared here rather
+ * than imported from `fixtures.ts` for the same reason `SAMPLE_EVENT_KEY` is:
+ * `scripts/capture.mjs` loads this module directly with Node's type stripper,
+ * which resolves no extensionless relative import.
+ *
+ * Both values are plainly synthetic. `channelRef` is the opaque reference the
+ * contract issues instead of a channel id, so no preview and no screenshot can
+ * carry one (spec §2.6, §12.4; T20a).
+ */
+const SAMPLE_CONSENTED_ACTOR = {
+  kind: 'consented',
+  displayName: 'sample-viewer-1',
+  channelRef: 'ref_0123456789abcdef0123456789abcdef',
+} as const
 
 interface SnapshotDraft {
   readonly stateRevision: number
@@ -416,6 +435,73 @@ const PAID_THANKS: PreviewState = {
   ],
 }
 
+const CONSENTED_ACTION: PreviewState = {
+  name: 'consented-action',
+  description:
+    'A viewer who opted in is named beside their own action; the CTA carries the consent notice.',
+  snapshot: snapshotOf({
+    stateRevision: 64,
+    inputMode: 'direct',
+    interactionEnabled: true,
+    broadcastLifecycle: 'live',
+    creature: {
+      creatureId: 'sample-creature-1',
+      lifeStage: 'youth',
+      growthStage: 'fledgling',
+      needId: 'affection',
+      emotionId: 'joyful',
+      bondProgress: { current: 8, target: 12 },
+      growthProgress: { current: 7, target: 12 },
+    },
+    mission: {
+      missionId: 'quiet_company',
+      progress: { current: 1, target: 3 },
+      choices: [],
+      choiceClosesAt: null,
+    },
+    environment: {
+      environmentId: 'home_room',
+      worldPhaseId: 'evening',
+      weatherId: 'clear',
+      chapterId: 'gathering',
+      chapterProgress: { current: 2, target: 3 },
+    },
+    display: {
+      currentNeedOrMission: { textKey: 'need.affection', iconId: 'icon_need_affection' },
+      // One viewer, one command: the count is 1 because a name may only ride on
+      // an action that is one person's (spec §6.4, §7.3, BOARD D-9). What joins
+      // this action to the reaction below is the revision the two share, not the
+      // instants — `preview-server.mjs` shifts both onto the current clock and
+      // leaves `stateRevision` alone (`read-model/identity.ts`).
+      lastAppliedAction: { commandName: 'PET', appliedAt: at(0), contributionCount: 1 },
+      growthOrChapterProgress: {
+        textKey: 'chapter.gathering',
+        progress: { current: 7, target: 12 },
+      },
+      nextChoiceAt: at(600_000),
+    },
+  }),
+  effects: [
+    EffectSchema.parse({
+      schemaVersion: CONTRACT_VERSION,
+      effectId: 'sample-effect-consented-1',
+      cause: { kind: 'event', eventKey: SAMPLE_EVENT_KEY },
+      causedByEventKey: SAMPLE_EVENT_KEY,
+      // Staged by the same commit that set `lastAppliedAction` above — this is
+      // the join: same revision, same command, same count, and exactly one such
+      // reaction (T20c).
+      stateRevision: 64,
+      startsAt: at(-2_000),
+      endsAt: at(600_000),
+      paid: false,
+      kind: 'ACTION_REACTION',
+      actor: SAMPLE_CONSENTED_ACTOR,
+      payload: { commandName: 'PET', contributionCount: 1 },
+    }),
+    ambience('sample-effect-consented-2', 'pet_soft_lean', 'idle_beat'),
+  ],
+}
+
 export const PREVIEW_STATES: readonly PreviewState[] = [
   CALM,
   HUNGRY,
@@ -423,6 +509,7 @@ export const PREVIEW_STATES: readonly PreviewState[] = [
   SLEEPING,
   DEGRADED,
   PAID_THANKS,
+  CONSENTED_ACTION,
 ]
 
 export function previewState(name: string): PreviewState | undefined {

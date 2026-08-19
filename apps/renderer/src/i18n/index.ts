@@ -34,8 +34,15 @@ export type TranslateParams = Readonly<Record<string, string | number>>
 
 export type Translate = (key: string, params?: TranslateParams) => string
 
-/** The short English alias for a key, or `null` when the slot needs none. */
-export type Alias = (key: string) => string | null
+/**
+ * The short English alias for a key, or `null` when the slot needs none.
+ *
+ * It takes the same parameters `Translate` does, because a line that has to say
+ * the same thing in both languages has to carry the same values in both — the
+ * consent notice names the two commands and the retention period, and neither
+ * may be written twice (BOARD D-9, TASK_SPECS §T20c).
+ */
+export type Alias = (key: string, params?: TranslateParams) => string | null
 
 function interpolate(template: string, params: TranslateParams | undefined): string {
   if (params === undefined) return template
@@ -63,7 +70,10 @@ export function createTranslator(log: RendererLog): Translate {
 }
 
 export function createAlias(): Alias {
-  return (key) => JA_ENTRIES[key]?.en ?? null
+  return (key, params) => {
+    const en = JA_ENTRIES[key]?.en
+    return en === undefined ? null : interpolate(en, params)
+  }
 }
 
 /** Broadcast time base is JST (spec §5.3); the wire value stays UTC. */

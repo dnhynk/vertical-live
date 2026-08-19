@@ -2,9 +2,16 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, describe, expect, it } from 'vitest'
-import { COMMAND_ALIASES, type Effect, type RendererToServerMessage } from '@vl/contract'
+import {
+  COMMAND_ALIASES,
+  CONSENT_COMMAND_ALIASES,
+  type Effect,
+  type RendererToServerMessage,
+  type WorldSnapshot,
+} from '@vl/contract'
 
 import { JA_ENTRIES } from '../i18n/index'
+import { CONSENT_RETENTION_DAYS } from '../read-model/identity'
 import { createRuntime, type RendererRuntime } from '../runtime'
 import {
   FakeClock,
@@ -14,7 +21,12 @@ import {
   sequenceRandom,
   type FakeSocketFactory,
 } from '../testing/fakes'
-import { sampleActionEffect, samplePaidThanksEffect, sampleSnapshot } from '../testing/fixtures'
+import {
+  SAMPLE_CONSENTED_ACTOR,
+  sampleActionEffect,
+  samplePaidThanksEffect,
+  sampleSnapshot,
+} from '../testing/fixtures'
 import Screen from './Screen'
 
 /**
@@ -31,6 +43,15 @@ import Screen from './Screen'
 
 function ja(key: string, params: Readonly<Record<string, string | number>> = {}): string {
   let text = JA_ENTRIES[key]?.text ?? key
+  for (const [name, value] of Object.entries(params)) {
+    text = text.replace(`{${name}}`, String(value))
+  }
+  return text
+}
+
+/** The same, for the short English alias a slot shows after the Japanese. */
+function en(key: string, params: Readonly<Record<string, string | number>> = {}): string {
+  let text = JA_ENTRIES[key]?.en ?? ''
   for (const [name, value] of Object.entries(params)) {
     text = text.replace(`{${name}}`, String(value))
   }
@@ -122,6 +143,49 @@ function show(harness: Harness, snapshot = sampleSnapshot()): void {
 
 function query(harness: Harness, testId: string): HTMLElement | null {
   return harness.container.querySelector(`[data-testid="${testId}"]`)
+}
+
+/**
+ * A snapshot and a reaction the identity join can actually connect (T20c): one
+ * viewer's single command, staged at the instant the snapshot says it was
+ * applied. The clock starts at that instant, so the reaction is playing.
+ */
+const NAMED_ACTION_AT = '2026-08-17T00:00:00.000Z'
+
+function consentedSnapshot(): WorldSnapshot {
+  const base = sampleSnapshot()
+  return sampleSnapshot({
+    display: {
+      ...base.display,
+      lastAppliedAction: { commandName: 'FEED', appliedAt: NAMED_ACTION_AT, contributionCount: 1 },
+    },
+  })
+}
+
+/**
+ * The next viewer's identical command, one second later and one commit on: the
+ * shape the review's counterexample needs (round 1, blocker 1).
+ */
+const NEXT_ACTION_AT = '2026-08-17T00:00:01.000Z'
+
+function nextActionSnapshot(): WorldSnapshot {
+  const base = sampleSnapshot()
+  return sampleSnapshot({
+    stateRevision: 2,
+    display: {
+      ...base.display,
+      lastAppliedAction: { commandName: 'FEED', appliedAt: NEXT_ACTION_AT, contributionCount: 1 },
+    },
+  })
+}
+
+function reaction(overrides: Record<string, unknown> = {}): Effect {
+  return sampleActionEffect({
+    startsAt: NAMED_ACTION_AT,
+    endsAt: '2026-08-17T00:00:05.000Z',
+    payload: { commandName: 'FEED', contributionCount: 1 },
+    ...overrides,
+  })
 }
 
 afterEach(() => {
@@ -265,6 +329,167 @@ describe('Screen (spec §5.2, §6.4, §8.4, §9.2, §12.3)', () => {
     // The four slots stay: only the call to action is withdrawn (spec §9.2).
     expect(query(harness, 'slot-need')).not.toBeNull()
     expect(query(harness, 'hud')).not.toBeNull()
+  })
+
+  it('names the consented viewer whose action the slot is showing (BOARD D-9)', () => {
+    const harness = mount()
+    show(harness, consentedSnapshot())
+    sendEffect(harness, reaction({ actor: SAMPLE_CONSENTED_ACTOR }))
+
+    const name = query(harness, 'slot-last-action-actor')
+    expect(name?.textContent).toBe(SAMPLE_CONSENTED_ACTOR.displayName)
+    // A text node and nothing else: no markup was parsed to put it there
+    // (spec §12.3).
+    expect(name?.children).toHaveLength(0)
+    expect(name?.firstChild?.nodeType).toBe(Node.TEXT_NODE)
+    // The slot still says what happened; the name is an addition, not a
+    // replacement (spec §5.2(2)).
+    expect(query(harness, 'slot-last-action')?.textContent).toContain(
+      ja('ui.contributions', { count: 1 }),
+    )
+  })
+
+  it('does not lend a name to the next action whose snapshot arrives first (BOARD D-9)', () => {
+    // Review round 1, blocker 1, on the screen itself. Viewer A opted in and fed
+    // the creature; their reaction plays for four seconds. A second later
+    // somebody else feeds, and the server publishes that snapshot **before** its
+    // effect (`apps/server/src/engine/engine.ts`), so for a moment the slot
+    // describes the new action while only A's named reaction is on screen —
+    // same command, same count, staged before the new action was applied. No
+    // frame is run in this test, so nothing is acknowledged either: the join may
+    // not depend on an ACK having gone out.
+    const harness = mount()
+    show(harness, consentedSnapshot())
+    sendEffect(harness, reaction({ actor: SAMPLE_CONSENTED_ACTOR }))
+    expect(query(harness, 'slot-last-action-actor')?.textContent).toBe(
+      SAMPLE_CONSENTED_ACTOR.displayName,
+    )
+
+    harness.clock.advance(1_000)
+    show(harness, nextActionSnapshot())
+    expect(query(harness, 'slot-last-action-actor')).toBeNull()
+    expect(harness.container.textContent).not.toContain(SAMPLE_CONSENTED_ACTOR.displayName)
+
+    // The new viewer's own reaction arrives. They never opted in, so the slot
+    // stays anonymous while A's named effect is still playing.
+    sendEffect(
+      harness,
+      reaction({
+        effectId: 'sample-effect-action-b',
+        stateRevision: 2,
+        startsAt: NEXT_ACTION_AT,
+        endsAt: '2026-08-17T00:00:06.000Z',
+      }),
+    )
+    expect(query(harness, 'slot-last-action-actor')).toBeNull()
+    expect(harness.container.textContent).not.toContain(SAMPLE_CONSENTED_ACTOR.displayName)
+
+    // And a retransmit of A's reaction (spec §7.3(7)) puts no name back either.
+    sendEffect(harness, reaction({ actor: SAMPLE_CONSENTED_ACTOR }))
+    expect(query(harness, 'slot-last-action-actor')).toBeNull()
+    expect(harness.container.textContent).not.toContain(SAMPLE_CONSENTED_ACTOR.displayName)
+  })
+
+  it('names the next consented viewer once their own commit is on screen', () => {
+    // The other half of the rule: refusing A's name must not cost B theirs.
+    const harness = mount()
+    show(harness, consentedSnapshot())
+    sendEffect(harness, reaction({ actor: SAMPLE_CONSENTED_ACTOR }))
+
+    harness.clock.advance(1_000)
+    show(harness, nextActionSnapshot())
+    sendEffect(
+      harness,
+      reaction({
+        effectId: 'sample-effect-action-b',
+        stateRevision: 2,
+        startsAt: NEXT_ACTION_AT,
+        endsAt: '2026-08-17T00:00:06.000Z',
+        actor: { ...SAMPLE_CONSENTED_ACTOR, displayName: 'sample-viewer-2' },
+      }),
+    )
+    expect(query(harness, 'slot-last-action-actor')?.textContent).toBe('sample-viewer-2')
+    expect(harness.container.textContent).not.toContain(SAMPLE_CONSENTED_ACTOR.displayName)
+  })
+
+  it('renders no name at all on a closed-gate screen', () => {
+    // Exactly the wire shape of BOARD A-1: `actor` absent from every effect.
+    const harness = mount()
+    show(harness, consentedSnapshot())
+    sendEffect(harness, reaction())
+    sendEffect(harness, samplePaidThanksEffect())
+
+    expect(query(harness, 'slot-last-action-actor')).toBeNull()
+    expect(harness.container.textContent).not.toContain(SAMPLE_CONSENTED_ACTOR.displayName)
+    expect(harness.container.textContent).not.toContain(SAMPLE_CONSENTED_ACTOR.channelRef)
+  })
+
+  it('keeps the name off the paid staging and off the reaction chip (spec §8.4)', () => {
+    const harness = mount()
+    show(harness, consentedSnapshot())
+    sendEffect(harness, reaction({ actor: SAMPLE_CONSENTED_ACTOR }))
+    sendEffect(harness, samplePaidThanksEffect())
+
+    expect(query(harness, 'paid-thanks')?.textContent).not.toContain(
+      SAMPLE_CONSENTED_ACTOR.displayName,
+    )
+    expect(query(harness, 'effect-sample-effect-action-1')?.textContent).not.toContain(
+      SAMPLE_CONSENTED_ACTOR.displayName,
+    )
+    // The opaque consent reference never reaches the DOM either (T20a).
+    expect(harness.container.textContent).not.toContain(SAMPLE_CONSENTED_ACTOR.channelRef)
+  })
+
+  it('states how a name gets on screen and how it comes off, next to the CTA', () => {
+    const harness = mount()
+    show(harness)
+
+    const notice = query(harness, 'cta-identity-notice')
+    expect(notice?.textContent).toBe(
+      ja('ui.identity.notice', {
+        join: CONSENT_COMMAND_ALIASES.JOIN.ja[0] ?? '',
+        leave: CONSENT_COMMAND_ALIASES.LEAVE.ja[0] ?? '',
+        days: CONSENT_RETENTION_DAYS,
+      }),
+    )
+    // The two commands are shown in the spellings the parser accepts (spec §7.1).
+    expect(query(harness, 'cta-consent-command-JOIN')?.textContent).toContain(
+      CONSENT_COMMAND_ALIASES.JOIN.ja[0],
+    )
+    expect(query(harness, 'cta-consent-command-LEAVE')?.textContent).toContain(
+      CONSENT_COMMAND_ALIASES.LEAVE.ja[0],
+    )
+    expect(query(harness, 'cta-consent-command-JOIN')?.textContent).toContain(
+      ja('ui.identity.join'),
+    )
+    expect(query(harness, 'cta-consent-command-LEAVE')?.textContent).toContain(
+      ja('ui.identity.leave'),
+    )
+
+    // The English line is not a shorter notice (review round 1, major 1): it
+    // says the same three things, so a viewer who reads only English is told how
+    // to take the name off again and when it goes by itself
+    // (`docs/ops/identity-consent.md` §2.1 plus D-9's 30 days).
+    const english = query(harness, 'cta-identity-notice-en')?.textContent
+    expect(english).toBe(
+      en('ui.identity.notice', {
+        join: CONSENT_COMMAND_ALIASES.JOIN.en[0] ?? '',
+        leave: CONSENT_COMMAND_ALIASES.LEAVE.en[0] ?? '',
+        days: CONSENT_RETENTION_DAYS,
+      }),
+    )
+    expect(english).toContain(CONSENT_COMMAND_ALIASES.LEAVE.en[0])
+    expect(english).toContain('DELETE')
+    expect(english).toContain(String(CONSENT_RETENTION_DAYS))
+  })
+
+  it('withdraws the consent notice together with the CTA (TASK_SPECS §T14, §T20c)', () => {
+    const harness = mount()
+    show(harness, sampleSnapshot({ interactionEnabled: false }))
+
+    expect(query(harness, 'cta-identity')).toBeNull()
+    expect(query(harness, 'cta-identity-notice')).toBeNull()
+    expect(query(harness, 'cta-consent-command-JOIN')).toBeNull()
   })
 
   it('thanks a paid event with a fixed staging and no name, amount or ranking', () => {

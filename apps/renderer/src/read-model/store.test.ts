@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import type { WorldSnapshot } from '@vl/contract'
 
 import { FakeClock } from '../testing/fakes'
 import {
@@ -84,6 +85,82 @@ describe('ReadModel snapshots (spec §7.3(6)(7), §10.2)', () => {
     expect(harness.model.snapshot).toBeNull()
     expect(harness.model.lastAppliedStateRevision).toBeNull()
     expect(harness.model.activeEffects).toEqual([])
+  })
+})
+
+/**
+ * The causal key of the identity join (T20c, review round 1 blocker 1).
+ *
+ * The renderer has to know which *commit* the action in the "just applied
+ * action" slot came from, because that is the only thing that distinguishes two
+ * viewers who sent the same command inside one four-second staging window. The
+ * snapshot does not carry it — a later snapshot repeats an unchanged
+ * `lastAppliedAction` under its own revision — so the answer comes from the
+ * sequence of snapshots, and this is the class that sees that sequence.
+ */
+describe('ReadModel action revision (BOARD D-9, spec §5.2(2))', () => {
+  function withAction(
+    stateRevision: number,
+    lastAppliedAction: WorldSnapshot['display']['lastAppliedAction'],
+  ): WorldSnapshot {
+    const base = sampleSnapshot()
+    return sampleSnapshot({
+      stateRevision,
+      display: { ...base.display, lastAppliedAction },
+    })
+  }
+
+  const FED = {
+    commandName: 'FEED',
+    appliedAt: '2026-08-17T00:00:30.000Z',
+    contributionCount: 1,
+  } as const
+  const PETTED = {
+    commandName: 'PET',
+    appliedAt: '2026-08-17T00:00:33.000Z',
+    contributionCount: 1,
+  } as const
+
+  it('starts with no key at all, and takes the first snapshot it is given', () => {
+    const harness = createHarness()
+    expect(harness.model.actionRevision).toBeNull()
+
+    harness.model.receiveSnapshot(withAction(10, FED))
+    expect(harness.model.actionRevision).toBe(10)
+  })
+
+  it('holds the key still while the slot keeps showing the same action', () => {
+    const harness = createHarness()
+    harness.model.receiveSnapshot(withAction(10, FED))
+    harness.model.receiveSnapshot(withAction(11, FED))
+    harness.model.receiveSnapshot(withAction(12, FED))
+    // The world moved on three times; the action on screen did not, so the
+    // commit that staged its reaction is still commit 10.
+    expect(harness.model.actionRevision).toBe(10)
+  })
+
+  it('moves the key to the commit that applied the next action', () => {
+    const harness = createHarness()
+    harness.model.receiveSnapshot(withAction(10, FED))
+    harness.model.receiveSnapshot(withAction(11, PETTED))
+    expect(harness.model.actionRevision).toBe(11)
+  })
+
+  it('clears the key when the slot has no action to name', () => {
+    const harness = createHarness()
+    harness.model.receiveSnapshot(withAction(10, FED))
+    harness.model.receiveSnapshot(withAction(11, null))
+    expect(harness.model.actionRevision).toBeNull()
+  })
+
+  it('does not let a dropped snapshot move the key', () => {
+    // A stale snapshot is not applied, so it may not be read as a change either
+    // — otherwise an out-of-order delivery would point the join at a commit the
+    // screen is not showing.
+    const harness = createHarness()
+    harness.model.receiveSnapshot(withAction(10, FED))
+    expect(harness.model.receiveSnapshot(withAction(9, PETTED))).toBe('stale')
+    expect(harness.model.actionRevision).toBe(10)
   })
 })
 

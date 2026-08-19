@@ -89,10 +89,33 @@ describe('ja.json (spec §5.3, BOARD A-11)', () => {
   })
 
   it('has wording for every key and an ASCII short alias where it has one', () => {
+    // Upper-case ASCII, plus `=` and `,` for the consent notice's "command =
+    // what it does" form (`docs/ops/identity-consent.md` §2.1). A `{name}`
+    // placeholder is lower case by `interpolate`'s own pattern and is replaced
+    // before the line is drawn, so the rule applies to what is left of the
+    // alias. Nothing here can carry a Japanese character or a line break onto
+    // the alias line.
     for (const [key, entry] of Object.entries(JA_ENTRIES)) {
       expect(entry.text.length, key).toBeGreaterThan(0)
-      if (entry.en !== undefined) expect(entry.en, key).toMatch(/^[A-Z0-9 '-]+$/)
+      if (entry.en === undefined) continue
+      expect(entry.en.replace(/\{[a-z]+\}/g, ''), key).toMatch(/^[A-Z0-9 ',=-]+$/)
     }
+  })
+
+  it('says in both languages how a name comes off again (BOARD D-9)', () => {
+    // The Japanese line already said all three things. The English one said only
+    // that a name is shown on opt-in, so a viewer reading it was told how to give
+    // a name and not how to take it back — `docs/ops/identity-consent.md` §2.1
+    // requires `JOIN = show my name · LEAVE = delete it`, and D-9 requires the
+    // 30-day automatic deletion on air too.
+    const notice = JA_ENTRIES['ui.identity.notice']
+    expect(notice).toBeDefined()
+    for (const placeholder of ['{join}', '{leave}', '{days}']) {
+      expect(notice?.text, placeholder).toContain(placeholder)
+      expect(notice?.en, placeholder).toContain(placeholder)
+    }
+    expect(notice?.en).toContain('DELETE IT NOW')
+    expect(notice?.en).toContain('AUTO-DELETED')
   })
 
   it('covers the content vocabulary the world can send (T7)', () => {
