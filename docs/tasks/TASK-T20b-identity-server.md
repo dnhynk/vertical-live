@@ -81,7 +81,7 @@ compliance 체크리스트를 남겨 사용자가 audit 제출 전에 검토할 
 | 항목 | 값 | 라벨 | 이유 |
 |---|---|---|---|
 | `input.perUser.cooldownMs` | 5000 | `provisional` (`input.provisional`에 등재) | 스펙 §6.4는 동의자 cooldown 값을 정하지 않는다. 집계창 길이(`window.windowMs=5000`, D-11 승인)와 같게 두어 "동의자는 창당 최대 1회 개별 반영"이 되게 했다. Gate 2 실트래픽 후 재조정 |
-| `CONSENT_NOTICE_VERSION` | `2026-08-19` | 고정 상수 | 고지문 문서의 최종 수정일. 문서와 상수가 어긋나면 테스트가 실패한다 |
+| `CONSENT_NOTICE_VERSION` | `2026-08-20` (round 2에서 `2026-08-19`에서 올림) | 고정 상수 | 고지문 문서의 최종 수정일. 문서와 상수가 어긋나면 테스트가 실패한다. round 2 M1이 저장 항목 고지를 고쳤고 round 1과 달리 같은 날이 아니므로 날짜를 올렸다 — 게시 전·동의 레코드 0건이라 재동의 대상은 없다 |
 | 분기 투표 플래그 | 기존 `engine.identityGateOpen` 유지 | 가정 | TASK_SPECS §T20b "분기 투표는 이 PR 범위 밖(플래그만 유지)"과 `docs/ops/gate0-checklist.md` §1.5("vote 경로는 켤 수 없다 — 사용자별 한 표·cooldown은 identity gate 개방을 전제")를 최소 diff로 읽었다. 새 플래그를 만들지 않았고 vote/director 분기 코드는 건드리지 않았다. A-20의 실험 **순서**는 운영 결정이지 코드 분기가 아니다 |
 | in-memory 귀속 버퍼 상한 | 1024 | 내부 메모리 한도(정책 아님) | drain 배치(200)·창당 직접 반영 상한(20)보다 훨씬 크다. 넘치면 오래된 항목이 익명이 될 뿐 잘못된 이름이 붙지 않는다 |
 
@@ -135,10 +135,28 @@ worker는 실계정을 쓰지 않는다(runbook 3.3). 열림 모드의 실계정
 - `refresh` field의 자동 재확인(`RetentionSweeper`의 `reverify` 콜백)은 production에서 주입되지 않는다.
   30일이 지나면 `reverification_due` 보고까지만 한다 — `docs/ops/identity-consent.md` §4 행 4·§5에 그대로
   적었고, 알림화는 T12 소관이다.
-- 30일 sweep이 지운 `channel_ref`를 arbiter에서 명시적으로 purge하는 경로는 없다(sweeper는 SQL 일괄
-  삭제라 ref를 모른다). 필요하지 않다는 근거: arbiter의 viewer 항목은 cooldown(5초)이 지나면 prune되고,
-  유일한 예외인 "투표한 viewer"도 choice window가 바뀌는 즉시 `forgetVoteScope`로 해제된다 — 30일 미활동
-  레코드가 arbiter에 남아 있을 수 없다. LEAVE·삭제 요청은 `drainForgotten` 경로로 즉시 purge한다.
+- 30일 sweep이 지운 `channel_ref`는 round 2(B2)에서 purge 경로가 생겼다. sweeper는 여전히 SQL 일괄
+  삭제라 ref를 모르지만, 매 sweep 끝에 `ConsentDirectory.forgetDeleted()`가 **버퍼 쪽에서** 같은 경계에
+  닿는다 — 버퍼에 남은 ref 중 행이 사라진 것을 골라 표시명을 버리고 그 ref를 `drainForgotten` 큐에
+  넣는다. round 1에 적었던 "필요하지 않다"는 근거(arbiter viewer 항목은 cooldown 5초 뒤 prune, 투표한
+  viewer는 choice window 교체 시 `forgetVoteScope`)는 arbiter에 대해서는 그대로 유효하지만, **버퍼에
+  대해서는 틀렸다** — 그것이 B2의 후반부다.
+- consent 경로의 지속 실패가 source를 영구 정지시키는지: 정지시키지 **않는다**(무한 재시도이며 영구
+  정지 상태는 없다). 실패한 LEAVE는 batch·checkpoint를 롤백하고 같은 토큰으로 재시도하며, 재시도 간격은
+  transport의 기존 backoff(`chat.reconnect` — initial/max/factor/jitter)와 `retryBudgetExhausted`가
+  관장한다. consent 실패 자체에는 별도 backoff도 별도 차단기도 없다. 이 선택의 대가(계속 실패하면 그
+  소스는 checkpoint를 진행시키지 못한다)는 §12.4를 위한 의도된 fail-closed이고, `/health`의
+  `youtube.chat.consent`·`consecutiveFailures`·`retryBudgetExhausted`와 `/metrics`의
+  `consent_observe_failed_*`로 보인다. **전용 backoff·차단기를 둘지는 T12 판단으로 남긴다** — 그 판정은
+  supervisor 소관이고, 이 PR은 신호만 낸다.
+- `youtube.chat.consent` 신호·`consent_observe_failed_*` 카운터를 supervisor가 어떻게 소비할지(경보·상태
+  전이 임계)는 **T12 소관으로 남아 있다.** 이 PR은 신호를 내보내기만 한다(위 항목과 같은 T12 티켓).
+- `RetentionSweeper`의 `reverify` 자동 재확인은 여전히 미구현이다(위 항목 참조). round 2에서 sweeper에
+  추가된 것은 `identity` 포트뿐이며 reverify와는 무관하다.
+- `StateEngine.pump()`를 31일치 가상 시간 점프 직후에 부르면 비트 단위로 따라잡느라 돌아오지 않는다.
+  이 PR과 무관한 엔진 자체의 성질이며(변경 전 코드로 만든 최소 재현 테스트에서도 같았다), 그래서 B2
+  회귀 테스트는 sweep 이후의 재시도를 writer pass 없이 `sink.commit`으로만 검증한다. 실서버는 시계가
+  그렇게 뛰지 않지만, 호스트가 31일 절전됐다 깨어나는 경우는 T12/T15에서 따로 볼 값어치가 있다.
 
 ## Review round 1
 
@@ -180,3 +198,58 @@ $ npm run build          → 전 워크스페이스 성공, "copied 6 migration(
   `commitIngestBatch` 안에서 실행된다. 실제 DB를 쓰는 통합 테스트가 JOIN·LEAVE·롤백 세 경로를 모두 통과한다.
 - **메모리 버퍼의 롤백**: 훅이 던져 트랜잭션이 롤백돼도 directory가 이미 지운 pending 표시명은 돌아오지
   않는다. 개인정보 관점에서 안전한 방향(이름은 덜 나가고 행은 재시도로 다시 지워진다)이라 그대로 뒀다.
+  **→ 이 판단은 틀렸다(round 2 B2에서 정정).** 삭제 방향만 보고 기록 방향을 보지 않았다: 같은 롤백이
+  `#remember`도 되돌리지 않으며 그쪽은 안전하지 않다. 지금은 두 방향 다 스테이징으로 닫혀 있다.
+
+## Review round 2
+
+리뷰어 판정: `request_changes` (blocker 2 + major 1). round 1의 일곱 건은 해소 확인을 받았고, 새로 나온
+세 건도 모두 타당해 반박 없이 고쳤다. **round 1에서 내가 "안전한 방향이라 그대로 뒀다"고 적은 판단
+하나(메모리 버퍼의 롤백)가 틀렸다** — 반대 방향을 보지 않았다. 아래 표의 마지막 열은 각각 그 지적을
+재현하는 테스트이며, 고침을 되돌리면 실패하는 것을 실제로 확인했다.
+
+| finding | 처리 | 고침 SHA | 근거·테스트 |
+|---|---|---|---|
+| **B1** `main.ts:639` — production chat adapter가 `(envelopes, checkpoint) => engine.ingest(...)`라 sink가 넘기는 `{ onInserted }`를 버린다. gate-open production에서 JOIN observe·LEAVE delete가 전혀 실행되지 않는데 envelope·checkpoint는 commit된다 | 배선을 함수로 꺼내고(`youtube/chat/wiring.ts`의 `chatRuntimeDeps`) 어댑터를 **없앴다**: engine이 이미 `InboxWriter`를 만족하므로 그대로 넘긴다 — 넘기지 않는 인자를 잃을 수는 없다. `main.ts`는 이 함수가 만든 객체 하나만 넘긴다. 같은 부류를 rg로 확인했다(아래 "같은 부류 확인") | `926d0c9` | 새 `youtube/chat/wiring.test.ts` 3건 — 실제 store·`StateEngine`·`ConsentDirectory`로 `chatRuntimeDeps()`가 만든 객체에 JOIN→consent row, LEAVE→삭제; 리뷰어의 좁은 probe(`onInserted` 호출 index `[0]`, `insertedCount` 1); 닫힘에서는 `consent`/`onConsentFailure` 부재. 2-인자 wrapper로 되돌리면 앞 두 건이 실패한다(확인: `expected undefined to be 'synthetic-viewer-wiring'`, `expected [] to deeply equal [ +0 ]`). 추가로 `identity/consent-mode.test.ts`의 fixture도 자체 inbox 대신 `chatRuntimeDeps`를 쓰게 바꿔, 기존 9건이 production 배선 위에서 돈다 |
+| **B2** `store.ts:336` 트랜잭션 안에서 훅이 `ConsentDirectory`의 in-memory `#remember`를 바꾸는데 rollback이 메모리를 되돌리지 않고(`directory.ts:145-151`), `RetentionSweeper`는 DB row만 지워(`retention.ts:249`) pending map을 안 비운다 → observe→checkpoint 실패→31일 sweep→같은 messageId retry에서 삭제된 actor가 `takeActor`로 재노출 | 두 쪽을 다 닫았다. (1) `ConsentDirectory.duringCommit(write)`가 메모리 전용 효과(`#remember`·삭제 시 forget) 두 가지를 write 동안 **스테이징**하고 write가 반환한 뒤에만 적용한다 — 롤백이면 폐기하고, 스테이징만 하고 적용/폐기를 안 하는 상태는 표현 자체가 불가능하다. sink가 inbox write를 이걸로 감싼다. `ConsentObserver`에 **필수** 메서드로 넣었다(선택으로 두면 반쪽 구현이 곧 이 결함이다 — 컴파일러가 stub 3개를 잡아냈다). (2) sweeper가 `identity` 포트를 받아 매 run 끝에 `forgetDeleted()`를 부른다: 버퍼에 남은 ref 중 행이 사라진 것을 골라 표시명을 버리고 ref를 arbiter purge 큐에 넣는다 — 일괄 삭제라 ref를 모르는 sweeper가 **버퍼 쪽에서** 같은 삭제 경계에 닿는 방식이다 | `8be3327` | `consent-mode.test.ts` 2건 신규. "discards a rolled-back attribution…": store 전용 `ArmedClock`으로 checkpoint 기록(트랜잭션 마지막 단계)을 실패시켜 훅 실행 **뒤** 롤백을 만들고 → 롤백 직후 `pendingCount 0` → 31일 sweep(`rowsDeleted 1`) → 같은 messageId 재시도 → `takeActor null`, `pendingCount 0`. "drops a buffered actor whose row the sweep deleted": 버퍼에 남은 상태로 sweep → `pendingCount 0`·`takeActor null`·`drainForgotten()`에 해당 ref. 스테이징과 `forgetDeleted`를 각각 무력화하면 두 건 다 `expected 1 to be +0`으로 실패한다(확인) |
+| **M1** `identity-consent.md:27·52·74`의 ja/en 고지가 "channel ID와 display name 외 아무것도"인데 `006_viewer-consent.sql:29-50`·`retention.json:248-254`는 `channel_ref`·`channel_id`·`display_name`·`consented_at`·`last_active_at`·`notice_version`을 저장한다 | ja/en 전문과 §1 요약표에 **6개를 전부** 적었고, "YouTube에서 받는 2개 / 시스템이 만드는 4개"의 구분을 유지했다(`channel_ref`가 ID·이름에서 파생되지 않는다는 사실 포함). `CONSENT_NOTICE_VERSION`을 `2026-08-20`으로 올렸다 — round 1의 유예 근거("같은 날")가 이번엔 성립하지 않기 때문이며, 게시 전·동의 레코드 0건이라 재동의 대상은 없다. 체크리스트 행 7에 sweep 쪽 삭제 경계를, 행 4의 낡은 줄 번호를 생성 지점 표기로 고쳤다 | `d58270d` | [S41] III.A.2(e)-(f). `identity.test.ts` "is versioned by the document it comes from"(문서↔상수 일치), `build`의 `generate-data-map.mjs --check` 통과(`retention.json`은 이미 6개를 적고 있었으므로 무변경) |
+
+### 같은 부류 확인 (B1, rg)
+
+`inbox.ingest`를 어댑터로 감싸는 곳은 네 군데다.
+
+| 위치 | hooks 전달 | 판정 |
+|---|---|---|
+| `apps/server/src/main.ts:639` (chat sink) | **버렸음** | B1 — 고쳤다. hooks를 넘기는 유일한 호출자(sink)가 여기로 들어온다 |
+| `apps/server/src/main.ts:179` (`SimulatorIngestEndpoint`) | 전달함 | 이상 없음 |
+| `tools/simulator/src/runner/harness.ts:152`, `tools/soak/src/system.ts:350` | 버림 | **무해**: 둘 다 `SimulatorIngestEndpoint`용이고 그 엔드포인트는 `inbox.ingest(envelopes, checkpoint)`로 2개만 넘긴다(`engine/ingest.ts:100`) — 넘길 hooks가 존재하지 않는다. consent 경로도 없다. 요청 범위 밖이라 건드리지 않았다 |
+| `apps/server/src/engine/e2e.test.ts:48` | 버림 | 테스트 fixture이고 consent를 쓰지 않는다. 무해 |
+
+### Round 3 gates (executed)
+
+```text
+$ npm run format:check   → All matched files use Prettier code style!
+$ npm run lint           → eslint 0 errors; check-no-legacy-imports: ok (0); check-install-scripts: ok (4)
+$ npm run typecheck      → tsc --build, 오류 없음
+$ npm run test           → Test Files 145 passed (145) / Tests 2082 passed | 1 skipped (2083)
+$ npm run build          → 전 워크스페이스 성공, "copied 6 migration(s)", "docs/ops/data-map.md up to date"
+```
+
+`origin/main` rebase 뒤에 실행한 수치다(rebase 전 이 브랜치 단독으로는 143 files / 2033 tests였고,
+차이는 그 사이 main에 들어온 다른 PR의 테스트다). round 2에서 본 `db/crash.test.ts`의 Windows
+`EPERM` flake는 이번 실행에서 재현되지 않았다.
+
+### Round 3 노트 (반박이 아니라 정정)
+
+- **round 1에서 틀린 판단**: "메모리 버퍼의 롤백 — 훅이 던져 롤백돼도 directory가 이미 지운 pending
+  표시명은 돌아오지 않는다. 개인정보 관점에서 안전한 방향이라 그대로 뒀다." 삭제 방향만 보고 **기록
+  방향**을 보지 않았다. 같은 롤백이 `#remember`도 되돌리지 않고, 그쪽은 안전하지 않다. round 2 B2가
+  두 방향을 다 스테이징으로 닫았다.
+- **`duringCommit`을 선택 메서드로 두지 않은 이유**: 관측만 구현한 observer는 롤백이 닿지 못하는
+  메모리를 남기고, 그게 정확히 이 결함이다. 필수로 두니 컴파일러가 stub 3개를 짚었고, 그중
+  `consent-mode.test.ts`의 wrapper는 실제 directory의 경계를 위임하도록 고쳤다 — 그러지 않았으면 그
+  테스트가 스테이징을 조용히 꺼 버렸을 것이다.
+- **"반환 = commit"의 가정**: `duringCommit`은 write가 반환하면 적용한다. SQL commit 뒤 반환 전에
+  던지는 경로(`StateEngine.ingest`의 `notifyIngest()`)는 폐기로 떨어지는데, 그쪽이 안전한 방향이다 —
+  이름이 붙지 않은 반응이 나갈 뿐, 저장소가 뒷받침하지 않는 이름이 나가지는 않는다. 주석에 적었다.
+- **`packages/contract` 무변경**, `package.json`/lockfile 무변경, 새 dependency 0.
