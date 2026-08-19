@@ -1,6 +1,6 @@
 import { z } from 'zod'
 
-import { CommandRefSchema } from './commands.js'
+import { CommandRefSchema, ConsentCommandRefSchema } from './commands.js'
 import { EventKindSchema, EventSourceSchema, SourceShapeSchema } from './enums.js'
 import { ExternalIdSchema, IsoUtcInstantSchema } from './primitives.js'
 import { CONTRACT_VERSION } from './version.js'
@@ -11,8 +11,9 @@ import { CONTRACT_VERSION } from './version.js'
  * Every API item produces exactly one envelope, including items we do not
  * support and items that fail validation. The envelope has no field for an
  * author, a display name, a channel id or the raw message text, so those values
- * cannot be persisted even by mistake while the identity gate is closed
- * (spec §7.4, §12.4, BOARD A-1).
+ * cannot be persisted even by mistake — not even for a consented viewer, whose
+ * name is stored once in the consent record T20b owns and nowhere else
+ * (spec §7.4, §12.4; BOARD A-1, D-9).
  */
 
 /**
@@ -95,6 +96,19 @@ export const ValidIngestEnvelopeSchema = z.strictObject({
   occurredAt: IsoUtcInstantSchema,
   /** Present only for a recognized free command; `null` otherwise. */
   command: CommandRefSchema.nullable(),
+  /**
+   * Present only for a recognized consent command (BOARD D-9); `null` or absent
+   * otherwise. It is kept apart from `command` because a consent decision moves
+   * no world state: nothing that feeds growth, tallies or staging reads this
+   * field, and nothing that reads `command` can see a `JOIN` (TASK_SPECS §T20a).
+   *
+   * The envelope still carries no identity of its own. The inbox is an
+   * append-only table (T4) and D-9 requires `LEAVE` to delete a consent record
+   * immediately, so the display name and the channel reference live only in the
+   * consent store T20b owns — the row here records that a decision arrived, not
+   * whose it was.
+   */
+  consentCommand: ConsentCommandRefSchema.nullable().optional(),
   /** Present only for paid events; `null` otherwise. */
   payment: PaymentDetailsSchema.nullable(),
 })

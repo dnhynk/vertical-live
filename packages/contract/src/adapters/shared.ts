@@ -1,4 +1,4 @@
-import type { CommandParser, CommandRef } from '../commands.js'
+import { isConsentCommandRef, type AnyCommandRef, type CommandParser } from '../commands.js'
 import type { EventKind, SourceShape } from '../enums.js'
 import {
   IngestEnvelopeSchema,
@@ -48,8 +48,12 @@ export interface NormalizedItemFacts {
   readonly kind: EventKind
   /** Canonical UTC instant derived from the platform publish time. */
   readonly occurredAt: string
-  /** Result of the injected parser, or `null` when nothing matched. */
-  readonly command: CommandRef | null
+  /**
+   * Result of the injected parser, or `null` when nothing matched. A consent
+   * command (BOARD D-9) is a legal result and `buildValidEnvelope` files it in
+   * its own field, so no world code path can mistake it for a care command.
+   */
+  readonly command: AnyCommandRef | null
   readonly payment: PaymentDetails | null
 }
 
@@ -143,6 +147,10 @@ export function buildValidEnvelope(
   ctx: IngestAdapterContext,
   sourceShape: SourceShape,
 ): IngestEnvelope {
+  // The one place the allowlist is split by what a command is allowed to do:
+  // `command` moves the world, `consentCommand` only moves consent (BOARD D-9,
+  // TASK_SPECS §T20a). Both readers hand their parser result here unsorted.
+  const isConsent = facts.command !== null && isConsentCommandRef(facts.command)
   return IngestEnvelopeSchema.parse({
     schemaVersion: CONTRACT_VERSION,
     messageId: facts.messageId,
@@ -154,7 +162,10 @@ export function buildValidEnvelope(
     validationStatus: 'valid',
     kind: facts.kind,
     occurredAt: facts.occurredAt,
-    command: facts.command,
+    command: isConsent ? null : facts.command,
+    // Written only when there is one, so an envelope for a care command has
+    // exactly the keys it had before D-9 (TASK_SPECS §T20a acceptance 2).
+    ...(isConsent ? { consentCommand: facts.command } : {}),
     payment: facts.payment,
   })
 }

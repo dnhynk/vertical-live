@@ -93,6 +93,36 @@
           "type": "string",
           "const": "ACTION_REACTION"
         },
+        "actor": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "consented"
+                },
+                "displayName": {
+                  "type": "string",
+                  "pattern": "^[^\\p{Cc}\\p{Zl}\\p{Zp}]{1,100}$"
+                },
+                "channelRef": {
+                  "type": "string",
+                  "pattern": "^ref_[0-9a-f]{32}$"
+                }
+              },
+              "required": [
+                "kind",
+                "displayName",
+                "channelRef"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "payload": {
           "type": "object",
           "properties": {

@@ -2,11 +2,17 @@ import { z } from 'zod'
 
 import { CommandNameSchema } from './commands.js'
 import { EventKeySchema, type EventKey } from './event.js'
+import { ActorSchema } from './identity.js'
 import { IdentifierSchema, IsoUtcInstantSchema } from './primitives.js'
 import { CONTRACT_VERSION } from './version.js'
 
 /**
  * A staged, idempotent piece of presentation (spec §7.3(6), §10.2).
+ *
+ * Only the free action reaction can name a viewer, and only a consented one
+ * (BOARD D-9). The paid thanks animation stays anonymous by construction — it
+ * has no `actor` field at all — because spending must not buy a name on screen
+ * (spec §8.4, §8.5).
  *
  * Paid effects are the durable outbox rows: they carry the causing event key and
  * absolute start/end times so a restart replays them exactly once and the
@@ -117,18 +123,32 @@ function withCauseRules<T extends z.ZodType<CausedEffect>>(schema: T): T {
  * Reaction to free commands. `contributionCount` preserves aggregated input
  * (spec §7.3). An aggregate window is closed by its timer, so this variant also
  * occurs with a deadline cause (spec §6.4).
+ *
+ * This is the one effect that can name a person, and only a consented one
+ * (BOARD D-9): the display name reaches the screen through the "just applied
+ * action" slot (spec §5.2(2), T20c) and nowhere else. The field is optional so
+ * every effect written before D-9 stays valid and anonymous; absent and `null`
+ * mean the same thing.
  */
 export const ActionReactionEffectSchema = withCauseRules(
   z.strictObject({
     ...effectBase,
     kind: z.literal('ACTION_REACTION'),
     paid: z.literal(false),
+    /** Consented viewer whose command produced this reaction, if any. */
+    actor: ActorSchema.optional(),
     payload: z.strictObject({
       commandName: CommandNameSchema,
       contributionCount: z.int().positive(),
     }),
   }),
-)
+).refine((effect) => (effect.actor ?? null) === null || effect.payload.contributionCount === 1, {
+  path: ['actor'],
+  // An aggregated reaction stands for several viewers (spec §6.4, §7.3), so
+  // attaching one name to it would credit one of them with everyone else's
+  // input — a participation claim that is not true (spec §2.6).
+  error: 'an aggregated reaction must not name an actor',
+})
 
 /**
  * Pre-described fixed thanks animation for a paid event (spec §8.4). `fallback`

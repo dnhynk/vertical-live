@@ -292,6 +292,64 @@ describe('Effect (spec §7.3(6), §8.4)', () => {
 })
 
 /**
+ * BOARD D-9 opened identity for consenting viewers only, and the effect is the
+ * one thing that carries a name to the screen (TASK_SPECS §T20a, §T20c). The
+ * rules that keeps that from becoming "spending buys a name" or "one viewer is
+ * credited with everyone's input" are here.
+ */
+describe('Effect actor (BOARD D-9, spec §8.4, §12.3)', () => {
+  const ACTOR = {
+    kind: 'consented',
+    displayName: 'synthetic-viewer-1',
+    channelRef: 'ref_0123456789abcdef0123456789abcdef',
+  } as const
+  const SOLO = { ...ACTION_REACTION, payload: { commandName: 'FEED', contributionCount: 1 } }
+
+  it('stays anonymous when the field is absent, which is what every effect before D-9 is', () => {
+    expect(EffectSchema.parse(ACTION_REACTION)).toEqual(ACTION_REACTION)
+    expect('actor' in EffectSchema.parse(ACTION_REACTION)).toBe(false)
+  })
+
+  it('names a consented viewer on a single reaction', () => {
+    const named = { ...SOLO, actor: ACTOR }
+    expect(EffectSchema.parse(named)).toEqual(named)
+    expect(ActionReactionEffectSchema.safeParse({ ...SOLO, actor: null }).success).toBe(true)
+  })
+
+  it('refuses a name on an aggregated reaction', () => {
+    // The aggregate window stands for several viewers (spec §6.4, §7.3), so one
+    // name on it would credit one of them with everyone else's input (spec §2.6).
+    expect(
+      ActionReactionEffectSchema.safeParse({
+        ...ACTION_REACTION,
+        payload: { commandName: 'FEED', contributionCount: 7 },
+        actor: ACTOR,
+      }).success,
+    ).toBe(false)
+  })
+
+  it('refuses an unconsented actor', () => {
+    expect(
+      ActionReactionEffectSchema.safeParse({ ...SOLO, actor: { ...ACTOR, kind: 'inferred' } })
+        .success,
+    ).toBe(false)
+    expect(
+      ActionReactionEffectSchema.safeParse({
+        ...SOLO,
+        actor: { ...ACTOR, channelRef: 'UC_TEST_SYNTHETIC_0001' },
+      }).success,
+    ).toBe(false)
+  })
+
+  it('gives the paid thanks animation no actor field at all', () => {
+    // Spending buys audit, staging and identity — never a name on screen
+    // (spec §8.4, §8.5); the field's absence is what enforces it.
+    expect(PaidThanksEffectSchema.safeParse({ ...PAID_THANKS, actor: ACTOR }).success).toBe(false)
+    expect(PaidThanksEffectSchema.safeParse({ ...PAID_THANKS, actor: null }).success).toBe(false)
+  })
+})
+
+/**
  * Spec §2.1 and §6.2 want seconds-scale staging with zero viewers, while
  * §7.3(6) and §10.2 name the causing event key of an effect. The `cause`
  * discriminator carries both: a timer-caused effect says so and has no key,
