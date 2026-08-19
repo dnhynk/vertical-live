@@ -64,6 +64,11 @@ function parseArgs(argv) {
     measureMs: 20_000,
     settleMs: 2_500,
     keepOpen: false,
+    // Which preview states to shoot, and how the files are named. Both default
+    // to the T14 run that produced the six original screenshots, so re-shooting
+    // one state for a later task does not overwrite or rename the rest.
+    only: null,
+    prefix: 'TASK-T14',
   }
   for (let index = 0; index < argv.length; index += 1) {
     const flag = argv[index]
@@ -71,6 +76,8 @@ function parseArgs(argv) {
     else if (flag === '--measure-ms') options.measureMs = Number(argv[++index])
     else if (flag === '--settle-ms') options.settleMs = Number(argv[++index])
     else if (flag === '--keep-open') options.keepOpen = true
+    else if (flag === '--only') options.only = new Set(argv[++index].split(','))
+    else if (flag === '--prefix') options.prefix = argv[++index]
   }
   return options
 }
@@ -239,12 +246,17 @@ async function main() {
   // The acceptance criterion asks for `?mode=dev`; `?mode=broadcast` is captured
   // for one state as well, because that is the screen OBS actually opens.
   const broadcastNames = new Set(['calm', 'paid-thanks'])
+  const selected = PREVIEW_STATES.filter(
+    (state) => options.only === null || options.only.has(state.name),
+  )
+  if (selected.length === 0) {
+    throw new Error(`--only matched no preview state (have: ${PREVIEW_STATES.map((s) => s.name)})`)
+  }
   const shots = [
-    ...PREVIEW_STATES.map((state) => ({ state, mode: 'dev' })),
-    ...PREVIEW_STATES.filter((state) => broadcastNames.has(state.name)).map((state) => ({
-      state,
-      mode: 'broadcast',
-    })),
+    ...selected.map((state) => ({ state, mode: 'dev' })),
+    ...selected
+      .filter((state) => broadcastNames.has(state.name))
+      .map((state) => ({ state, mode: 'broadcast' })),
   ]
   for (const { state, mode } of shots) {
     await cdp.send('Page.navigate', { url: pageUrl(state.name, mode) })
@@ -259,7 +271,7 @@ async function main() {
     )
 
     const shot = await cdp.send('Page.captureScreenshot', { format: 'png' })
-    const file = join(options.out, `TASK-T14-${mode}-${state.name}-1080x1920.png`)
+    const file = join(options.out, `${options.prefix}-${mode}-${state.name}-1080x1920.png`)
     writeFileSync(file, Buffer.from(shot.data, 'base64'))
     written.push(file)
     console.log(`${mode}/${state.name}: ${measured} -> ${file}`)

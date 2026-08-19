@@ -50,9 +50,18 @@ const STATE_ACCESS: readonly [string, RegExp][] = [
   ['store or dispatch', /store|dispatch|setState|useState|useReducer/i],
 ]
 
-/** What spec §8.5 and §12.3 forbid on screen. */
+/**
+ * What spec §8.5 and §12.3 forbid on screen.
+ *
+ * `actor` joined the list with BOARD D-9 (TASK_SPECS §T20c). D-9 let a consented
+ * viewer be named in the free action slot and **only** there; a paid
+ * acknowledgement that could reach the field would turn a payment into a name on
+ * screen, which is what spec §8.4 has forbidden all along.
+ * `read-model/identity-confinement.test.ts` makes the same check over every
+ * component; this one keeps it stated where the paid rule is stated.
+ */
 const FORBIDDEN_DISPLAY: readonly [string, RegExp][] = [
-  ['a name', /author|displayName|channelId|userName|nickName|supporterName/i],
+  ['a name', /author|displayName|channelId|userName|nickName|supporterName|\bactor\b/i],
   ['an amount', /amountMicros|amount|currency|price|jewels|yen/i],
   ['a tier', /tier/i],
   ['a ranking', /rank|leaderboard|top\s*supporter|total(Spent|Paid)/i],
@@ -98,5 +107,15 @@ describe('EffectLayer.tsx (the only caller of the paid staging)', () => {
 
   it('takes effects and text functions, never a snapshot', () => {
     expect(/snapshot|WorldSnapshot|useReadModel|runtime/i.test(EFFECT_LAYER)).toBe(false)
+  })
+
+  it('draws the free reaction chips without a name either (BOARD D-9)', () => {
+    // The layer holds whole effects, so it *could* read `actor` off a reaction.
+    // D-9 put the name in the "just applied action" slot and nowhere else, so
+    // the chips stay anonymous even for a consented viewer.
+    const found = FORBIDDEN_DISPLAY.filter(([, pattern]) => pattern.test(EFFECT_LAYER)).map(
+      ([label]) => label,
+    )
+    expect(found).toEqual([])
   })
 })

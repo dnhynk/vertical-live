@@ -5,7 +5,8 @@ import { JA_ENTRIES } from '../i18n/index'
 import { PREVIEW_STATES, previewState } from './preview-states'
 
 /**
- * The six representative screens of TASK_SPECS §T14 acceptance 1.
+ * The six representative screens of TASK_SPECS §T14 acceptance 1 and the
+ * consented-viewer screen of §T20c.
  *
  * Two things are checked here, and both are about honesty rather than looks:
  * nothing in a preview may look like real participation (spec §2.6), and every
@@ -13,10 +14,18 @@ import { PREVIEW_STATES, previewState } from './preview-states'
  * keys would be evidence of nothing.
  */
 
-const REQUIRED = ['calm', 'hungry', 'play', 'sleeping', 'degraded', 'paid-thanks']
+const REQUIRED = [
+  'calm',
+  'hungry',
+  'play',
+  'sleeping',
+  'degraded',
+  'paid-thanks',
+  'consented-action',
+]
 
 describe('preview states', () => {
-  it('covers the six situations the acceptance criterion names', () => {
+  it('covers the situations the acceptance criteria name', () => {
     expect(PREVIEW_STATES.map((state) => state.name)).toEqual(REQUIRED)
     for (const name of REQUIRED) expect(previewState(name)).toBeDefined()
     expect(previewState('sample-missing')).toBeUndefined()
@@ -52,6 +61,27 @@ describe('preview states', () => {
     expect(previewState('degraded')?.snapshot.broadcastLifecycle).toBe('degraded')
     expect(previewState('play')?.snapshot.display.aggregateWindow?.tallies.length).toBe(3)
     expect(previewState('paid-thanks')?.effects.some((effect) => effect.paid)).toBe(true)
+  })
+
+  it('shows a consented viewer only where D-9 allows one', () => {
+    const consented = previewState('consented-action')
+    const named = consented?.effects.filter(
+      (effect) => effect.kind === 'ACTION_REACTION' && (effect.actor ?? null) !== null,
+    )
+    expect(named).toHaveLength(1)
+    // The slot can only draw the name if it can join the two messages, so the
+    // preview has to be a state the join actually succeeds on (T20c).
+    const action = consented?.snapshot.display.lastAppliedAction
+    expect(named?.[0]?.kind === 'ACTION_REACTION' && named[0].payload.commandName).toBe(
+      action?.commandName,
+    )
+    expect(action?.contributionCount).toBe(1)
+
+    // Every other preview stays exactly as anonymous as it was before D-9.
+    const elsewhere = PREVIEW_STATES.filter((state) => state.name !== 'consented-action').flatMap(
+      (state) => state.effects.filter((effect) => 'actor' in effect && effect.actor != null),
+    )
+    expect(elsewhere).toEqual([])
   })
 
   it('uses only wording the resource can resolve, so no screenshot shows a raw key', () => {
