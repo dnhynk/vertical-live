@@ -102,6 +102,33 @@
             }
           ]
         },
+        "consentCommand": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "enum": [
+                    "JOIN",
+                    "LEAVE"
+                  ]
+                },
+                "argument": {
+                  "type": "null"
+                }
+              },
+              "required": [
+                "name",
+                "argument"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "payment": {
           "anyOf": [
             {

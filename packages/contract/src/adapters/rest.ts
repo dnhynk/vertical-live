@@ -1,4 +1,4 @@
-import type { CommandRef } from '../commands.js'
+import type { AnyCommandRef } from '../commands.js'
 import type { EventKind } from '../enums.js'
 import type { IngestEnvelope, PaymentDetails, ValidationErrorCode } from '../ingest.js'
 import { EXTERNAL_ID_PATTERN, toIsoUtcInstant } from '../primitives.js'
@@ -111,7 +111,7 @@ export function fromRestListItem(item: unknown, ctx: IngestAdapterContext): Inge
     details = nested
   }
 
-  let command: CommandRef | null = null
+  let command: AnyCommandRef | null = null
   let payment: PaymentDetails | null = null
 
   switch (binding.kind) {

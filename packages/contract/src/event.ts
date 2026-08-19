@@ -2,6 +2,7 @@ import { z } from 'zod'
 
 import { CommandRefSchema } from './commands.js'
 import { EventKindSchema, EventSourceSchema } from './enums.js'
+import { ActorSchema } from './identity.js'
 import { PaymentDetailsSchema, type ValidIngestEnvelope } from './ingest.js'
 import { ExternalIdSchema, IsoUtcInstantSchema, type IsoUtcInstant } from './primitives.js'
 import { CONTRACT_VERSION } from './version.js'
@@ -9,9 +10,11 @@ import { CONTRACT_VERSION } from './version.js'
 /**
  * The canonical event contract of spec §7.4, field for field.
  *
- * `actor` is typed as `null`: while the identity feature gate is closed there is
- * no approved schema extension for a user, so the type system — not a runtime
- * check — guarantees no identity is stored (spec §7.4, §12.4, BOARD A-1).
+ * `actor` is `null` by default and can only ever be the consented shape of
+ * BOARD D-9 instead: a viewer who opted in with `JOIN` carries a display name
+ * and an opaque `channelRef`, everyone else carries nothing. The raw channel id
+ * has no field here at all, so identity cannot be stored by mistake
+ * (spec §7.4, §12.4; see `identity.ts`).
  */
 
 /**
@@ -79,7 +82,8 @@ const canonicalEventShape = z.strictObject({
   kind: EventKindSchema,
   occurredAt: IsoUtcInstantSchema,
   receivedAt: IsoUtcInstantSchema,
-  actor: z.null(),
+  /** `null` unless the viewer consented (BOARD D-9); never a raw channel id. */
+  actor: ActorSchema,
   command: CommandRefSchema.nullable(),
   payment: PaymentDetailsSchema.nullable(),
   /**
