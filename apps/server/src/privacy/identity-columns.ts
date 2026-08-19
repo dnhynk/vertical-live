@@ -102,12 +102,10 @@ export function findIdentityColumns(store: PersistenceStore): IdentityColumnHit[
  * Empty before migration 006 has run or on a build where the table was dropped.
  */
 export function findConsentIdentityColumns(store: PersistenceStore): IdentityColumnHit[] {
-  return store
-    .listColumns(CONSENT_TABLE)
-    .flatMap((column) => {
-      const matched = matchIdentityPart(column)
-      return matched === undefined ? [] : [{ table: CONSENT_TABLE, column, matched }]
-    })
+  return store.listColumns(CONSENT_TABLE).flatMap((column) => {
+    const matched = matchIdentityPart(column)
+    return matched === undefined ? [] : [{ table: CONSENT_TABLE, column, matched }]
+  })
 }
 
 /**

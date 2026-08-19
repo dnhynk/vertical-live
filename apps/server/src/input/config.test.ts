@@ -21,6 +21,7 @@ const VALID = {
       exitAggregateAtCommands: 10,
       maxDirectPerWindow: 20,
     },
+    perUser: { cooldownMs: 5000 },
     provisional: ['maxRawLength'],
   },
 }
@@ -39,15 +40,17 @@ describe('loadInputConfig', () => {
     })
   })
 
-  it('lists only maxRawLength as provisional now that D-11 approved the window', () => {
+  it('lists maxRawLength and the consent cooldown as provisional (D-11, D-9)', () => {
     const config = loadInputConfig({ env: {} })
 
     // D-11 took `window.*` off the provisional list; `maxRawLength` has no
-    // approved value yet, so it stays (BOARD A-15).
-    expect(config.provisional).toEqual(['maxRawLength'])
+    // approved value yet, and neither does the consented-viewer cooldown D-9/A-9
+    // introduced — spec §6.4 fixes no number for it (BOARD A-15).
+    expect(config.provisional).toEqual(['maxRawLength', 'perUser.cooldownMs'])
     for (const key of config.provisional) {
       expect(key.startsWith('window.')).toBe(false)
     }
+    expect(config.perUser.cooldownMs).toBeGreaterThan(0)
   })
 
   it('applies env overrides', () => {
@@ -98,5 +101,23 @@ describe('rejected configuration', () => {
     expect(() =>
       loadInputConfig({ configPath: writeConfig(VALID), env: { VL_INPUT_WINDOW_MS: 'later' } }),
     ).toThrow(InputConfigError)
+  })
+
+  it('reports a missing perUser section', () => {
+    // The consented-viewer rules of BOARD D-9 are not optional settings with a
+    // silent default: a missing section would leave the cooldown unspecified
+    // while the code still claims to enforce one.
+    const withoutPerUser: Record<string, unknown> = { ...VALID.input }
+    delete withoutPerUser['perUser']
+    expect(() =>
+      loadInputConfig({ configPath: writeConfig({ input: withoutPerUser }), env: {} }),
+    ).toThrow(/input\.perUser must be an object/)
+  })
+
+  it('reports a negative per-user cooldown', () => {
+    const path = writeConfig({ input: { ...VALID.input, perUser: { cooldownMs: -1 } } })
+    expect(() => loadInputConfig({ configPath: path, env: {} })).toThrow(
+      /input\.perUser\.cooldownMs must not be negative/,
+    )
   })
 })

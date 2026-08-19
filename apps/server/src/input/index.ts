@@ -12,7 +12,9 @@ export {
   type CommandWindowTally,
   type ArbiterAdmission,
   type InputArbiterOptions,
+  type InputPerUserConfig,
   type InputWindowConfig,
+  type SuppressionReason,
 } from './arbiter.js'
 export {
   InputConfigError,

@@ -130,9 +130,7 @@ export function refreshConsent(
   input: { channelId: string; displayName: string; lastActiveAt: string },
 ): boolean {
   const result = database
-    .prepare(
-      `UPDATE viewer_consent SET display_name = ?, last_active_at = ? WHERE channel_id = ?`,
-    )
+    .prepare(`UPDATE viewer_consent SET display_name = ?, last_active_at = ? WHERE channel_id = ?`)
     .run(input.displayName, input.lastActiveAt, input.channelId)
   return result.changes > 0
 }
@@ -160,9 +158,7 @@ export function deleteConsent(
       : (['channel_id', selector.channelId] as const)
 
   const run = database.transaction((): ConsentDeleteResult => {
-    const deleted = database
-      .prepare(`DELETE FROM viewer_consent WHERE ${column} = ?`)
-      .run(value)
+    const deleted = database.prepare(`DELETE FROM viewer_consent WHERE ${column} = ?`).run(value)
     const rowsDeleted = deleted.changes
     const ledgerEntryId = insertRetentionLedger(database, audit({ rowsDeleted }))
     return { rowsDeleted, ledgerEntryId }

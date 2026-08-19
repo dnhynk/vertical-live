@@ -11,7 +11,7 @@ import { GrpcChatSource } from './grpc-source.js'
 import { buildChatHealthSignals, type ChatObservation } from './health.js'
 import { RestChatSource } from './rest-source.js'
 import { CancellableDelay, type ChatAccessTokens, type ChatRunResult } from './retry.js'
-import { ChatIngestSink } from './sink.js'
+import { ChatIngestSink, type ConsentObserver } from './sink.js'
 import { ChatSourceState } from './state.js'
 import {
   GrpcStreamListTransport,
@@ -70,6 +70,8 @@ export interface ChatSourceOptions {
   readonly quota?: QuotaTracker
   readonly healthSink?: HealthSignalSink
   readonly onIngested?: (insertedCount: number) => void
+  /** Consent directory; passed only while the consent gate is open (BOARD D-9). */
+  readonly consent?: ConsentObserver
   readonly logger?: Logger
   /** Replaced in tests by a transport pointed at the fake gRPC server. */
   readonly transport?: StreamListTransport
@@ -171,6 +173,7 @@ export class ChatSource {
       broadcastId: target.broadcastId,
       initialPageToken: stored?.nextPageToken ?? null,
       ...(this.#options.onIngested === undefined ? {} : { onIngested: this.#options.onIngested }),
+      ...(this.#options.consent === undefined ? {} : { consent: this.#options.consent }),
     })
     this.#sink = sink
     this.#logger.info('youtube chat: starting', {

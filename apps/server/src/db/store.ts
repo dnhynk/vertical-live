@@ -1048,11 +1048,7 @@ export class PersistenceStore {
   }
 
   /** Re-reads the Authorized Data columns from a new message ([S41] III.E.4.c). */
-  refreshConsent(input: {
-    channelId: string
-    displayName: string
-    lastActiveAt: string
-  }): boolean {
+  refreshConsent(input: { channelId: string; displayName: string; lastActiveAt: string }): boolean {
     return refreshConsent(this.#db, input)
   }
 

@@ -35,7 +35,24 @@ import type { SourceCheckpoint } from '../../db/types.js'
  * The checkpoint only ever moves forward to a token the server actually sent:
  * an empty `next_page_token` leaves the last good token in place, because that
  * is the token a reconnect must present.
+ *
+ * The consent gate adds one step and no field. When it is open, each raw item is
+ * shown to the `ConsentDirectory` *before* the envelope is written, because the
+ * raw item is the only thing that still carries `authorDetails` — the envelope
+ * never has a field for it. The directory writes or deletes the one consent row
+ * and remembers a consented viewer's name in memory; nothing it saw is added to
+ * the envelope, so the inbox is byte-for-byte what it was while the gate was
+ * closed (BOARD D-9, spec §7.4).
  */
+
+/**
+ * The consent side of one received item (T20b). Kept as a one-method port so the
+ * sink depends on the decision, not on the store behind it, and so the closed
+ * configuration simply passes nothing.
+ */
+export interface ConsentObserver {
+  observe(rawItem: unknown, envelope: IngestEnvelope): { readonly kind: string }
+}
 
 export interface ChatIngestSinkOptions {
   /** `StateEngine.ingest` — inbox rows and checkpoint in one transaction. */
@@ -51,6 +68,12 @@ export interface ChatIngestSinkOptions {
   readonly initialPageToken?: string | null
   /** Called after a commit so the engine's writer loop stops idling. */
   readonly onIngested?: (insertedCount: number) => void
+  /**
+   * Consent directory, present only while the consent gate is open (BOARD D-9).
+   * Absent means the request carried no `authorDetails` part at all, so there is
+   * nothing for it to read.
+   */
+  readonly consent?: ConsentObserver
 }
 
 export interface ChatBatch {
@@ -73,6 +96,14 @@ export interface ChatBatchOutcome {
   readonly userEvents: number
   /** `receivedAt` of this batch when it carried at least one valid user event. */
   readonly userEventAt: string | null
+  /**
+   * Consent decisions this batch carried: `JOIN`s recorded and `LEAVE`s honoured
+   * (BOARD D-9). Anonymous counts — the sink never learns whose they were.
+   */
+  readonly consentJoined: number
+  readonly consentLeft: number
+  /** Items whose consent decision could not be applied; see `normalizeChatItems`. */
+  readonly consentFailed: number
 }
 
 /** One item of an API response, as its shape's adapter reads it. */
@@ -84,6 +115,9 @@ export interface NormalizedChatItems {
   readonly dropped: number
   /** Valid (supported) events among them. */
   readonly userEvents: number
+  readonly consentJoined: number
+  readonly consentLeft: number
+  readonly consentFailed: number
 }
 
 /**
@@ -98,10 +132,14 @@ export function normalizeChatItems(
   items: readonly unknown[],
   adapt: ChatItemAdapter,
   context: IngestAdapterContext,
+  consent?: ConsentObserver,
 ): NormalizedChatItems {
   const envelopes: IngestEnvelope[] = []
   let dropped = 0
   let userEvents = 0
+  let consentJoined = 0
+  let consentLeft = 0
+  let consentFailed = 0
   for (const item of items) {
     let envelope: IngestEnvelope
     try {
@@ -115,9 +153,28 @@ export function normalizeChatItems(
       continue
     }
     if (envelope.validationStatus === 'valid') userEvents += 1
+    // The raw item is still in scope here and nowhere later: this is the last
+    // moment `authorDetails` exists (BOARD D-9).
+    //
+    // A failure here is counted and does not abort the batch. Letting it throw
+    // would roll back the whole response *and* its checkpoint, so the same items
+    // would be fetched again forever (§7.3(2)) and the room would stop moving —
+    // a worse outcome than one consent decision not landing. The decision is not
+    // lost silently either: `consentFailed` reaches `/health` and `/metrics`, a
+    // viewer can send the command again, and the 30-day sweep still expires
+    // anything a failed `LEAVE` left behind (config/retention.json).
+    if (consent !== undefined) {
+      try {
+        const observation = consent.observe(item, envelope)
+        if (observation.kind === 'joined') consentJoined += 1
+        if (observation.kind === 'left') consentLeft += 1
+      } catch {
+        consentFailed += 1
+      }
+    }
     envelopes.push(envelope)
   }
-  return { envelopes, dropped, userEvents }
+  return { envelopes, dropped, userEvents, consentJoined, consentLeft, consentFailed }
 }
 
 export class ChatIngestSink {
@@ -158,7 +215,8 @@ export class ChatIngestSink {
       parseCommand: this.#options.parseCommand,
     }
     const adapt = batch.sourceShape === 'grpc' ? fromGrpcStreamListItem : fromRestListItem
-    const { envelopes, dropped, userEvents } = normalizeChatItems(batch.items, adapt, context)
+    const { envelopes, dropped, userEvents, consentJoined, consentLeft, consentFailed } =
+      normalizeChatItems(batch.items, adapt, context, this.#options.consent)
 
     // Committed even when `envelopes` is empty: a heartbeat response with a new
     // token still has to move the checkpoint, or a reconnect would replay from
@@ -182,6 +240,9 @@ export class ChatIngestSink {
       checkpoint: result.checkpoint,
       userEvents,
       userEventAt: userEvents > 0 ? receivedAt : null,
+      consentJoined,
+      consentLeft,
+      consentFailed,
     }
   }
 }

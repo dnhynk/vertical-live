@@ -317,6 +317,4 @@ export interface ConsentRecord {
 }
 
 /** Which consent row to act on. Both selectors address exactly one viewer. */
-export type ConsentSelector =
-  | { readonly channelId: string }
-  | { readonly channelRef: string }
+export type ConsentSelector = { readonly channelId: string } | { readonly channelRef: string }

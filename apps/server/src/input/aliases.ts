@@ -63,9 +63,7 @@ export function matchAlias(token: string): AllowlistedCommandName | null {
 }
 
 /** Narrows a matched name to the consent half of the allowlist (BOARD D-9). */
-export function isConsentCommandName(
-  name: AllowlistedCommandName,
-): name is ConsentCommandName {
+export function isConsentCommandName(name: AllowlistedCommandName): name is ConsentCommandName {
   return CONSENT_NAMES.has(name)
 }
 

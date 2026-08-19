@@ -17,16 +17,22 @@ import {
  * default come from the official pages, everything about reconnect pacing and
  * fallback policy is a first guess to be replaced with the Gate 2 numbers.
  *
- * `parts` is validated rather than merely read. While the identity gate is
- * closed (BOARD A-1) the only requestable parts are `id` and `snippet`; asking
- * for `authorDetails` would pull display names and channel ids across the
- * process boundary, which spec §7.2/§7.4 forbid outright. A typo in a config
- * file must not be able to do that, so the loader refuses to start.
+ * `parts` is validated rather than merely read, and the identity part is not
+ * configurable at all. Spec §7.2 says `streamList` always requests `id,snippet`
+ * and adds `authorDetails` "only when the identity feature gate is approved", so
+ * the file declares the base list and the **gate** decides whether the identity
+ * part is appended (`identityGateOpen`, BOARD D-9). A config file therefore has
+ * no spelling that requests author identity, whatever an operator types into it,
+ * and turning consent mode on is one flag rather than two edits that could
+ * disagree.
  */
 
-/** The only parts V1 may request (spec §7.2). */
+/** The base parts every request carries (spec §7.2). */
 export const ALLOWED_PARTS = ['id', 'snippet'] as const
-/** Requestable but forbidden while the identity gate is closed (BOARD A-1). */
+/**
+ * Appended only while the consent gate is open (BOARD D-9); never accepted from
+ * the config file, because a typo must not be able to request identity.
+ */
 export const IDENTITY_PART = 'authorDetails'
 
 export class ChatConfigError extends Error {
@@ -87,6 +93,12 @@ export interface ChatFallbackConfig {
 export interface ChatConfig {
   /** Master switch; the source stays inert until an operator turns it on. */
   readonly enabled: boolean
+  /**
+   * `engine.identityGateOpen` as the caller resolved it (BOARD D-9 consent
+   * mode). Recorded on the config so the source, the health signals and the
+   * tests all read the same value that decided `parts`.
+   */
+  readonly identityGateOpen: boolean
   /** `liveChatId` when it is injected by config; `null` means "ask the resolver". */
   readonly liveChatId: string | null
   /** Broadcast the chat belongs to; part of every `eventKey` (spec §7.4). */
@@ -102,9 +114,20 @@ export interface ChatConfig {
   readonly provisional: readonly string[]
 }
 
-export function loadChatConfig(options: LoadAuthConfigOptions = {}): ChatConfig {
+export interface LoadChatConfigOptions extends LoadAuthConfigOptions {
+  /**
+   * Consent mode (BOARD D-9): `false` keeps the closed configuration of A-1,
+   * `true` lets the source request `authorDetails` so a viewer who sends `JOIN`
+   * can be recognized. Defaults to closed — the safe value when a caller
+   * forgets to pass it.
+   */
+  readonly identityGateOpen?: boolean
+}
+
+export function loadChatConfig(options: LoadChatConfigOptions = {}): ChatConfig {
   const section = readYouTubeSection('chat', options)
   const env = options.env ?? process.env
+  const identityGateOpen = options.identityGateOpen ?? false
 
   const grpc = asObject(section['grpc'], 'youtube.chat.grpc')
   const keepalive = asObject(grpc['keepalive'], 'youtube.chat.grpc.keepalive')
@@ -134,6 +157,7 @@ export function loadChatConfig(options: LoadAuthConfigOptions = {}): ChatConfig 
 
   return Object.freeze({
     enabled: readBoolean(section['enabled'], 'youtube.chat.enabled'),
+    identityGateOpen,
     liveChatId: readNullableString(
       env['VL_YOUTUBE_LIVE_CHAT_ID'] ?? section['liveChatId'],
       'youtube.chat.liveChatId',
@@ -142,7 +166,7 @@ export function loadChatConfig(options: LoadAuthConfigOptions = {}): ChatConfig 
       env['VL_YOUTUBE_BROADCAST_ID'] ?? section['broadcastId'],
       'youtube.chat.broadcastId',
     ),
-    parts: Object.freeze(parts),
+    parts: Object.freeze(identityGateOpen ? [...parts, IDENTITY_PART] : parts),
     maxResults,
     grpc: Object.freeze({
       endpoint: readString(grpc['endpoint'], 'youtube.chat.grpc.endpoint'),
@@ -189,17 +213,21 @@ export function loadChatConfig(options: LoadAuthConfigOptions = {}): ChatConfig 
 }
 
 /**
- * `parts` must be exactly `id,snippet` — not a subset of it (review round 1,
- * M2). Spec §7.2 states the request part list, and dropping `id` would be worse
- * than a style problem: without a message id there is no dedupe key and no
- * minimal envelope (§7.3(1)(4)). Duplicates are refused too, because the value
- * is sent verbatim on the wire.
+ * The configured `parts` must be exactly `id,snippet` — not a subset of it
+ * (review round 1, M2). Spec §7.2 states the request part list, and dropping
+ * `id` would be worse than a style problem: without a message id there is no
+ * dedupe key and no minimal envelope (§7.3(1)(4)). Duplicates are refused too,
+ * because the value is sent verbatim on the wire.
+ *
+ * `authorDetails` is refused here even when the consent gate is open: the gate
+ * appends it (see `loadChatConfig`), so a file that also names it would either
+ * duplicate the part or express an identity decision in a second place.
  */
 function readParts(value: unknown): string[] {
   const parts = readStringArray(value, 'youtube.chat.parts')
   if (parts.includes(IDENTITY_PART)) {
     throw new ChatConfigError(
-      `parts must not contain ${IDENTITY_PART}: the identity gate is closed in V1, so no author identity may be requested (spec §7.2, §7.4, BOARD A-1)`,
+      `parts must not contain ${IDENTITY_PART}: whether author identity is requested is decided by engine.identityGateOpen, not by this list (spec §7.2, §7.4, BOARD D-9)`,
     )
   }
   const unknown = parts.filter(

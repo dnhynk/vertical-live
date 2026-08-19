@@ -6,6 +6,7 @@ import {
   type BroadcastLifecycle,
   type CanonicalEvent,
   type CommandName,
+  type ConsentedActor,
   type Effect,
   type InputMode,
   type PaidEventKind,
@@ -107,6 +108,18 @@ export interface EnginePublisher {
   publishEffect(effect: Effect): void
 }
 
+/**
+ * Where a consented viewer's display name comes from (BOARD D-9, T20b).
+ *
+ * The chat source resolved it while the message still had `authorDetails`; the
+ * engine asks for it by message id when the row reaches the writer, and the
+ * resolver forgets it at the same moment. Absent in the closed configuration and
+ * after a restart, which is why every consumer treats `null` as normal.
+ */
+export interface ActorResolver {
+  takeActor(messageId: string): ConsentedActor | null
+}
+
 export const nullPublisher: EnginePublisher = {
   rendererCount: 0,
   publishSnapshot() {},
@@ -120,6 +133,12 @@ export interface StateEngineOptions {
   readonly inputConfig?: InputConfig
   readonly publisher?: EnginePublisher
   readonly logger?: Logger
+  /**
+   * Consented display names for the messages being processed (BOARD D-9). Absent
+   * while the consent gate is closed, in which case every `actor` stays `null`
+   * exactly as it was under A-1.
+   */
+  readonly identity?: ActorResolver
   /**
    * Schedule the periodic wake-up on `start()`. `false` leaves the loop entirely
    * in the caller's hands, which is what the tests and T11's virtual clock need:
@@ -210,6 +229,8 @@ export class StateEngine {
   readonly #inputConfig: InputConfig
   readonly #publisher: EnginePublisher
   readonly #logger: Logger
+  /** Consented actor lookup (BOARD D-9); absent while the gate is closed. */
+  readonly #identity: ActorResolver | undefined
   readonly #metrics: EngineMetrics
 
   #world: WorldState
@@ -271,6 +292,7 @@ export class StateEngine {
     this.#inputConfig = options.inputConfig ?? loadInputConfig()
     this.#publisher = options.publisher ?? nullPublisher
     this.#logger = options.logger ?? silentLogger
+    this.#identity = options.identity
     this.#autoTick = options.autoTick !== false
     this.#metrics = new EngineMetrics(this.#config.engine.metricsSampleSize)
     this.#world = initialWorldState({
@@ -283,6 +305,7 @@ export class StateEngine {
     this.#arbiter = new InputArbiter({
       clock: this.#clock,
       config: this.#inputConfig.window,
+      perUser: this.#inputConfig.perUser,
     })
   }
 
@@ -323,6 +346,7 @@ export class StateEngine {
     this.#arbiter = new InputArbiter({
       clock: this.#clock,
       config: this.#inputConfig.window,
+      perUser: this.#inputConfig.perUser,
       initialMode: this.#inputMode,
     })
 
@@ -790,7 +814,11 @@ export class StateEngine {
       return null
     }
 
-    const event = toCanonicalEvent(row.envelope, row.ingestSeq)
+    const event = toCanonicalEvent(
+      row.envelope,
+      row.ingestSeq,
+      this.#identity?.takeActor(row.envelope.messageId) ?? null,
+    )
     const paidKind = paidEventKindOf(event)
 
     if (paidKind === null && this.#isExpired(event, now)) {
@@ -810,7 +838,15 @@ export class StateEngine {
       return null
     }
 
-    const admission = this.#arbiter.admit(command)
+    const admission = this.#arbiter.admit(command, event.actor, this.#voteScope())
+    if (admission.disposition === 'suppressed') {
+      // A consented viewer's own cooldown or one-vote rule (BOARD D-9, A-9).
+      // Recorded as processed with its reason, so the row is not re-drained and
+      // the audit trail says why nothing happened (spec §7.3(3)).
+      this.#resolve(row.ingestSeq, `suppressed:${admission.reason ?? 'unknown'}`)
+      this.#metrics.count(`command_suppressed_${admission.reason ?? 'unknown'}`)
+      return null
+    }
     if (admission.disposition === 'aggregated') {
       // Held, not resolved: the recovery cursor stays below this row until the
       // window closes, so a crash re-drains it (spec §6.4 "기여 수 보존").
@@ -868,6 +904,16 @@ export class StateEngine {
     this.#resolve(row.ingestSeq, 'applied')
     this.#metrics.count('paid_applied')
     return { input: { kind: 'event', event }, now: this.#advanceTo(event.receivedAt), event }
+  }
+
+  /**
+   * Identity of the open choice window, so "one vote" means one vote per
+   * decision (BOARD A-9). `null` when no window is open, which is when a vote
+   * command cannot be accepted at all (spec §7.1).
+   */
+  #voteScope(): string | null {
+    const choice = this.#world.world.choice
+    return choice === null ? null : `${choice.choiceSetId}:${choice.opensAt}`
   }
 
   #isExpired(event: CanonicalEvent, now: string): boolean {
@@ -986,7 +1032,16 @@ export class StateEngine {
     const effects = drafts.map((entry, index) =>
       assembleEffect(
         entry.draft,
-        { revision, ...(entry.deadline === undefined ? {} : { deadline: entry.deadline }) },
+        {
+          revision,
+          ...(entry.deadline === undefined ? {} : { deadline: entry.deadline }),
+          // Only an event-caused draft can name anyone, and only the actor of
+          // the very event that caused it (BOARD D-9).
+          actor:
+            entry.draft.cause.kind === 'event'
+              ? (eventsByKey.get(entry.draft.cause.eventKey)?.actor ?? null)
+              : null,
+        },
         index,
       ),
     )
@@ -1444,7 +1499,19 @@ export class StateEngine {
 }
 
 /** The §7.4 canonical event for a validated envelope, plus its issued sequence. */
-export function toCanonicalEvent(envelope: ValidIngestEnvelope, ingestSeq: number): CanonicalEvent {
+/**
+ * The §7.4 canonical event for one inbox row.
+ *
+ * `actor` is the only value that does not come from the row: the envelope has no
+ * identity field at all (that is the point), so a consented viewer's name is
+ * supplied by the caller from memory and defaults to `null` — for everyone who
+ * did not consent, for every replay, and for every restart (BOARD D-9).
+ */
+export function toCanonicalEvent(
+  envelope: ValidIngestEnvelope,
+  ingestSeq: number,
+  actor: ConsentedActor | null = null,
+): CanonicalEvent {
   return CanonicalEventSchema.parse({
     schemaVersion: envelope.schemaVersion,
     eventKey: eventKeyForEnvelope(envelope),
@@ -1455,7 +1522,7 @@ export function toCanonicalEvent(envelope: ValidIngestEnvelope, ingestSeq: numbe
     kind: envelope.kind,
     occurredAt: envelope.occurredAt,
     receivedAt: envelope.receivedAt,
-    actor: null,
+    actor,
     command: envelope.command,
     payment: envelope.payment,
     sourceDataExpiresAt: sourceDataExpiresAt(envelope.receivedAt),

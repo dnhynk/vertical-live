@@ -46,11 +46,7 @@ import { CONSENT_NOTICE_VERSION } from './notice.js'
 export interface ConsentStorePort {
   upsertConsent(record: ConsentRecord): ConsentRecord
   findConsentByChannelId(channelId: string): ConsentRecord | null
-  refreshConsent(input: {
-    channelId: string
-    displayName: string
-    lastActiveAt: string
-  }): boolean
+  refreshConsent(input: { channelId: string; displayName: string; lastActiveAt: string }): boolean
   deleteConsent(selector: ConsentSelector, audit: ConsentDeleteAudit): ConsentDeleteResult
 }
 
@@ -179,7 +175,10 @@ export class ConsentDirectory {
    * deletion request handler calls this with whichever reference the operator
    * was given (spec §12.4 사용자 삭제 요청).
    */
-  forget(selector: ConsentSelector, reason: 'user_request' | 'consent_revoked'): ConsentDeleteResult {
+  forget(
+    selector: ConsentSelector,
+    reason: 'user_request' | 'consent_revoked',
+  ): ConsentDeleteResult {
     return this.#delete(selector, reason)
   }
 

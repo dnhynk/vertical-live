@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
-import type { InputWindowConfig } from './arbiter.js'
+import type { InputPerUserConfig, InputWindowConfig } from './arbiter.js'
 import type { ParserLimits } from './parse.js'
 
 /**
@@ -17,6 +17,8 @@ import type { ParserLimits } from './parse.js'
 export interface InputConfig {
   readonly maxRawLength: number
   readonly window: InputWindowConfig
+  /** Per-consented-viewer rules (BOARD D-9, A-9); inert while the gate is closed. */
+  readonly perUser: InputPerUserConfig
   readonly provisional: readonly string[]
 }
 
@@ -54,6 +56,7 @@ export function loadInputConfig(options: LoadInputConfigOptions = {}): InputConf
   }
   const section = readObject(input, 'input')
   const window = readObject(section['window'], 'input.window')
+  const perUser = readObject(section['perUser'], 'input.perUser')
 
   const config: InputConfig = Object.freeze({
     maxRawLength: readPositiveInt(
@@ -76,6 +79,12 @@ export function loadInputConfig(options: LoadInputConfigOptions = {}): InputConf
       maxDirectPerWindow: readNonNegativeInt(
         env['VL_INPUT_MAX_DIRECT_PER_WINDOW'] ?? window['maxDirectPerWindow'],
         'input.window.maxDirectPerWindow',
+      ),
+    }),
+    perUser: Object.freeze({
+      cooldownMs: readNonNegativeInt(
+        env['VL_INPUT_PER_USER_COOLDOWN_MS'] ?? perUser['cooldownMs'],
+        'input.perUser.cooldownMs',
       ),
     }),
     provisional: Object.freeze(readStringArray(section['provisional'], 'input.provisional')),

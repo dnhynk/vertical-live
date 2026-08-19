@@ -24,6 +24,8 @@ export interface CommandMetricsSnapshot {
   readonly rejectedByReason: Readonly<Record<RejectionReason, number>>
   readonly directApplied: number
   readonly aggregated: number
+  /** Commands a consented viewer's cooldown or one-vote rule dropped (D-9). */
+  readonly suppressed: number
   readonly windowsClosed: number
   /** Contributions carried by closed windows; proves none were lost (§7.3). */
   readonly windowContributions: number
@@ -53,6 +55,7 @@ export class CommandMetrics {
   #rejectedByReason = emptyReasonCounts()
   #directApplied = 0
   #aggregated = 0
+  #suppressed = 0
   #windowsClosed = 0
   #windowContributions = 0
 
@@ -75,6 +78,8 @@ export class CommandMetrics {
   recordAdmission(admission: ArbiterAdmission): void {
     if (admission.disposition === 'direct') {
       this.#directApplied += 1
+    } else if (admission.disposition === 'suppressed') {
+      this.#suppressed += 1
     } else {
       this.#aggregated += 1
     }
@@ -94,6 +99,7 @@ export class CommandMetrics {
       rejectedByReason: { ...this.#rejectedByReason },
       directApplied: this.#directApplied,
       aggregated: this.#aggregated,
+      suppressed: this.#suppressed,
       windowsClosed: this.#windowsClosed,
       windowContributions: this.#windowContributions,
       commandSuccessRatio:
@@ -111,6 +117,7 @@ export class CommandMetrics {
     this.#rejectedByReason = emptyReasonCounts()
     this.#directApplied = 0
     this.#aggregated = 0
+    this.#suppressed = 0
     this.#windowsClosed = 0
     this.#windowContributions = 0
   }

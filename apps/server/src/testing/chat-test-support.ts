@@ -27,6 +27,9 @@ export const TEST_ACCESS_TOKEN = 'test-access-token'
 export function testChatConfig(overrides: Partial<ChatConfig> = {}): ChatConfig {
   return {
     enabled: true,
+    // Closed by default (BOARD A-1); the consent-mode tests pass `true` and the
+    // `authorDetails` part together, the way `loadChatConfig` derives them.
+    identityGateOpen: false,
     liveChatId: TEST_LIVE_CHAT_ID,
     broadcastId: TEST_BROADCAST_ID,
     parts: ['id', 'snippet'],

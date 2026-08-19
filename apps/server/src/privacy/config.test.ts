@@ -5,8 +5,10 @@ import { describe, expect, it } from 'vitest'
 
 import {
   AUTH_REVOKED_REASONS,
+  CONSENT_FIELD_KEY,
   DEFAULT_RETENTION_CONFIG_PATH,
   POLICY_MAX_CLIENT_SIDE_DELETION_DAYS,
+  POLICY_MAX_CONSENT_IDENTITY_DAYS,
   POLICY_MAX_PROVIDER_SIDE_DELETION_DAYS,
   RETENTION_CONFIG_ENV,
   RetentionConfigError,
@@ -58,10 +60,19 @@ describe('the shipped retention config', () => {
     expect(inbox?.allowedPeriodDays).toBe(SOURCE_DATA_RETENTION_DAYS)
   })
 
-  it('declares no personal identifier anywhere', () => {
-    for (const field of config.fields) {
-      expect(field.personalIdentifiers).toBe('none')
-    }
+  it('declares a personal identifier in exactly one field, the consent one', () => {
+    // BOARD D-9 opened identity for consenting viewers only, so the rule is no
+    // longer "nowhere" but "one place" — and that place is checked by name.
+    const claiming = config.fields.filter((field) => field.personalIdentifiers !== 'none')
+    expect(claiming.map((field) => field.key)).toEqual([CONSENT_FIELD_KEY])
+    expect(claiming[0]?.personalIdentifiers).toBe('consented_identity')
+  })
+
+  it('keeps the consent field inside the [S41] III.E.4.c 30-day maximum', () => {
+    const consent = config.fields.find((field) => field.key === CONSENT_FIELD_KEY)
+    expect(consent?.policy).toBe('delete')
+    expect(consent?.allowedPeriodDays).toBeLessThanOrEqual(POLICY_MAX_CONSENT_IDENTITY_DAYS)
+    expect(consent?.expiry).toEqual({ kind: 'column', column: 'last_active_at' })
   })
 
   it('deletes every authorized API field within the policy ceiling', () => {
@@ -207,6 +218,40 @@ describe('rejected configs', () => {
     expect(() =>
       parseRetentionConfig(withField('ingest_inbox.envelope', { personalIdentifiers: 'declared' })),
     ).toThrow(/personalIdentifiers must be "none"/)
+  })
+
+  it('refuses a second field claiming consented identity', () => {
+    // BOARD D-9 approved one place for identity, and `identity-columns.ts`
+    // audits the schema on the same assumption.
+    expect(() =>
+      parseRetentionConfig(
+        withField('ingest_inbox.envelope', { personalIdentifiers: 'consented_identity' }),
+      ),
+    ).toThrow(/may only be "consented_identity" for viewer_consent\.identity/)
+  })
+
+  it('refuses a consent record kept beyond the [S41] 30-day maximum', () => {
+    // The route that would otherwise slip past: declaring the consent row as
+    // internal state so the authorized-API-data ceiling does not apply, and then
+    // writing D-9's original 90 days.
+    expect(() =>
+      parseRetentionConfig(
+        withField(CONSENT_FIELD_KEY, { dataClass: 'derived_state', allowedPeriodDays: 90 }),
+      ),
+    ).toThrow(/exceeds the 30-day policy maximum/)
+  })
+
+  it('refuses a consent record with a refresh policy', () => {
+    expect(() =>
+      parseRetentionConfig(
+        withField(CONSENT_FIELD_KEY, {
+          dataClass: 'derived_state',
+          policy: 'refresh',
+          allowedPeriodDays: null,
+          reverifyPeriodDays: 30,
+        }),
+      ),
+    ).toThrow(/holds consented identity and must use policy "delete"/)
   })
 
   it('refuses authorized API data with a refresh policy', () => {
