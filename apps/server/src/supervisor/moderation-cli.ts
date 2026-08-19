@@ -170,10 +170,25 @@ function parseArgs(argv: readonly string[]): ParsedArgs | { readonly error: stri
   return { reason, note, clear, help }
 }
 
+/**
+ * A machine-stable token for a failure, unwrapping one `cause`.
+ *
+ * `fetch` reports a refused connection as a bare `TypeError` and hangs the
+ * useful part — `ECONNREFUSED`, `ETIMEDOUT` — off `cause`. Reporting `TypeError`
+ * to an operator whose broadcast is unsupervised says nothing about what to do
+ * next; the code says the server is not listening (found by the end-to-end smoke
+ * run, not by the unit test, which had been given an unrealistically flat
+ * error).
+ */
 function errorToken(error: unknown): string {
-  if (error instanceof Error) {
-    const code = (error as NodeJS.ErrnoException).code
-    return code ?? error.name
+  if (!(error instanceof Error)) return 'unknown_error'
+  const code = (error as NodeJS.ErrnoException).code
+  if (code !== undefined) return code
+  const cause = error.cause
+  if (cause instanceof Error) {
+    const causeCode = (cause as NodeJS.ErrnoException).code
+    if (causeCode !== undefined) return causeCode
+    return `${error.name}:${cause.name}`
   }
-  return 'unknown_error'
+  return error.name
 }

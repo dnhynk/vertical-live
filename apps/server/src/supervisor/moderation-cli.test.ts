@@ -73,7 +73,13 @@ describe('moderation CLI', () => {
   })
 
   it('fails loudly when the server does not answer — there is no flag file', async () => {
-    const error = Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' })
+    // The shape Node's `fetch` really produces: a bare `TypeError` with the
+    // useful code on `cause`. The first version of this test used a flat error
+    // with `code` on it and passed while the CLI printed `TypeError` to the
+    // operator (caught by the end-to-end smoke run).
+    const error = Object.assign(new TypeError('fetch failed'), {
+      cause: Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' }),
+    })
     const { deps, lines } = cli({
       fetchImpl: (() => Promise.reject(error)) as unknown as typeof fetch,
     })
