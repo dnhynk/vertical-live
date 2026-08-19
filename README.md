@@ -52,7 +52,7 @@ YouTube 세로 라이브를 24시간 무인으로 진행하고, 시청자 입력
 | [`simulator.md`](docs/ops/simulator.md) | 시나리오 주입·replay·지연 리포트(§15 Gate 1) |
 | [`gate0-checklist.md`](docs/ops/gate0-checklist.md) | Gate 0 승인 항목과 §17 미정 결정 표 |
 | [`gate2-experiments.md`](docs/ops/gate2-experiments.md) | 방송 길이 실험·모바일 calibration·실계정 검증 |
-| [`moderation-call-table.md`](docs/ops/moderation-call-table.md) | §12.3 24시간 호출표 템플릿(Gate 0 승인 대상) |
+| [`moderation-call-table.md`](docs/ops/moderation-call-table.md) | §12.3 24시간 호출표(Gate 0 승인 2026-08-19, BOARD D-13) |
 
 ## 3. 저장소 구조
 

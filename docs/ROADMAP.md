@@ -4,7 +4,7 @@
 > 저장소의 작업(T0–T17)·운영 문서와 연결한 것이며, **게이트 항목을 늘리거나 줄이지 않는다.** 항목 문구가 스펙과
 > 어긋나면 스펙이 이긴다.
 > 작업 진행 상태의 정본은 [`docs/tasks/BOARD.md`](tasks/BOARD.md)다. 이 문서는 게이트 단위 요약만 유지한다.
-> 최종 갱신: 2026-08-18(T16 정합화).
+> 최종 갱신: 2026-08-19(T19 Gate 0 승인 반영).
 
 ## 0. 게이트를 읽는 법
 
@@ -24,24 +24,28 @@
 ## Gate 0 — 스펙 승인
 
 **성격**: 사람의 결정. 코드로 통과할 수 없다.
+**상태: 부분 승인(2026-08-19, BOARD D-8~D-16). 잔여 3건** — §1.2 계정 audit 값(전용 채널 생성 후 기입),
+§1.4 일본 패널·콘텐츠 기준 초안 승인(T21), §1.7 운영 합격선(Gate 2 baseline 후 잠금). **잔여가 있으므로 Gate 0
+통과 선언은 하지 않는다.**
 **체크리스트**: [`docs/ops/gate0-checklist.md`](ops/gate0-checklist.md) · **결정 기록**: `docs/tasks/BOARD.md` §2(D-*)
 
 | § 15 Gate 0 항목 | 현재 상태 |
 |---|---|
-| 절대 목표, 오리지널 IP, 무료 핵심 플레이, V1 콘텐츠, 수익화 금지선에 사용자 동의 | 미승인 |
-| YouTube Studio에서 기존 채널·YPP·Gifts·Supers·Membership·Shopping 상태 audit·증빙 | 미수행(§17) |
-| 전용 채널 또는 기존 채널 기준선·증분 수익 귀속 규칙 승인 | 미승인(§17) |
-| identity 고지·동의·삭제·compliance 경로 또는 개인 식별 기능 비활성화 결정 | 미승인. 코드는 **비활성화만** 구현했다(BOARD A-1). 개방 경로는 schema extension·동의 UX·삭제 경로가 붙는 후속 작업 |
-| 첫 5초 일본 패널 모집 조건·통과 기준, 24시간 콘텐츠 목록과 반복 표본 기준 승인 | 미승인(§17) |
-| 정책상 허용되는 일본 시장 증빙 방식과 일본 범위 합격 기준 승인 | 미승인(§17) |
-| 파일럿 기본 입력 모드, hard backlog·flood 보호값, direct↔vote 실험 순서 승인 | 미승인. 코드는 `direct` 기본 + 비경쟁 집계를 provisional 값으로 구현(A-3, A-9) |
-| 방송 길이 실험 순서와 Gate 3 자동화 전략 선택 절차 승인 | 미승인. 코드는 `single` 기본 + rolling 실험 플래그(A-4) |
-| 72시간·장기 운영 측정식과 provisional 목표, 24시간 moderation 호출표, public 예산·손실 중단선·최대 관측기간 승인 | 미승인. 호출표 템플릿은 [`docs/ops/moderation-call-table.md`](ops/moderation-call-table.md), 코드 게이트는 `assertModerationCallTableApproved()` |
+| 절대 목표, 오리지널 IP, 무료 핵심 플레이, V1 콘텐츠, 수익화 금지선에 사용자 동의 | **승인 2026-08-19(D-8)** |
+| YouTube Studio에서 기존 채널·YPP·Gifts·Supers·Membership·Shopping 상태 audit·증빙 | **미수행**. 채널 경로만 승인(D-10: 전용 새 채널, 2026-08-19 현재 미생성) — 값과 증빙은 채널 생성 후 |
+| 전용 채널 또는 기존 채널 기준선·증분 수익 귀속 규칙 승인 | **승인 2026-08-19(D-10)**: 전용 새 채널이라 사전 기준선 없음 → 수익 전부 이 Live 귀속 |
+| identity 고지·동의·삭제·compliance 경로 또는 개인 식별 기능 비활성화 결정 | **승인 2026-08-19(D-9)**: (B) 동의자 한정 개방(opt-in 동의·즉시 삭제·90일 미활동 자동 삭제). 구현은 T20a/b/c이고 **머지 전까지 코드는 비활성화(A-1)를 유지**한다 |
+| 첫 5초 일본 패널 모집 조건·통과 기준, 24시간 콘텐츠 목록과 반복 표본 기준 승인 | **미승인**. 절차만 승인(D-15: 코디네이터 초안 → 사용자 승인). 초안은 T21 |
+| 정책상 허용되는 일본 시장 증빙 방식과 일본 범위 합격 기준 승인 | **미승인**. 절차만 승인(D-15), 초안은 T21 |
+| 파일럿 기본 입력 모드, hard backlog·flood 보호값, direct↔vote 실험 순서 승인 | **입력 모드·보호값 승인 2026-08-19(D-11)**: direct + 비경쟁 집계, `input.window` 5000/20/30/10 → provisional 해제. direct↔vote 실험 순서는 identity 개방 구현 뒤로 남았다 |
+| 방송 길이 실험 순서와 Gate 3 자동화 전략 선택 절차 승인 | **승인 2026-08-19(D-12)**: 단일 장기 Live 먼저, rolling(<12h)은 그다음 비교. 선택 절차는 `gate2-experiments.md` 1장 |
+| 72시간·장기 운영 측정식과 provisional 목표, 24시간 moderation 호출표, public 예산·손실 중단선·최대 관측기간 승인 | **호출표 승인 2026-08-19(D-13)** — [`docs/ops/moderation-call-table.md`](ops/moderation-call-table.md) 1·2장, 코드 게이트 `assertModerationCallTableApproved()` 통과. **예산 승인(D-14)**: 월 10만원 · 누적 손실 중단선 50만원 · 최대 관측기간 6개월. **운영 합격선은 provisional 유지 → Gate 2 72h baseline 후 잠금(D-14, A-15)** |
 
 Gate 0이 승인되기 전에도 구현은 진행하되, 구현된 것은 **스펙이 정한 안전한 기본 경로**뿐이다(BOARD 가정 A-*):
 identity 비활성(A-1), `direct` + 비경쟁 집계(A-3), `single` broadcast(A-4). 승인 결과 중 숫자·값은 설정 교체로
 반영되지만, **다른 경로를 고르면 후속 구현이 필요하다** — identity (B)는 schema extension·동의 UX·삭제 경로가 붙는
-새 작업이다([`docs/ops/gate0-checklist.md`](ops/gate0-checklist.md) 1.3).
+새 작업이다([`docs/ops/gate0-checklist.md`](ops/gate0-checklist.md) 1.3). 2026-08-19 승인으로 D-11(설정 교체)과
+D-13(호출표)은 반영이 끝났고, D-9(identity (B))는 **T20a/b/c 구현이 남아 있다.**
 
 ---
 
@@ -135,7 +139,7 @@ reboot·자동 시작·sleep·GPU reset·remote-session 종료·자동 업데이
 
 | 결정 시점 | 결정 |
 |---|---|
-| Gate 0 | 채널·YPP·기능 상태 audit · 수익 귀속 규칙 · identity 경로 · 패널 조건과 콘텐츠 기준 · 일본 시장 증빙 · 입력 모드와 flood 보호값 · moderation 호출표 · 가용률과 alert 기준(provisional) · public 예산과 중단선 |
+| Gate 0 | 채널·YPP·기능 상태 audit(**D-10, 채널 생성 후 값 기입**) · 수익 귀속 규칙(**D-10 승인**) · identity 경로(**D-9 승인, 구현 T20**) · 패널 조건과 콘텐츠 기준(**D-15, 초안 T21**) · 일본 시장 증빙(**D-15, 초안 T21**) · 입력 모드와 flood 보호값(**D-11 승인**) · moderation 호출표(**D-13 승인**) · 가용률과 alert 기준(**D-14: provisional 유지, Gate 2 후 잠금**) · public 예산과 중단선(**D-14 승인**) |
 | Gate 2 종료 전 | 단일 장기 Live 또는 12시간 미만 rolling |
 | 72시간 soak 전 | hosting OS와 primary/backup encoder 구성 |
 | YPP fan funding 활성화 전 | Gifts 활성화 또는 Super Sticker 유지 |

@@ -141,7 +141,7 @@ npm run secrets -w @vl/server -- set alerts.discordWebhookUrl   # 값은 stdin�
 
 ### 4.3 모더레이션 호출표 (§12.3, Gate 0)
 
-`supervisor.moderation`은 **자리만** 있고 값은 비어 있다(`approved: false`). 스펙 §12.3은 "24시간 호출 책임자, 최대 응답시간, escalation 채널, 자동 차단 범위와 safe-stop 조건"을 Gate 0에서 승인하도록 하고, 그 표가 없으면 Gate 3 public 파일럿을 시작하지 않는다. `assertModerationCallTableApproved(config.moderation)`가 그 게이트이며, 승인 전에는 무엇이 비었는지 이름을 대고 throw한다. **코드가 값을 채우지 않는다.**
+`supervisor.moderation`은 **Gate 0 승인표가 들어가는 자리**다. 스펙 §12.3은 "24시간 호출 책임자, 최대 응답시간, escalation 채널, 자동 차단 범위와 safe-stop 조건"을 Gate 0에서 승인하도록 하고, 그 표가 없으면 Gate 3 public 파일럿을 시작하지 않는다. `assertModerationCallTableApproved(config.moderation)`가 그 게이트이며, 승인 전에는 무엇이 비었는지 이름을 대고 throw한다. **코드가 값을 채우지 않는다** — 값은 사람의 승인이고, 지금 들어 있는 것은 2026-08-19 사용자 승인분(BOARD **D-13**, `approved: true`)이다. 승인 내용은 [`moderation-call-table.md`](moderation-call-table.md) 1·2장이 정본이다.
 
 모더레이션 제어 불건전은 `supervisor.reportModerationHealth('degraded', '<사유>')`로 보고한다. §12.3의 2단계가 그대로 코드다.
 
