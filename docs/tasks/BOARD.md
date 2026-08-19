@@ -38,7 +38,7 @@
 | T19 | Gate 0 승인 반영(체크리스트·config·모더레이션 호출표) | T16, T18 | — | merged | t19-gate0-apply | #25 | `task_8633302d4f33` |
 | T20a | identity (B) 계약: 동의자 한정 actor·join/leave 명령 | T1b, T6 | ✔ | merged | t20a-identity-contract | #26 | `task_a7a6d0666e7c` |
 | T20b | identity (B) 서버: 동의 저장·authorDetails 처리·삭제·보존·compliance 문서 | T20a, T9, T13, T8 | — | changes_requested | t20b-identity-server | #28 | `task_d221f62c9dae` |
-| T20c | identity (B) 렌더러: 동의자 표시명·고지 CTA | T20a, T14 | — | changes_requested | t20c-identity-renderer | #29 | `task_f15883c91c9d` |
+| T20c | identity (B) 렌더러: 동의자 표시명·고지 CTA | T20a, T14 | — | merged | t20c-identity-renderer | #29 | `task_f15883c91c9d` |
 | T21 | 일본 패널·5초 테스트·24h 콘텐츠 목록·증빙 초안(D-15) | T14, T16 | — | merged | t21-japan-panel-draft | #27 | `task_5ccfd178a887` |
 | T22 | 모더레이션 사유 보고 경로(사람 트리거 admin 엔드포인트 + filter_evasion_surge 휴리스틱; D-13 토큰 4개) | T12, T19 | — | pending | t22-moderation-report | | |
 
@@ -246,3 +246,4 @@
 | 2026-08-19 15:20 | F-T20b-1 완료(68d7226/e4052c2: consent mutation을 commitIngestBatch 트랜잭션 안 onInserted 훅으로, 철회/삭제 fail-closed(+/health·/metrics), deleteWithAudit 단일 삭제 경계, 닫힘 모드 /metrics 원복, 고지 목적 추가, compliance 표 정정, arbiter purge; 2028 tests; CI 32268789728 녹색; worker_done은 capability 만료로 거부됐으나 본문 수신 → task 수동 completed) → R-T20b-2 `task_39ab69330f0b` → `ctx_1cb79c3e0536`(review2). 진행: F-T20c-1 |
 | 2026-08-19 15:54 | R-T20b-2 request_changes(round 1 해소; 신규 blocker 2: production main.ts가 onInserted 훅을 버려 JOIN/LEAVE가 production에서 미실행, 트랜잭션 rollback 시 in-memory pending 잔존→sweep 후 retry에 재노출; major: 고지 저장 항목 과소기재) → **F-T20b-2** `task_7121d2af9888`(production 배선 통합 테스트·commit 후 메모리 반영·항목 전부 고지). review2 정리. 진행: F-T20c-1 |
 | 2026-08-19 16:11 | F-T20c-1 완료(fd75fcb/7c57c97/709f82e: 커밋(stateRevision) 기반 이름 조인·후보 1개 규칙·영어 고지 보강·code point 상한; 회귀 7종; 2006 tests; CI 32273948150 녹색; T20d [contract] 후보(lastAppliedAction.stateRevision) 기록) → R-T20c-2 `task_90ca27829f2d` → `ctx_6ae1c19e4a5e`(review2). 진행: F-T20b-2 |
+| 2026-08-19 16:38 | R-T20c-2 **approve** → 최종 게이트(renderer 23파일, contract·server·deps 0, CI 32273948150 녹색) → **PR #29 squash merge**(main 93540b4). T20c worker release·worktree 제거. 정리 강화: `terminal stop`이 남기는 유휴 review/review2 pane 27개 close, cleanup_review.py가 pane close까지 수행. T21 워크트리 디렉터리(비어 있음)는 다른 프로세스 lock으로 삭제 대기. 진행: F-T20b-2 |
