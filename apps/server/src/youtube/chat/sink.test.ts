@@ -163,6 +163,50 @@ describe('ChatIngestSink', () => {
     expect(resumed.pageToken).toBe('token_restored')
   })
 
+  it('counts a consent observation and never lets one abort the batch', () => {
+    // BOARD D-9: the consent directory is shown each raw item before the
+    // envelope is written. A failure there must not roll back the response and
+    // its checkpoint — that would refetch the same items forever (§7.3(2)) — so
+    // it is counted and the stream keeps moving.
+    const seen: unknown[] = []
+    const observing = new ChatIngestSink({
+      inbox: storeInbox(temp.store),
+      clock: temp.clock,
+      parseCommand: testParseCommand,
+      sourceKey: TEST_SOURCE_KEY,
+      liveChatId: TEST_LIVE_CHAT_ID,
+      broadcastId: TEST_BROADCAST_ID,
+      consent: {
+        observe: (rawItem) => {
+          seen.push(rawItem)
+          if (seen.length === 1) throw new Error('consent store unavailable')
+          return { kind: 'joined' }
+        },
+      },
+    })
+
+    const outcome = observing.commit({
+      sourceShape: 'grpc',
+      items: [grpcFixture('text-message-event'), grpcFixture('super-chat-event')],
+      nextPageToken: 'token_consent',
+    })
+
+    expect(seen).toHaveLength(2)
+    expect(outcome.consentFailed).toBe(1)
+    expect(outcome.consentJoined).toBe(1)
+    expect(outcome.inserted).toBe(2)
+    expect(temp.store.getSourceCheckpoint(TEST_SOURCE_KEY)?.nextPageToken).toBe('token_consent')
+  })
+
+  it('makes no consent observation at all without a directory', () => {
+    const outcome = sink().commit({
+      sourceShape: 'grpc',
+      items: [grpcFixture('text-message-event')],
+      nextPageToken: 'token_1',
+    })
+    expect(outcome).toMatchObject({ consentJoined: 0, consentLeft: 0, consentFailed: 0 })
+  })
+
   it('forgets a refused token without erasing what is already stored', () => {
     const resumed = sink()
     resumed.commit({ sourceShape: 'grpc', items: [], nextPageToken: 'token_refused' })

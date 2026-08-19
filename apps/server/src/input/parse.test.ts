@@ -142,3 +142,64 @@ describe('purity', () => {
     expect(parse('a', GATE_OPEN_WINDOW_OPEN).status).toBe('accepted')
   })
 })
+
+/**
+ * Consent commands (BOARD D-9, TASK_SPECS §T20a/§T20b).
+ *
+ * They are allowlisted commands of spec §7.1, but they move no world state, so
+ * the parser returns them under their own status. Nothing that switches on
+ * `status === 'accepted'` can therefore see a `JOIN`.
+ */
+describe('consent commands', () => {
+  it('accepts なのる / なまえけす and their English aliases while the gate is open', () => {
+    for (const [text, name] of [
+      ['なのる', 'JOIN'],
+      ['JOIN', 'JOIN'],
+      ['join', 'JOIN'],
+      ['なまえけす', 'LEAVE'],
+      ['LEAVE', 'LEAVE'],
+    ] as const) {
+      expect(parse(text, GATE_OPEN_WINDOW_CLOSED)).toEqual({
+        status: 'accepted_consent',
+        consentCommand: { name, argument: null },
+        commandLike: true,
+      })
+    }
+  })
+
+  it('refuses them while the consent gate is closed', () => {
+    // Accepting a `JOIN` the closed configuration would not store is a consent
+    // the system did not honour (BOARD A-1, D-9).
+    for (const text of ['なのる', 'JOIN', 'なまえけす', 'LEAVE']) {
+      expect(parse(text, GATE_CLOSED)).toEqual({
+        status: 'rejected',
+        reason: 'consent_disabled',
+        commandLike: true,
+      })
+    }
+  })
+
+  it('takes no argument at all', () => {
+    // `ConsentCommandRefSchema.argument` is `null` by construction: an argument
+    // slot would be a second place a chat line could ride along.
+    expect(parse('join now', GATE_OPEN_WINDOW_CLOSED)).toMatchObject({
+      reason: 'extraneous_text',
+      commandLike: true,
+    })
+    expect(parse('なのる ごはん', GATE_OPEN_WINDOW_CLOSED)).toMatchObject({
+      reason: 'extraneous_text',
+    })
+  })
+
+  it('never returns a consent command as a world command', () => {
+    const result = parse('なのる', GATE_OPEN_WINDOW_OPEN)
+    expect(result.status).not.toBe('accepted')
+    expect(result).not.toHaveProperty('command')
+  })
+
+  it('keeps the moderation order: a link outranks the consent shape', () => {
+    expect(parse('join https://example.invalid/spam', GATE_OPEN_WINDOW_CLOSED)).toMatchObject({
+      reason: 'url',
+    })
+  })
+})
