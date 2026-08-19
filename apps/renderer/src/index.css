@@ -744,7 +744,9 @@ body {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  font-size: 24px;
+  /* Sized so the whole notice fits on one line at 1080px wide (D-9: the screen
+     carries one line, the channel description carries the full text). */
+  font-size: 21px;
   font-weight: 600;
   color: var(--ink-dim);
 }
@@ -777,7 +779,7 @@ body {
 }
 
 .cta-identity-meaning {
-  font-size: 22px;
+  font-size: 21px;
   font-weight: 600;
   color: var(--ink-dim);
 }

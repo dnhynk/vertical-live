@@ -87,6 +87,7 @@ const MAY_NAME_DISPLAY_NAME = new Set([
   'read-model/identity-confinement.test.ts',
   'components/Screen.test.tsx',
   'testing/fixtures.ts',
+  'testing/preview-states.ts',
 ])
 
 describe('renderer source invariants', () => {

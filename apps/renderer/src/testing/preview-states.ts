@@ -6,8 +6,6 @@ import {
   type WorldSnapshot,
 } from '@vl/contract'
 
-import { SAMPLE_CONSENTED_ACTOR } from './fixtures'
-
 /**
  * The six representative screens of TASK_SPECS §T14 acceptance 1, plus the
  * consented-viewer screen of §T20c, as contract values the preview harness can
@@ -40,6 +38,22 @@ function at(offsetMs: number): string {
 
 /** Every event key here names the simulator, never a broadcast (spec §2.6). */
 const SAMPLE_EVENT_KEY = 'simulator:sample-broadcast:sample-message-1'
+
+/**
+ * The one consented viewer any preview shows (BOARD D-9). Declared here rather
+ * than imported from `fixtures.ts` for the same reason `SAMPLE_EVENT_KEY` is:
+ * `scripts/capture.mjs` loads this module directly with Node's type stripper,
+ * which resolves no extensionless relative import.
+ *
+ * Both values are plainly synthetic. `channelRef` is the opaque reference the
+ * contract issues instead of a channel id, so no preview and no screenshot can
+ * carry one (spec §2.6, §12.4; T20a).
+ */
+const SAMPLE_CONSENTED_ACTOR = {
+  kind: 'consented',
+  displayName: 'sample-viewer-1',
+  channelRef: 'ref_0123456789abcdef0123456789abcdef',
+} as const
 
 interface SnapshotDraft {
   readonly stateRevision: number
@@ -455,8 +469,12 @@ const CONSENTED_ACTION: PreviewState = {
     display: {
       currentNeedOrMission: { textKey: 'need.affection', iconId: 'icon_need_affection' },
       // One viewer, one command: the count is 1 because a name may only ride on
-      // an action that is one person's (spec §6.4, §7.3, BOARD D-9).
-      lastAppliedAction: { commandName: 'PET', appliedAt: at(-2_000), contributionCount: 1 },
+      // an action that is one person's (spec §6.4, §7.3, BOARD D-9). The instant
+      // is `at(0)` — the world time itself — because `preview-server.mjs` shifts
+      // the snapshot onto the current clock while starting every effect one
+      // second before it, and the slot only names an action its reaction did not
+      // start *after* (`read-model/identity.ts`).
+      lastAppliedAction: { commandName: 'PET', appliedAt: at(0), contributionCount: 1 },
       growthOrChapterProgress: {
         textKey: 'chapter.gathering',
         progress: { current: 7, target: 12 },

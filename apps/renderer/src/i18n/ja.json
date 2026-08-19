@@ -28,7 +28,7 @@
     },
 
     "ui.identity.notice": {
-      "text": "{join} を おくった ひとだけ なまえを ひょうじ。{leave} で すぐ さくじょ。{days}にち かつどうが なければ じどうで さくじょ",
+      "text": "{join} を おくった ひとだけ なまえを ひょうじ・{leave} で すぐ さくじょ・{days}にち かつどうなしで じどうさくじょ",
       "en": "YOUR NAME IS SHOWN ONLY IF YOU OPT IN",
       "nativeReview": "pending"
     },

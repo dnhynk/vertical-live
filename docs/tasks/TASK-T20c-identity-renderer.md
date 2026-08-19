@@ -1,7 +1,7 @@
 # TASK-T20c-identity-renderer
 
 - Task: T20c identity (B) 렌더러 — 동의자 표시명·고지 CTA (`docs/tasks/TASK_SPECS.md` §T20c)
-- Branch: `dnhynk/t20c-identity-renderer` · PR: #<n>
+- Branch: `dnhynk/t20c-identity-renderer` · PR: #29
 - Orca: task `task_f15883c91c9d` · dispatch `ctx_b0d6f01bf847`
 - Spec sections read: §5.2, §5.3, §7.1, §7.4, §8.4, §8.5, §12.3, §12.4
 - BOARD decisions/assumptions relied on: D-9(30일 정정 포함), A-1(부분 뒤집힘), A-9, A-11, A-15
@@ -85,18 +85,67 @@
 
 ### Acceptance criteria
 
-| # | 기준 | 상태(met/unmet/unverifiable) | 근거(테스트 파일·명령·출력) |
+`docs/tasks/TASK_SPECS.md` §T20c의 합격 기준 2개와, 디스패치 명세가 나눠 적은 범위 4개를 함께 대조한다.
+
+| # | 기준 | 상태 | 근거(테스트 파일·명령·출력) |
 |---|---|---|---|
+| 1 | 표시명이 **닫힘 모드 fixture에서 절대 렌더되지 않음** | met | `apps/renderer/src/components/Screen.test.tsx` "renders no name at all on a closed-gate screen" — 닫힘 모드의 실제 wire 모양(모든 effect에 `actor` 없음)으로 스냅샷+반응+유료 연출을 보내고 `slot-last-action-actor`가 없음 + **화면 전체 textContent**에 표시명·`channelRef`가 없음을 확인. 선택자 수준은 `apps/renderer/src/read-model/identity.test.ts` "shows no name while the gate is closed, whatever else is on screen"·"shows no name for a viewer who has not opted in" |
+| 1 | **유료 연출 컴포넌트가 `actor`를 읽지 않음(정적 검사)** | met | `apps/renderer/src/components/paid-staging.test.ts` — 금칙 패턴에 `\bactor\b` 추가(`PaidThanks.tsx`, 그리고 신규 "draws the free reaction chips without a name either"로 `EffectLayer.tsx`도). 더 넓게 `apps/renderer/src/read-model/identity-confinement.test.ts`가 **워크스페이스 전체**에서 `actor` 필드를 읽는 파일이 `read-model/identity.ts`뿐임을 고정하고, `src/components/**`(비테스트) 전체에 `actor`·`displayName`이 0건임을 따로 검사한다. 컴포넌트 목록이 아니라 필드 이름을 검사하므로 새 컴포넌트가 생겨도 자동으로 걸린다 |
+| 2 | **ja.json 키 전부 `nativeReview: pending`** | met | `apps/renderer/src/i18n/japanese-source.test.ts` "is marked as awaiting native review, entry by entry"(기존 테스트, 신규 3키 포함해 통과). 신규 키: `ui.identity.notice`·`ui.identity.join`·`ui.identity.leave` |
+| 2 | **하드코딩 일본어 0건** | met | 같은 파일 "contains no hard-coded Japanese outside ja.json". 명령 문자열(`なのる`/`なまえけす`)은 계약의 `CONSENT_COMMAND_ALIASES`에서만 오고, 고지 문장은 ja.json이 `{join}`/`{leave}`/`{days}`로 보간한다 |
+| 범위 1 | '방금 반영된 행동' 슬롯에 `actor.kind==='consented'`일 때만 표시명 | met | `read-model/identity.ts`(`selectActionActorName`) + `Hud.tsx`(`slot-actor`). `identity.test.ts`의 `selectActionActorName` 12개 케이스가 성공·거부 경로를 함께 고정(다른 사람 행동에 이름 붙이기, 동률, 명령·횟수 불일치, 스냅샷보다 새로운 effect, 문자열 비교 함정). `actor=null`이면 DOM이 이전과 동일(`Screen.test.tsx` "draws the four fixed slots from snapshot.display" 무변경 통과) |
+| 범위 1 | 길이 제한·이모지/제어문자·양방향 제어문자 정리, React 텍스트 노드로만 렌더 | met | `sanitizeDisplayName`(`identity.ts`) + `identity.test.ts`의 `sanitizeDisplayName` 10개 케이스(양방향 4종·제어/서식 4종·공백 접기·빈 결과·grapheme 말줄임·계약 상한 초과 거부·markup 미해석). 텍스트 노드는 `Screen.test.tsx`가 `firstChild.nodeType === Node.TEXT_NODE`로 확인하고, `identity-confinement.test.ts`가 렌더러 전체에 `dangerouslySetInnerHTML`/`innerHTML =`/`insertAdjacentHTML`/`document.write`가 0건임을 고정 |
+| 범위 2 | 유료 감사 연출·다른 effect에 이름 없음, 지출·참여 순위표 없음 | met | 위 정적 검사 2개 + `Screen.test.tsx` "keeps the name off the paid staging and off the reaction chip". 순위표는 애초에 없고 `paid-staging.test.ts`의 `a ranking` 패턴이 계속 0건 |
+| 범위 3 | CTA 고지 한 줄(ja 주 표기 + en 별칭) + JOIN/LEAVE 안내, T14 CTA 비활성 시 함께 숨김 | met | `Cta.tsx`의 `cta-identity` 블록(활성 분기 안에만 존재). `Screen.test.tsx` "states how a name gets on screen and how it comes off, next to the CTA"(문구가 ja.json + 계약 별칭 + `CONSENT_RETENTION_DAYS`의 보간 결과와 정확히 일치)와 "withdraws the consent notice together with the CTA"(`interactionEnabled:false`에서 `cta-identity`·`cta-identity-notice`·`cta-consent-command-JOIN` 전부 없음) |
+| 범위 4 | `?mode=dev` 대표 상태 1종 추가 + 스크린샷 | met | `testing/preview-states.ts`의 `consented-action`, `preview-states.test.ts` "shows a consented viewer only where D-9 allows one"(이름 있는 effect가 정확히 1개, 조인이 성립하는 조합, 나머지 6개 상태는 전부 익명). 스크린샷 `docs/tasks/assets/TASK-T20c-dev-consented-action-1080x1920.png`(아래) |
 
 ### Gates (executed)
 
 ```text
+git fetch origin && (soft-reset rebase onto origin/main 00ebc42 — 아래 "정직성 메모")
+npm run format:check -> All matched files use Prettier code style!
+npm run lint         -> eslint 0 problems; check-no-legacy-imports: ok (0 legacy imports);
+                        check-install-scripts: ok (4 reviewed, better-sqlite3 binding loads)
+npm run typecheck    -> tsc --build tsconfig.json, 오류 0
+npm run test         -> Test Files 141 passed (141), Tests 1991 passed | 1 skipped (1992)
+npm run build        -> @vl/contract, @vl/renderer, @vl/server, @vl/simulator, @vl/soak 성공
+
+npm run build -w @vl/renderer
+  dist/assets/index-*.js 1,210 kB (gzip 342 kB)  — T14 이후 그대로, 이 PR로 늘지 않음
+node apps/renderer/scripts/capture.mjs --only consented-action --prefix TASK-T20c --measure-ms 3000
+  chrome: C:/Program Files/Google/Chrome/Application/chrome.exe
+  dev/consented-action: stage 1080x1920, canvas 1080x1920, slots 4
+    -> docs/tasks/assets/TASK-T20c-dev-consented-action-1080x1920.png
+  frame budget: 279 frames in 3.0s = 92.9 fps at 1080x1920 (headless, software WebGL; 4 health frames)
+  wrote 1 screenshots to docs/tasks/assets
 ```
+
+정직성 메모 3개:
+
+1. `prettier --check .`는 로컬 도구가 만드는 `.impeccable/hook.cache.json`(이 저장소 산출물 아님)까지 훑는다. 그 캐시를 지운 뒤의 결과가 위 출력이다. 작업 도중 그 파일이 실수로 두 커밋에 들어갔고, 브랜치를 `origin/main` 위에서 다시 쌓아 **PR diff에는 남지 않는다**(`git diff --name-only origin/main`에 없음).
+2. rebase는 `git rebase origin/main`이 위 캐시 파일 때문에 멈춰서(`untracked working tree files would be overwritten`) `git reset --soft origin/main` 후 3개 커밋으로 다시 쌓았다. 그 과정에서 `docs/tasks/BOARD.md`가 옛 버전으로 되돌아갈 뻔했으나 `git checkout origin/main -- docs/tasks/BOARD.md`로 복구했고, 최종 diff에 BOARD.md는 없다.
+3. **실행하지 않았음**: 실제 OBS Browser Source 육안 확인(호스트 OBS 기동은 T2/T17·Gate 2 항목이며 이 PR의 합격 기준이 아니다). GPU 브라우저에서의 FPS 측정도 하지 않았다(headless software WebGL만). 원어민 검수(§5.3, Gate 3)도 하지 않았다 — 신규 3키 전부 `nativeReview: "pending"`.
+
+### Screenshot
+
+![T20c dev consented-action](assets/TASK-T20c-dev-consented-action-1080x1920.png)
+
+'반영された行動' 슬롯에 `sample-viewer-1` pill이 붙고, CTA 아래에 고지 한 줄(ja 1줄 + en 별칭)과
+`なのる`/`なまえけす` 안내가 붙는다. 오른쪽 검은 패널은 `?mode=dev` 진단 패널이며 `?mode=broadcast`에는
+없다(T14 follow-up: 패널이 슬롯 위를 덮는 문제는 이 PR 범위 밖이며 그대로다).
 
 ## Not done / out of scope
 
-- …
+- `packages/contract` 미변경(`[contract]` task 아님). 표시명·`channelRef`·동의 명령 별칭은 T20a가 이미 넣어 둔 것을 읽기만 했다.
+- 서버 쪽(T20b, PR #28)은 건드리지 않았다. 이 PR은 계약만 보고 구현했고, `docs/ops/identity-consent.md` §2.1의 고지 초안과 **같은 취지**의 문구를 쓰되 T20c 명세가 요구한 3가지(동의자 한정·즉시 삭제·30일 미활동 자동 삭제)를 한 줄에 모두 담았다. 초안 §2.1은 앞의 2개만 담고 있으므로 문구가 문자 그대로 같지는 않다.
+- 동의자 한정 cooldown·한 표(A-9)·분기 투표는 서버 쪽 결정이라 렌더러에 아무 것도 넣지 않았다. `ChoiceOptionView.commandName`은 서버가 넣어 줄 때만 표시되는 기존 동작 그대로다.
+- 유료 연출·순위표·지출 표시는 손대지 않았다. `PaidThanks.tsx`는 한 글자도 바뀌지 않았고 정적 검사만 강화했다.
+- 원어민 검수·문안 확정은 Gate 3(A-11).
 
 ## Follow-ups
 
-- …
+- **이름이 반응 연출(4초)과 함께 사라진다.** 슬롯은 그 뒤로도 같은 행동을 익명으로 계속 보여 준다. D-9의 "철회 시 즉시 삭제"를 렌더러가 흐리지 않게 하려고 일부러 아무 것도 기억하지 않은 결과다. 이름을 더 오래 두고 싶다면 (a) 서버가 `display.lastAppliedAction`에 `actor`를 실어 주고(계약 변경, `[contract]`) (b) 철회 시 서버가 즉시 새 snapshot을 내는 쪽이 옳다 — 렌더러가 자체 캐시로 늘리는 것은 삭제 보장을 깨므로 권하지 않는다.
+- 조인이 `startsAt <= appliedAt`에 기대므로, 서버가 반응 effect의 `startsAt`을 `lastAppliedAction.appliedAt`보다 **뒤로** 잡도록 바뀌면 이름이 조용히 사라진다(틀린 이름이 뜨는 게 아니라 안 뜬다 — fail-closed). 지금은 `apps/server/src/world/reducer.ts`가 두 값을 같은 `now`로 쓴다. 계약이 두 메시지를 잇는 키를 갖게 되면 이 추론은 필요 없어진다.
+- `scripts/capture.mjs`에 `--only`/`--prefix`를 더했다(대표 상태 1장만 다시 찍기 위해). 기본값은 T14와 동일해서 기존 사용법은 그대로다.
+- `.impeccable/`(로컬 도구 캐시)는 저장소에 들어가면 안 되는데 `.gitignore`에 없다. 다른 worker도 같은 실수를 할 수 있으므로 별도 정리 task로 남긴다.
+- `?mode=dev` 패널이 '반영された行動' 슬롯을 가리는 문제는 T14에서 이미 follow-up으로 적혀 있고 그대로다.
