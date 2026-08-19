@@ -157,7 +157,7 @@
 | 1b | (2) 재현 테스트가 수정 전 실패·수정 후 통과(되돌려 확인) | met | `ingest.test.ts` › `while the write lock outlasts the old budget`. **`RESPONSE_BUDGET_MS`를 2_000으로 되돌리면**: `× ... 3081ms → TimeoutError: The operation was aborted due to timeout`(100 % 실패). **15_000에서**: 통과, 요청 실측 2,864 ms |
 | 2 | 10회 반복 flaky 0 | met | **라운드 1**: `ingest.test.ts` + `clock-jump.test.ts` 10회 연속 매회 `Tests 27 passed (27)`, 전체 `npm run test` 10회 연속 모두 `Tests 2091 passed \| 1 skipped (2092)` (아래 "정직 보고" 항목 참조). **라운드 2**(`engine.ts`를 고쳤으므로 엔진 디렉터리 전체): `npx vitest run apps/server/src/engine` 10회 연속 매회 `Test Files 17 passed (17) / Tests 124 passed (124)`, 실패 0 |
 | 3 | 게이트 5개 녹색 | met | 아래 Gates |
-| 4 | 기존 T8/T15 테스트 무변경 통과 | met | `apps/server/src/engine/ingest.test.ts`는 **§T8e가 직접 고치라고 지정한 예외**(108+/3-)이고, **그 외 T8/T15 테스트 파일은 무변경**이다(`git diff --stat origin/main...HEAD`에 `engine.ts`·`config.ts`·`config.test.ts`·`ingest.test.ts`·`clock-jump.test.ts`·`config/default.json`·티켓만). 전체 스위트 146파일 2,093건 통과 |
+| 4 | 기존 T8/T15 테스트 무변경 통과 | met | `apps/server/src/engine/ingest.test.ts`는 **§T8e가 직접 고치라고 지정한 예외**(108+/3-)이고, **그 외 T8/T15 테스트 파일은 무변경**이다(`git diff --stat origin/main...HEAD`에 `engine.ts`·`config.ts`·`config.test.ts`·`ingest.test.ts`·`clock-jump.test.ts`·`config/default.json`·티켓만). 전체 스위트 149파일 2,143건 통과(rebase 후) |
 | 5 | PR CI 녹색 | met | PR #31, CI run `32292215316` **pass** (3m31s) — https://github.com/dnhynk/vertical-live/actions/runs/32292215316 |
 
 ### Gates (executed — 라운드 1; 라운드 2 게이트는 아래 `## Review round 1` §Round 2 게이트)
@@ -215,19 +215,22 @@ fault matrix의 "DB lock" 행이며, 라이브 중 백업이 파일을 잡는 �
 
 ### Round 2 게이트
 
+`git fetch origin && git rebase origin/main`(main이 9 커밋 전진) **뒤** 5개 전부 재실행했다.
+
 ```text
 npm run format:check  -> pass ("All matched files use Prettier code style!")
 npm run lint          -> pass (eslint 0, check-no-legacy-imports: ok (0 legacy imports),
                                check-install-scripts: ok (4 reviewed, better-sqlite3 binding loads))
 npm run typecheck     -> pass (tsc --build tsconfig.json, 출력 없음, exit 0)
-npm run test          -> pass (Test Files 146 passed (146),
-                               Tests 2093 passed | 1 skipped (2094))
+npm run test          -> pass (Test Files 149 passed (149),
+                               Tests 2143 passed | 1 skipped (2144))
 npm run build         -> pass (contract/renderer/server/simulator/soak, migrations 6,
                                docs/ops/data-map.md up to date)
 ```
 
 반복: `npx vitest run apps/server/src/engine` **10회 연속** 매회 `Test Files 17 passed (17) / Tests 124
 passed (124)`, 실패 0. 이번 라운드는 `engine.ts`를 고쳤으므로 두 파일이 아니라 엔진 디렉터리 전체를 반복했다.
+rebase 전 기준으로 전체 `npm run test`도 4회 연속 `Tests 2093 passed | 1 skipped (2094)`로 실패 0이었다.
 
 ## Not done / out of scope
 
