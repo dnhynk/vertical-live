@@ -26,20 +26,28 @@ const VALID = {
 }
 
 describe('loadInputConfig', () => {
-  it('reads the repository config and marks the tuning values provisional', () => {
+  it('reads the repository config with the Gate 0 approved window values (D-11)', () => {
     const config = loadInputConfig({ env: {} })
-    expect(config.maxRawLength).toBeGreaterThan(0)
-    expect(config.window.windowMs).toBeGreaterThan(0)
-    // BOARD A-3/A-15: none of these are approved limits yet.
-    expect(config.provisional).toEqual(
-      expect.arrayContaining([
-        'maxRawLength',
-        'window.windowMs',
-        'window.enterAggregateAtCommands',
-        'window.exitAggregateAtCommands',
-        'window.maxDirectPerWindow',
-      ]),
-    )
+
+    // BOARD D-11 (2026-08-19) approved these four exactly; they are no longer
+    // starting values a reader may re-tune at will.
+    expect(config.window).toEqual({
+      windowMs: 5000,
+      maxDirectPerWindow: 20,
+      enterAggregateAtCommands: 30,
+      exitAggregateAtCommands: 10,
+    })
+  })
+
+  it('lists only maxRawLength as provisional now that D-11 approved the window', () => {
+    const config = loadInputConfig({ env: {} })
+
+    // D-11 took `window.*` off the provisional list; `maxRawLength` has no
+    // approved value yet, so it stays (BOARD A-15).
+    expect(config.provisional).toEqual(['maxRawLength'])
+    for (const key of config.provisional) {
+      expect(key.startsWith('window.')).toBe(false)
+    }
   })
 
   it('applies env overrides', () => {
