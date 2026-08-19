@@ -156,7 +156,7 @@ npm run secrets -w @vl/server -- set alerts.discordWebhookUrl   # 값은 stdin�
 
 | 경로 | 무엇이 트리거하는가 | 어떤 토큰 |
 |---|---|---|
-| **사람** `POST /admin/moderation` + `npm run moderation` | 사람이 Studio에서 채팅을 읽고 판단한다 | 4개 전부 |
+| **사람** `POST /admin/moderation` + `npm run moderation -w @vl/server` | 사람이 Studio에서 채팅을 읽고 판단한다 | 4개 전부 |
 | **자동** `filter_evasion_surge` 휴리스틱 | 입력 metrics의 집계창 통계 | `filter_evasion_surge` **하나만** |
 
 나머지 세 토큰에 자동 탐지가 **없는 것은 의도한 것**이다. '표적 혐오·협박', '개인정보 노출', '성적·자해 위험'은 메시지가 무엇을 *뜻하는지*에 대한 판단인데, 이 프로세스는 §7.3(1)·§12.3에 따라 판단할 메시지를 보관하지 않는다. 없는 근거로 방송을 멈추는 자동 판정을 만드는 것보다, 사람이 누르는 경로를 확실히 두는 쪽이 §12.3의 설계다.
@@ -168,7 +168,7 @@ npm run secrets -w @vl/server -- set alerts.discordWebhookUrl   # 값은 stdin�
 - 승인되지 않은 사유를 supervisor까지 통과시키지 않는 이유: 그런 사유는 `safeStopConditions`와 영원히 일치하지 않아 "멈추지 않는 warning"으로 조용히 격하된다.
 - `note`(자유 텍스트)는 **이 호스트의 로그에만** 남는다. alert·`/health`·world state 어디에도 가지 않는다(§12.3 raw chat 금지). 200자·제어문자 제거.
 - `POST /admin/moderation/clear`는 보고를 철회해 CTA를 되돌린다. **이미 `safe_stopped`인 run을 되살리지 않는다** — 그것은 프로세스를 다시 시작하는 일이다(§9.2). 응답의 `resumesRun: false`가 그 말이다.
-- CLI에는 **플래그 파일 fallback이 없다**(kill CLI와 다른 점). 보고의 효과는 살아 있는 supervisor 안에서만 일어나므로 서버가 응답하지 않으면 끌 CTA도 멈출 방송도 없고, 그때 쓰는 명령은 `npm run kill`이다. 게다가 파일은 "모더레이션 degraded"를 디스크에 남겨 채팅이 멀쩡한 다음 run을 오탐으로 멈추게 만든다. 그래서 HTTP만 쓰고, 실패하면 기계 토큰(`ECONNREFUSED`, `http_401` …)과 함께 **실패로 끝난다**.
+- CLI에는 **플래그 파일 fallback이 없다**(kill CLI와 다른 점). 보고의 효과는 살아 있는 supervisor 안에서만 일어나므로 서버가 응답하지 않으면 끌 CTA도 멈출 방송도 없고, 그때 쓰는 명령은 `npm run kill -w @vl/server -- --reason "<why>"`다. 게다가 파일은 "모더레이션 degraded"를 디스크에 남겨 채팅이 멀쩡한 다음 run을 오탐으로 멈추게 만든다. 그래서 HTTP만 쓰고, 실패하면 기계 토큰(`ECONNREFUSED`, `http_401` …)과 함께 **실패로 끝난다**.
 
 **자동 경로**(`moderation-heuristic.ts`): 입력 metrics를 `windowMs` 창마다 표본 추출해 창별 delta를 낸다.
 

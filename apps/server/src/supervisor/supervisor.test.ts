@@ -285,10 +285,23 @@ describe('supervisor state machine', () => {
         kind: 'moderation_unhealthy',
         reason: 'targeted_harassment',
       })
+      // Both stages alert, in order and once each (review round 1, B1). Stage 1
+      // is not skipped because stage 2 follows: §12.3 turns the CTA off and says
+      // so, and only then does the approved token stop the run.
+      const warnings = harness.alerts.ofKind('moderation.unhealthy')
+      expect(warnings).toHaveLength(1)
+      expect(warnings[0]?.severity).toBe('warning')
+      expect(warnings[0]?.reason).toBe('targeted_harassment')
+      expect(warnings[0]?.detail['safeStopConditionMatched']).toBe(true)
       // One alert, not one per evaluation (spec §11 알림).
       const alerts = harness.alerts.ofKind('supervisor.safe_stopped')
       expect(alerts).toHaveLength(1)
       expect(alerts[0]?.severity).toBe('critical')
+      // …and the operator sees the warning first.
+      const order = harness.alerts.alerts.map((alert) => alert.kind)
+      expect(order.indexOf('moderation.unhealthy')).toBeLessThan(
+        order.indexOf('supervisor.safe_stopped'),
+      )
       // `/health` carries the token and the instant, and nothing an operator
       // typed (TASK_SPECS §T22: "토큰·시각만").
       const moderation = harness.supervisor.health().moderation

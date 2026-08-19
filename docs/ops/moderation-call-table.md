@@ -62,7 +62,7 @@
 
 | 사유 토큰 | 무엇을 뜻하는가 | 보고 경로(사람/자동) | 1단계(CTA off) | 2단계(safe-stop) |
 |---|---|---|---|---|
-| `targeted_harassment` | 특정인을 겨냥한 혐오·협박이 채팅에 나타났고 자동 필터가 그것을 막지 못하고 있다(§12.3 "표적 혐오·협박") | **사람만** — `npm run moderation -- --reason targeted_harassment` | 항상 | ☑ |
+| `targeted_harassment` | 특정인을 겨냥한 혐오·협박이 채팅에 나타났고 자동 필터가 그것을 막지 못하고 있다(§12.3 "표적 혐오·협박") | **사람만** — `npm run moderation -w @vl/server -- --reason targeted_harassment` | 항상 | ☑ |
 | `pii_exposure` | 개인정보가 채팅에 노출되고 있고 자동 필터가 그것을 막지 못하고 있다(§12.3 "개인정보 노출") | **사람만** — 같은 CLI | 항상 | ☑ |
 | `sexual_or_self_harm_risk` | 성적 내용 또는 자해 위험 신호가 나타났다(§12.3 "성적·자해 위험") | **사람만** — 같은 CLI | 항상 | ☑ |
 | `filter_evasion_surge` | 금칙어·URL 필터를 우회하는 변형 입력이 급증해 자동 차단이 사실상 무력해졌다(§12.3 "필터 우회 폭증") | **사람 + 자동**(입력 metrics 휴리스틱, T22) | 항상 | ☑ |
@@ -86,7 +86,7 @@
 | `note` | **이 호스트의 로그에만** 남는다. alert·`/health`·world state에는 가지 않는다(§12.3 raw chat 금지). 200자·제어문자 제거 |
 | 해제 | `POST /admin/moderation/clear` — CTA를 되돌린다. **`safe_stopped`는 풀지 않는다**(§9.2, 프로세스 재시작이 그 절차다) |
 | CLI | `npm run moderation -w @vl/server -- --reason <토큰> [--note <text>] [--clear]` |
-| CLI fallback | **없다.** kill CLI와 달리 플래그 파일을 쓰지 않는다 — 보고의 효과는 살아 있는 supervisor 안에서만 일어나고, 파일은 다음 run을 오탐으로 멈추게 만들기 때문이다. 서버가 응답하지 않으면 명령은 실패하고 `npm run kill`을 안내한다 |
+| CLI fallback | **없다.** kill CLI와 달리 플래그 파일을 쓰지 않는다 — 보고의 효과는 살아 있는 supervisor 안에서만 일어나고, 파일은 다음 run을 오탐으로 멈추게 만들기 때문이다. 서버가 응답하지 않으면 명령은 실패하고 `npm run kill -w @vl/server -- --reason "<why>"`를 안내한다 |
 
 ### 자동 경로 — `filter_evasion_surge` 휴리스틱 (T22)
 
@@ -186,7 +186,7 @@
 3. ~~`docs/tasks/BOARD.md` §2에 `D-*`로 기록한다.~~ → 완료(D-13, 코디네이터).
 4. ~~[`gate0-checklist.md`](gate0-checklist.md) 1.8 체크박스를 닫는다.~~ → 완료.
 5. ~~**남은 것 → `T22`**: 2장의 네 토큰을 실제로 보고하는 탐지·보고 경로 구현.~~ → **완료(T22, 2026-08-20)**:
-   사람 트리거 `POST /admin/moderation`(+ `npm run moderation` CLI, 네 토큰 전부)과 `filter_evasion_surge`
+   사람 트리거 `POST /admin/moderation`(+ `npm run moderation -w @vl/server` CLI, 네 토큰 전부)과 `filter_evasion_surge`
    휴리스틱. 2장의 '보고 경로' 열이 무엇이 사람이고 무엇이 자동인지 정본이다.
 
 **T22 뒤에도 남아 있는 것**(Gate 2/3에서 확인):

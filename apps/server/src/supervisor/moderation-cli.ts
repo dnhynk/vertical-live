@@ -15,7 +15,7 @@ import { MODERATION_REASON_TOKENS, isModerationReasonToken } from './moderation-
  * 1. Everything a report does — turning the CTA off, alerting, matching the
  *    Gate 0 safe-stop list — happens inside a running supervisor. If the server
  *    is not answering there is no CTA to turn off and no broadcast to stop; the
- *    command for that situation is `npm run kill`.
+ *    command for that situation is `npm run kill -w @vl/server -- --reason "<why>"`.
  * 2. A file would leave "moderation degraded" on the disk with no protocol for
  *    clearing it, so a later run whose chat is fine would come up degraded
  *    because of an old incident. That is a false positive, not the 안전 정지 of
@@ -46,7 +46,8 @@ reason tokens (docs/ops/moderation-call-table.md §2, BOARD D-13):
   ${MODERATION_REASON_TOKENS.join('\n  ')}
 
 There is no flag-file fallback: a report only means something to a running
-server. If the server does not answer, stop the broadcast with \`npm run kill\`.
+server. If the server does not answer, stop the broadcast with
+\`npm run kill -w @vl/server -- --reason "<why>"\`.
 Clearing does not restart a run that already reached safe_stopped — that is
 starting the process again (spec §9.2).`
 
@@ -136,7 +137,7 @@ async function post(
     // that would silently degrade the next run (see the module comment).
     return {
       ok: false,
-      error: `${errorToken(error)} (server not reachable; use \`npm run kill\` to stop the broadcast)`,
+      error: `${errorToken(error)} (server not reachable; stop the broadcast with \`npm run kill -w @vl/server -- --reason "<why>"\`)`,
     }
   }
 }

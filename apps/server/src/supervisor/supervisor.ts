@@ -243,12 +243,12 @@ export class Supervisor {
    * Moderation control health (spec §12.3). Reported by whoever observes it.
    *
    * §12.3 defines two levels and this method implements both (review round 1,
-   * M2): an unhealthy display filter or block control turns the CTA off first,
-   * and when safety **cannot be assured** the run stops. Which reasons mean the
-   * second level is a human decision, so it is read from the Gate 0 call table
-   * (`supervisor.moderation.safeStopConditions`) rather than invented here —
-   * while that list is empty, an unhealthy control turns the CTA off and alerts,
-   * and nothing stops the run on its own.
+   * M2): an unhealthy display filter or block control turns the CTA off and
+   * warns, and when safety **cannot be assured** the run stops on top of that.
+   * Which reasons mean the second level is a human decision, so it is read from
+   * the Gate 0 call table (`supervisor.moderation.safeStopConditions`) rather
+   * than invented here — while that list is empty, an unhealthy control turns
+   * the CTA off and alerts, and nothing stops the run on its own.
    */
   reportModerationHealth(status: HealthStatus, reason: string | null = null): void {
     const previous = this.#moderation
@@ -262,25 +262,31 @@ export class Supervisor {
     if (!changed) return
 
     const token = reason ?? 'moderation_unhealthy'
-    if (reason !== null && this.#config.moderation.safeStopConditions.includes(reason)) {
+    const safeStopConditionMatched =
+      reason !== null && this.#config.moderation.safeStopConditions.includes(reason)
+    // Stage 1 runs even when stage 2 follows (review round 1, B1). An approved
+    // token used to return straight out of `requestSafeStop`, so the run stopped
+    // with a critical alert and no warning — but §12.3's first stage is not
+    // conditional on the second, and the warning is the record of *which*
+    // control went unhealthy. It goes out first, in that order, on purpose.
+    void this.#alert('warning', 'moderation.unhealthy', {
+      reason: token,
+      detail: {
+        status,
+        // Says plainly whether this also stops the run, so an operator reading
+        // the alert knows the Gate 0 table is what decides that (spec §12.3).
+        safeStopConditionMatched,
+        approvedCallTable: this.#config.moderation.approved,
+      },
+    })
+    if (safeStopConditionMatched) {
       void this.requestSafeStop({
         kind: 'moderation_unhealthy',
         at: this.#clock.nowUtcIso(),
         reason: token,
         detail: { status, approvedCallTable: this.#config.moderation.approved },
       })
-      return
     }
-    void this.#alert('warning', 'moderation.unhealthy', {
-      reason: token,
-      detail: {
-        status,
-        // Says plainly why this did not stop the run, so an operator reading the
-        // alert knows the Gate 0 table is what decides that (spec §12.3).
-        safeStopConditionMatched: false,
-        approvedCallTable: this.#config.moderation.approved,
-      },
-    })
   }
 
   /** Adapter for T10's `SafeStopRequestSink` (spec §9.1). */

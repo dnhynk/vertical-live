@@ -171,7 +171,7 @@ npm run moderation -w @vl/server -- --clear
 2. **판단한다.** YouTube Studio에서 실제 채팅을 본다. **이 저장소에는 볼 채팅이 없다** — raw chat을 보관하지 않기
    때문이다(§12.3). 필요하면 Studio/API에서 timeout·ban을 한다(승인표 4번: timeout·ban은 사람이 한다).
 3. **보고한다(CLI 한 줄).** 위 명령. 서버가 응답하지 않으면 이 명령은 **실패로 끝난다** — 플래그 파일 fallback이
-   없다. 그때는 3장의 `npm run kill`로 방송을 멈춘다.
+   없다. 그때는 3장의 `npm run kill -w @vl/server -- --reason "<why>"`로 방송을 멈춘다.
 4. **결과를 확인한다.** `GET /health`:
    - `supervisor.moderation.status = "degraded"`, `.reason = "<토큰>"`, `.reportedAtUtc = <시각>`
    - `supervisor.interactionEnabled = false` (화면 CTA off)

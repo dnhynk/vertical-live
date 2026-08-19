@@ -92,7 +92,10 @@ describe('moderation CLI', () => {
     expect(output).toContain('ECONNREFUSED')
     // The operator is pointed at the command that *does* work on a wedged
     // process, because this one deliberately does not (see `moderation-cli.ts`).
-    expect(output).toContain('npm run kill')
+    // The workspace form, because the root has no `kill` script and an
+    // operator who pastes what this prints must not get `Missing script`
+    // while a broadcast is running (review round 1, M2).
+    expect(output).toContain('npm run kill -w @vl/server -- --reason')
   })
 
   it('fails on a refusal from the server and names the status', async () => {

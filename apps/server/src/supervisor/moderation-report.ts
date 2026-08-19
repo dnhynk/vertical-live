@@ -1,11 +1,6 @@
 import { systemClock, type Clock } from '../clock.js'
 import { silentLogger, type Logger } from '../secrets/redaction.js'
-import {
-  authorizeAdmin,
-  readTokenField,
-  type AdminRequest,
-  type AdminResponse,
-} from './admin-auth.js'
+import { authorizeAdmin, type AdminRequest, type AdminResponse } from './admin-auth.js'
 
 /**
  * The human-triggered half of spec §12.3's call path (TASK_SPECS §T22).
@@ -20,11 +15,12 @@ import {
  *
  * Two rules shape the surface:
  *
- * - **The reason is a token from the approved table, or the request is
- *   refused.** A free-text reason would arrive at `reportModerationHealth()`,
- *   never match `safeStopConditions`, and quietly turn into a warning that does
- *   not stop the broadcast — the exact failure `moderation-call-table.md` §2
- *   warns about ("문자열이 다르면 조건은 영원히 일치하지 않는다").
+ * - **The reason is a token from the approved table, compared exactly, or the
+ *   request is refused.** A free-text reason would arrive at
+ *   `reportModerationHealth()`, never match `safeStopConditions`, and quietly
+ *   turn into a warning that does not stop the broadcast — the exact failure
+ *   `moderation-call-table.md` §2 warns about ("문자열이 다르면 조건은 영원히
+ *   일치하지 않는다").
  * - **`note` never leaves the log.** An operator needs somewhere to write why
  *   they pressed it; a broadcast state document is not that place, and a note
  *   pasted from chat would be raw chat in an alert (§12.3).
@@ -101,7 +97,7 @@ export class AdminModerationEndpoint {
     const refusal = authorizeAdmin(request, this.#options.token)
     if (refusal !== null) return refusal
 
-    const reason = readTokenField(request.body, 'reason')
+    const reason = readReason(request.body)
     if (reason === null || !isModerationReasonToken(reason)) {
       // The rejected value is not echoed: it is operator input, and a 400 that
       // repeats it back is a way for text to reach a log or a screen. What comes
@@ -140,6 +136,23 @@ export class AdminModerationEndpoint {
     // never coming back.
     return { status: 202, body: { accepted: true, cleared: true, at, resumesRun: false } }
   }
+}
+
+/**
+ * The submitted `reason`, **exactly as it was sent**.
+ *
+ * Round 1 (M1) found why this cannot be `readTokenField()`: sanitizing before
+ * comparing makes the sanitizer a laundry. A raw `targeted_harassment\^@` lost
+ * the characters that made it unapproved, matched the table, and came back 202
+ * — the endpoint answered a request nobody approved. An enum is compared, not
+ * cleaned. Bounding and stripping stay where free text needs them (the kill
+ * switch's reason, `admin-auth.ts`); here anything that is not byte-for-byte a
+ * table token is a 400, so nothing unapproved reaches the supervisor.
+ */
+function readReason(body: unknown): string | null {
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) return null
+  const value = (body as Record<string, unknown>)['reason']
+  return typeof value === 'string' && value !== '' ? value : null
 }
 
 /**
