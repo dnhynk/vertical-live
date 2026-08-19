@@ -35,11 +35,11 @@
 | T8d | 엔진 버그픽스: `#publish` markEffectPublished store 실패 시 미발행 row 고아화(T8c 발견) | T8c | — | merged | t8d-publish-store-failure | #22 | `task_43eb61f3968d` |
 | T17b | CI 버그픽스: T17 Windows 경로 의미론(ubuntu CI 실패 3건) + client.test 호스트 vault 의존 | T17 | — | merged | t17b-ci-path-semantics | #23 | `task_70edf8e8feff` |
 | T18 | D-6/D-7 구현·문서(OBS 버전 고정 승인, safe-mode sentinel 정책, public 문구) | T17, T2 | — | merged | t18-obs-safemode-policy | #24 | `task_0d996db3c12a` |
-| T19 | Gate 0 승인 반영(체크리스트·config·모더레이션 호출표) | T16, T18 | — | dispatched | t19-gate0-apply | | `task_8633302d4f33` |
-| T20a | identity (B) 계약: 동의자 한정 actor·join/leave 명령 | T1b, T6 | ✔ | dispatched | t20a-identity-contract | | `task_a7a6d0666e7c` |
+| T19 | Gate 0 승인 반영(체크리스트·config·모더레이션 호출표) | T16, T18 | — | in_review | t19-gate0-apply | #25 | `task_8633302d4f33` |
+| T20a | identity (B) 계약: 동의자 한정 actor·join/leave 명령 | T1b, T6 | ✔ | in_review | t20a-identity-contract | #26 | `task_a7a6d0666e7c` |
 | T20b | identity (B) 서버: 동의 저장·authorDetails 처리·삭제·보존·compliance 문서 | T20a, T9, T13, T8 | — | pending | t20b-identity-server | | |
 | T20c | identity (B) 렌더러: 동의자 표시명·고지 CTA | T20a, T14 | — | pending | t20c-identity-renderer | | |
-| T21 | 일본 패널·5초 테스트·24h 콘텐츠 목록·증빙 초안(D-15) | T14, T16 | — | ready | t21-japan-panel-draft | | |
+| T21 | 일본 패널·5초 테스트·24h 콘텐츠 목록·증빙 초안(D-15) | T14, T16 | — | dispatched | t21-japan-panel-draft | | `task_5ccfd178a887` |
 
 디스패치 순서 원칙: `ready` 중 T-ID 낮은 것부터, 동시 2, `[contract]`는 하나만. 리뷰 Task는 `R-<T-ID>-<round>`로 별도 등록하고 아래 이력에만 남긴다.
 
@@ -85,6 +85,7 @@
 | A-15 | 합격선 숫자(soak 중단·복구 허용치, freeze 허용치, p95 합격선, 신선도 최소치)는 코드에 하드코딩하지 않고 `provisional` config로 두며 Gate 0/2 승인값으로 교체 | 스펙 §7.5, §11 | T7, T11, T15 |
 | A-18 | broadcast attempt 마커(`vl-attempt:<id>`, snippet.description)는 privacyStatus=private 상태에서만 존재하고, broadcast ID가 durable하게 채택된 직후 `liveBroadcasts.update`로 제거한 뒤에만 공개 전환을 허용(제거 전 공개 전환 차단). 근거: §9.1 reconcile 식별성 vs §4·§12.5(공개 메타데이터 품질) — R-T10-3 finding | 스펙 §9.1 §4 §12.5 | T10, T12 |
 | A-19 | 렌더러 ACK-store 실패(effect_outbox acked_at 기록 거부, 예: SQLITE_FULL)는 writer pass 실패와 같은 store 실패 부류로 취급한다: coordinator family `writer_failing` → 엔진 restart(예산 3) → 소진 시 `safe_stopped`(fault-matrix F-12 `degraded` → 예산 초과 시 F-18) 정책을 그대로 적용하고 별도 비재시작 family를 만들지 않는다. 근거: 동일 연결·동일 분류기(`classifyStoreFailure`)의 실패이며 T12·T15가 이미 고정한 정책과 일치; 새 family는 T12 계약 변경 — R-T8c-2 major | 스펙 §9.2 §11, fault-matrix F-12·F-18 | T8c, T12 |
+| A-20 | §1.5 direct↔vote 실험 순서: **direct 먼저**, vote(분기 투표·사용자별 한 표)는 T20a/b/c(동의자 한정 identity) 머지 후 Gate 2에서 동의자 표본으로 실험. Gate 0에서 사용자 결정이 없었던 항목(T19 발견)이라 가정으로 둠 — 사용자가 뒤집을 수 있음 | 스펙 §6.4, D-9, D-11 | T20b, Gate 2 |
 | A-17 | 타이머(deadline) 유래 effect는 `cause:{kind:'deadline',deadlineKind}`로 표기하고 `causedByEventKey=null`; event 유래는 `cause:{kind:'event',eventKey}`이며 causedByEventKey와 일치; 유료 effect는 event 유래만. T7은 EffectDraft(cause 판별자)만 반환하고 T8이 Effect를 조립 | 스펙 §2.1·§6.2(무입력 진행) vs §7.3(6)·§10.2(원인 event key) — T7 질문(2026-08-17)으로 발견 | T1b, T7, T8 |
 | A-16 | stream key는 vault(SecretProvider)가 정본. 서버가 StartStream 전 obs-websocket `SetStreamServiceSettings`로 런타임 주입하고 운영자는 OBS UI에 키를 입력하지 않는다. OBS가 서비스 설정을 프로파일 디렉터리(service.json)에 저장하는 사실은 문서에 명시(저장소·DB·로그·화면 밖), 정지 시 제거·디렉터리 ACL은 T17 | 스펙 §10.2, R-T2-1 리뷰 finding | T2, T12, T17 |
 
@@ -227,3 +228,4 @@
 | 2026-08-18 09:26 | R-T18-4 verdict **approve**(round 3 재현·junction 부모 정상 배치·guard 무력화 대조 모두 확인) → 최종 게이트(contract·deps 0, supervisor 변경은 lastNote 관측 채널만, config `obs.process.sentinelDir` ""=APPDATA 파생, CLAUDE.md/런북/TASK_SPECS public 문구) → **PR #24 squash merge**(main 34a8f0d). T18 worker release·worktree 제거. **main CI run 32121339258 성공**(7 step 전부). 사용자 결정 5건 처리 완료 — 무인 루프 종료, 남은 것은 Gate 0 사용자 항목 |
 | 2026-08-19 10:00 | **Gate 0 사용자 결정 수집(UI 4라운드, 16문항)** → D-8~D-16 기록. 후속 작업 등록 예정: T19(Gate 0 반영: gate0-checklist 체크·config input.window 승인값·supervisor.moderation 승인표·moderation-call-table·ROADMAP), T20a[contract]/T20b/T20c(identity (B) 동의자 한정 개방), T21(일본 패널·5초 테스트·콘텐츠 목록 초안). 사용자 수동 단계(Discord 서버·webhook, Google 계정·채널·Cloud·OAuth)는 안내문으로 전달 |
 | 2026-08-19 10:08 | TASK_SPECS에 §T18(완료 기록)·§T19·§T20a/b/c·§T21 추가. **T19** `task_8633302d4f33` 디스패치 `ctx_d9382cedc69a`, **T20a**[contract] `task_a7a6d0666e7c` 디스패치 `ctx_e3bb7d6ceff7`. T21은 다음 슬롯. 사용자에게 Discord·YouTube/Cloud/OAuth 수동 단계 안내문 전달 |
+| 2026-08-19 10:52 | T19 worker_done(succeeded, PR #25: 체크리스트·호출표·config 승인값·ROADMAP; CI 녹색; 발견: D-13 safe-stop 토큰 4개를 보고하는 production 경로가 V1에 없음 → **T22 등록**, §1.5 direct↔vote 순서 미결 → **A-20**). T20a worker_done(succeeded, PR #26: actor consented 타입·channelRef ref_hex32·JOIN/LEAVE 별도 enum·consentCommand 필드·ACTION_REACTION only+refine·privacy 규칙 개정; 1955 tests; CI 녹색) — worker 권장안 6건 코디네이터 승인. R-T19-1 `task_3133e41c8e98`(review) · R-T20a-1 `task_efe1fbae30e0`(review2). **T21** `task_5ccfd178a887` 디스패치 `ctx_8fda1be1b646`. 사용자 Discord webhook: 보고는 '완료'였으나 vault `missing` → 실제 저장 명령 재안내 |
