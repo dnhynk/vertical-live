@@ -52,6 +52,7 @@ import { StreamKeyCustodian } from './youtube/broadcast/stream-key.js'
 import type { ChatSource } from './youtube/chat/chat-source.js'
 import { loadChatConfig } from './youtube/chat/config.js'
 import { createChatSource } from './youtube/chat/runtime.js'
+import { chatRuntimeDeps } from './youtube/chat/wiring.js'
 import { createExponentialBackoff } from './youtube/quota/backoff.js'
 import { loadQuotaConfig } from './youtube/quota/config.js'
 import { QuotaTracker } from './youtube/quota/tracker.js'
@@ -634,43 +635,28 @@ new KillSwitchFileWatcher({
  * comes from the open attempt in `broadcast_resources` when the lifecycle is
  * wired; the config value stays as the development injection point §T9 allows.
  */
-chatSource = await createChatSource({
-  store,
-  inbox: { ingest: (envelopes, checkpoint) => engine.ingest(envelopes, checkpoint) },
-  engine: {
-    get ready() {
-      return engine.ready
-    },
-    snapshot: () => engine.snapshot(),
-  },
-  clock: systemClock,
-  inputConfig,
-  identityGateOpen: config.engine.identityGateOpen,
-  ...(consentDirectory === null
-    ? {}
-    : {
-        consent: consentDirectory,
-        onConsentFailure: (failure) => {
-          engine.countConsentFailure(failure.kind)
-        },
-      }),
-  config: chatConfig,
-  logger: stdoutLogger,
-  ...(tokens === null ? {} : { auth: tokens }),
-  ...(broadcastLifecycle === null
-    ? {}
-    : {
-        resolveTarget: async () => {
-          const binding = await broadcastLifecycle.ensureBound()
-          return binding.liveChatId === null
-            ? null
-            : { liveChatId: binding.liveChatId, broadcastId: binding.broadcastId }
-        },
-      }),
-  onIngested: () => {
-    engine.pump()
-  },
-})
+chatSource = await createChatSource(
+  chatRuntimeDeps({
+    store,
+    engine,
+    clock: systemClock,
+    inputConfig,
+    identityGateOpen: config.engine.identityGateOpen,
+    consent: consentDirectory,
+    config: chatConfig,
+    logger: stdoutLogger,
+    auth: tokens,
+    resolveTarget:
+      broadcastLifecycle === null
+        ? null
+        : async () => {
+            const binding = await broadcastLifecycle.ensureBound()
+            return binding.liveChatId === null
+              ? null
+              : { liveChatId: binding.liveChatId, broadcastId: binding.broadcastId }
+          },
+  }),
+)
 
 httpServer.listen(port, DEFAULT_HOST, () => {
   process.stdout.write(`@vl/server listening on http://${DEFAULT_HOST}:${port}\n`)
