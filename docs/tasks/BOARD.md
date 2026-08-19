@@ -40,7 +40,7 @@
 | T20b | identity (B) 서버: 동의 저장·authorDetails 처리·삭제·보존·compliance 문서 | T20a, T9, T13, T8 | — | merged | t20b-identity-server | #28 | `task_d221f62c9dae` |
 | T20c | identity (B) 렌더러: 동의자 표시명·고지 CTA | T20a, T14 | — | merged | t20c-identity-renderer | #29 | `task_f15883c91c9d` |
 | T21 | 일본 패널·5초 테스트·24h 콘텐츠 목록·증빙 초안(D-15) | T14, T16 | — | merged | t21-japan-panel-draft | #27 | `task_5ccfd178a887` |
-| T22 | 모더레이션 사유 보고 경로(사람 트리거 admin 엔드포인트 + filter_evasion_surge 휴리스틱; D-13 토큰 4개) | T12, T19 | — | in_review | t22-moderation-report | #30 | `task_43f8dd164d5a` |
+| T22 | 모더레이션 사유 보고 경로(사람 트리거 admin 엔드포인트 + filter_evasion_surge 휴리스틱; D-13 토큰 4개) | T12, T19 | — | changes_requested | t22-moderation-report | #30 | `task_43f8dd164d5a` |
 | T8e | 엔진: StateEngine.pump()가 31일 가상 시계 점프 후 미반환(184s timeout; T20b 리뷰 관측) + engine/ingest.test.ts:442 SQLite write lock flaky(T21 관측) 조사·수정 | T8 | — | dispatched | t8e-clock-jump-flaky | | `task_364b480f6a22` |
 
 디스패치 순서 원칙: `ready` 중 T-ID 낮은 것부터, 동시 2, `[contract]`는 하나만. 리뷰 Task는 `R-<T-ID>-<round>`로 별도 등록하고 아래 이력에만 남긴다.
@@ -253,3 +253,4 @@
 | 2026-08-19 17:34 | F-T20b-3 완료(af8f73d/4314664: sweeper consent-field 직후·abort 경로 reconcile, 자체 발견한 4번째 삭제 경로 RevocationHandler도 같은 경계로 — 코디네이터 승인; fault test 3; 2085 tests; CI 32281849411 녹색) → R-T20b-4 `task_af0fa820f85f` → `ctx_e88d4c4b76cf`(review2) |
 | 2026-08-19 17:56 | R-T20b-4 **approve** → 최종 게이트(59파일, contract·deps 0, config perUser.cooldownMs provisional 추가·retention.json viewer_consent 필드, CI 32281849411 녹색) → **PR #28 squash merge**(main ead0ee9). T20b worker release·worktree 제거. **identity (B) 3종 전부 머지**(T20a #26, T20b #28, T20c #29). TASK_SPECS §T22·§T8e 추가 → **T22** `task_43f8dd164d5a`·**T8e** `task_364b480f6a22` 디스패치 |
 | 2026-08-19 18:45 | T22 질문(우회 집합) → A 승인(moderate() 7개 코드, 분모=파서 도달 메시지). T22 worker_done(succeeded, PR #30: /admin/moderation{,/clear}·CLI·admin-auth 추출·filter_evasion_surge 휴리스틱(provisional 5개)·CommandMetrics production 생성·문서 3종; CLI e2e에서 ECONNREFUSED cause 결함 발견·수정; 2132 tests; CI 32288618666 녹색). R-T22-1 `task_06eedd22f11e` → `ctx_c10a82f0649e`(review). 진행: T8e |
+| 2026-08-19 19:19 | R-T22-1 request_changes(blocker: 승인 토큰 경로가 1단계 warning 생략; major: 정제 후 allowlist 비교로 비승인 원문 승인, CLI 안내 `npm run kill` 루트 부재) → **F-T22-1** `task_f39b5db8bc4a`. review 정리. 진행: T8e |
