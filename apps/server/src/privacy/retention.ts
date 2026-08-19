@@ -158,16 +158,45 @@ export class RetentionSweeper {
   run(): RetentionSweepResult {
     const startedAt = this.#clock.nowUtcIso()
     const entries: RetentionEntryResult[] = []
+    let buffered = 0
     // Column-expiry fields first, orphan fields last: a `gift_combo` row is only
     // orphaned once the inbox rows for its base key are gone, so running the two
     // in the other order would always postpone the orphan cleanup by one sweep.
-    for (const field of orderedFields(this.#config.fields)) {
-      entries.push(this.#sweepField(field))
+    try {
+      for (const field of orderedFields(this.#config.fields)) {
+        entries.push(this.#sweepField(field))
+        // The consent rows are gone the moment this field returns, so the
+        // buffered names go with them *here* rather than at the end of the run
+        // (review round 3). The end-of-run call alone put the deletion and the
+        // memory boundary on opposite sides of every later field: with the
+        // shipped config `metrics_daily` is swept next, and a failing ledger
+        // write there aborted the run after the consent rows were already
+        // committed as deleted — leaving a deleted viewer's name attributable
+        // by `takeActor` until the next hourly tick (spec §12.4, D-9).
+        if (field.personalIdentifiers === 'consented_identity') {
+          buffered += this.#identity?.forgetDeleted() ?? 0
+        }
+      }
+    } catch (error) {
+      // The other half of the same boundary: an abort anywhere in the loop —
+      // including from the consent field itself, whose own ledger failure throws
+      // before the reconcile above — still reconciles the buffer before the
+      // error reaches the scheduler.
+      try {
+        this.#identity?.forgetDeleted()
+      } catch (reconcileError) {
+        // Logged, never thrown: replacing `error` here would hide why the sweep
+        // aborted, and both failures reach the scheduler's sink as one failed run.
+        this.#logger.error('buffered actors could not be reconciled after an aborted sweep', {
+          message: describe(reconcileError),
+        })
+      }
+      throw error
     }
     // Unconditional, and after every field: a row deleted here is deleted for
     // good, so the buffer must not be able to outlive it by one sweep. The cost
     // is bounded by the buffer (see `forgetDeleted`), not by the tables.
-    const buffered = this.#identity?.forgetDeleted() ?? 0
+    buffered += this.#identity?.forgetDeleted() ?? 0
     const finishedAt = this.#clock.nowUtcIso()
     const result: RetentionSweepResult = {
       startedAt,

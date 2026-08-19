@@ -243,6 +243,56 @@ function dumpDatabase(file: string): string {
   }
 }
 
+/**
+ * Makes one field's `retention_ledger` rows fail, and only that field's. Used to
+ * abort a run *after* the consent rows are already deleted, which is the shape of
+ * review round 3: the deletion is final, the run is not.
+ */
+function blockLedgerInsertsFor(file: string, fieldKey: string): void {
+  const database = openDatabase({ file, busyTimeoutMs: 1000 })
+  try {
+    database.exec(
+      `CREATE TRIGGER retention_ledger_block BEFORE INSERT ON retention_ledger
+       WHEN NEW.field_key = '${fieldKey}'
+       BEGIN SELECT RAISE(ABORT, 'ledger unavailable for ${fieldKey.split('.')[0]}'); END`,
+    )
+  } finally {
+    database.close()
+  }
+}
+
+/**
+ * A joined viewer with one committed but not yet drained message: the display
+ * name exists only in the directory's buffer when the deletion runs, which is
+ * the only way it can outlive the row.
+ */
+function withBufferedActor(): Fixture {
+  const active = build(true)
+  fixture = active
+  deliver(active, [
+    chatItem({
+      messageId: 'msg_test_join',
+      text: 'なのる',
+      channelId: JOINER,
+      displayName: JOINER_NAME,
+    }),
+  ])
+  active.sink.commit({
+    sourceShape: 'grpc',
+    items: [
+      chatItem({
+        messageId: 'msg_test_feed_buffered',
+        text: 'ごはん',
+        channelId: JOINER,
+        displayName: JOINER_NAME,
+      }),
+    ],
+    nextPageToken: 'token_test_buffered',
+  })
+  expect((active.directory as ConsentDirectory).pendingCount).toBe(1)
+  return active
+}
+
 /** The action reactions published so far, newest last. */
 function reactions(active: Fixture): { actor?: unknown }[] {
   return active.harness.publisher.effects.filter(
@@ -724,6 +774,39 @@ describe('consent mode (BOARD D-9)', () => {
     expect(directory.pendingCount).toBe(0)
     expect(directory.takeActor('msg_test_feed_buffered')).toBeNull()
     // The reference goes to the arbiter purge queue with the row (round 1, M4).
+    expect(directory.drainForgotten()).toContain(channelRef)
+  })
+
+  it('drops the buffered actor even when a later field aborts the sweep', () => {
+    // Review round 2 (B2) put the sweep and the buffer on the same boundary, but
+    // the reconcile still ran once, after the whole field loop. With the shipped
+    // config `metrics_daily` is swept immediately after `viewer_consent`, so the
+    // sequence the reviewer reproduced in round 3 was: the consent rows commit as
+    // deleted, the next field's ledger write fails, the run aborts before the
+    // reconcile — and `takeActor` still handed out the name of someone whose
+    // record had been deleted, until the scheduler's next hourly tick.
+    const active = withBufferedActor()
+    const directory = active.directory as ConsentDirectory
+    const channelRef = active.harness.store.findConsentByChannelId(JOINER)?.channelRef
+
+    // `metrics_daily` is `status: "planned"`, so its `table_absent` ledger row is
+    // written outside the sweeper's per-field error handling: a failure there
+    // aborts the whole run, with the consent rows already committed as deleted.
+    blockLedgerInsertsFor(active.harness.temp.file, 'metrics_daily.aggregates')
+    const sweeper = new RetentionSweeper({
+      store: active.harness.store,
+      clock: active.harness.clock,
+      config: loadRetentionConfig(),
+      identity: directory,
+    })
+    active.harness.clock.advance(31 * 24 * 60 * 60 * 1000)
+    expect(() => sweeper.run()).toThrow(/ledger unavailable for metrics_daily/)
+
+    // The consent deletion committed before the abort, so it is final...
+    expect(active.harness.store.countRows('viewer_consent')).toBe(0)
+    // ...and the memory it authorized went with it, in the same run.
+    expect(directory.pendingCount).toBe(0)
+    expect(directory.takeActor('msg_test_feed_buffered')).toBeNull()
     expect(directory.drainForgotten()).toContain(channelRef)
   })
 
