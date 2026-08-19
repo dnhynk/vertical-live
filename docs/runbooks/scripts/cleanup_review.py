@@ -10,6 +10,24 @@ try:
     d = json.loads(r.stdout); print("terminals stopped:", (d.get("result") or {}).get("stopped"))
 except Exception:
     print("terminal stop raw:", r.stdout[:200])
+def close_panes():
+    """`terminal stop` kills the agent but leaves idle panes titled review/review2; close those ptys too."""
+    r = subprocess.run([ORCA, "terminal", "list", "--json"], capture_output=True, text=True, encoding="utf-8", errors="replace")
+    try:
+        ts = json.loads(r.stdout).get("result", {}).get("terminals", [])
+    except Exception:
+        return 0
+    n = 0
+    for t in ts:
+        h = t.get("handle") or t.get("id"); title = (t.get("title") or "").strip()
+        if title == name:
+            rr = subprocess.run([ORCA, "terminal", "close", "--terminal", h, "--json"], capture_output=True, text=True, encoding="utf-8", errors="replace")
+            try:
+                n += 1 if json.loads(rr.stdout).get("ok") else 0
+            except Exception:
+                pass
+    return n
+print("panes closed:", close_panes())
 def git(*a):
     return subprocess.run(["git", "-C", wt] + list(a), capture_output=True, text=True, encoding="utf-8", errors="replace")
 cur = git("rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
