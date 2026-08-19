@@ -78,7 +78,7 @@
 > 진입점**이고, 이 저장소에는 **위 네 토큰을 실제로 보고하는 production 경로가 아직 없다**(호출부는 supervisor의
 > 테스트뿐이며 예시 토큰 `block_control_unavailable`을 쓴다). 즉 **승인표 5번은 "보고가 들어오면 멈춘다"는 정책이
 > 잠긴 것이지, 지금 자동 탐지가 돌고 있다는 뜻이 아니다.** 1번의 부재 구간 커버는 이 탐지·보고 경로가 구현되어야
-> 실제로 성립한다 — **후속 task `T22`에서 구현한다**(BOARD §1, 의존 T12·T19: 사람이 트리거하는 admin 보고
+> 실제로 성립한다 — **후속 task `T22`에서 구현한다**(BOARD 등록 2026-08-19, 의존 T12·T19: 사람이 트리거하는 admin 보고
 > 엔드포인트 + `filter_evasion_surge` 휴리스틱). **Gate 3 public 파일럿 전에 T22가 머지되어야 한다.**
 
 또한 §12.3은 "화면 노출 필터나 차단 제어가 불건전하면 먼저 이름 표시와 interaction CTA를 끄고, 안전을 보장할 수
@@ -132,5 +132,5 @@
 3. ~~`docs/tasks/BOARD.md` §2에 `D-*`로 기록한다.~~ → 완료(D-13, 코디네이터).
 4. ~~[`gate0-checklist.md`](gate0-checklist.md) 1.8 체크박스를 닫는다.~~ → 완료.
 5. **남은 것 → `T22`**: 2장의 네 토큰을 실제로 보고하는 탐지·보고 경로 구현(사람 트리거 admin 엔드포인트 +
-   `filter_evasion_surge` 휴리스틱). BOARD §1에 T22로 등록됐고 의존은 T12·T19다. Gate 3 public 파일럿
+   `filter_evasion_surge` 휴리스틱). BOARD에 T22로 등록됐고(2026-08-19) 의존은 T12·T19다. Gate 3 public 파일럿
    전에 필요하다.

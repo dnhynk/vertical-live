@@ -145,7 +145,7 @@ $ npm run build
 - **[중요] safe-stop 4개 토큰을 보고하는 production 경로가 없다.** `reportModerationHealth()`는 진입점만 있고
   `targeted_harassment`·`pii_exposure`·`sexual_or_self_harm_risk`·`filter_evasion_surge`를 실제로 보고하는
   코드가 저장소에 0건이다. D-13은 **호출 책임자 부재 구간을 자동 safe-stop이 덮는다**고 승인했으므로, 그 커버리지는
-  이 경로가 구현되어야 실제로 성립한다. → **`T22`로 등록됐다**(BOARD §1, 2026-08-19 round 1: 사람 트리거 admin
+  이 경로가 구현되어야 실제로 성립한다. → **`T22`로 등록됐다**(BOARD 2026-08-19, round 1: 사람 트리거 admin
   보고 엔드포인트 + `filter_evasion_surge` 휴리스틱, 의존 T12·T19). **Gate 3 public 파일럿 전에 T22가 머지되어야
   한다.** 귀속은 `moderation-call-table.md` 2·5장과 `gate0-checklist.md` §1.8에 적었다.
 - §1.2 audit 값 기입: 전용 채널·Google Cloud·OAuth 개설(D-16, 사용자) 후 체크리스트 §1.2를 닫는 후속 작업.
@@ -198,6 +198,9 @@ copied 5 migration(s) to dist/db/migrations · docs/ops/data-map.md up to date
 ### 이 라운드에서 하지 않은 것
 
 - **BOARD 편집 없음.** A-20·T22 등록은 코디네이터 소유다(`CLAUDE.md` §8, TASK_SPECS §T19). 이 라운드는 인용만 했다.
+  확인한 현재 상태(origin/main `6fba7b8`): **A-20은 BOARD §3 가정 표에 행이 있다**(`BOARD.md:88`). **T22는 §5
+  이력(`BOARD.md:231`)에만 있고 §1 작업 상태 표에는 아직 행이 없다** — 그래서 문서 인용을 "BOARD §1"이 아니라
+  "BOARD 등록 2026-08-19"로 적었다. §1 행 추가는 코디네이터 몫이라 worker_done에 보고했다.
 - **T22 구현 없음.** 보고 경로 구현은 T22의 범위다. 이 PR은 귀속만 고정한다.
 - **§1.5 체크박스를 닫지 않았다.** A-20은 가정이고 사용자 결정이 아니다 — 닫으면 리뷰가 지적한 과장을 반대 방향으로
   반복하는 것이다.

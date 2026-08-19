@@ -171,7 +171,7 @@ D-11 승인에 따라 **`input.provisional` 목록에서 제거**했다(`maxRawL
 > **상태 단서(정직 표기)**: 승인된 safe-stop 토큰 4개를 **실제로 보고하는 production 경로는 V1에 아직 없다**
 > (`reportModerationHealth()`는 진입점만 있다 — [`moderation-call-table.md`](moderation-call-table.md) 2장).
 > 그래서 D-13의 "호출 책임자 부재 구간을 자동 safe-stop이 덮는다"는 커버리지는 **아직 성립하지 않는다.**
-> 이 경로는 **후속 task `T22`에서 구현한다**(BOARD §1, 의존 T12·T19). **T22 머지 전에는 Gate 3 public
+> 이 경로는 **후속 task `T22`에서 구현한다**(BOARD 등록 2026-08-19, 의존 T12·T19). **T22 머지 전에는 Gate 3 public
 > 파일럿을 시작하지 않는다.** 이 체크박스는 D-13 승인 기록이므로 닫혀 있고, 구현 여부는 T22가 추적한다.
 
 ---
