@@ -187,9 +187,9 @@ npm run build         -> pass (contract/renderer/server/simulator/soak, migratio
 
 | # | 지적 | 재현(수정 전) | 고침 | SHA |
 |---|---|---|---|---|
-| B1 | `engine.ts:750`·`:1554`·`:1563` — 러닝 catch-up이 부르는 `#recoverDeadlines()`가 `this.#world = recovery.state`를 DB commit **앞**에 대입. `deadline_recovery` commit에 `SQLITE_BUSY` 1회를 주입하면 DB엔 과거 pending deadline이 남는데 메모리는 이미 제거/재무장돼 다음 pass가 재시도하지 않고 health가 `degraded`→`live`로 거짓 회복(SQL 저장소 권위·§10.2·§11 위반) | `first pump returned 0` / `lastFailure "database is locked"` / **`db overdue pending 7`** / `degraded ["writer_failing"]` → 락 해제 후 **`second pump returned 0`**, **`db overdue pending 7`**, `degraded []`, `lifecycle live` | commit 성공 뒤에만 `recovery.state` 채택(store-first, `#applySteps()`와 같은 원칙). deliver 중 거부되면 마지막으로 저장소가 확인한 state로 메모리 되돌림 → 다음 pass가 같은 gap을 다시 보고 재시도, 그때까지 health 유지. `start()`도 같은 함수를 쓰므로 동일 수정이 start 경로에 그대로 적용된다 | `17fee1a` |
-| B2 | `engine.ts:1584` — recovery의 `plan.deliver`가 ordinary loop의 `#settleAcknowledgedFallback()` durable-ACK 검사를 건너뜀. 원본 `PAID_THANKS` ACK 후 audit-state commit 전 재시작 + 31일 전진 + `start()`이면 원본 row `ackedAt`이 있는데도 `fallback:true` 효과 1건 발행(§9.2 "대체 감사 연출 **한 번**"·§11 유료 무결성 위반) | `acked_at 2026-08-16T00:00:01.100Z` 인데 **`fallback stagings 1`**, `settled_by_ack undefined` | recovered deliver도 `#settleAcknowledgedFallback()`을 먼저 통과시켜, ACK가 durable하면 효과를 내지 않고 의무만 원자적으로 닫는다(ordinary loop와 완전히 같은 경유) | `17fee1a` |
-| M1 | `engine.ts:693` — `#catchUpOverdueDeadlines()`/`#recoverDeadlines()`가 `void`라 recovery 내부 트랜잭션이 `runPending()` 반환값에 합산되지 않음. 31일 점프에서 `pump()`는 4를 반환했지만 `stateRevision`은 10 증가 | `returned 4` / `revision delta 10` / `metrics.commit delta 9` / `deadline_recovery_commit 1` (합계 = 10 `commitStateTransition`) | 두 메서드가 커밋 수를 반환하고 `#runPending()`이 합산 → 반환값 = 그 패스의 실제 `commitStateTransition` 수. 테스트가 `expect(commits).toBe(stateRevision 증가분)`으로 계약을 고정한다. 티켓의 "4 commits" 근거를 **10**으로 정정(위 §수정, §Result, §Follow-ups) | `17fee1a` |
+| B1 | `engine.ts:750`·`:1554`·`:1563` — 러닝 catch-up이 부르는 `#recoverDeadlines()`가 `this.#world = recovery.state`를 DB commit **앞**에 대입. `deadline_recovery` commit에 `SQLITE_BUSY` 1회를 주입하면 DB엔 과거 pending deadline이 남는데 메모리는 이미 제거/재무장돼 다음 pass가 재시도하지 않고 health가 `degraded`→`live`로 거짓 회복(SQL 저장소 권위·§10.2·§11 위반) | `first pump returned 0` / `lastFailure "database is locked"` / **`db overdue pending 7`** / `degraded ["writer_failing"]` → 락 해제 후 **`second pump returned 0`**, **`db overdue pending 7`**, `degraded []`, `lifecycle live` | commit 성공 뒤에만 `recovery.state` 채택(store-first, `#applySteps()`와 같은 원칙). deliver 중 거부되면 마지막으로 저장소가 확인한 state로 메모리 되돌림 → 다음 pass가 같은 gap을 다시 보고 재시도, 그때까지 health 유지. `start()`도 같은 함수를 쓰므로 동일 수정이 start 경로에 그대로 적용된다 | `0091a06` |
+| B2 | `engine.ts:1584` — recovery의 `plan.deliver`가 ordinary loop의 `#settleAcknowledgedFallback()` durable-ACK 검사를 건너뜀. 원본 `PAID_THANKS` ACK 후 audit-state commit 전 재시작 + 31일 전진 + `start()`이면 원본 row `ackedAt`이 있는데도 `fallback:true` 효과 1건 발행(§9.2 "대체 감사 연출 **한 번**"·§11 유료 무결성 위반) | `acked_at 2026-08-16T00:00:01.100Z` 인데 **`fallback stagings 1`**, `settled_by_ack undefined` | recovered deliver도 `#settleAcknowledgedFallback()`을 먼저 통과시켜, ACK가 durable하면 효과를 내지 않고 의무만 원자적으로 닫는다(ordinary loop와 완전히 같은 경유) | `0091a06` |
+| M1 | `engine.ts:693` — `#catchUpOverdueDeadlines()`/`#recoverDeadlines()`가 `void`라 recovery 내부 트랜잭션이 `runPending()` 반환값에 합산되지 않음. 31일 점프에서 `pump()`는 4를 반환했지만 `stateRevision`은 10 증가 | `returned 4` / `revision delta 10` / `metrics.commit delta 9` / `deadline_recovery_commit 1` (합계 = 10 `commitStateTransition`) | 두 메서드가 커밋 수를 반환하고 `#runPending()`이 합산 → 반환값 = 그 패스의 실제 `commitStateTransition` 수. 테스트가 `expect(commits).toBe(stateRevision 증가분)`으로 계약을 고정한다. 티켓의 "4 commits" 근거를 **10**으로 정정(위 §수정, §Result, §Follow-ups) | `0091a06` |
 | m1 | 티켓 `:157` — "T8/T15 테스트 파일은 하나도 수정하지 않았다"가 같은 문장의 `ingest.test.ts` 108+/3-와 모순 | — | "`ingest.test.ts`는 §T8e가 직접 지정한 예외, **그 외** T8/T15 테스트 파일 무변경"으로 정정 | 이 커밋 |
 
 ### 회귀 테스트 (되돌려 확인)
@@ -231,6 +231,107 @@ npm run build         -> pass (contract/renderer/server/simulator/soak, migratio
 반복: `npx vitest run apps/server/src/engine` **10회 연속** 매회 `Test Files 17 passed (17) / Tests 124
 passed (124)`, 실패 0. 이번 라운드는 `engine.ts`를 고쳤으므로 두 파일이 아니라 엔진 디렉터리 전체를 반복했다.
 rebase 전 기준으로 전체 `npm run test`도 4회 연속 `Tests 2093 passed | 1 skipped (2094)`로 실패 0이었다.
+
+## Review round 2
+
+리뷰어 verdict: `request_changes` (blocker 1). 라운드 1의 B1·B2·M1·m1은 **해소 확인**을 받았고(게이트 5개와
+head `0720d41`의 CI run `32301155923` 녹색 포함), 남은 blocker 하나는 라운드 1의 store-first 수정이 *첫*
+트랜잭션에만 적용됐다는 지적이다. 타당하다. 아래도 CLAUDE.md 디버깅 절차대로 **먼저 재현**한 뒤 고쳤다.
+
+> 라운드 1 표의 SHA는 그 뒤 두 번의 rebase로 다시 쓰였다: `17fee1a` → `00bed27` → **`0091a06`**. 위 표를
+> 현재 값으로 정정했다.
+
+### 가설 → 반증 관측 → 실측
+
+**가설.** recovery는 트랜잭션이 하나가 아니다. `deadline_recovery` commit 1건 + `plan.deliver` 1건당 1건이다.
+그런데 첫 commit이 영속시키는 `recovery.state`는 세계가 **deliver까지 마친 뒤**의 상태라 deliver 대상이 이미
+pending set에서 빠져 있고, 따라서 `deadlineTableDiff`가 그 행들을 `cancelled`로 닫는다. 그 뒤 per-deadline
+commit이 거부되면 `catch`가 `durable = recovery.state`로 되돌리는데 거기엔 **재시도할 것이 남아 있지 않다**.
+
+**이 가설을 반증할 관측.** 가설이 틀렸다면, recovery commit 직후 첫 전달 전에 락을 잡았을 때 (a) DB에 overdue
+pending 행이 남아 있고, (b) 락 해제 후 다음 pass가 그 전달을 완료해야 한다. 하나라도 관측되면 가설 기각.
+
+**실측.** `better-sqlite3` 두 번째 연결이 recovery commit **직후** `BEGIN IMMEDIATE`를 잡아 첫 전달이
+`busy_timeout` 만료로 실제 `SQLITE_BUSY`를 받게 한 probe(수정 전 = `engine.ts`만 되돌린 트리):
+
+```text
+pump  {"refused":0,"lastFailure":"database is locked","lifecycle":"degraded",
+       "overduePending":0,"overdueKinds":[],
+       "cancelled":["chapter_beat/replay","mission_close/coalesce","need_decay/coalesce",
+                    "weather_change/coalesce","world_phase/coalesce"],"gapRecovered":1}
+락 해제 후 {"retried":0,"overduePending":0,"gapRecovered":1,"lifecycle":"live"}
+start {"thrown":"database is locked","overduePending":0,"overdueKinds":[]}
+다음 부팅 {"overduePending":0,"lifecycle":"live","revision":2}
+```
+
+반증 관측은 하나도 나오지 않았다. §10.2가 "전달한다"고 정한 `replay`·`coalesce` 점유 5건이 전부 `cancelled`로
+닫혔고, 다음 pass는 0 커밋·`deadline_gap_recovered` 그대로 1·`live`(거짓 회복)였다. start 경로도 같다: 다음
+부팅이 같은 리비전대(revision 2)에서 overdue 0으로 올라온다 — 수정 후 같은 시나리오의 revision 9와 비교하면
+**전달 7건이 조용히 사라진 것**이다. 스펙 §10.2·§11 위반, 리뷰어 재현과 일치.
+
+### 고침
+
+| # | 지적 | 재현(수정 전) | 고침 | SHA |
+|---|---|---|---|---|
+| B3 | `engine.ts:1583`·`:1595`·`:1605`·`:1634` — `deadline_recovery` commit이 `recovery.state`(deliver가 이미 빠진 상태)를 영속시켜 deliver 행을 `cancelled`로 닫음. 이후 per-deadline commit이 거부되면 `catch`의 복원 지점에 재시도할 것이 없음 → pump 0·degraded인데 overdue 0, 다음 pump 0·`deadline_gap_recovered` 1·`live`(거짓 회복). start 경로는 다음 부팅이 같은 리비전에서 overdue 0으로 `live` | 위 §실측 블록(수정 전 4줄). `cancelled` 5행 = `chapter_beat/replay` + coalesce 4건, 다음 pass `retried 0`, 다음 부팅 `revision 2` | **(b) deliver deadline을 각 전달 트랜잭션이 성공할 때까지 durable pending으로 유지.** recovery commit이 채택하는 것은 그 commit이 실제로 정산한 것뿐 — 만료와 재무장된 후속뿐이고, 전달을 아직 빚진 타이머는 자기 트랜잭션이 `fired`로 닫을 때까지 `pending` 행으로 남는다. store-first가 첫 트랜잭션이 아니라 **트랜잭션마다** 성립한다. 새 모듈 함수 `withDeliveriesPending()`이 `recovery.state`에 그 타이머들을 되돌려 놓고, commit·`durable`·`this.#world`가 모두 그 상태를 쓴다. 전달 경로 자체는 무수정이라 durable-ACK 검사와 "결제 1건당 대체 감사 1회" 불변조건은 그대로 | `57bde88` |
+
+원자적 recovery(선택지 (a))를 택하지 않은 이유: `#applySteps()`는 이미 여러 step을 한 트랜잭션에 담지만, 만료·
+재무장은 step이 아니라 `recovery.state`에서 오므로 합치려면 `#applySteps()`에 base-state와 `expired` 인자를
+추가해야 하고, 한 리비전에 `deadline_recovery` 전이 종류가 사라진다. (b)는 §10.2가 이미 말하는 것 — "전달될
+점유는 아직 살아 있는 타이머" — 을 저장소에 그대로 적는 쪽이고, 실패 시 남은 전달만 다음 pump/start가 이어받는다.
+멱등성도 (b) 쪽이 강하다: 재시도에서 `plan.expired`·`plan.rescheduled`가 비므로 두 번째 `deadline_recovery`
+commit은 아예 일어나지 않고, 남은 전달만 실행된다(아래 `gapRecovered 2`·`retried 7`).
+
+### 회귀 테스트 (되돌려 확인)
+
+`clock-jump.test.ts`에 2건 추가 — pump 경로와 start 경로가 같은 창을 각각 덮는다. 락 시점만 한 커밋 뒤로 옮긴
+`lockAfterDeadlineRecovery()` 훅을 쓰며, 라운드 1과 마찬가지로 **스토어·트랜잭션·에러는 전부 진짜**다(§11 fault
+matrix "DB lock"). 훅은 `store.commitStateTransition`을 테스트에서 감싸는 것뿐이라 리뷰어가 소스 무수정으로
+동등 재현할 수 있다.
+
+`engine.ts`만 되돌려 실행한 결과 — 지적이 정확히 두 개의 실패를 만들고, 기존 6건은 그대로 통과한다:
+
+```text
+FAIL  ... > keeps a recovered delivery pending when its own transaction is refused
+      AssertionError: expected 0 to be greater than 0        (clock-jump.test.ts:285, overdue pending)
+FAIL  ... > keeps a recovered delivery pending when start() is refused, and finishes it on the next boot
+      AssertionError: expected 0 to be greater than 0        (clock-jump.test.ts:329, overdue pending)
+Tests  2 failed | 6 passed (8)
+```
+
+수정 후: `Tests 8 passed (8)`. 같은 probe의 수정 후 실측 —
+
+```text
+pump  {"refused":0,"lastFailure":"database is locked","lifecycle":"degraded",
+       "overduePending":5,
+       "overdueKinds":["need_decay/coalesce","mission_close/coalesce","weather_change/coalesce",
+                       "world_phase/coalesce","chapter_beat/replay"],
+       "cancelled":[],"gapRecovered":1}
+락 해제 후 {"retried":7,"overduePending":0,"gapRecovered":2,"lifecycle":"live"}
+start {"thrown":"database is locked","overduePending":5,"overdueKinds":[…같은 5건]}
+다음 부팅 {"overduePending":0,"lifecycle":"live","revision":9}
+```
+
+`cancelled` 0건, overdue 5건 잔존, 다음 pass가 7커밋으로 전달을 마치고서야 `live`. start 경로도 다음 부팅이
+같은 5건을 찾아 revision 9까지 올린다.
+
+### Round 3 게이트
+
+`git fetch origin && git rebase origin/main`(main이 3 커밋 전진) 뒤 5개 전부 재실행했다.
+
+```text
+npm run format:check  -> pass ("All matched files use Prettier code style!")
+npm run lint          -> pass (eslint 0, check-no-legacy-imports: ok (0 legacy imports),
+                               check-install-scripts: ok (4 reviewed, better-sqlite3 binding loads))
+npm run typecheck     -> pass (tsc --build tsconfig.json, 출력 없음, exit 0)
+npm run test          -> pass (Test Files 149 passed (149),
+                               Tests 2145 passed | 1 skipped (2146))
+npm run build         -> pass (contract/renderer/server/simulator/soak, migrations 6,
+                               docs/ops/data-map.md up to date)
+```
+
+반복: `npx vitest run apps/server/src/engine` **10회 연속** 매회 `Test Files 17 passed (17) / Tests 126
+passed (126)`, 실패 0.
 
 ## Not done / out of scope
 
