@@ -39,9 +39,12 @@ Gate 0 §1.4의 네 항목(일본 패널 모집 조건 · 5초 무음 이해 테
 | Prolific 참가자 국가 | https://researcher-help.prolific.com/en/articles/445224-who-are-the-participants-on-prolific | 2026-08-19 | 참가자는 대부분 OECD 회원국 거주, **일본 포함**. 모집 경로 후보 1개 확인 |
 | Analytics `country` 차원 | https://developers.google.com/youtube/analytics/dimensions | 2026-08-19 | `country`는 ISO-3166-1 alpha-2(일본 `JP`), 식별 불가 행은 `ZZ`. 일본 시장 증빙의 기본 차원 |
 | Analytics limited data | https://support.google.com/youtube/answer/9101241 | 2026-08-19 | "국가/지역 관련 지표·차원은 limited될 수 있다", **임계치는 비공개이며 변경 가능**. §15 Gate 4의 "국가 데이터 없으면 선언하지 않음"과 직접 연결 |
-| traffic source 값 | https://developers.google.com/youtube/analytics/dimensions#Traffic_Source_Dimensions | 2026-08-19 | `insightTrafficSourceType`에 `SHORTS`·`LIVE_REDIRECT` 등. **세로 Live 피드 유입이 어느 값인지는 문서에서 확정 못 함** → "확인 필요" |
+| traffic source 값 (Query API) | https://developers.google.com/youtube/analytics/dimensions#Traffic_Source_Dimensions | 2026-08-19 | `insightTrafficSourceType`에 `SHORTS`·`LIVE_REDIRECT` 등. **이 값 목록에는 세로 Live 피드에 대응하는 값이 없다**(확인일 기준) → Query API 쪽만 "확인 필요". 리뷰 round 2 m1에서 범위를 좁혔다 |
 | playback location 값 | https://developers.google.com/youtube/analytics/dimensions#Playback_Location_Dimensions | 2026-08-19 | `BROWSE`(홈·구독 피드 등 탐색 기능에서의 재생)는 traffic source가 아니라 **`insightPlaybackLocationType`** 값이다. 리뷰 round 1 m1에서 정정 |
-| engaged views 정의 | https://support.google.com/youtube/answer/9313698 | 2026-08-19 | 이 페이지에 engaged views의 **독립 정의가 없다**(평균 시청 지속시간 설명 안에서 1회 언급). 세로 Live 제공 여부 → "확인 필요" |
+| engaged views (도움말) | https://support.google.com/youtube/answer/9313698 | 2026-08-19 | 이 **도움말 페이지**에는 engaged views의 독립 정의가 없다(평균 시청 지속시간 설명 안에서 1회 언급). 남은 "확인 필요"는 **Studio 화면 표기**뿐이다 — API 정의는 아래 Reporting API 행에 있다. 리뷰 round 2 m1 |
+| **Reporting API** traffic source 값 (bulk) | https://developers.google.com/youtube/reporting/v1/reports/dimensions | 2026-08-19 | 채널 리포트 차원 `traffic_source_type` 값 **`31` = `Vertical live feed`**("Views originated from the vertical live feed."). Query API의 `insightTrafficSourceType`과 **다른 차원**이다. 리뷰 round 2 m1 |
+| **Reporting API** 채널 리포트 스키마 | https://developers.google.com/youtube/reporting/v1/reports/channel_reports | 2026-08-19 | `channel_traffic_source_a3` 차원 = `date, channel_id, video_id, live_or_on_demand, subscribed_status, country_code, traffic_source_type, traffic_source_detail`, 지표에 `engaged_views` 포함. 일본 × 세로 Live 유입 × engaged views가 **한 리포트 안에** 있다. 리뷰 round 2 m1 |
+| **Reporting API** 지표 정의 | https://developers.google.com/youtube/reporting/v1/reports/metrics | 2026-08-19 | `engaged_views` = "The number of times the channel's videos have been viewed past the initial seconds". 리뷰 round 2 m1 |
 
 ## Questions asked (orca ask) and answers
 
@@ -69,7 +72,7 @@ Gate 0 §1.4의 네 항목(일본 패널 모집 조건 · 5초 무음 이해 테
 
 | # | 기준 | 상태 | 근거 |
 |---|---|---|---|
-| 1 | 모든 숫자에 '제안' 라벨과 근거/무근거 표기; 외부 주장에 URL·확인 날짜 | met | 문서 §0이 라벨 규약을 정의하고, §1–§4의 모든 수치 표에 `제안(근거: …)` / `제안(근거 없음)` / `측정값(…)` / `확인 필요(출처 없음)` 중 하나가 붙어 있다. 외부 주장은 §6 출처 표([P1]–[P9])에 URL과 확인일 2026-08-19로 있다 |
+| 1 | 모든 숫자에 '제안' 라벨과 근거/무근거 표기; 외부 주장에 URL·확인 날짜 | met | 문서 §0이 라벨 규약을 정의하고, §1–§4의 모든 수치 표에 `제안(근거: …)` / `제안(근거 없음)` / `측정값(…)` / `확인 필요(출처 없음)` 중 하나가 붙어 있다. 외부 주장은 §6 출처 표([P1]–[P12])에 URL과 확인일 2026-08-19로 있다. 리뷰 round 2 m1에서 지적된 세로 Live 피드 유입·engaged views 서술의 결함(공식 Reporting API 문서를 확인하지 않고 "문서에서 확정 못 함"이라고 쓴 것)은 `%SHA%`에서 고쳤다 |
 | 2 | 콘텐츠 목록의 사건명이 T7 코드의 실제 사건 식별자와 일치(grep 증빙) | met | 문서 §3.1(a)에 grep 명령 3개, §3.2에 식별자마다 `파일:줄`. 아래 "재현한 명령" 참조 |
 
 ### 재현한 명령과 출력 (요약)
@@ -150,7 +153,8 @@ docs/tasks/TASK-T21-japan-panel-draft.md
   "다음 선택 30분 전 예고"는 현재 동작하지 않으며, 5초 테스트 Q4의 난이도와 직접 관련이 있다(문서 §2.6, §5 A-8).
 - 사용자 승인 뒤: 승인값을 BOARD `D-*`에 기록하고 `gate0-checklist.md` §1.4 체크박스를 채우는 후속 task.
   승인된 반복 장면 기준은 `world/content/tuning.ts`의 `FRESHNESS_MINIMUMS`를 교체하고 `provisional`에서 뺀다.
-- T19(PR #25)가 같은 `gate0-checklist.md`를 고치고 있다. #25가 먼저 머지되면 이 브랜치를 rebase한다.
+- ~~T19(PR #25)가 같은 `gate0-checklist.md`를 고치고 있다.~~ **#25는 `79a2e23`으로 머지됐고 round 2에서 rebase하며
+  §1.5 헤딩 충돌을 해소했다**(아래 "Review round 2").
 
 ## Review round 1
 
@@ -172,3 +176,44 @@ docs/tasks/TASK-T21-japan-panel-draft.md
 - rebase: `origin/main` `c6bbf0d` 위로 충돌 없이 rebase됐다. T19(PR #25)는 아직 `gate0-checklist.md`를 바꾸지 않았고, 이 브랜치의 §1.4 3줄은 그대로다(`git diff origin/main...HEAD -- docs/ops/gate0-checklist.md` = 3줄 추가).
 - 게이트 5개 재실행 결과는 위 "Gates (executed)"에 있다.
 - 문서 전체에 남은 `70%`·`90%`는 5초 테스트(§2·A-2)의 통과선뿐이며, 이는 Gate 0 승인 대상이지 Gate 4 절대값이 아니다.
+
+## Review round 2
+
+리뷰 verdict `request_changes`. **round 1의 major 1 + minor 5는 리뷰어가 전부 해소 확인**했고(회귀 점검 통과),
+수락 기준 2도 `met`으로 바뀌었다. 신규 지적은 minor 1건이고 그것만 고쳤다. **코드 변경 없음, 새 숫자·게이트 없음.**
+
+| # | 지적 | 확인한 사실 (직접 재확인) | 고친 내용 | SHA |
+|---|---|---|---|---|
+| m1 | `japan-panel-plan.md:365`(·`:419-420`)와 티켓 `:42,44`의 "세로 Live 피드 유입이 어느 차원의 어떤 값인지 공식 문서에서 확정 못 했다"·"engaged views 제공 여부 불확실"이 불완전·구식 | 지적이 맞다. 공식 문서를 직접 다시 열어 확인(2026-08-19): (a) **Reporting API** 채널 리포트 차원 `traffic_source_type` 값 **`31` = `Vertical live feed`**("Views originated from the vertical live feed.") [P10]; (b) `channel_traffic_source_a3` 차원 = `date, channel_id, video_id, live_or_on_demand, subscribed_status, country_code, traffic_source_type, traffic_source_detail`, 지표에 `engaged_views` 포함 [P11]; (c) `engaged_views` = "The number of times the channel's videos have been viewed past the initial seconds" [P12]. 반대로 **Query API** `insightTrafficSourceType`의 값 목록에는 확인일 기준 세로 Live 피드 대응 값이 **없다**(`SHORTS`·`LIVE_REDIRECT`는 다른 유입) [P7] | **경로를 둘로 분리해 다시 썼다.** §4.2에 "API가 둘이라는 것부터 구분한다" 항목을 넣고, bulk Reporting API 경로(값 `31`, `channel_traffic_source_a3`, `engaged_views`)를 **문서로 확인된 사실**로 URL·확인일과 함께 적었다. §4.1 "쓸 수 있다" 표에 Reporting API 채널 리포트 행을 추가하고, §5 A-6 제안에 같은 경로를 명시했다. **Gate 2 "확인 필요" 범위는 Query API·Studio 쪽으로 좁혔다**: §4.5 항목 1은 "Studio 화면 표기"만, 항목 2는 "Query API로 분리 가능한가"만 남기고, 문서상 경로를 실계정에서 실행해 본 적 없다는 사실을 항목 2-1로 분리했다. 6장에 [P10]·[P11]·[P12]를 추가했다. 티켓 "Sources consulted" 표의 두 행(`:42`·`:44`)도 같은 기준으로 고치고 새 출처 3행을 넣었다 | `%SHA%` |
+
+### Round 2 이후 재확인
+
+- rebase: T19(PR #25, `79a2e23`)가 머지돼 `origin/main` `fc402f3` 위로 rebase했다. `gate0-checklist.md` §1.5
+  헤딩에서 충돌 1건(main이 "— 승인 2026-08-19 (D-11)"을 붙임) → **main 쪽 헤딩을 취하고** 이 브랜치의 §1.4
+  "초안 제출" 2줄을 그대로 유지해 해소했다. 이 브랜치의 checklist 변경은 **여전히 3줄 추가뿐**이다
+  (`git diff origin/main...HEAD -- docs/ops/gate0-checklist.md`).
+- 새로 만든 숫자·합격선·게이트는 **없다.** 추가된 `31`은 통과선이 아니라 공식 문서의 **열거형 값**이다.
+- 게이트 5개 재실행 결과는 아래 "Gates (round 2)"에 있다.
+
+### Gates (round 2)
+
+리뷰 round 2 수정 뒤 `origin/main` `fc402f3` 위로 rebase한 상태에서 돌린 결과다.
+
+```text
+npm run format:check  -> pass ("All matched files use Prettier code style!")
+npm run lint          -> pass (eslint 0, check-no-legacy-imports: ok (0), check-install-scripts: ok (4 reviewed))
+npm run typecheck     -> pass (tsc --build, 출력 없음, exit 0)
+npm run test          -> pass (Test Files 139 passed (139), Tests 1957 passed | 1 skipped (1958), 106.95s, exit 0)
+npm run build         -> pass (contract/renderer/server/simulator/soak, migrations 5, data-map up to date, exit 0)
+```
+
+실행하지 않은 게이트: 없음.
+
+**테스트 1회 실패 기록(정직 보고).** 같은 커밋에서 돌린 **첫 번째** `npm run test`에서
+`apps/server/src/engine/ingest.test.ts:442`("answers 503 with a reason code while another connection holds the
+write lock")가 1건 실패했고, **이어서 돌린 2회는 모두 통과**했다(위 수치는 3회차, exit 0). 이 브랜치의 diff는
+문서 3개뿐이고 코드·config 변경이 0이므로(`git diff --name-only origin/main...HEAD`) 이 실패의 원인일 수 없다.
+해당 테스트는 다른 커넥션이 write lock을 쥔 상태의 SQLite 반환 코드에 의존하고(같은 파일이 `db_busy`와
+`db_locked` 두 reason을 다룬다), 이 테스트 파일은 `origin/main`의 `01d8f2a`(#20)에서 온 것으로 이 PR이
+건드리지 않았다. **재현 1/3회**이며 근본 원인까지 규명하지는 않았다 — 코디네이터 판단용으로만 남긴다.
+

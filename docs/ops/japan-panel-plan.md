@@ -340,6 +340,7 @@ Gate 3의 "24시간 산출물 사후 표본이 승인된 일일 챕터 완결성
 |---|---|
 | YouTube Analytics/Studio의 공식 aggregate: 조회수, 시청시간, 평균 시청 지속시간, traffic source, **geography(`country`)** | 스펙 §14.1, [P5] |
 | 내부 무식별 카운터: 유효 명령 수, 창 집계 결과, 명령 성공률 | 스펙 §14.1 "무식별 유효 명령 수", `apps/server/src/input/metrics.ts` |
+| YouTube **Reporting API**의 채널 bulk 리포트: `channel_traffic_source_a3`(`country_code`·`traffic_source_type`·`live_or_on_demand` 차원 × `engaged_views`·`views`·`watch_time_minutes` 등 지표) | 같은 §14.1의 공식 aggregate, [P10][P11][P12] — 4.2 |
 | 승인된 일본 패널 결과(1–2장) | 스펙 §15 Gate 4 "승인된 일본 패널" |
 
 | 못 쓴다(승인 전) | 근거 |
@@ -361,8 +362,24 @@ Gate 3의 "24시간 산출물 사후 표본이 승인된 일일 챕터 완결성
 - **유입 경로와 재생 위치는 서로 다른 차원이다.** `insightTrafficSourceType`에는 `SHORTS`(앞 영상에서 세로로
   스와이프해 넘어온 Shorts 시청 경험 유입), `LIVE_REDIRECT`(Live Redirect 유입) 등이 있고 [P7](확인 2026-08-19),
   `BROWSE`(홈 화면·구독 피드 등 탐색 기능에서 일어난 재생)는 유입 경로가 아니라 **`insightPlaybackLocationType`
-  의 값**이다 [P9](확인 2026-08-19). 두 차원을 한 표에 섞어 읽지 않는다. **세로 Live 피드 유입이 어느 차원의
-  어떤 값으로 집계되는지는 공식 문서에서 확정하지 못했다** — `확인 필요(출처 없음)`, Gate 2 실계정에서 확인한다.
+  의 값**이다 [P9](확인 2026-08-19). 두 차원을 한 표에 섞어 읽지 않는다.
+- **API가 둘이라는 것부터 구분한다.** 위 두 차원은 **Analytics Query API**(질의형)의 것이고, 아래의
+  `traffic_source_type`·`country_code`는 **Reporting API**(bulk 리포트)의 것이다. 이름이 비슷해도 서로 다른
+  차원이므로 값을 옮겨 쓰지 않는다.
+- **세로 Live 피드 유입은 bulk Reporting API에 문서로 정의돼 있다.** 채널 리포트 차원 `traffic_source_type`에
+  값 **`31` = `Vertical live feed`**("Views originated from the vertical live feed.")가 있다
+  [P10](확인 2026-08-19). 반면 Query API `insightTrafficSourceType`의 값 목록에는 **확인일 기준 세로 Live 피드에
+  대응하는 값이 없다**(`SHORTS`·`LIVE_REDIRECT`는 있지만 둘 다 다른 유입이다) [P7](확인 2026-08-19).
+- **일본 × 세로 Live 피드 × engaged views는 한 리포트 안에 같이 있다(문서 기준).** 채널 리포트
+  `channel_traffic_source_a3`의 차원은 `date, channel_id, video_id, live_or_on_demand, subscribed_status,
+  country_code, traffic_source_type, traffic_source_detail`이고 지표에 `engaged_views`가 있다
+  [P11](확인 2026-08-19). `engaged_views`는 "The number of times the channel's videos have been viewed past the
+  initial seconds"로 정의된다 [P12](확인 2026-08-19). 즉 `country_code`=`JP` × `traffic_source_type`=`31` ×
+  `live_or_on_demand`로 이 절의 일본 증빙을 뽑는 **경로가 문서상으로는 존재한다.** 다만 이 경로를 **실계정에서
+  실행해 본 적은 없고**, 위의 limited data 한계 [P6]는 그대로 적용된다.
+- **그래서 지금 남은 미확인은 Query API·Studio 쪽으로 좁혀진다.** Query API로 같은 분해가 되는지, Studio 화면이
+  이 유입과 engaged views를 어떤 이름으로 보여 주는지는 실계정에서만 확인된다 — `확인 필요(출처 없음)`,
+  Gate 2에서 확인한다(4.5).
 
 ### 4.3 패널과 Analytics의 역할 분담
 
@@ -416,8 +433,9 @@ Gate 3의 "24시간 산출물 사후 표본이 승인된 일일 챕터 완결성
 
 | # | 항목 | 상태 |
 |---|---|---|
-| 1 | `engaged views`가 세로 Live에도 제공되는가 | `확인 필요(출처 없음)` — 공식 도움말 [P8]에는 정의가 없고 "평균 시청 지속시간" 설명 안에서 한 번 언급될 뿐이다(확인 2026-08-19). Gate 2 실계정 Studio에서 확인한다 |
-| 2 | 세로 Live 피드 유입이 `insightTrafficSourceType`(유입 경로)·`insightPlaybackLocationType`(재생 위치) 중 어느 차원의 어떤 값으로 집계되는가 | `확인 필요(출처 없음)` — 4.2 |
+| 1 | **Studio 화면**이 세로 Live의 engaged views를 보여 주는가(그리고 어떤 이름으로) | API 쪽은 **문서로 확인됨**: Reporting API `channel_traffic_source_a3` 지표에 `engaged_views`가 있고 정의도 공개돼 있다 [P11][P12](확인 2026-08-19). 남은 미확인은 **Studio 화면 표기**뿐이다 — 공식 도움말 [P8]에는 독립 정의가 없다(확인 2026-08-19). `확인 필요(출처 없음)`, Gate 2 실계정 Studio에서 확인한다 |
+| 2 | **Analytics Query API**(`insightTrafficSourceType`)로 세로 Live 피드 유입을 분리할 수 있는가 | **bulk Reporting API는 문서로 확인됨**: `traffic_source_type` 값 `31` = `Vertical live feed` [P10](확인 2026-08-19). Query API 값 목록에는 확인일 기준 대응 값이 없다 [P7] — 실계정에서 다시 확인한다. `확인 필요(출처 없음)` — 4.2 |
+| 2-1 | 위 Reporting API 경로가 **실계정에서 실제로** 일본 행을 내주는가(limited data [P6] 포함) | 문서상 경로는 있으나 실행해 본 적 없음 → `확인 필요(출처 없음)`, Gate 2에서 확인한다 |
 | 3 | 명령 성공률을 `GET /metrics`에서 읽을 수 있는가 | **읽을 수 없다.** `commandSuccessRatio`는 구현되어 있으나(`apps/server/src/input/metrics.ts:25`) production 경로 `chatParserPort`가 `metrics`를 넘기지 않는다(`apps/server/src/youtube/chat/runtime.ts:124`). Gate 4에서 쓰려면 배선이 필요하다(5장 A-6) |
 
 ---
@@ -434,7 +452,7 @@ Gate 3의 "24시간 산출물 사후 표본이 승인된 일일 챕터 완결성
 | A-3 | 24시간 콘텐츠 목록 | 3.2의 어휘 표 전체(챕터 3 × 조합 9, 디렉터 규칙 10, 미션 5, 연출 변형 71) | |
 | A-4 | 패널 비용의 예산 처리 | 월 예산(D-14) 안에서 볼지 별도 항목으로 볼지 | |
 | A-5 | 반복 장면 기준 | 하루 고유 전이 ≥60, 반복 서사 장면 비율 ≤0.55, 사람 표본 검토 매일 6구간×5분 | |
-| A-6 | 일본 시장 증빙 방식 | geography `country=JP` aggregate + 패널, 국가 행이 비면 미달로 기록 | |
+| A-6 | 일본 시장 증빙 방식 | geography `country=JP` aggregate + 패널, 국가 행이 비면 미달로 기록. 세로 Live 유입까지 보려면 Reporting API `channel_traffic_source_a3`(`country_code` × `traffic_source_type`=`31` × `live_or_on_demand`)를 쓴다(4.2) | |
 | A-7 | Gate 4 **절차**(숫자 아님) | baseline 14일 → freeze(이때 통과선·표본 하한 숫자를 처음 커밋) → 겹치지 않는 validation 14일. 세 축의 지표와 식은 4.4, **절대 숫자는 이 문서가 제안하지 않는다**(스펙 §14.1) | |
 | A-8 | 후속 코드 작업 착수 여부 | (a) 명령 성공률을 `GET /metrics`에 노출, (b) `choice.previewLeadMs`를 실제 예고에 쓰기 — 둘 다 이 문서 범위 밖의 별도 task | |
 
@@ -455,6 +473,9 @@ Gate 3의 "24시간 산출물 사후 표본이 승인된 일일 챕터 완결성
 | [P7] | Google, "Dimensions — Traffic source dimensions" — `insightTrafficSourceType` 값(`SHORTS`, `LIVE_REDIRECT` 포함) | https://developers.google.com/youtube/analytics/dimensions#Traffic_Source_Dimensions | 2026-08-19 |
 | [P8] | YouTube Help, "Understand your YouTube engagement" — engaged views의 독립 정의 없음(확인 결과) | https://support.google.com/youtube/answer/9313698 | 2026-08-19 |
 | [P9] | Google, "Dimensions — Playback location dimensions" — `insightPlaybackLocationType` 값(`BROWSE` 포함) | https://developers.google.com/youtube/analytics/dimensions#Playback_Location_Dimensions | 2026-08-19 |
+| [P10] | Google, "Dimensions — YouTube Reporting API" — 채널 리포트 `traffic_source_type` 값 `31` = `Vertical live feed` | https://developers.google.com/youtube/reporting/v1/reports/dimensions | 2026-08-19 |
+| [P11] | Google, "Channel Reports — YouTube Reporting API" — `channel_traffic_source_a3`의 차원(`country_code`·`traffic_source_type`·`live_or_on_demand` 포함)과 지표(`engaged_views` 포함) | https://developers.google.com/youtube/reporting/v1/reports/channel_reports | 2026-08-19 |
+| [P12] | Google, "Metrics — YouTube Reporting API" — `engaged_views` 정의 | https://developers.google.com/youtube/reporting/v1/reports/metrics | 2026-08-19 |
 
 스펙이 이미 인용한 출처는 번호를 그대로 쓴다: [S28](fake engagement 정책), [S41](API Data 식별정보·동의),
 [S42](파생 지표 정책) — URL은 [`docs/PROJECT_SPEC.md`](../PROJECT_SPEC.md) §18에 있다.
