@@ -38,7 +38,7 @@
 | T19 | Gate 0 승인 반영(체크리스트·config·모더레이션 호출표) | T16, T18 | — | merged | t19-gate0-apply | #25 | `task_8633302d4f33` |
 | T20a | identity (B) 계약: 동의자 한정 actor·join/leave 명령 | T1b, T6 | ✔ | merged | t20a-identity-contract | #26 | `task_a7a6d0666e7c` |
 | T20b | identity (B) 서버: 동의 저장·authorDetails 처리·삭제·보존·compliance 문서 | T20a, T9, T13, T8 | — | changes_requested | t20b-identity-server | #28 | `task_d221f62c9dae` |
-| T20c | identity (B) 렌더러: 동의자 표시명·고지 CTA | T20a, T14 | — | in_review | t20c-identity-renderer | #29 | `task_f15883c91c9d` |
+| T20c | identity (B) 렌더러: 동의자 표시명·고지 CTA | T20a, T14 | — | changes_requested | t20c-identity-renderer | #29 | `task_f15883c91c9d` |
 | T21 | 일본 패널·5초 테스트·24h 콘텐츠 목록·증빙 초안(D-15) | T14, T16 | — | merged | t21-japan-panel-draft | #27 | `task_5ccfd178a887` |
 | T22 | 모더레이션 사유 보고 경로(사람 트리거 admin 엔드포인트 + filter_evasion_surge 휴리스틱; D-13 토큰 4개) | T12, T19 | — | pending | t22-moderation-report | | |
 
@@ -242,3 +242,4 @@
 | 2026-08-19 14:10 | R-T21-3 request_changes(minor 2: A-6→A-8 참조, :279→:278) → F-T21-3 완료(385267c, CI 녹색) → R-T21-4 `task_f8303c4121b1`(판정 원칙: 초안 PR은 추적성·정직성·근거 규칙만 blocker). 진행: F-T20b-1, T20c |
 | 2026-08-19 14:27 | 사용자 지시: 브랜치·워크트리·리뷰어 세션 즉시 정리 → 묵은 `review*/pr-N` 로컬 브랜치 41개 삭제, `cleanup_review.py` 추가(리뷰 worker_done 즉시 실행), review2 정리. T20c worker_done(succeeded, PR #29: read-model/identity.ts 단일 읽기·표시명 정리·슬롯 결합 규칙(모호하면 익명)·CTA 고지·dev 상태·스크린샷; 1991 tests; CI 32263076013 녹색). R-T20c-1 `task_23d8bcfac881` → `ctx_6ec0fdf7f55a`(review2). 진행: R-T21-4(review), F-T20b-1 |
 | 2026-08-19 14:55 | R-T21-4 **approve** → 최종 게이트(문서 3개, 코드 0, CI 32261174836 녹색) → **PR #27 squash merge**(main a536691). T21 worker release·worktree 제거, review 정리. **사용자 승인 대기: `docs/ops/japan-panel-plan.md` §5 A-1~A-8(제안 항목)** — 승인되면 gate0-checklist §1.4 체크. 진행: R-T20c-1(review2), F-T20b-1 |
+| 2026-08-19 15:09 | R-T20c-1 request_changes(blocker: snapshot-before-effect에서 이전 viewer 이름이 새 행동에 귀속 — 인과 키 없음; major: 영어 고지에 LEAVE·30일 누락; minor: UTF-16 단위 100 검사) → **F-T20c-1** `task_50cbf8518534`(effect.stateRevision과 lastAppliedAction 변화 시점의 snapshot.stateRevision 정확 조인·후보 1개일 때만, 아니면 ask→T20d [contract]). review2 정리. 진행: F-T20b-1 |
