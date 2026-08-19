@@ -155,7 +155,7 @@
 | 2 | 10회 반복 flaky 0 | met | `ingest.test.ts` + `clock-jump.test.ts` 10회 연속: 매회 `Tests 27 passed (27)`, 실패 0. 추가로 **전체 `npm run test` 10회 연속** 모두 `Tests 2091 passed \| 1 skipped (2092)` (아래 "정직 보고" 항목 참조) |
 | 3 | 게이트 5개 녹색 | met | 아래 Gates |
 | 4 | 기존 T8/T15 테스트 무변경 통과 | met | T8/T15 테스트 파일은 **하나도 수정하지 않았다**(`git diff --stat origin/main...HEAD`에 `engine.ts`·`config.ts`·`config.test.ts`·`ingest.test.ts`·`clock-jump.test.ts`·`config/default.json`·티켓만). 전체 스위트 146파일 2,091건 통과 |
-| 5 | PR CI 녹색 | met | 아래 Gates의 CI run |
+| 5 | PR CI 녹색 | met | PR #31, CI run `32292215316` **pass** (3m31s) — https://github.com/dnhynk/vertical-live/actions/runs/32292215316 |
 
 ### Gates (executed)
 
