@@ -1561,6 +1561,15 @@ export class StateEngine {
    * `#catchUpOverdueDeadlines()` saw nothing to retry and `/health` returned from
    * `degraded` to `live` with the gap still unrecovered (spec §10.2, §11).
    *
+   * A recovery is more than one transaction, so store-first has to hold *per
+   * transaction* (review round 2). The `deadline_recovery` commit adopts only the
+   * expiries and the re-armed successors; every timer the plan still owes a
+   * delivery stays a durable `pending` row until its own transaction fires it.
+   * Committing the whole recovered state up front closed those rows as
+   * `cancelled` and left the retry with nothing to find: a delivery refused after
+   * it dropped the occurrence for good, and the next pass — or the next boot —
+   * came back `live` on a gap it had never delivered.
+   *
    * Returns the number of `commitStateTransition` calls it made, so
    * `runPending()`'s "commits written by this pass" contract still holds when the
    * pass recovered a gap (review round 1, M1).
@@ -1573,13 +1582,18 @@ export class StateEngine {
       return 0
     }
 
+    // What the recovery may adopt before it has delivered anything: the plan's
+    // expiries and re-armed successors, with every timer it still owes a
+    // delivery put back into the pending set (review round 2).
+    const staged = withDeliveriesPending(this.#world, recovery.state, plan.deliver)
+
     let commits = 0
     // The state the store holds. Never behind what memory is serving.
     let durable = this.#world
 
     if (plan.expired.length > 0 || plan.rescheduled.length > 0) {
       const revision = this.#revision + 1
-      const snapshot = this.#buildSnapshot(revision, this.#processedSeq, recovery.state)
+      const snapshot = this.#buildSnapshot(revision, this.#processedSeq, staged)
       this.#store.commitStateTransition({
         snapshot,
         revision,
@@ -1587,22 +1601,21 @@ export class StateEngine {
         transitions: [{ revision, causedByEventKey: null, kind: 'deadline_recovery', at: now }],
         deadlines: deadlineTableDiff({
           previous: before,
-          next: pendingDeadlines(recovery.state),
+          next: pendingDeadlines(staged),
           expired: plan.expired,
         }),
-        engineState: serializeEngineState(recovery.state, this.#inputMode, this.#paidThanksEffects),
+        engineState: serializeEngineState(staged, this.#inputMode, this.#paidThanksEffects),
       })
-      durable = recovery.state
+      durable = staged
       this.#revision = revision
       this.#lastCommittedAt = this.#clock.nowUtcIso()
       this.#metrics.count('deadline_recovery_commit')
       this.#metrics.count('deadline_expired', plan.expired.length)
       commits += 1
     }
-    // Below the commit above this is speculative: the plan's only remaining
-    // effect on the pending set is that the timers about to be delivered leave
-    // it, and each delivery writes its own `fired` row.
-    this.#world = recovery.state
+    // Same set as the store now holds when the commit above ran, and identical to
+    // the current world when it did not: the deliveries are still pending in both.
+    this.#world = staged
 
     // Delivered at the recovery instant, not at the moment they were missed: the
     // policy has already decided *whether* the occurrence still happens, and the
@@ -1692,4 +1705,33 @@ function summarizeTransitions(transitions: readonly WorldTransition[]): string {
 
 function maxInstant(a: string, b: string): string {
   return toMillis(a) >= toMillis(b) ? a : b
+}
+
+/**
+ * The recovered state with the timers the plan still owes a delivery put back
+ * into the pending set (review round 2).
+ *
+ * `recoverDeadlines()` returns the state *after* the whole plan, deliveries
+ * included, because the world describes one recovery. The engine writes it in
+ * several transactions, so the state it may adopt before the first delivery is
+ * the recovered one plus the pending rows that delivery has not closed yet —
+ * otherwise a refused delivery would have dropped the occurrence for good.
+ *
+ * Keyed by the deadline table's own `(kind, key)` row id, and taken from
+ * `current.world.deadlines`, which is where the world's timers live: a paid
+ * substitute is derived from the audit state, is not in this array, and is
+ * therefore already pending for as long as the obligation is (spec §8.5, §9.2).
+ */
+function withDeliveriesPending(
+  current: WorldState,
+  recovered: WorldState,
+  deliver: readonly ScheduledDeadline[],
+): WorldState {
+  const owed = new Set(deliver.map(deadlineRowIdOf))
+  const held = current.world.deadlines.filter((deadline) => owed.has(deadlineRowIdOf(deadline)))
+  if (held.length === 0) return recovered
+  return {
+    world: { ...recovered.world, deadlines: [...recovered.world.deadlines, ...held] },
+    audit: recovered.audit,
+  }
 }

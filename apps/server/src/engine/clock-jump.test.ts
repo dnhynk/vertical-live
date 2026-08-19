@@ -49,6 +49,27 @@ function lockOnDeadlineRecovery(store: PersistenceStore, competitor: Database.Da
   }
 }
 
+/**
+ * Takes the database's write lock immediately *after* the recovery transition
+ * commits, so the first `plan.deliver` transaction of the same recovery — and
+ * only that one — ends in `SQLITE_BUSY` (review round 2).
+ *
+ * Same fault as `lockOnDeadlineRecovery`, one commit later: the window a real
+ * backup or antivirus scan opens does not care which of the recovery's
+ * transactions it lands between (spec §11 fault matrix "DB lock").
+ */
+function lockAfterDeadlineRecovery(store: PersistenceStore, competitor: Database.Database): void {
+  const commit = store.commitStateTransition.bind(store)
+  store.commitStateTransition = (input) => {
+    const result = commit(input)
+    if ((input.transitions ?? []).some((transition) => transition.kind === 'deadline_recovery')) {
+      store.commitStateTransition = commit
+      competitor.exec('BEGIN IMMEDIATE')
+    }
+    return result
+  }
+}
+
 /** The substitute acknowledgements among published effects (spec §9.2). */
 function fallbackStagings(effects: readonly Effect[]): Effect[] {
   return effects.filter((effect) => effect.kind === 'PAID_THANKS' && effect.payload.fallback)
@@ -229,6 +250,97 @@ describe('writer pass after a virtual clock jump', () => {
     expect(fallbackStagings(restarted.publisher.effects)).toHaveLength(0)
 
     restarted.engine.stop()
+    harness.dispose()
+  })
+
+  /**
+   * Review round 2. The recovery is two or more transactions: one
+   * `deadline_recovery` commit for the expiries and the re-armed successors,
+   * then one per delivery. The first commit used to persist a state the plan's
+   * deliveries had *already* been taken out of, so `deadlineTableDiff` closed
+   * those rows as `cancelled` — and a delivery refused after it left the engine
+   * with nothing overdue to retry: the next pass recovered a gap that had lost
+   * its deliveries, and `/health` returned to `live` (spec §10.2 replay/coalesce,
+   * §11 상태 복구).
+   */
+  it('keeps a recovered delivery pending when its own transaction is refused', () => {
+    const harness = createEngineHarness()
+    harness.engine.start()
+    const competitor = new Database(harness.temp.file)
+
+    harness.clock.advance(31 * DAY_MS)
+    const jumpedTo = harness.clock.nowUtcIso()
+    lockAfterDeadlineRecovery(harness.store, competitor)
+
+    const refused = harness.engine.pump()
+
+    expect(refused).toBe(0)
+    expect(harness.engine.health().lastFailure?.error ?? '').toMatch(/database is locked|BUSY/i)
+    expect(harness.engine.health().broadcastLifecycle).toBe('degraded')
+
+    // The recovery commit went through, so the expiries and the re-armed `skip`
+    // successors are durable — but every delivery it planned is still an overdue
+    // pending row, because no transaction has closed one yet.
+    const stranded = harness.store.listPendingDeadlines(jumpedTo)
+    expect(stranded.length).toBeGreaterThan(0)
+    // Named rather than counted: `replay` and `coalesce` are exactly the two
+    // policies whose occurrence §10.2 says must still be delivered, and they were
+    // the rows the old order wrote off as `cancelled`.
+    expect(stranded.map((row) => row.kind)).toContain('chapter_beat')
+    expect(stranded.some((row) => row.policy === 'coalesce')).toBe(true)
+
+    // The lock is gone (spec §9.1) and the next ordinary pass owes those
+    // deliveries. Before the fix it had nothing left to deliver and said `live`.
+    competitor.exec('ROLLBACK')
+    const retried = harness.engine.pump()
+
+    expect(retried).toBeGreaterThan(0)
+    expect(harness.store.listPendingDeadlines(jumpedTo)).toHaveLength(0)
+    expect(harness.engine.metrics().counters['deadline_gap_recovered']).toBe(2)
+    expect(harness.engine.health().broadcastLifecycle).toBe('live')
+    expect(harness.engine.health().degradedReasons).toEqual([])
+
+    competitor.close()
+    harness.dispose()
+  })
+
+  /**
+   * The same window on the `start()` path (review round 2). `start()` runs the
+   * identical recovery, so a delivery refused there used to leave the next boot
+   * loading a revision with nothing overdue: the process came up `live` having
+   * silently dropped the occurrences §10.2 says it owes.
+   */
+  it('keeps a recovered delivery pending when start() is refused, and finishes it on the next boot', () => {
+    const harness = createEngineHarness()
+    harness.engine.start()
+    harness.engine.stop()
+
+    const restarted = restartEngine(harness)
+    const competitor = new Database(harness.temp.file)
+    restarted.clock.advance(31 * DAY_MS)
+    const jumpedTo = restarted.clock.nowUtcIso()
+    lockAfterDeadlineRecovery(restarted.store, competitor)
+
+    expect(() => {
+      restarted.engine.start()
+    }).toThrow(/database is locked|BUSY/i)
+
+    const stranded = restarted.store.listPendingDeadlines(jumpedTo)
+    expect(stranded.length).toBeGreaterThan(0)
+    expect(stranded.map((row) => row.kind)).toContain('chapter_beat')
+    expect(stranded.some((row) => row.policy === 'coalesce')).toBe(true)
+
+    // Next boot, lock released: the gap is still there to be found.
+    competitor.exec('ROLLBACK')
+    competitor.close()
+    const rebooted = restartEngine(restarted)
+    rebooted.engine.start()
+
+    expect(rebooted.store.listPendingDeadlines(jumpedTo)).toHaveLength(0)
+    expect(rebooted.engine.health().broadcastLifecycle).toBe('live')
+    expect(rebooted.engine.health().lastFailure).toBeNull()
+
+    rebooted.engine.stop()
     harness.dispose()
   })
 })
