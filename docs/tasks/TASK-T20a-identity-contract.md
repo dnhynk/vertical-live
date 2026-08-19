@@ -56,16 +56,23 @@ T20b, 렌더러 표시는 T20c이며 이 PR은 계약만 바꾼다.
 
 | 주제 | URL | 확인일 | 결론 |
 |---|---|---|---|
+| `authorDetails.displayName`의 정의·길이 상한 | https://developers.google.com/youtube/v3/live/docs/liveChatMessages | 2026-08-19 | "The display name of the author's YouTube channel." 길이 상한은 **문서화되어 있지 않음** |
+| 채널 제목 길이 상한 | https://developers.google.com/youtube/v3/docs/channels | 2026-08-19 | `brandingSettings.channel.title`은 "maximum length of 30 characters". `snippet.title`에는 상한 명시 없음 |
 
 ## Questions asked (orca ask) and answers
 
 | 질문 | 답(코디네이터) | 반영 |
 |---|---|---|
+| 설계 6건(명령 문자열·channelRef 형식·Effect.actor 배치·동의 명령 운반 경로·envelope에 actor 미배치·확인 effect/fixture 범위)에 대한 권장안 승인 여부 | (대기 중 — 답이 오면 이 표와 코드에 반영) | 권장안대로 구현함. 답이 다르면 해당 항목만 수정 |
 
 ## Assumptions / provisional values
 
 | 항목 | 값 | 라벨 | 이유 |
 |---|---|---|---|
+| `DISPLAY_NAME_MAX_LENGTH` | 100 | provisional | [S3]가 `displayName` 상한을 문서화하지 않는다. 문서화된 유일한 채널 제목 상한(30자, `brandingSettings.channel.title`)보다 넉넉하게 잡아 정상 이름을 거부하지 않으면서 무한 길이를 막는 **저장 상한**이다. 화면 표시 길이는 T20c가 정한다 |
+| `channelRef` 형식 `ref_` + 32자 소문자 hex | 128bit CSPRNG를 서버가 발급 | provisional(코디네이터 답 대기) | 실제 channelId(`UC`+22자, 대문자 포함)가 구조적으로 담길 수 없어 합격 기준 1을 스키마로 보증한다 |
+| 동의/철회 명령 문자열 `JOIN`/`LEAVE`, ja `なのる`/`なまえけす`, icons 없음 | — | provisional(코디네이터 답 대기), `nativeReview: pending` | 名乗る=이름을 밝히다(동의), なまえけす=이름을 지우다(철회). 오타로 서로 바뀌지 않도록 철자 거리를 두었고, 이모지 별칭은 우발 입력으로 개인정보 저장·삭제가 일어나지 않도록 두지 않았다. §7.1이 VOTE_A/B/C에 아이콘을 주지 않은 것과 같은 이유 |
+| `ACTION_REACTION.actor`가 있으면 `contributionCount === 1` | refine으로 강제 | 결정(근거: 스펙 §2.6·§6.4) | 집계된 반응은 여러 기여자를 대표하므로 한 사람 이름을 붙이면 가짜 귀속이 된다 |
 
 ## Result
 
@@ -73,17 +80,28 @@ T20b, 렌더러 표시는 T20c이며 이 PR은 계약만 바꾼다.
 
 | # | 기준 | 상태(met/unmet/unverifiable) | 근거(테스트 파일·명령·출력) |
 |---|---|---|---|
+| 1a | 계약 테스트 통과 | met | `npm run test` — 139 files / 1955 passed, 1 skipped (아래 Gates) |
+| 1b | 스키마 생성물 최신 | met | `npm run schema:generate -w @vl/contract`로 재생성(6개 파일). 최신 여부는 `packages/contract/src/schema/registry.test.ts`와 `npm run build`의 `generate-schema.mjs --check`가 검사하며 둘 다 통과 |
+| 1c | fixture round-trip | met | `packages/contract/src/adapters/adapters.test.ts` — grpc/rest 각 24개 fixture가 같은 envelope를 만든다(235 tests). 기존 fixture는 **한 글자도 바뀌지 않았다**(`git diff --stat packages/contract/fixtures` = 변경 0) |
+| 1d | `UC`로 시작하는 24자 channelId 패턴이 contract 전체(스키마·fixture·테스트)에 0건 | met | `packages/contract/src/privacy.test.ts` "has no channel id anywhere in the package, schema and fixtures included" — `/UC[A-Za-z0-9_-]{22}/`로 `packages/contract` 전 텍스트 파일(node_modules·dist 제외)을 검사, 파일 수 하한 assert 포함 |
+| 2 | 닫힘(actor=null) 기존 fixture·테스트 무변경 통과(하위 호환) | met | fixture 24×2개 무변경. `apps/server`·`apps/renderer`·`tools/*` 소스는 **변경 0**이며 전체 1955 tests 통과. 계약 쪽에서 손댄 기존 테스트는 `privacy.test.ts`(명세가 개정을 지시), `event.test.ts`의 actor 1건(닫힘 단정을 D-9 규칙으로 재기술), `commands.test.ts`·`read-model.test.ts`·`adapters.test.ts`는 **추가만** |
+| 3 | 게이트 5개 녹색 | met | 아래 Gates |
+| 4 | PR CI 녹색 | (PR 생성 후 기입) | |
 
 ### Gates (executed)
 
 ```text
-아직 실행하지 않음
+(아래는 최종 실행 결과로 갱신)
 ```
 
 ## Not done / out of scope
 
-- 동의 저장·삭제·보존·compliance 문서(T20b), 렌더러 표시명·CTA 고지(T20c)
+- 동의 저장·삭제·보존·`authorDetails` 요청·compliance 문서(T20b), 렌더러 표시명·CTA 고지문(T20c).
+- 확인 effect("참여 등록됨") kind는 만들지 않았다. §T20a는 1종을 **허용**할 뿐 요구하지 않으며, 렌더링 주체(T20c)가 정해지기 전에 kind를 늘리면 렌더러의 exhaustive switch만 건드리게 된다. 필요해지면 [contract] 후속에서.
+- 새 fixture 파일 없음. 기존 grpc/rest fixture는 `authorDetails`를 다루지 않아 무변경이 하위 호환의 증거이고(합격 기준 2), 동의자 경로 표본은 계약 테스트 안의 명백한 합성값(`synthetic-viewer-1`, `ref_0123…`)으로 두었다.
+- `docs/ops/data-map.md`는 T20b 범위라 건드리지 않았다(빌드의 `generate-data-map.mjs --check`는 통과).
 
 ## Follow-ups
 
-- 
+- T6 파서는 아직 `COMMAND_ALIASES`(세계 명령)만 순회한다. 동의 명령을 실제로 받으려면 `ALLOWLISTED_COMMAND_ALIASES`로 lookup을 넓혀야 하며, 이는 의미 변경이므로 T20b 범위다.
+- `DISPLAY_NAME_MAX_LENGTH`는 공식 문서에 상한이 생기거나 audit에서 값이 정해지면 그 값으로 교체한다.
