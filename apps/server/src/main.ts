@@ -346,6 +346,10 @@ if (needsGrant) {
       clock: systemClock,
       config: loadRetentionConfig(),
       grantRevoker: vaultGrantRevoker(vault),
+      // A revocation deletes `viewer_consent` by SQL batch just as the sweep
+      // does, so the directory's buffered display names are reconciled on the
+      // same boundary (review round 3).
+      ...(consentDirectory === null ? {} : { identity: consentDirectory }),
       logger: stdoutLogger,
     }),
     onResult: (result) => {

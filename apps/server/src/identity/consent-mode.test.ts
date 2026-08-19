@@ -12,6 +12,7 @@ import { createCommandParserPort, loadInputConfig, parserLimits } from '../input
 import { loadRetentionConfig } from '../privacy/config.js'
 import { UserDeletionRequestHandler } from '../privacy/deletion-request.js'
 import { RetentionSweeper } from '../privacy/retention.js'
+import { RevocationHandler } from '../privacy/revocation.js'
 import type { LogFields } from '../secrets/redaction.js'
 import { testChatConfig } from '../testing/chat-test-support.js'
 import { FakeClock } from '../testing/fake-clock.js'
@@ -291,6 +292,17 @@ function withBufferedActor(): Fixture {
   })
   expect((active.directory as ConsentDirectory).pendingCount).toBe(1)
   return active
+}
+
+/** The production revocation handler, wired to this fixture's live directory. */
+function revocationHandler(active: Fixture): RevocationHandler {
+  return new RevocationHandler({
+    store: active.harness.store,
+    clock: active.harness.clock,
+    config: loadRetentionConfig(),
+    grantRevoker: { revoke: () => Promise.resolve('nothing_stored' as const) },
+    identity: active.directory as ConsentDirectory,
+  })
 }
 
 /** The action reactions published so far, newest last. */
@@ -808,6 +820,69 @@ describe('consent mode (BOARD D-9)', () => {
     expect(directory.pendingCount).toBe(0)
     expect(directory.takeActor('msg_test_feed_buffered')).toBeNull()
     expect(directory.drainForgotten()).toContain(channelRef)
+  })
+
+  it('drops the buffered actor when a revocation deletes the consent rows', async () => {
+    // Found while re-checking the round 3 boundary, not raised by a review round.
+    // `RevocationHandler` is the fourth path that removes `viewer_consent` rows
+    // (LEAVE, the T13 request, the 30-day sweep, this) and it took no reconciler
+    // at all: an OAuth withdrawal deleted every row by SQL batch while the live
+    // directory kept the buffered display names, so `takeActor` handed out a
+    // deleted viewer's name for the rest of the process's life.
+    const active = withBufferedActor()
+    const directory = active.directory as ConsentDirectory
+    const channelRef = active.harness.store.findConsentByChannelId(JOINER)?.channelRef
+
+    const revocation = await revocationHandler(active).handle({
+      type: 'auth_revoked',
+      at: active.harness.clock.nowUtcIso(),
+      reason: 'operator_revoked',
+    })
+
+    expect(revocation.entries.find((entry) => entry.table === 'viewer_consent')).toMatchObject({
+      outcome: 'deleted',
+      rowsDeleted: 1,
+    })
+    expect(active.harness.store.countRows('viewer_consent')).toBe(0)
+    expect(directory.pendingCount).toBe(0)
+    expect(directory.takeActor('msg_test_feed_buffered')).toBeNull()
+    expect(directory.drainForgotten()).toContain(channelRef)
+  })
+
+  it('drops the buffered actor when a field after the consent field aborts a revocation', async () => {
+    // The order-independence half. With the shipped config `viewer_consent` is
+    // the *last* authorized field, so no later field can abort after it today —
+    // this asserts that the guarantee comes from the boundary and not from that
+    // ordering, because reordering `config/retention.json` would otherwise
+    // silently reintroduce the round 3 blocker on this path.
+    const active = withBufferedActor()
+    const directory = active.directory as ConsentDirectory
+    // The shipped file's own two fields, swept in the opposite order — nothing
+    // about the policy is invented here, only the order it is walked in.
+    const shipped = loadRetentionConfig()
+    const order = ['viewer_consent.identity', 'ingest_inbox.envelope']
+    const fields = order.flatMap((key) => shipped.fields.filter((field) => field.key === key))
+    expect(fields.map((field) => field.key)).toEqual(order)
+    const reordered = { ...shipped, fields }
+
+    blockLedgerInsertsFor(active.harness.temp.file, 'ingest_inbox.envelope')
+    await expect(
+      new RevocationHandler({
+        store: active.harness.store,
+        clock: active.harness.clock,
+        config: reordered,
+        grantRevoker: { revoke: async () => 'nothing_stored' as const },
+        identity: directory,
+      }).handle({
+        type: 'auth_revoked',
+        at: active.harness.clock.nowUtcIso(),
+        reason: 'operator_revoked',
+      }),
+    ).rejects.toThrow(/ledger unavailable for ingest_inbox/)
+
+    expect(active.harness.store.countRows('viewer_consent')).toBe(0)
+    expect(directory.pendingCount).toBe(0)
+    expect(directory.takeActor('msg_test_feed_buffered')).toBeNull()
   })
 
   it('is inert in the closed configuration', () => {
