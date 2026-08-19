@@ -233,7 +233,15 @@ npm run build        -> @vl/contract, @vl/renderer, @vl/server, @vl/simulator, @
 node apps/renderer/scripts/capture.mjs --only consented-action --prefix TASK-T20c --measure-ms 3000
   dev/consented-action: stage 1080x1920, canvas 1080x1920, slots 4
   frame budget: 43 frames in 3.0s = 14.3 fps at 1080x1920 (headless, software WebGL)
+
+CI: run 32273655198 (`ffe3e61` — 코드 최종 상태) 녹색, 1m57s
+    https://github.com/dnhynk/vertical-live/actions/runs/32273655198
 ```
+
+위 5개 게이트는 rebase 뒤 로컬에서 한 번에 돌린 결과다(`6a4fd09` 시점). 그 뒤 커밋
+(`ffe3e61`)은 테스트 주석 한 곳만 고친 것이라 로컬에서는 `prettier --check`와
+`identity.test.ts`(29 passed)만 다시 돌렸고, 5개 게이트 전체는 위 CI run이 같은 트리에서
+돌렸다.
 
 스크린샷은 다시 찍었다. 고지 영어 줄이 바뀌었기 때문이고, 같은 이미지에서 `sample-viewer-1`
 pill이 여전히 슬롯에 붙어 있는 것이 리비전 조인이 실제 렌더러에서도 성립한다는 증거다.
