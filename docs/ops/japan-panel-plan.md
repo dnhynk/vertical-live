@@ -170,7 +170,7 @@
   그것은 **패널이 답을 주어야 할 튜닝 질문**이지 이 문서가 미리 정할 값이 아니다.
 - `choice.previewLeadMs`(30분)는 **정의만 있고 이 값을 읽는 런타임·reducer 코드가 없다.** grep `previewLeadMs`의
   전부는 정의 3곳이다: `apps/server/src/world/content/tuning.ts:79`(타입), 같은 파일 `:168`(기본값),
-  `config/default.json:279`(설정값). 소비처는 0곳이므로 "선택 30분 전 예고"는 현재 동작하지 않는다. 화면을
+  `config/default.json:278`(설정값). 소비처는 0곳이므로 "선택 30분 전 예고"는 현재 동작하지 않는다. 화면을
   고쳐야 한다면 T21이 아니라 별도 task다(5장 A-8).
 
 ### 2.7 언제 다시 돌리는가
@@ -436,7 +436,7 @@ Gate 3의 "24시간 산출물 사후 표본이 승인된 일일 챕터 완결성
 | 1 | **Studio 화면**이 세로 Live의 engaged views를 보여 주는가(그리고 어떤 이름으로) | API 쪽은 **문서로 확인됨**: Reporting API `channel_traffic_source_a3` 지표에 `engaged_views`가 있고 정의도 공개돼 있다 [P11][P12](확인 2026-08-19). 남은 미확인은 **Studio 화면 표기**뿐이다 — 공식 도움말 [P8]에는 독립 정의가 없다(확인 2026-08-19). `확인 필요(출처 없음)`, Gate 2 실계정 Studio에서 확인한다 |
 | 2 | **Analytics Query API**(`insightTrafficSourceType`)로 세로 Live 피드 유입을 분리할 수 있는가 | **bulk Reporting API는 문서로 확인됨**: `traffic_source_type` 값 `31` = `Vertical live feed` [P10](확인 2026-08-19). Query API 값 목록에는 확인일 기준 대응 값이 없다 [P7] — 실계정에서 다시 확인한다. `확인 필요(출처 없음)` — 4.2 |
 | 2-1 | 위 Reporting API 경로가 **실계정에서 실제로** 일본 행을 내주는가(limited data [P6] 포함) | 문서상 경로는 있으나 실행해 본 적 없음 → `확인 필요(출처 없음)`, Gate 2에서 확인한다 |
-| 3 | 명령 성공률을 `GET /metrics`에서 읽을 수 있는가 | **읽을 수 없다.** `commandSuccessRatio`는 구현되어 있으나(`apps/server/src/input/metrics.ts:25`) production 경로 `chatParserPort`가 `metrics`를 넘기지 않는다(`apps/server/src/youtube/chat/runtime.ts:124`). Gate 4에서 쓰려면 배선이 필요하다(5장 A-6) |
+| 3 | 명령 성공률을 `GET /metrics`에서 읽을 수 있는가 | **읽을 수 없다.** `commandSuccessRatio`는 구현되어 있으나(`apps/server/src/input/metrics.ts:25`) production 경로 `chatParserPort`가 `metrics`를 넘기지 않는다(`apps/server/src/youtube/chat/runtime.ts:124`). Gate 4에서 쓰려면 배선이 필요하다(5장 A-8) |
 
 ---
 

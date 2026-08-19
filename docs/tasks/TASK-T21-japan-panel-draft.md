@@ -147,9 +147,9 @@ docs/tasks/TASK-T21-japan-panel-draft.md
 
 - **명령 성공률이 `GET /metrics`에 노출되지 않는다.** `commandSuccessRatio`는 구현되어 있으나
   (`apps/server/src/input/metrics.ts:25`) production 경로 `chatParserPort`가 `metrics`를 주입하지 않는다
-  (`apps/server/src/youtube/chat/runtime.ts:124`). Gate 4 참여 축에서 쓰려면 배선이 필요하다(문서 §4.5, §5 A-6).
+  (`apps/server/src/youtube/chat/runtime.ts:124`). Gate 4 참여 축에서 쓰려면 배선이 필요하다(문서 §4.5, §5 A-8).
 - **`choice.previewLeadMs`(30분)가 정의만 있고 읽는 코드가 없다.** 정의는 `world/content/tuning.ts:79`(타입)·
-  `:168`(기본값)·`config/default.json:279`(설정값) 3곳이고 런타임·reducer 소비처는 0곳이다.
+  `:168`(기본값)·`config/default.json:278`(설정값) 3곳이고 런타임·reducer 소비처는 0곳이다.
   "다음 선택 30분 전 예고"는 현재 동작하지 않으며, 5초 테스트 Q4의 난이도와 직접 관련이 있다(문서 §2.6, §5 A-8).
 - 사용자 승인 뒤: 승인값을 BOARD `D-*`에 기록하고 `gate0-checklist.md` §1.4 체크박스를 채우는 후속 task.
   승인된 반복 장면 기준은 `world/content/tuning.ts`의 `FRESHNESS_MINIMUMS`를 교체하고 `provisional`에서 뺀다.
@@ -168,7 +168,7 @@ docs/tasks/TASK-T21-japan-panel-draft.md
 | m1 | `:360-362` P7 enum 귀속 오류 | 공식 문서 확인(2026-08-19): `BROWSE`는 `insightPlaybackLocationType`("views that took place on the YouTube home page or home screen, in the user's subscription feed, or in another YouTube browsing feature"), `SHORTS`·`LIVE_REDIRECT`는 `insightTrafficSourceType` 값 | §4.2를 두 차원으로 분리하고 "두 차원을 한 표에 섞어 읽지 않는다"를 추가. 재생 위치 차원 출처 `[P9]`(`#Playback_Location_Dimensions`, 앵커 존재 확인)를 6장에 추가하고 `[P7]` 설명을 traffic source로 한정. §4.5 항목 2도 "어느 차원의 어떤 값인가"로 고쳤다 | `45d0319` |
 | m2 | `:273` `crisis_sleeping`이 `apps/server/src/world`에 없음 | `grep -rn crisis_sleeping` 결과는 renderer 2곳(`preview-states.ts:302`, `palette.test.ts:189`)의 textKey·iconId뿐이고 world에는 0건. 실제 식별자는 crisis id `sleeping`(`world/types.ts:43`), 전이 `crisis_entered`(`world/reducer.ts:215`), 연출 변형 `crisis_sleep_curl`(`world/content/variants.ts:492`) | night 행을 `crisis_entered -> sleeping`(임계 판정 `world/creature.ts:102`, 연출 변형 `crisis_sleep_curl`)로 바꾸고 file:line을 붙였다 | `45d0319` |
 | m3 | `:58` `cost 0 (no source)`에 §0 라벨이 없음 | 지적이 맞다. §0은 "라벨 없는 숫자는 이 문서에 없다"고 선언해 놓았다 | `경로 자체의 비용 **0원** \`제안(근거 없음)\` — 견적을 받아본 적이 없다`로 고쳤다 | `45d0319` |
-| m4 | `:171-172` previewLeadMs grep 주장이 거짓(`config/default.json:279`에도 정의) | 지적이 맞다. `previewLeadMs` 전체 출현은 정의 3곳(`tuning.ts:79` 타입, `tuning.ts:168` 기본값, `config/default.json:279` 설정값)이고, 이 값을 읽는 코드는 0곳이다(`world` 섹션을 읽는 config 로더도 없다) | 세 정의 위치를 그대로 적고, 사실로 유지되는 부분("런타임·reducer 소비처 0곳 → 30분 예고는 동작하지 않는다")만 남겼다. 같은 줄의 잘못된 상호참조 `5장 A-5`(반복 장면 기준)를 `A-8`(후속 코드 작업)로 정정했다 — 리뷰 지적 밖이지만 같은 두 줄 안의 오기다. 티켓 Follow-up의 같은 서술도 맞췄다 | `45d0319` |
+| m4 | `:171-172` previewLeadMs grep 주장이 거짓(`config/default.json:278`에도 정의) | 지적이 맞다. `previewLeadMs` 전체 출현은 정의 3곳(`tuning.ts:79` 타입, `tuning.ts:168` 기본값, `config/default.json:278` 설정값)이고, 이 값을 읽는 코드는 0곳이다(`world` 섹션을 읽는 config 로더도 없다) | 세 정의 위치를 그대로 적고, 사실로 유지되는 부분("런타임·reducer 소비처 0곳 → 30분 예고는 동작하지 않는다")만 남겼다. 같은 줄의 잘못된 상호참조 `5장 A-5`(반복 장면 기준)를 `A-8`(후속 코드 작업)로 정정했다 — 리뷰 지적 밖이지만 같은 두 줄 안의 오기다. 티켓 Follow-up의 같은 서술도 맞췄다 | `45d0319` |
 | m5 | 티켓 Result의 변경 파일 수 2 ≠ 실제 3 | `git diff --name-only origin/main...HEAD` = checklist·plan·ticket 3개 | 숫자 대신 `--name-only` 실제 출력을 붙였다 | `45d0319` |
 
 ### Round 1 이후 재확인
