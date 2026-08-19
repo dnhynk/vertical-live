@@ -15,6 +15,15 @@ import {
 import { systemClock, type Clock } from '../clock.js'
 import { loadDatabaseConfig, type LoadDatabaseConfigOptions } from './config.js'
 import {
+  deleteConsent,
+  findConsentByChannelId,
+  findConsentByChannelRef,
+  refreshConsent,
+  upsertConsent,
+  type ConsentDeleteAudit,
+  type ConsentDeleteResult,
+} from './consent.js'
+import {
   EffectNotPublishedError,
   PersistenceInvariantError,
   ProcessedCursorError,
@@ -53,6 +62,8 @@ import {
   type BroadcastTransitionTarget,
 } from './types.js'
 import type {
+  ConsentRecord,
+  ConsentSelector,
   DeadlineRecord,
   InboxInput,
   InboxSubmission,
@@ -1014,6 +1025,40 @@ export class PersistenceStore {
 
   listRetentionLedger(filter: RetentionLedgerFilter = {}): RetentionLedgerRow[] {
     return listRetentionLedger(this.#db, filter)
+  }
+
+  // --------------------------------------------------------- viewer consent
+  //
+  // T20b's surface (BOARD D-9, migration 006). The statements live in
+  // `db/consent.ts`; these methods keep the consent store on the same
+  // connection as everything else, so a deletion and its `retention_ledger` row
+  // share one transaction (spec §12.4).
+
+  /** Records or renews one viewer's consent, keeping the issued `channelRef`. */
+  upsertConsent(record: ConsentRecord): ConsentRecord {
+    return upsertConsent(this.#db, record)
+  }
+
+  findConsentByChannelId(channelId: string): ConsentRecord | null {
+    return findConsentByChannelId(this.#db, channelId)
+  }
+
+  findConsentByChannelRef(channelRef: string): ConsentRecord | null {
+    return findConsentByChannelRef(this.#db, channelRef)
+  }
+
+  /** Re-reads the Authorized Data columns from a new message ([S41] III.E.4.c). */
+  refreshConsent(input: {
+    channelId: string
+    displayName: string
+    lastActiveAt: string
+  }): boolean {
+    return refreshConsent(this.#db, input)
+  }
+
+  /** Deletes one viewer's consent row and its audit row in one transaction. */
+  deleteConsent(selector: ConsentSelector, audit: ConsentDeleteAudit): ConsentDeleteResult {
+    return deleteConsent(this.#db, selector, audit)
   }
 
   // ------------------------------------------------------- broadcast resources

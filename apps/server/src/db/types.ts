@@ -296,3 +296,27 @@ export interface RecoveryState {
   readonly dueDeadlines: readonly PersistedDeadline[]
   readonly checkpoints: readonly SourceCheckpoint[]
 }
+
+/**
+ * One consented viewer (migration 006, BOARD D-9).
+ *
+ * The whole record lives in `viewer_consent` and nowhere else. `channelId` is
+ * the raw YouTube channel id and never leaves the server's memory or this row;
+ * `channelRef` is the opaque reference the contract carries instead
+ * (`CHANNEL_REF_PATTERN`), so nothing downstream can learn the id.
+ */
+export interface ConsentRecord {
+  readonly channelRef: string
+  readonly channelId: string
+  readonly displayName: string
+  readonly consentedAt: string
+  /** Last message that refreshed this row ([S41] III.E.4.c 30-day rule). */
+  readonly lastActiveAt: string
+  /** Notice text version the viewer agreed to (docs/ops/identity-consent.md). */
+  readonly noticeVersion: string
+}
+
+/** Which consent row to act on. Both selectors address exactly one viewer. */
+export type ConsentSelector =
+  | { readonly channelId: string }
+  | { readonly channelRef: string }

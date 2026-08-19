@@ -1,4 +1,4 @@
-import type { CommandRef } from '@vl/contract'
+import type { CommandRef, ConsentCommandRef } from '@vl/contract'
 
 /**
  * Why a message did not become a command. Spec §7.3(1) and §12.3 allow the
@@ -27,6 +27,8 @@ export type RejectionReason =
   | 'invalid_argument'
   /** `VOTE_A/B/C` outside an open vote window or with the identity gate closed. */
   | 'vote_disabled'
+  /** `JOIN`/`LEAVE` while the consent gate is closed (BOARD A-1, D-9). */
+  | 'consent_disabled'
 
 export const REJECTION_REASONS: readonly RejectionReason[] = [
   'too_long',
@@ -42,12 +44,25 @@ export const REJECTION_REASONS: readonly RejectionReason[] = [
   'extraneous_text',
   'invalid_argument',
   'vote_disabled',
+  'consent_disabled',
 ]
 
 export interface ParsedCommand {
   readonly status: 'accepted'
   readonly command: CommandRef
   /** Always true for an accepted message; kept so both arms share the field. */
+  readonly commandLike: true
+}
+
+/**
+ * An accepted consent command (BOARD D-9). It is a **separate status** from
+ * `accepted` on purpose: everything that moves the world switches on
+ * `status === 'accepted'`, so a `JOIN` cannot reach a world code path — not the
+ * arbiter, not a tally, not an effect (TASK_SPECS §T20a, §T20b).
+ */
+export interface ParsedConsentCommand {
+  readonly status: 'accepted_consent'
+  readonly consentCommand: ConsentCommandRef
   readonly commandLike: true
 }
 
@@ -62,7 +77,7 @@ export interface Rejection {
   readonly commandLike: boolean
 }
 
-export type ParseResult = ParsedCommand | Rejection
+export type ParseResult = ParsedCommand | ParsedConsentCommand | Rejection
 
 /**
  * State the parser needs but does not own. Both flags come from the world
@@ -71,8 +86,12 @@ export type ParseResult = ParsedCommand | Rejection
  */
 export interface ParseContext {
   /**
-   * Identity feature gate (spec §6.4, §7.4, BOARD A-1). While it is closed
-   * there is no per-user attribution, so branch voting is off.
+   * Identity feature gate (spec §6.4, §7.4). BOARD A-1 kept it closed and D-9
+   * redefined what "open" means: consent mode, in which a viewer who sent
+   * `JOIN` is attributable and nobody else is. While it is closed there is no
+   * per-user attribution, so branch voting is off and the consent commands
+   * themselves are refused — accepting a `JOIN` that stores nothing would be a
+   * promise the closed configuration cannot keep.
    */
   readonly identityGateOpen: boolean
   /** Whether a choice window is currently open (spec §6.4, §7.1). */

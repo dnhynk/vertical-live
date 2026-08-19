@@ -1,6 +1,6 @@
-import { CommandRefSchema, type CommandName } from '@vl/contract'
+import { CommandRefSchema, ConsentCommandRefSchema, type CommandName } from '@vl/contract'
 
-import { matchAlias } from './aliases.js'
+import { isConsentCommandName, matchAlias } from './aliases.js'
 import { moderate } from './moderation.js'
 import { normalizeText, tokenize } from './normalize.js'
 import type { ParseContext, ParseResult, RejectionReason } from './types.js'
@@ -18,6 +18,10 @@ import type { ParseContext, ParseResult, RejectionReason } from './types.js'
  *  3. moderation — link, personal data, banned term (spec §12.3 discards these
  *     "regardless of any command effect", so they outrank the shape rules).
  *  4. `no_command` — the first token is not in the allowlist.
+ *  4a. consent commands (`JOIN`/`LEAVE`, BOARD D-9) leave here in their own
+ *     result shape. They take no argument at all, and while the consent gate is
+ *     closed they are refused with `consent_disabled` — a `JOIN` that stores
+ *     nothing would be a consent the system did not honour.
  *  5. `extraneous_text` / `invalid_argument` — the accepted shape is exactly
  *     `command` or `command <short word>`, and the word may not itself be a
  *     command. The word is letters and digits only: the contract's charset also
@@ -79,6 +83,24 @@ export function parseMessage(
   if (name === null) {
     return reject('no_command', false)
   }
+
+  if (isConsentCommandName(name)) {
+    if (!context.identityGateOpen) {
+      return reject('consent_disabled', true)
+    }
+    // No argument slot: `JOIN` and `LEAVE` are whole decisions, and a trailing
+    // word would be a second place a chat line could try to ride along
+    // (contract `ConsentCommandRefSchema`).
+    if (tokens.length > 1) {
+      return reject('extraneous_text', true)
+    }
+    const consentCommand = ConsentCommandRefSchema.safeParse({ name, argument: null })
+    if (!consentCommand.success) {
+      return reject('no_command', true)
+    }
+    return { status: 'accepted_consent', consentCommand: consentCommand.data, commandLike: true }
+  }
+
   const argument = tokens[1] ?? null
   // A second command is not an argument: `feed play` is two intents in one
   // message, and picking one of them would be guessing at meaning.

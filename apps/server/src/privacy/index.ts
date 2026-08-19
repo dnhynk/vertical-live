@@ -8,8 +8,10 @@
  */
 export {
   AUTH_REVOKED_REASONS,
+  CONSENT_FIELD_KEY,
   DEFAULT_RETENTION_CONFIG_PATH,
   POLICY_MAX_CLIENT_SIDE_DELETION_DAYS,
+  POLICY_MAX_CONSENT_IDENTITY_DAYS,
   POLICY_MAX_PROVIDER_SIDE_DELETION_DAYS,
   POLICY_MAX_SOURCE_DATA_DAYS,
   POLICY_MAX_USER_REQUEST_DELETION_DAYS,
@@ -26,6 +28,7 @@ export {
   type RetentionExpiry,
   type RetentionField,
   type RetentionFieldStatus,
+  type RetentionPersonalIdentifiers,
   type RetentionRefreshField,
   type RetentionSweepConfig,
   type RevocationClass,
@@ -49,7 +52,10 @@ export {
   type UserDeletionRequestOptions,
 } from './deletion-request.js'
 export {
+  CONSENT_SCHEMA_OBJECTS,
+  CONSENT_TABLE,
   IDENTITY_NAME_PARTS,
+  findConsentIdentityColumns,
   findIdentityColumns,
   findIdentitySchemaText,
   matchIdentityPart,

@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url'
 
 import type { RetentionPolicyKind, RetentionSource } from '../db/index.js'
 import type { AuthRevokedReason } from '../youtube/auth/events.js'
+import { CONSENT_TABLE } from './identity-columns.js'
 
 /**
  * Loader for `config/retention.json` — the field-level retention schedule spec
@@ -19,10 +20,12 @@ import type { AuthRevokedReason } from '../youtube/auth/events.js'
  *   `refresh` would be a promise the sweeper cannot keep.
  * - A client-side consent withdrawal and a user deletion request may allow at
  *   most 7 days; a provider-side revocation at most 30 (spec §12.4).
- * - Every field must declare `personalIdentifiers: "none"`. While the identity
- *   gate is closed the schema has no column for a name, a channel id or a stable
- *   hash at all (spec §7.4, §12.4, BOARD A-1), so a config that claims otherwise
- *   is a bug in the config, not a new policy.
+ * - Every field must declare `personalIdentifiers: "none"` — except the one
+ *   consent field BOARD D-9 approved, which declares `"consented_identity"` and
+ *   is held to the extra rules in `readPersonalIdentifiers`. Every other field
+ *   has no column for a name, a channel id or a stable hash at all (spec §7.4,
+ *   §12.4), so a config that claims otherwise is a bug in the config, not a new
+ *   policy.
  * - Unknown keys are rejected, so a misspelled `allowedPeriodDays` cannot fall
  *   back to a default.
  */
@@ -30,6 +33,11 @@ import type { AuthRevokedReason } from '../youtube/auth/events.js'
 export type RetentionDataClass =
   'authorized_api_data' | 'derived_state' | 'identifier_free_aggregate'
 export type RetentionFieldStatus = 'present' | 'planned'
+/**
+ * What a field holds about a person. `consented_identity` exists for exactly one
+ * field (BOARD D-9) and every other field must be `none`.
+ */
+export type RetentionPersonalIdentifiers = 'none' | 'consented_identity'
 /** Which §12.4 window a revocation falls under. */
 export type RevocationClass = 'client_side' | 'provider_side'
 
@@ -47,7 +55,7 @@ interface RetentionFieldCommon {
   readonly dataClass: RetentionDataClass
   readonly purpose: string
   readonly storedColumns: readonly string[]
-  readonly personalIdentifiers: 'none'
+  readonly personalIdentifiers: RetentionPersonalIdentifiers
   readonly expiry: RetentionExpiry
   /** A row whose column is NULL had not finished when it was deleted. */
   readonly unfinishedColumn?: string
@@ -109,6 +117,31 @@ export const POLICY_MAX_SOURCE_DATA_DAYS = 30
 export const POLICY_MAX_CLIENT_SIDE_DELETION_DAYS = 7
 export const POLICY_MAX_PROVIDER_SIDE_DELETION_DAYS = 30
 export const POLICY_MAX_USER_REQUEST_DELETION_DAYS = 7
+
+/** The one field allowed to hold identity (BOARD D-9, migration 006). */
+export const CONSENT_FIELD_KEY = `${CONSENT_TABLE}.identity`
+
+/**
+ * Longest a consent record may go without being refreshed.
+ *
+ * [S41] Developer Policies III.E.4.c
+ * (https://developers.google.com/youtube/terms/developer-policies, checked
+ * 2026-08-19): "API Clients may store all other types of Authorized Data not
+ * identified in section (III.E.4.b) for as long as is necessary for the purposes
+ * of the specific consent granted by an active user and for no longer than 30
+ * calendar days." A display name and a channel id are not among the III.E.4.b
+ * exceptions (Analytics API data, Reporting API data, statistics), so they fall
+ * under this 30-day cap.
+ *
+ * The only refresh path this system has is the viewer's own next message, which
+ * re-delivers both values; `viewer_consent.last_active_at` records when that last
+ * happened. A viewer who stops sending stops refreshing, so the row is deleted.
+ * BOARD D-9 first wrote 90 days for that rule and the coordinator corrected it to
+ * 30 on 2026-08-19 once this clause was read: an external policy maximum is not
+ * something a project decision can widen, which is why the ceiling is enforced
+ * here and not only written in the config file.
+ */
+export const POLICY_MAX_CONSENT_IDENTITY_DAYS = 30
 
 export class RetentionConfigError extends Error {
   constructor(message: string) {
@@ -354,11 +387,7 @@ function parseField(
   const storedColumns = readStringArray(entry['storedColumns'], `${label}.storedColumns`)
   for (const column of storedColumns) readIdentifier(column, `${label}.storedColumns[]`)
 
-  if (entry['personalIdentifiers'] !== 'none') {
-    throw new RetentionConfigError(
-      `${label}.personalIdentifiers must be "none": while the identity gate is closed no field may hold a user name, channel id or stable hash (spec §7.4, §12.4, BOARD A-1)`,
-    )
-  }
+  const personalIdentifiers = readPersonalIdentifiers(entry['personalIdentifiers'], label, key)
 
   const expiry = parseExpiry(entry['expiry'], `${label}.expiry`)
   const unfinishedColumnRaw = entry['unfinishedColumn']
@@ -376,7 +405,7 @@ function parseField(
     dataClass,
     purpose,
     storedColumns: Object.freeze(storedColumns),
-    personalIdentifiers: 'none',
+    personalIdentifiers,
     expiry,
     ...(unfinishedColumn === undefined ? {} : { unfinishedColumn }),
     specRef,
@@ -402,7 +431,20 @@ function parseField(
         `${label}.allowedPeriodDays ${String(allowedPeriodDays)} exceeds sourceDataRetentionDays ${String(sourceDataRetentionDays)} (spec §12.4)`,
       )
     }
+    if (personalIdentifiers === 'consented_identity') {
+      assertAtMost(
+        allowedPeriodDays,
+        POLICY_MAX_CONSENT_IDENTITY_DAYS,
+        `${label}.allowedPeriodDays`,
+        '[S41] III.E.4.c — Authorized Data outside the III.E.4.b exceptions may be stored "for no longer than 30 calendar days"',
+      )
+    }
     return Object.freeze({ ...common, policy: 'delete', allowedPeriodDays })
+  }
+  if (personalIdentifiers === 'consented_identity') {
+    throw new RetentionConfigError(
+      `${label} holds consented identity and must use policy "delete": the only refresh path is the viewer's next message, so a viewer who stops sending has to be deleted ([S41] III.E.4.c)`,
+    )
   }
 
   if (entry['allowedPeriodDays'] !== null) {
@@ -416,6 +458,31 @@ function parseField(
     allowedPeriodDays: null,
     reverifyPeriodDays: readPositiveInt(entry['reverifyPeriodDays'], `${label}.reverifyPeriodDays`),
   })
+}
+
+/**
+ * `personalIdentifiers`, with the D-9 exception attached to the one field that
+ * earned it. Any other field claiming identity is refused: the audit in
+ * `identity-columns.ts` allows identity columns in `viewer_consent` alone, so a
+ * second claimant would be describing a table that may not exist.
+ */
+function readPersonalIdentifiers(
+  value: unknown,
+  label: string,
+  key: string,
+): RetentionPersonalIdentifiers {
+  if (value === 'none') return 'none'
+  if (value === 'consented_identity') {
+    if (key !== CONSENT_FIELD_KEY) {
+      throw new RetentionConfigError(
+        `${label}.personalIdentifiers may only be "consented_identity" for ${CONSENT_FIELD_KEY} (BOARD D-9); every other field must be "none" (spec §7.4, §12.4)`,
+      )
+    }
+    return 'consented_identity'
+  }
+  throw new RetentionConfigError(
+    `${label}.personalIdentifiers must be "none" or, for ${CONSENT_FIELD_KEY} only, "consented_identity" (spec §7.4, §12.4, BOARD D-9)`,
+  )
 }
 
 function parseExpiry(value: unknown, label: string): RetentionExpiry {
