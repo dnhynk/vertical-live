@@ -1,7 +1,7 @@
 # TASK-T20b-identity-server
 
 - Task: T20b identity (B) 서버: 동의 저장·authorDetails 처리·삭제·보존·compliance 문서 (`docs/tasks/TASK_SPECS.md` §T20b)
-- Branch: `dnhynk/t20b-identity-server` · PR: #27
+- Branch: `dnhynk/t20b-identity-server` · PR: #28
 - Orca: task `task_d221f62c9dae` · dispatch `ctx_db0ddb93029b`
 - Spec sections read: §7.2, §7.3, §7.4, §12.3, §12.4, §14.1
 - BOARD decisions/assumptions relied on: D-9, D-11, D-13, A-1(부분 뒤집힘), A-9, A-15, A-20
