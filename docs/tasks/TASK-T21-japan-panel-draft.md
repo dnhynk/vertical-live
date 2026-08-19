@@ -58,9 +58,8 @@ Gate 0 §1.4의 네 항목(일본 패널 모집 조건 · 5초 무음 이해 테
 | Gate 3 미시작 조건 | Q3 < 50% | `제안(근거 없음)`(조건의 취지는 §2.3) | 무료 명령을 못 읽으면 무료 핵심 플레이가 화면에서 성립하지 않는다 |
 | 반복 장면 합격선 | 고유 전이 ≥ 60, 반복 서사 장면 비율 ≤ 0.55 | `제안(근거: 측정값 + 임의 여유폭)` | 관측 70–83 / 0.339–0.475에서 여유를 둔 값. 여유폭 자체는 근거 없음 |
 | 사람 표본 검토 | 매일 6구간 × 5분 | `제안(근거 없음)` | §12.5는 "정기적 표본 검토"만 요구하고 주기·표본을 정하지 않는다 |
-| Gate 4 기간 | baseline 14일 → freeze → validation 14일, 가동률 ≥ 90% | `제안(근거 없음)` | §15는 "겹치지 않는 post-freeze validation"만 요구한다 |
-| Gate 4 절대 통과선 | **제안하지 않음** | — | §14.1이 "기준선 수집 뒤, 결과를 보기 전에 고정"을 요구하므로 기준선이 없는 지금은 숫자를 만들 수 없다. 절차와 식의 형태만 제안 |
-| 명령 성공률 하한 | ≥ 70% | `제안(근거 없음)` | 유일하게 baseline 없이 절대값을 제안한 항목. 근거 없음을 문서에 명시 |
+| Gate 4 관측 구간 길이 | baseline 14일 → freeze → 겹치지 않는 validation 14일 | `제안(근거 없음)` | §15는 "겹치지 않는 post-freeze validation"만 요구한다. 구간 **길이**는 절차값이고 합격선이 아니다 |
+| Gate 4 절대 통과선·표본 하한(가동률·명령 성공률 포함) | **제안하지 않음** | — | §14.1이 "기준선 수집 뒤, 결과를 보기 전에 고정"을 요구하므로 기준선이 없는 지금은 숫자를 만들 수 없다. 지표·계산식·freeze 절차만 제안하고, 숫자는 freeze 단계에서 처음 정한다(리뷰 round 1 M1) |
 | 패널 부수 조건 | OS 배분 1/3, 1인 10분, 1인당 자극물 2종, 채점자 2인 | `제안(근거 없음)` | 실행 편의값 |
 
 ## Result
@@ -110,20 +109,29 @@ seed_day_1 타임라인 발췌(JST):
 
 ### Gates (executed)
 
+리뷰 round 1 수정 뒤 `origin/main` `c6bbf0d` 위로 rebase한 상태에서 다시 돌린 결과다.
+
 ```text
 npm run format:check  -> pass ("All matched files use Prettier code style!")
 npm run lint          -> pass (eslint 0, check-no-legacy-imports: ok (0), check-install-scripts: ok (4 reviewed))
 npm run typecheck     -> pass (tsc --build, 출력 없음)
-npm run test          -> pass (Test Files 139 passed (139), Tests 1955 passed | 1 skipped (1956), 76.43s)
-npm run build         -> pass (전 워크스페이스 tsc --build 완료)
+npm run test          -> pass (Test Files 139 passed (139), Tests 1955 passed | 1 skipped (1956), 108.81s)
+npm run build         -> pass (전 워크스페이스 tsc --build, data-map up to date)
 ```
 
-실행하지 않은 게이트: 없음. (`origin/main` `c56f9d4` 위로 rebase한 뒤 실행했다.)
+실행하지 않은 게이트: 없음. (round 0은 `c56f9d4` 위에서 같은 5개가 pass했고 결과 수치도 같았다.)
 
 ### 코드 변경 없음
 
-이 PR은 문서 2개만 바꾼다. `git diff --stat origin/main...HEAD`가 `docs/` 밖으로 나가지 않는다.
-`packages/contract` 변경 0(이 task는 `[contract]`가 아니다), 새 dependency 0.
+이 PR은 문서 **3개**만 바꾼다. `git diff --name-only origin/main...HEAD`:
+
+```text
+docs/ops/gate0-checklist.md
+docs/ops/japan-panel-plan.md
+docs/tasks/TASK-T21-japan-panel-draft.md
+```
+
+`docs/` 밖으로 나가지 않는다. `packages/contract` 변경 0(이 task는 `[contract]`가 아니다), 새 dependency 0.
 
 ## Not done / out of scope
 
@@ -136,7 +144,8 @@ npm run build         -> pass (전 워크스페이스 tsc --build 완료)
 - **명령 성공률이 `GET /metrics`에 노출되지 않는다.** `commandSuccessRatio`는 구현되어 있으나
   (`apps/server/src/input/metrics.ts:25`) production 경로 `chatParserPort`가 `metrics`를 주입하지 않는다
   (`apps/server/src/youtube/chat/runtime.ts:124`). Gate 4 참여 축에서 쓰려면 배선이 필요하다(문서 §4.5, §5 A-6).
-- **`choice.previewLeadMs`(30분)가 정의만 있고 reducer가 참조하지 않는다**(`world/content/tuning.ts:168`).
+- **`choice.previewLeadMs`(30분)가 정의만 있고 읽는 코드가 없다.** 정의는 `world/content/tuning.ts:79`(타입)·
+  `:168`(기본값)·`config/default.json:279`(설정값) 3곳이고 런타임·reducer 소비처는 0곳이다.
   "다음 선택 30분 전 예고"는 현재 동작하지 않으며, 5초 테스트 Q4의 난이도와 직접 관련이 있다(문서 §2.6, §5 A-8).
 - 사용자 승인 뒤: 승인값을 BOARD `D-*`에 기록하고 `gate0-checklist.md` §1.4 체크박스를 채우는 후속 task.
   승인된 반복 장면 기준은 `world/content/tuning.ts`의 `FRESHNESS_MINIMUMS`를 교체하고 `provisional`에서 뺀다.

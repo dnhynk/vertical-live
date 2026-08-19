@@ -55,7 +55,7 @@
 |---|---|---|
 | **Prolific** | 참가자는 대부분 OECD 회원국 거주자이며 **일본이 지원 국가 목록에 포함**된다 [P3](확인 2026-08-19) | 유료. 조사 플랫폼 참가자는 일반 시청자보다 조사 숙련도가 높을 수 있다 |
 | 일본 리서치 패널 업체 | `확인 필요(출처 없음)` — 업체·조건·견적을 이 문서에서 확정하지 않는다 | 비용이 가장 크다. 스크리너 품질이 업체에 의존한다 |
-| 지인·커뮤니티 모집 | 경로 자체는 비용 0(출처 없음) | **선택 편향이 크다.** 1단계 정성에만 쓰고 2단계 정량 통과 판정에는 쓰지 않기를 제안한다 `제안(근거 없음)` |
+| 지인·커뮤니티 모집 | 경로 자체의 비용 **0원** `제안(근거 없음)` — 견적을 받아본 적이 없다 | **선택 편향이 크다.** 1단계 정성에만 쓰고 2단계 정량 통과 판정에는 쓰지 않기를 제안한다 `제안(근거 없음)` |
 
 어느 경로를 쓰든 **스크리너 문항과 실제 통과 인원을 기록**한다. 참가자를 지어내거나 응답을 대신 채우지 않는다
 (스펙 §2.6, `CLAUDE.md` §3 — 가짜 참여 금지는 패널 자료에도 그대로 적용된다).
@@ -168,9 +168,10 @@
   (3.3 타임라인: 06:00 JST 시작 → 14:24 JST turn). `apps/server/src/world/project.ts:48`의 `nextChoiceAt`이
   choice 창이 열리기 전에는 turn beat 시각을 그대로 돌려주기 때문이다. Q4의 통과율이 낮게 나올 가능성이 크며,
   그것은 **패널이 답을 주어야 할 튜닝 질문**이지 이 문서가 미리 정할 값이 아니다.
-- `content/tuning.ts`의 `choice.previewLeadMs`(30분)는 **정의만 있고 reducer가 참조하지 않는다**
-  (grep: `previewLeadMs`는 `apps/server/src/world/content/tuning.ts`에만 나온다). 즉 "선택 30분 전 예고"는 현재
-  동작하지 않는다. 화면을 고쳐야 한다면 T21이 아니라 별도 task다(5장 A-5).
+- `choice.previewLeadMs`(30분)는 **정의만 있고 이 값을 읽는 런타임·reducer 코드가 없다.** grep `previewLeadMs`의
+  전부는 정의 3곳이다: `apps/server/src/world/content/tuning.ts:79`(타입), 같은 파일 `:168`(기본값),
+  `config/default.json:279`(설정값). 소비처는 0곳이므로 "선택 30분 전 예고"는 현재 동작하지 않는다. 화면을
+  고쳐야 한다면 T21이 아니라 별도 task다(5장 A-8).
 
 ### 2.7 언제 다시 돌리는가
 
@@ -270,7 +271,7 @@ for (const seed of ['seed_day_1', 'seed_day_2', 'seed_day_3', 'seed_day_4', 'see
 | 07:00–11:59 | `morning` | 07:00 `phase_changed→morning` | `idle_sun_stretch`(`phases:['morning']`+`clear`), `mission_meal_together`, `visitor_postal_bird` |
 | 12:00–16:59 | `afternoon` | 12:00 `phase_changed→afternoon`, **14:24 `chapter_beat(turn)`+`choice_opened`**, **14:44 `choice_resolved`** | 확정된 조합의 장소로 이동(`garden`/`riverside`/`home_room`/`night_terrace`), `mission_gather_basket`, `mission_ribbon_*` |
 | 17:00–20:59 | `evening` | 17:00 `phase_changed→evening` | `visitor_lantern_moth`, `mission_quiet_night`, `mission_lantern_calm`(`phases:['evening','night']`) |
-| 21:00–03:59 | `night` | 21:00 `phase_changed→night`, **23:16 `chapter_resolved`** | `crisis_sleeping`(밤에 `rest` 압력이 임계 초과), `idle_star_gaze`(`night`+`starry`/`clear`), `idle_curl_sleep`, `weather_star_clear`, `growth_stage_advanced` |
+| 21:00–03:59 | `night` | 21:00 `phase_changed→night`, **23:16 `chapter_resolved`** | `crisis_entered -> sleeping`(밤에 `rest`가 임계 초과, `world/creature.ts:102`·`world/reducer.ts:215`, 연출 변형 `crisis_sleep_curl` `world/content/variants.ts:492`), `idle_star_gaze`(`night`+`starry`/`clear`), `idle_curl_sleep`, `weather_star_clear`, `growth_stage_advanced` |
 | 언제나 | — | `idle_beat` 30–75초(`tuning.ts:132`), `need_decay` 90초(`tuning.ts:135`), **미션 20분 주기**(`mission_started`→`mission_resolved`, `tuning.ts:159`), `weather_change` 150분 판정(`tuning.ts:179`, 값이 바뀔 때만 전이), `visitor_arrival` 210분 판정·체류 40분(`tuning.ts:181`), `crisis_recovery` 300초 판정(`tuning.ts:152`) | 무료 명령이 들어오면 그 자리에서 `feed_*`/`play_*`/`pet_*` 반응 20종 중 하나 |
 
 **유료 이벤트**는 시간대와 무관하게 `PAID_THANKS` 연출 1회만 만들고(원 연출 시간이 지나면 대체 감사 연출 1회,
@@ -357,9 +358,11 @@ Gate 3의 "24시간 산출물 사후 표본이 승인된 일일 챕터 완결성
 - **그때 무엇을 하는가**(제안): ① 기간을 늘려 재조회, ② 필터·breakdown을 제거하고 재조회, ③ 그래도 비면
   **"일본 검증 완료"를 선언하지 않고 미달로 기록한다.** 이것은 제안이 아니라 스펙 §15 Gate 4의 문장이다
   ("개인정보 threshold로 국가 데이터가 제공되지 않으면 일본 검증 완료를 선언하지 않음").
-- **유입 경로**: `insightTrafficSourceType`에는 `BROWSE`(홈·구독 피드 등 탐색 기능), `SHORTS`(Shorts 시청
-  경험에서의 세로 스와이프), `LIVE_REDIRECT` 등이 있다 [P7](확인 2026-08-19). **세로 Live 피드 유입이 어떤
-  값으로 집계되는지는 공식 문서에서 확정하지 못했다** — `확인 필요(출처 없음)`, Gate 2 실계정에서 확인한다.
+- **유입 경로와 재생 위치는 서로 다른 차원이다.** `insightTrafficSourceType`에는 `SHORTS`(앞 영상에서 세로로
+  스와이프해 넘어온 Shorts 시청 경험 유입), `LIVE_REDIRECT`(Live Redirect 유입) 등이 있고 [P7](확인 2026-08-19),
+  `BROWSE`(홈 화면·구독 피드 등 탐색 기능에서 일어난 재생)는 유입 경로가 아니라 **`insightPlaybackLocationType`
+  의 값**이다 [P9](확인 2026-08-19). 두 차원을 한 표에 섞어 읽지 않는다. **세로 Live 피드 유입이 어느 차원의
+  어떤 값으로 집계되는지는 공식 문서에서 확정하지 못했다** — `확인 필요(출처 없음)`, Gate 2 실계정에서 확인한다.
 
 ### 4.3 패널과 Analytics의 역할 분담
 
@@ -380,14 +383,18 @@ Gate 3의 "24시간 산출물 사후 표본이 승인된 일일 챕터 완결성
 함께 고정한다"** 고 못박는다. 따라서 **이 문서는 절대 숫자를 정할 수 없다** — 기준선이 아직 없기 때문이다.
 정할 수 있는 것은 **절차와 식의 형태**이며, 아래가 그 제안이다.
 
+> **이 절에는 통과선·표본 하한의 절대 숫자가 하나도 없다. 그것이 의도다.** 아래 ①③의 "14일"은 *관측 구간의
+> 길이 제안*이고 합격 여부를 가르는 값이 아니다. 가동률·명령 성공률·조회수 같은 **판정 숫자는 ② freeze에서
+> baseline을 보고 validation 시작 전에 처음 정해지며**, 그 전에 이 문서가 숫자를 제시하면 스펙 §14.1을 어긴다.
+
 **절차 제안**
 
 | 단계 | 내용 | 라벨 |
 |---|---|---|
 | ① baseline | Gate 3 파일럿 이후 **연속 14일** 관측. 이 구간에서는 통과 판정을 하지 않는다 | `제안(근거 없음)` |
-| ② freeze | baseline 값을 보고 **통과선 숫자를 문서에 적어 커밋한다**(BOARD `D-*` + 이 파일). 이후 수정 금지 | `제안(근거: 스펙 §14.1 "결과를 보기 전에 고정")` |
+| ② freeze | baseline 값을 보고 **세 축의 통과선과 표본 하한 숫자를 전부 이때 처음 적어 커밋한다**(BOARD `D-*` + 이 파일). 이후 수정 금지 | `제안(근거: 스펙 §14.1 "결과를 보기 전에 고정")` |
 | ③ validation | baseline과 **겹치지 않는 연속 14일**. 여기 숫자로만 판정 | `제안(근거: 스펙 §15 "겹치지 않는 post-freeze validation")` |
-| 표본 요건 | validation 14일 중 방송 가동률 **≥ 90%**, 일 단위 표본 14개 | `제안(근거 없음)` |
+| 표본 요건(식) | **방송 가동률** = 실제 방송 시간 ÷ 구간 총 시간, **유효 일 표본 수** = 가동률 하한을 넘긴 날의 수. 두 하한 값은 ②에서 정한다 | 숫자는 ② 이전에는 `제안 불가` |
 
 **세 축의 지표와 식의 형태**
 
@@ -395,7 +402,7 @@ Gate 3의 "24시간 산출물 사후 표본이 승인된 일일 챕터 완결성
 |---|---|---|---|
 | 발견 | `country=JP`의 일별 조회수, JP 비중, traffic source 분포 | validation의 **일별 중앙값 ≥ freeze에서 적은 절대값** | 절대값은 ② 이전에는 `제안 불가` |
 | 시청 | `country=JP`의 일별 평균 시청 지속시간 | 같음 | 같음 |
-| 참여 | 방송 1시간당 **무식별 유효 명령 수**, **명령 성공률**(수락/명령처럼 보이는 메시지) | 같음. 명령 성공률만 절대 하한 **≥ 70%** 를 제안한다 | `제안(근거 없음)` |
+| 참여 | 방송 1시간당 **무식별 유효 명령 수**; **명령 성공률** = `accepted ÷ commandLike`(allowlist 첫 토큰을 가진 메시지 대비 수락된 명령 수, `apps/server/src/input/metrics.ts:15`–`25`) | 같음 | 같음 |
 
 **중단선 제안**
 
@@ -410,7 +417,7 @@ Gate 3의 "24시간 산출물 사후 표본이 승인된 일일 챕터 완결성
 | # | 항목 | 상태 |
 |---|---|---|
 | 1 | `engaged views`가 세로 Live에도 제공되는가 | `확인 필요(출처 없음)` — 공식 도움말 [P8]에는 정의가 없고 "평균 시청 지속시간" 설명 안에서 한 번 언급될 뿐이다(확인 2026-08-19). Gate 2 실계정 Studio에서 확인한다 |
-| 2 | 세로 Live 피드 유입이 `insightTrafficSourceType`의 어떤 값으로 집계되는가 | `확인 필요(출처 없음)` — 4.2 |
+| 2 | 세로 Live 피드 유입이 `insightTrafficSourceType`(유입 경로)·`insightPlaybackLocationType`(재생 위치) 중 어느 차원의 어떤 값으로 집계되는가 | `확인 필요(출처 없음)` — 4.2 |
 | 3 | 명령 성공률을 `GET /metrics`에서 읽을 수 있는가 | **읽을 수 없다.** `commandSuccessRatio`는 구현되어 있으나(`apps/server/src/input/metrics.ts:25`) production 경로 `chatParserPort`가 `metrics`를 넘기지 않는다(`apps/server/src/youtube/chat/runtime.ts:124`). Gate 4에서 쓰려면 배선이 필요하다(5장 A-6) |
 
 ---
@@ -428,7 +435,7 @@ Gate 3의 "24시간 산출물 사후 표본이 승인된 일일 챕터 완결성
 | A-4 | 패널 비용의 예산 처리 | 월 예산(D-14) 안에서 볼지 별도 항목으로 볼지 | |
 | A-5 | 반복 장면 기준 | 하루 고유 전이 ≥60, 반복 서사 장면 비율 ≤0.55, 사람 표본 검토 매일 6구간×5분 | |
 | A-6 | 일본 시장 증빙 방식 | geography `country=JP` aggregate + 패널, 국가 행이 비면 미달로 기록 | |
-| A-7 | Gate 4 절차 | baseline 14일 → freeze(숫자 커밋) → 겹치지 않는 validation 14일, 가동률 ≥90%, 명령 성공률 ≥70% | |
+| A-7 | Gate 4 **절차**(숫자 아님) | baseline 14일 → freeze(이때 통과선·표본 하한 숫자를 처음 커밋) → 겹치지 않는 validation 14일. 세 축의 지표와 식은 4.4, **절대 숫자는 이 문서가 제안하지 않는다**(스펙 §14.1) | |
 | A-8 | 후속 코드 작업 착수 여부 | (a) 명령 성공률을 `GET /metrics`에 노출, (b) `choice.previewLeadMs`를 실제 예고에 쓰기 — 둘 다 이 문서 범위 밖의 별도 task | |
 
 ---
@@ -445,8 +452,9 @@ Gate 3의 "24시간 산출물 사후 표본이 승인된 일일 챕터 완결성
 | [P4] | Nielsen Norman Group, "Testing Visual Design: A Comprehensive Guide" (Megan Chan, 2024-12-13) — 5초 테스트의 정의와 한계, 사전 고지 금지 | https://www.nngroup.com/articles/testing-visual-design/ | 2026-08-19 |
 | [P5] | Google, "Dimensions — YouTube Analytics and Reporting APIs" — `country` 등 geographic dimensions | https://developers.google.com/youtube/analytics/dimensions | 2026-08-19 |
 | [P6] | YouTube Help, "Understand limited data in YouTube Analytics" — 국가/지역 지표의 limited data, 임계치 비공개 | https://support.google.com/youtube/answer/9101241 | 2026-08-19 |
-| [P7] | Google, "Dimensions — Traffic source dimensions" — `insightTrafficSourceType` 값 | https://developers.google.com/youtube/analytics/dimensions#Traffic_Source_Dimensions | 2026-08-19 |
+| [P7] | Google, "Dimensions — Traffic source dimensions" — `insightTrafficSourceType` 값(`SHORTS`, `LIVE_REDIRECT` 포함) | https://developers.google.com/youtube/analytics/dimensions#Traffic_Source_Dimensions | 2026-08-19 |
 | [P8] | YouTube Help, "Understand your YouTube engagement" — engaged views의 독립 정의 없음(확인 결과) | https://support.google.com/youtube/answer/9313698 | 2026-08-19 |
+| [P9] | Google, "Dimensions — Playback location dimensions" — `insightPlaybackLocationType` 값(`BROWSE` 포함) | https://developers.google.com/youtube/analytics/dimensions#Playback_Location_Dimensions | 2026-08-19 |
 
 스펙이 이미 인용한 출처는 번호를 그대로 쓴다: [S28](fake engagement 정책), [S41](API Data 식별정보·동의),
 [S42](파생 지표 정책) — URL은 [`docs/PROJECT_SPEC.md`](../PROJECT_SPEC.md) §18에 있다.
