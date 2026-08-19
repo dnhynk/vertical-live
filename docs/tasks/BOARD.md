@@ -35,9 +35,9 @@
 | T8d | 엔진 버그픽스: `#publish` markEffectPublished store 실패 시 미발행 row 고아화(T8c 발견) | T8c | — | merged | t8d-publish-store-failure | #22 | `task_43eb61f3968d` |
 | T17b | CI 버그픽스: T17 Windows 경로 의미론(ubuntu CI 실패 3건) + client.test 호스트 vault 의존 | T17 | — | merged | t17b-ci-path-semantics | #23 | `task_70edf8e8feff` |
 | T18 | D-6/D-7 구현·문서(OBS 버전 고정 승인, safe-mode sentinel 정책, public 문구) | T17, T2 | — | merged | t18-obs-safemode-policy | #24 | `task_0d996db3c12a` |
-| T19 | Gate 0 승인 반영(체크리스트·config·모더레이션 호출표) | T16, T18 | — | in_review | t19-gate0-apply | #25 | `task_8633302d4f33` |
-| T20a | identity (B) 계약: 동의자 한정 actor·join/leave 명령 | T1b, T6 | ✔ | in_review | t20a-identity-contract | #26 | `task_a7a6d0666e7c` |
-| T20b | identity (B) 서버: 동의 저장·authorDetails 처리·삭제·보존·compliance 문서 | T20a, T9, T13, T8 | — | pending | t20b-identity-server | | |
+| T19 | Gate 0 승인 반영(체크리스트·config·모더레이션 호출표) | T16, T18 | — | changes_requested | t19-gate0-apply | #25 | `task_8633302d4f33` |
+| T20a | identity (B) 계약: 동의자 한정 actor·join/leave 명령 | T1b, T6 | ✔ | merged | t20a-identity-contract | #26 | `task_a7a6d0666e7c` |
+| T20b | identity (B) 서버: 동의 저장·authorDetails 처리·삭제·보존·compliance 문서 | T20a, T9, T13, T8 | — | dispatched | t20b-identity-server | | `task_d221f62c9dae` |
 | T20c | identity (B) 렌더러: 동의자 표시명·고지 CTA | T20a, T14 | — | pending | t20c-identity-renderer | | |
 | T21 | 일본 패널·5초 테스트·24h 콘텐츠 목록·증빙 초안(D-15) | T14, T16 | — | dispatched | t21-japan-panel-draft | | `task_5ccfd178a887` |
 
@@ -229,3 +229,4 @@
 | 2026-08-19 10:00 | **Gate 0 사용자 결정 수집(UI 4라운드, 16문항)** → D-8~D-16 기록. 후속 작업 등록 예정: T19(Gate 0 반영: gate0-checklist 체크·config input.window 승인값·supervisor.moderation 승인표·moderation-call-table·ROADMAP), T20a[contract]/T20b/T20c(identity (B) 동의자 한정 개방), T21(일본 패널·5초 테스트·콘텐츠 목록 초안). 사용자 수동 단계(Discord 서버·webhook, Google 계정·채널·Cloud·OAuth)는 안내문으로 전달 |
 | 2026-08-19 10:08 | TASK_SPECS에 §T18(완료 기록)·§T19·§T20a/b/c·§T21 추가. **T19** `task_8633302d4f33` 디스패치 `ctx_d9382cedc69a`, **T20a**[contract] `task_a7a6d0666e7c` 디스패치 `ctx_e3bb7d6ceff7`. T21은 다음 슬롯. 사용자에게 Discord·YouTube/Cloud/OAuth 수동 단계 안내문 전달 |
 | 2026-08-19 10:52 | T19 worker_done(succeeded, PR #25: 체크리스트·호출표·config 승인값·ROADMAP; CI 녹색; 발견: D-13 safe-stop 토큰 4개를 보고하는 production 경로가 V1에 없음 → **T22 등록**, §1.5 direct↔vote 순서 미결 → **A-20**). T20a worker_done(succeeded, PR #26: actor consented 타입·channelRef ref_hex32·JOIN/LEAVE 별도 enum·consentCommand 필드·ACTION_REACTION only+refine·privacy 규칙 개정; 1955 tests; CI 녹색) — worker 권장안 6건 코디네이터 승인. R-T19-1 `task_3133e41c8e98`(review) · R-T20a-1 `task_efe1fbae30e0`(review2). **T21** `task_5ccfd178a887` 디스패치 `ctx_8fda1be1b646`. 사용자 Discord webhook: 보고는 '완료'였으나 vault `missing` → 실제 저장 명령 재안내 |
+| 2026-08-19 11:15 | R-T19-1 request_changes(major 2: 잔여 건수 서술(A-20 반영 필요)·T22 귀속 누락) → **F-T19-1** `task_b8187fb847c4`. R-T20a-1 **approve**(acceptance 6/6, finding 0) → 최종 게이트(contract만 20파일, apps 변경 0, deps 0, 생성물 --check) → **PR #26 squash merge**(main c56f9d4). T20a worker release·worktree 제거. **T20b** `task_d221f62c9dae` 디스패치 `ctx_db0ddb93029b`. 진행: T21, F-T19-1, T20b |
