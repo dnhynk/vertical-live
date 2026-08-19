@@ -83,7 +83,7 @@ BOARD는 코디네이터 소유이므로 건드리지 않는다.
 |---|---|---|---|
 | 1 | `assertModerationCallTableApproved()` 통과 + 거부 경로 테스트(빈 칸 하나라도 있으면 이름을 대고 throw) 유지 | met | `apps/server/src/supervisor/config.test.ts` — `accepts the repository config as approved`(저장소 config로 통과), `still refuses an unapproved table, and names what is missing`(`/onCallOwner/`·`/safeStopConditions/`), `names the one field that was blanked out of an otherwise approved table`(`missing: safeStopConditions`, `missing: approved`). `npx vitest run apps/server/src/supervisor/config.test.ts apps/server/src/supervisor/supervisor.test.ts` → **2 files, 39 tests passed** |
 | 2 | `input.provisional`에 `window.*`가 없고 값이 D-11과 일치 | met | `apps/server/src/input/config.test.ts` — `reads the repository config with the Gate 0 approved window values (D-11)`(5000/20/30/10 정확 비교), `lists only maxRawLength as provisional now that D-11 approved the window`(`toEqual(['maxRawLength'])` + `window.` 접두 0건). `npx vitest run apps/server/src/input/config.test.ts` → **9 tests passed** |
-| 3 | 게이트 5개 + CI 녹색; 문서의 모든 값이 BOARD D-번호를 인용 | met(로컬) / CI는 PR에서 확인 | 아래 Gates 블록. 문서 인용: `gate0-checklist.md` 1.1~1.8·3장이 항목마다 D-8~D-16과 승인일 2026-08-19을 적었고, `moderation-call-table.md` 1·2·3·5장이 D-13, `ROADMAP.md` Gate 0 표가 D-8~D-16, `README.md`·`runbook-operations.md`·`supervisor.md`가 D-13을 인용한다 |
+| 3 | 게이트 5개 + CI 녹색; 문서의 모든 값이 BOARD D-번호를 인용 | met(로컬) / CI는 PR에서 확인 | 아래 Gates 블록. 문서 인용: `gate0-checklist.md` 1.1~1.8·3장이 항목마다 D-8~D-16과 승인일 2026-08-19을 적었고, `moderation-call-table.md` 1·2·3·5장이 D-13, `ROADMAP.md` Gate 0 표가 D-8~D-16, `README.md`·`runbook-operations.md`·`supervisor.md`가 D-13을 인용한다. **round 2 정정(2026-08-19)**: D-9의 보존기간이 origin/main BOARD에서 `~~90일~~ → 30일 미refresh(미활동) 시 삭제`로 정정됐으므로([S41] Developer Policies **III.E.4.c** Authorized Data 30일 상한, https://developers.google.com/youtube/terms/developer-policies 확인 2026-08-19), `gate0-checklist.md` §1.3 승인 범위와 `ROADMAP.md` Gate 0 표의 D-9 요약을 30일로 맞췄다 — 이 정정 전에는 두 문서가 정본 D-9와 모순되어 이 기준은 met가 아니었다 |
 
 ### Gates (executed)
 
@@ -151,6 +151,10 @@ $ npm run build
 - §1.2 audit 값 기입: 전용 채널·Google Cloud·OAuth 개설(D-16, 사용자) 후 체크리스트 §1.2를 닫는 후속 작업.
 - §1.5 `direct↔vote 실험 순서` 결정: identity 개방(T20) 이후 **사용자 결정 필요**. 그때까지는 BOARD **A-20**이
   가정으로 순서를 정해 두며(direct 먼저), 가정이므로 체크리스트 항목은 열린 채로 둔다.
+- **[round 2 발견] `docs/tasks/TASK_SPECS.md` §T20a의 보존 문구가 아직 90일이다** — `:356`("90일 미활동 삭제",
+  `lastActiveAt+90d`)과 `:361`("90일 미활동 자동 삭제(가상 시계)"). 정본 BOARD D-9는 30일로 정정됐으므로 이 명세대로
+  구현하면 [S41] III.E.4.c를 위반한다. **T20의 명세이고 `TASK_SPECS.md`는 코디네이터 소유**라 이 PR에서 고치지
+  않았다(범위 밖). 코디네이터가 T20a 명세를 30일로 정정해야 한다 — worker_done에 보고했다.
 
 ## Review round 1
 
@@ -205,3 +209,66 @@ copied 5 migration(s) to dist/db/migrations · docs/ops/data-map.md up to date
 - **§1.5 체크박스를 닫지 않았다.** A-20은 가정이고 사용자 결정이 아니다 — 닫으면 리뷰가 지적한 과장을 반대 방향으로
   반복하는 것이다.
 - 코드·config·테스트 변경 0건.
+
+## Review round 2
+
+리뷰: PR #25, verdict `request_changes`(major 1, blocker 0). 리뷰어가 게이트 5개 + CI(run 32247104953)를 다시 직접
+실행해 전부 pass였고, **round 1의 major 2건(잔여 건수 서술 · T22 귀속)은 해소로 확인**됐다. 남은 지적 1건은 round 1
+이후 **정본이 움직여서** 생긴 것이다: 코디네이터가 2026-08-19 11:25 T20b 질문에 답하며 BOARD **D-9의 보존기간을
+90일 → 30일로 정정**했는데(`docs/tasks/BOARD.md:58`, `:234`), 이 PR의 두 문서는 정정 전 값을 그대로 요약하고 있었다.
+반박은 없다 — 지적은 사실이고, 30일은 [S41] Developer Policies **III.E.4.c**(Authorized Data refresh·보관 30일 상한,
+https://developers.google.com/youtube/terms/developer-policies, 확인 2026-08-19)라는 **외부 구속**이라 협상 대상이
+아니다. 이 라운드도 코드 변경 0건, `.md`만 바꿨다.
+
+| finding | 처리(고침 SHA / 반박 근거) |
+|---|---|
+| [major] `docs/ops/gate0-checklist.md:87`·`docs/ROADMAP.md:40` — 두 곳이 "90일 미활동 시 자동 삭제"를 D-9로 귀속하지만, 정본 BOARD D-9(`origin/main`, `docs/tasks/BOARD.md:58`)는 이를 **30일**로 정정했다([S41] III.E.4.c가 Authorized Data를 30일로 상한, 90일 불가). 이대로 머지하면 체크리스트·ROADMAP이 인용한 결정과 모순되므로 수용 기준 3과 스펙 §12.4 정책 정합이 성립하지 않는다 | **고침 `3057007`.** 두 문서의 D-9 요약을 **"30일 미refresh(미활동) 시 자동 삭제"**로 바꾸고, 값 옆에 **정정 근거**(2026-08-19 D-9 정정 · [S41] Developer Policies III.E.4.c의 Authorized Data 30일 상한 · 정책 URL과 확인 날짜)를 함께 적었다. 숫자만 바꾸지 않고 "**최초 승인 문구의 90일은 쓸 수 없다**"를 명시해, 90일을 본 사람이 이 문서를 옛 버전으로 오해하지 않게 했다. 티켓 `## Result` 수용 기준 3의 근거 칸에도 같은 정정을 적고 **정정 전에는 met가 아니었다**고 명시했다 |
+
+### Gates (round 2 fix, 로컬)
+
+2026-08-19, `dnhynk/t19-gate0-apply` @ `3057007`(origin/main `958b494` 위로 rebase 후), Node 24 / Windows 11.
+
+```text
+$ npm run format:check
+> prettier --check .
+Checking formatting...
+All matched files use Prettier code style!             (exit 0)
+
+$ npm run lint
+> eslint . && node scripts/check-no-legacy-imports.mjs && node scripts/check-install-scripts.mjs
+check-no-legacy-imports: ok (0 legacy imports)
+check-install-scripts: ok (4 reviewed, better-sqlite3 binding loads)   (eslint 위반 0건, exit 0)
+
+$ npm run typecheck
+> tsc --build tsconfig.json                            (출력 없음 = 통과, exit 0)
+
+$ npm run test
+> vitest run
+ Test Files  139 passed (139)
+      Tests  1957 passed | 1 skipped (1958)
+   Duration  74.79s                                    (exit 0)
+
+$ npm run build
+> @vl/renderer: ✓ built in 11.53s
+> @vl/server: copied 5 migration(s) to dist/db/migrations · docs/ops/data-map.md up to date
+> @vl/simulator, @vl/soak: tsc --build (출력 없음 = 통과)   (exit 0)
+```
+
+실행하지 않은 게이트: 없음. 이 라운드의 변경은 `.md` 2개뿐이다 — `git diff --stat 8662329..3057007`은
+`docs/ROADMAP.md`·`docs/ops/gate0-checklist.md` 2개(+5 −2)만 보고한다. **테스트 수가 round 1의 1911 pass에서
+1957 pass(139 files)로 늘어난 것은 이 PR 때문이 아니라 rebase 대상이 origin/main `6fba7b8` → `958b494`로
+바뀌면서 그 사이에 머지된 다른 PR의 테스트가 들어왔기 때문이다.** 이 라운드가 건드린 파일에는 테스트가 없다.
+이 티켓 파일은 위 게이트 실행 뒤에 커밋했으므로, 티켓 텍스트에 대해서는 `prettier --check`를 다시 돌려 확인했다:
+`npx prettier --check docs/tasks/TASK-T19-gate0-apply.md` → `All matched files use Prettier code style!`(exit 0).
+
+### 이 라운드에서 하지 않은 것
+
+- **BOARD 편집 없음.** D-9 정정 자체는 코디네이터가 `origin/main`에 이미 기록했다(`BOARD.md:58`, `:234`). 이 PR은
+  파생 문서를 정본에 맞추기만 한다.
+- **`docs/tasks/TASK_SPECS.md` §T20a의 90일 문구는 고치지 않았다**(`:356`, `:361`). T20의 명세이고 파일 소유자가
+  코디네이터라 범위 밖이다 — Follow-ups에 적고 worker_done으로 보고했다. **정본 D-9와 모순이 남아 있는 유일한
+  지점이므로 T20a 착수 전에 정정되어야 한다.**
+- **코드·config·테스트 변경 0건.** `config/retention.json`의 실제 보존 구현은 T20a/b/c 범위이고, 이 PR은
+  `engine.identityGateOpen: false`(A-1) 상태를 그대로 둔다.
+- `docs/PROJECT_SPEC.md:261-262`·`gate0-checklist.md:60`의 "90일"은 **YPP 자격 임계치**(업로드·Shorts 조회 기간)라
+  D-9 보존기간과 무관하다 — 건드리지 않았다.
