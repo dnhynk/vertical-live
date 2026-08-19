@@ -11,10 +11,15 @@
 
 핵심 사실 세 가지:
 
-1. **개인 식별자는 어디에도 저장되지 않는다.** identity gate가 닫힌 V1에서 스키마에는 사용자명·channel ID·
-   가역/안정 hash를 담을 **컬럼 자체가 없다**(§7.4, §12.4, BOARD A-1). 계약 수준은
-   `packages/contract/src/privacy.test.ts`, DB 스키마 수준은 `apps/server/src/privacy/schema-identity.test.ts`가
-   테스트로 고정한다. 따라서 모든 field의 `personalIdentifiers`는 `none`이다.
+1. **개인 식별자는 `viewer_consent` 한 테이블에만 저장되고, 그 밖에는 컬럼 자체가 없다.**
+   BOARD **D-9**(2026-08-19, Gate 0 §1.3 = (B))가 `なのる`(JOIN)를 보낸 시청자에 한해 channel ID와 표시명 저장을
+   승인했고, 마이그레이션 006이 그 한 테이블을 만든다. 그 밖의 모든 테이블은 예전 그대로 — 사용자명·channel ID·
+   가역/안정 hash를 담을 컬럼이 없다(§7.4, §12.4, BOARD A-1의 나머지 부분). 계약 수준은
+   `packages/contract/src/privacy.test.ts`(표시명은 동의자 `actor`에만, 원 channel ID는 계약에 없음),
+   DB 스키마 수준은 `apps/server/src/privacy/schema-identity.test.ts`("identity 컬럼은 consent 테이블에만")가
+   테스트로 고정한다. `personalIdentifiers`가 `none`이 아닌 field는 `viewer_consent.identity` 하나뿐이고,
+   로더가 다른 field의 그런 선언을 거부한다. 고지문·삭제 절차·compliance 체크리스트는
+   `docs/ops/identity-consent.md`.
 2. **모든 삭제·재확인은 append-only로 기록되고, 삭제와 그 증거는 원자적이다.** 배치의 `DELETE`와 그 배치의
    `retention_ledger` 행은 **같은 트랜잭션**에서 커밋된다(리뷰 round 1, B1). 원장 쓰기가 실패하면 그 배치의 삭제도
    롤백되므로 "삭제됐는데 기록이 없는" 상태는 만들어질 수 없고, 다음 sweep이 다시 삭제하며 기록한다. 원장을 아예 쓸 수
@@ -29,7 +34,9 @@
 |---|---|---|
 | 주기 sweep | `privacy/scheduler.ts` → `privacy/retention.ts` | `sweep.intervalMs`마다. 기동 직후 1회(다운타임 중 도달한 기한을 한 주기 더 기다리지 않는다) |
 | 동의 철회 | `privacy/revocation.ts` | T3 `auth_revoked` 이벤트(`RevocationAuthEventSink`를 `TokenManager`에 연결) |
-| 사용자 삭제 요청 | `privacy/deletion-request.ts` | 운영자가 요청을 받았을 때 `handle()` 호출 |
+| 사용자 삭제 요청 | `privacy/deletion-request.ts` | 운영자가 요청을 받았을 때 `handle(subject?)` 호출. `channelRef`/channel ID를 주면 그 동의 레코드를 즉시 삭제하고, 주지 않으면 "저장된 것이 없음"을 스키마에서 증명하고 기록한다 |
+| 동의·철회 명령 | `identity/directory.ts` | 수신 경로에서 `なのる`(JOIN)/`なまえけす`(LEAVE). LEAVE는 즉시 삭제 + `reason=consent_revoked` 기록 |
+| 30일 미활동 삭제 | `privacy/retention.ts`(`viewer_consent.identity`) | 주기 sweep이 `last_active_at + 30일` 경과 레코드를 삭제([S41] III.E.4.c) |
 | 파생 지표 가드 | `privacy/derived-metrics.ts` | 테스트(`derived-metrics.test.ts`)가 저장소 소스·스키마를 스캔 |
 
 T13은 모듈과 계약만 제공한다. 프로세스 수명주기(DB 열기·supervisor)는 T12 소관이므로 기동 배선은 T12가 다음처럼 한다:
