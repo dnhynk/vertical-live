@@ -84,7 +84,10 @@ YouTube Studio에서 **실제 값**을 읽어 증빙과 함께 기록한다. 이
       — 승인 2026-08-19, D-9
 
 **승인 범위(D-9)**: **opt-in 명령으로 고지문에 동의한 시청자만** channelId·표시명을 저장·화면 표시하고, 철회/삭제
-명령으로 즉시 삭제하며, **90일 미활동 시 자동 삭제**한다. 고지는 방송 화면 CTA 한 줄 + 채널 설명/고정 댓글 전문이다.
+명령으로 즉시 삭제하며, **30일 미refresh(미활동) 시 자동 삭제**한다 — 2026-08-19 **D-9 정정**: [S41] Developer
+Policies **III.E.4.c**가 Authorized Data의 refresh·보관 상한을 30일로 두므로 최초 승인 문구의 90일은 쓸 수 없다
+(https://developers.google.com/youtube/terms/developer-policies, 확인 2026-08-19). 고지는 방송 화면 CTA 한 줄 +
+채널 설명/고정 댓글 전문이다.
 미동의자는 현재처럼 익명(`actor=null`)이고, 사용자별 cooldown·한 표·분기 투표는 동의자 한정이다.
 
 **현재 코드**: 아직 (A)다(`config/default.json` → `engine.identityGateOpen: false`, BOARD A-1).
