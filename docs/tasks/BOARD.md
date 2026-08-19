@@ -42,6 +42,7 @@
 | T21 | 일본 패널·5초 테스트·24h 콘텐츠 목록·증빙 초안(D-15) | T14, T16 | — | merged | t21-japan-panel-draft | #27 | `task_5ccfd178a887` |
 | T22 | 모더레이션 사유 보고 경로(사람 트리거 admin 엔드포인트 + filter_evasion_surge 휴리스틱; D-13 토큰 4개) | T12, T19 | — | merged | t22-moderation-report | #30 | `task_43f8dd164d5a` |
 | T8e | 엔진: StateEngine.pump()가 31일 가상 시계 점프 후 미반환(184s timeout; T20b 리뷰 관측) + engine/ingest.test.ts:442 SQLite write lock flaky(T21 관측) 조사·수정 | T8 | — | changes_requested | t8e-clock-jump-flaky | #31 | `task_364b480f6a22` |
+| T8f | 테스트 스위트 CPU 3.7배 증가(73.76s→271.98s, T20b/T22 머지 후) 원인 규명 + 얇은 타임아웃(replay.test.ts 5s) 점검 | T8e, T20b, T22 | — | pending | t8f-suite-time | | |
 
 디스패치 순서 원칙: `ready` 중 T-ID 낮은 것부터, 동시 2, `[contract]`는 하나만. 리뷰 Task는 `R-<T-ID>-<round>`로 별도 등록하고 아래 이력에만 남긴다.
 
@@ -260,3 +261,4 @@
 | 2026-08-19 20:21 | R-T8e-1 request_changes(blocker 2: 러닝 catch-up의 #recoverDeadlines가 commit 전 메모리 채택 → BUSY 시 분기·거짓 회복; recovery fallback이 durable-ACK 검사 생략 → 유료 감사 중복; major: commit 수 미합산; minor: 티켓 무변경 오기) → **F-T8e-1** `task_ecabf42268a5`(store-first 원칙). review2 정리. 진행: F-T22-2 |
 | 2026-08-19 20:23 | F-T22-2 완료(22c4fe7: alert 순서 큐 + 건당 deliveryTimeout, 안전 정지는 첫 await 전 동기; 지연 sink·timeout escape 테스트; 2135 tests; CI 32297409738 녹색) → R-T22-3 `task_afd333c02737` → `ctx_b50bfa81639c`(review). 진행: F-T8e-1 |
 | 2026-08-19 20:35 | R-T22-3 **approve** → 최종 게이트(29파일, contract 0, deps 0, heuristics 임계 5개 provisional 등록, `moderation` 스크립트 추가, CI 32297409738 녹색) → **PR #30 squash merge**(main df3fd58). T22 worker release·worktree 제거. D-13 토큰 4개의 보고 경로(사람 트리거 + filter_evasion_surge 자동)가 production에 존재 — gate0-checklist §1.8의 'T22 머지 전 Gate 3 public 파일럿 없음' 조건 충족. 진행: F-T8e-1 |
+| 2026-08-19 21:01 | F-T8e-1 완료(store-first recovery 채택·durable-ACK 경유·commit 수 합산·티켓 정정; 2143 tests; CI 32301155923 녹색; 관측: rebase 후 첫 CI attempt가 replay.test.ts 5s 타임아웃 부하 flake, main 스위트 CPU 3.7배 증가 → **T8f 등록**) → R-T8e-2 `task_cd71ebf65e21` → `ctx_61ff6817780f`(review2) |
