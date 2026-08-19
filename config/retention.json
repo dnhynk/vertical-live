@@ -244,7 +244,7 @@
       "status": "present",
       "source": "youtube_api",
       "dataClass": "authorized_api_data",
-      "purpose": "consented viewer identity (BOARD D-9): channel_id is the deletion key and the only copy of the raw id, display_name is shown next to '방금 반영된 행동' (spec §5.2(2)) and used for nothing else, channel_ref is the opaque reference the contract carries instead of the id, notice_version records which notice text was agreed to, last_active_at is the [S41] III.E.4.c refresh instant. No per-viewer counter, no message history, no D1/D7/D30 series (spec §14.1)",
+      "purpose": "consented viewer identity (BOARD D-9): channel_id is the deletion key and the only copy of the raw id, display_name is shown next to '방금 반영된 행동' (spec §5.2(2)) and is used for nothing else, channel_ref is the opaque reference the contract carries instead of the id and is also the key of the two consented-viewer input rules of A-9 — a per-viewer cooldown and one vote per choice window, both held in memory by the input arbiter and never stored as a counter — notice_version records which notice text was agreed to, last_active_at is the [S41] III.E.4.c refresh instant. No per-viewer counter, no message history, no D1/D7/D30 series (spec §14.1)",
       "storedColumns": [
         "channel_ref",
         "channel_id",
