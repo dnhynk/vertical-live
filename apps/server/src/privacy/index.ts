@@ -50,6 +50,7 @@ export {
   UserDeletionRequestHandler,
   type UserDeletionReceipt,
   type UserDeletionRequestOptions,
+  type UserDeletionSubject,
 } from './deletion-request.js'
 export {
   CONSENT_SCHEMA_OBJECTS,

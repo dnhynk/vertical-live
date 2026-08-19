@@ -4,6 +4,7 @@ import { loadEngineConfig } from './engine/config.js'
 import { StateEngine } from './engine/engine.js'
 import { SimulatorIngestEndpoint } from './engine/ingest.js'
 import { RendererHub } from './engine/publisher.js'
+import { ConsentDirectory } from './identity/directory.js'
 import { loadInputConfig } from './input/config.js'
 import { loadRetentionConfig } from './privacy/config.js'
 import { RetentionSweeper } from './privacy/retention.js'
@@ -226,6 +227,20 @@ const hub = new RendererHub({
   },
 })
 
+/**
+ * The consent directory exists only while the consent gate is open (BOARD D-9).
+ * Closed, nothing constructs it, the chat request carries no `authorDetails`
+ * part, and every `actor` stays `null` exactly as it was under BOARD A-1.
+ */
+const consentDirectory = config.engine.identityGateOpen
+  ? new ConsentDirectory({
+      store,
+      clock: systemClock,
+      retention: loadRetentionConfig(),
+      logger: stdoutLogger,
+    })
+  : null
+
 const engine = new StateEngine({
   store,
   clock: systemClock,
@@ -233,6 +248,7 @@ const engine = new StateEngine({
   inputConfig,
   publisher: hub,
   logger: stdoutLogger,
+  ...(consentDirectory === null ? {} : { identity: consentDirectory }),
 })
 
 // --------------------------------------------------------------------- OBS
@@ -303,7 +319,9 @@ if (supervisorConfig.integrations.obs) {
  * because a revoked or unrenewable grant is outside the automation boundary
  * (§9.1).
  */
-const chatConfig = loadChatConfig()
+// The gate decides the requested parts, so it is passed rather than read from
+// the chat section (spec §7.2, BOARD D-9).
+const chatConfig = loadChatConfig({ identityGateOpen: config.engine.identityGateOpen })
 const needsGrant = chatConfig.enabled || supervisorConfig.integrations.broadcast
 
 let tokens: TokenManager | null = null
@@ -626,6 +644,7 @@ chatSource = await createChatSource({
   clock: systemClock,
   inputConfig,
   identityGateOpen: config.engine.identityGateOpen,
+  ...(consentDirectory === null ? {} : { consent: consentDirectory }),
   config: chatConfig,
   logger: stdoutLogger,
   ...(tokens === null ? {} : { auth: tokens }),

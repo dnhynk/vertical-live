@@ -13,9 +13,10 @@ import { createRetentionHarness, seedInbox, type RetentionHarness } from './test
  * User / account deletion requests (spec §12.4: "사용자 삭제·계정 삭제 요청은 해당
  * 사용자와 관련해 저장한 모든 user data를 가능한 빨리, 최대 7일 안에 삭제한다").
  *
- * While the identity gate is closed the answer is "nothing about a person is
- * stored" — and the handler has to *prove* that from the live schema and leave a
- * dated record, not simply return success.
+ * Two answers, both of which have to be provable rather than merely returned:
+ * a request naming nobody the system stored is answered from the live schema
+ * with a dated record, and a request naming a consented viewer (BOARD D-9)
+ * deletes their one `viewer_consent` row immediately and records that.
  */
 
 const T0 = '2026-01-01T00:00:00.000Z'
@@ -45,7 +46,7 @@ describe('user deletion request handler', () => {
     const active = open()
     seedInbox(active.store, 2, T0)
 
-    const receipt = handlerFor(active).handle(T0)
+    const receipt = handlerFor(active).handle(undefined, T0)
 
     expect(receipt.storedIdentifierColumns).toEqual([])
     expect(receipt.rowsDeleted).toBe(0)
@@ -79,15 +80,89 @@ describe('user deletion request handler', () => {
   it('records each request separately so an audit can count them', () => {
     const active = open()
     const handler = handlerFor(active)
-    handler.handle(T0)
-    handler.handle(T0)
+    handler.handle(undefined, T0)
+    handler.handle(undefined, T0)
     expect(active.store.listRetentionLedger({ reason: 'user_request' })).toHaveLength(2)
   })
 
-  it('refuses to answer once the schema can store an identifier', () => {
-    // The interface a future identity gate has to replace: recording "nothing
-    // stored" against a schema that *can* store a person would be a false audit
-    // record, so the handler fails loudly instead (spec §12.4, §17).
+  it('deletes the consented viewer named by the request (BOARD D-9)', () => {
+    const active = open()
+    const stored = active.store.upsertConsent({
+      channelRef: 'ref_00000000000000000000000000000001',
+      channelId: 'UC_TEST_synthetic_viewer_1',
+      displayName: 'synthetic-viewer-1',
+      consentedAt: T0,
+      lastActiveAt: T0,
+      noticeVersion: '2026-08-19',
+    })
+
+    const receipt = handlerFor(active).handle({ channelRef: stored.channelRef }, T0)
+
+    expect(receipt.rowsDeleted).toBe(1)
+    expect(active.store.findConsentByChannelRef(stored.channelRef)).toBeNull()
+    expect(active.store.countRows('viewer_consent')).toBe(0)
+    const rows = active.store.listRetentionLedger({ reason: 'user_request' })
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({
+      fieldKey: 'viewer_consent.identity',
+      outcome: 'deleted',
+      rowsDeleted: 1,
+      deadlineAt: plusDays(T0, 7),
+    })
+    expect(rows[0]?.deletedAt).not.toBeNull()
+  })
+
+  it('records a deletion request for a viewer who was never stored', () => {
+    // The honest answer to "delete my data" from somebody who never opted in:
+    // nothing was deleted, and the record says so instead of claiming a row.
+    const active = open()
+    const receipt = handlerFor(active).handle({ channelId: 'UC_TEST_synthetic_viewer_absent' }, T0)
+    expect(receipt.rowsDeleted).toBe(0)
+    expect(active.store.listRetentionLedger({ reason: 'user_request' })[0]).toMatchObject({
+      outcome: 'no_stored_identifiers',
+      rowsDeleted: 0,
+      deletedAt: null,
+    })
+  })
+
+  it('never writes the subject into the ledger or a log line', () => {
+    const active = open()
+    const lines: string[] = []
+    const handler = new UserDeletionRequestHandler({
+      store: active.store,
+      clock: active.clock,
+      config: active.config,
+      logger: {
+        debug: (message, fields) => lines.push(`${message} ${JSON.stringify(fields)}`),
+        info: (message, fields) => lines.push(`${message} ${JSON.stringify(fields)}`),
+        warn: (message, fields) => lines.push(`${message} ${JSON.stringify(fields)}`),
+        error: (message, fields) => lines.push(`${message} ${JSON.stringify(fields)}`),
+      },
+    })
+    active.store.upsertConsent({
+      channelRef: 'ref_00000000000000000000000000000002',
+      channelId: 'UC_TEST_synthetic_viewer_2',
+      displayName: 'synthetic-viewer-2',
+      consentedAt: T0,
+      lastActiveAt: T0,
+      noticeVersion: '2026-08-19',
+    })
+
+    handler.handle({ channelId: 'UC_TEST_synthetic_viewer_2' }, T0)
+
+    const ledger = JSON.stringify(active.store.listRetentionLedger({ reason: 'user_request' }))
+    for (const haystack of [ledger, lines.join('\n')]) {
+      expect(haystack).not.toContain('UC_TEST_synthetic_viewer_2')
+      expect(haystack).not.toContain('synthetic-viewer-2')
+      expect(haystack).not.toContain('ref_00000000000000000000000000000002')
+    }
+  })
+
+  it('refuses to answer once a table other than viewer_consent can store an identifier', () => {
+    // Recording "deleted everything" against a schema that has a *second* place
+    // to store a person would be a false audit record, so the handler fails
+    // loudly instead (spec §12.4; the consent table itself is the one exception,
+    // BOARD D-9).
     const active = open()
     const database = openDatabase({ file: active.temp.file, busyTimeoutMs: 1000 })
     try {
@@ -97,8 +172,8 @@ describe('user deletion request handler', () => {
     }
 
     const handler = handlerFor(active)
-    expect(() => handler.handle(T0)).toThrow(IdentityColumnsPresentError)
-    expect(() => handler.handle(T0)).toThrow(/viewer_identity.author_channel_id/)
+    expect(() => handler.handle(undefined, T0)).toThrow(IdentityColumnsPresentError)
+    expect(() => handler.handle(undefined, T0)).toThrow(/viewer_identity.author_channel_id/)
     expect(active.store.listRetentionLedger({ reason: 'user_request' })).toEqual([])
   })
 })

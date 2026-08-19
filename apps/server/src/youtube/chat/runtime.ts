@@ -14,6 +14,7 @@ import { QuotaTracker } from '../quota/tracker.js'
 import { loadQuotaConfig } from '../quota/config.js'
 import { ChatSource, type LiveChatTargetResolver } from './chat-source.js'
 import { loadChatConfig, type ChatConfig } from './config.js'
+import type { ConsentObserver } from './sink.js'
 import type { ChatAccessTokens } from './retry.js'
 
 /**
@@ -35,8 +36,18 @@ export interface ChatRuntimeDeps {
   }
   readonly clock: Clock
   readonly inputConfig: InputConfig
-  /** `engine.identityGateOpen` from `config/default.json` (BOARD A-1). */
+  /**
+   * `engine.identityGateOpen` from `config/default.json`, in the consent-mode
+   * meaning BOARD D-9 gave it: `false` = closed (A-1), `true` = consenting
+   * viewers are recognized. It decides both the requested parts and whether the
+   * parser accepts `JOIN`/`LEAVE` at all.
+   */
   readonly identityGateOpen: boolean
+  /**
+   * Consent directory, passed only when the gate is open. Without it the sink
+   * has nothing to hand a raw item to, which is the closed behaviour.
+   */
+  readonly consent?: ConsentObserver
   readonly onIngested?: (insertedCount: number) => void
   readonly resolveTarget?: LiveChatTargetResolver
   readonly logger?: Logger
@@ -59,7 +70,7 @@ export interface ChatRuntimeDeps {
 }
 
 export async function createChatSource(deps: ChatRuntimeDeps): Promise<ChatSource | null> {
-  const config = deps.config ?? loadChatConfig()
+  const config = deps.config ?? loadChatConfig({ identityGateOpen: deps.identityGateOpen })
   if (!config.enabled) return null
 
   const logger = deps.logger ?? silentLogger
@@ -85,6 +96,7 @@ export async function createChatSource(deps: ChatRuntimeDeps): Promise<ChatSourc
     engine: deps.engine,
     quota,
     logger,
+    ...(deps.consent === undefined ? {} : { consent: deps.consent }),
     ...(deps.onIngested === undefined ? {} : { onIngested: deps.onIngested }),
     ...(deps.resolveTarget === undefined ? {} : { resolveTarget: deps.resolveTarget }),
   })
@@ -114,7 +126,8 @@ async function buildTokenManager(deps: ChatRuntimeDeps, logger: Logger): Promise
 /**
  * The T6 parser, reading the live gate state on every message: a vote alias is
  * only a command while a choice window is open (spec §7.1), and per-user
- * attribution stays off while the identity gate is closed (BOARD A-1).
+ * attribution — plus the `JOIN`/`LEAVE` commands themselves — stays off while
+ * the consent gate is closed (BOARD A-1, D-9).
  */
 export function chatParserPort(deps: {
   readonly engine: { snapshot(): WorldSnapshot }
