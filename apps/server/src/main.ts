@@ -491,6 +491,9 @@ const runtimeDeps = {
       store,
       clock: systemClock,
       config: loadRetentionConfig(),
+      // The sweep deletes consent rows by SQL batch, so the directory's buffered
+      // display names have to be reconciled against what is left (round 2, B2).
+      ...(consentDirectory === null ? {} : { identity: consentDirectory }),
       logger: stdoutLogger,
     }),
     clock: systemClock,

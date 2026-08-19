@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
+import type { Clock, TimerHandle } from '../clock.js'
 import { openDatabase } from '../db/index.js'
 import { createTempStore } from '../db/testing/temp-store.js'
 import {
@@ -12,6 +13,7 @@ import { loadRetentionConfig } from '../privacy/config.js'
 import { UserDeletionRequestHandler } from '../privacy/deletion-request.js'
 import { RetentionSweeper } from '../privacy/retention.js'
 import type { LogFields } from '../secrets/redaction.js'
+import { testChatConfig } from '../testing/chat-test-support.js'
 import { FakeClock } from '../testing/fake-clock.js'
 import {
   ChatIngestSink,
@@ -19,6 +21,7 @@ import {
   type ConsentFailure,
   type ConsentObserver,
 } from '../youtube/chat/sink.js'
+import { chatRuntimeDeps } from '../youtube/chat/wiring.js'
 import { ConsentDirectory } from './directory.js'
 
 /**
@@ -55,6 +58,13 @@ interface Fixture {
 interface BuildOptions {
   /** Wraps the live directory, so a test can make one decision fail. */
   readonly wrapConsent?: (directory: ConsentDirectory) => ConsentObserver
+  /**
+   * The clock the *store* reads, separate from the one everything else reads.
+   * `commitIngestBatch` stamps the checkpoint from it as the last step of its
+   * transaction, so an armed failure here rolls a batch back after the consent
+   * hook has already run (review round 2, B2).
+   */
+  readonly storeClock?: Clock
 }
 
 let fixture: Fixture | undefined
@@ -63,6 +73,44 @@ afterEach(() => {
   fixture?.dispose()
   fixture = undefined
 })
+
+/**
+ * A clock that fails one reading on demand. Given to the *store* only, it makes
+ * `commitIngestBatch` throw where it stamps the checkpoint — the last step of
+ * its transaction, after the consent hook has run (review round 2, B2).
+ */
+class ArmedClock implements Clock {
+  readonly #inner: Clock
+  #armed = false
+
+  constructor(inner: Clock) {
+    this.#inner = inner
+  }
+
+  armFailure(): void {
+    this.#armed = true
+  }
+
+  nowUtcIso(): string {
+    if (this.#armed) {
+      this.#armed = false
+      throw new Error('checkpoint write failed')
+    }
+    return this.#inner.nowUtcIso()
+  }
+
+  monotonicMs(): number {
+    return this.#inner.monotonicMs()
+  }
+
+  setTimeout(handler: () => void, delayMs: number): TimerHandle {
+    return this.#inner.setTimeout(handler, delayMs)
+  }
+
+  clearTimeout(handle: TimerHandle): void {
+    this.#inner.clearTimeout(handle)
+  }
+}
 
 /** One `LiveChatMessage` as the gRPC transport delivers it ([S4] proto). */
 function chatItem(options: {
@@ -104,7 +152,7 @@ function build(identityGateOpen: boolean, options: BuildOptions = {}): Fixture {
   const logger = { debug: record, info: record, warn: record, error: record }
 
   const clock = new FakeClock({ epochMs: TEST_EPOCH_MS })
-  const temp = createTempStore({ clock })
+  const temp = createTempStore({ clock: options.storeClock ?? clock })
   const directory = identityGateOpen
     ? new ConsentDirectory({
         store: temp.store,
@@ -123,10 +171,23 @@ function build(identityGateOpen: boolean, options: BuildOptions = {}): Fixture {
   const consentFailures: ConsentFailure[] = []
   const observer =
     directory === null ? null : (options.wrapConsent?.(directory) ?? (directory as ConsentObserver))
+  // The inbox and the consent observer come from the wiring `main.ts` passes,
+  // not from a hand-rolled adapter: a fixture that builds its own inbox is what
+  // let the production wiring drop the commit hooks (review round 2, B1).
+  const deps = chatRuntimeDeps({
+    store: temp.store,
+    engine: harness.engine,
+    clock,
+    inputConfig,
+    identityGateOpen,
+    consent: observer,
+    config: testChatConfig({ enabled: true }),
+    logger,
+    auth: null,
+    resolveTarget: null,
+  })
   const sink = new ChatIngestSink({
-    inbox: {
-      ingest: (envelopes, checkpoint, hooks) => harness.engine.ingest(envelopes, checkpoint, hooks),
-    },
+    inbox: deps.inbox,
     clock,
     parseCommand: createCommandParserPort({
       context: () => ({ identityGateOpen, voteWindowOpen: false }),
@@ -135,10 +196,10 @@ function build(identityGateOpen: boolean, options: BuildOptions = {}): Fixture {
     sourceKey: `youtube:${LIVE_CHAT_ID}`,
     liveChatId: LIVE_CHAT_ID,
     broadcastId: BROADCAST_ID,
-    ...(observer === null
+    ...(deps.consent === undefined
       ? {}
       : {
-          consent: observer,
+          consent: deps.consent,
           onConsentFailure: (failure: ConsentFailure) => consentFailures.push(failure),
         }),
   })
@@ -429,6 +490,9 @@ describe('consent mode (BOARD D-9)', () => {
           if (isLeave && failWithdrawal) throw new Error('consent store unavailable')
           return directory.observe(rawItem, envelope)
         },
+        // The real boundary, so the wrapper does not quietly disable the staging
+        // the rolled-back batch depends on (review round 2, B2).
+        duringCommit: (write) => directory.duringCommit(write),
       }),
     })
     fixture = active
@@ -533,6 +597,134 @@ describe('consent mode (BOARD D-9)', () => {
     active.harness.engine.pump()
     for (const effect of reactions(active)) expect(effect.actor ?? null).toBeNull()
     expect(JSON.stringify(active.harness.publisher.effects)).not.toContain(JOINER_NAME)
+  })
+
+  it('discards a rolled-back attribution, so a swept identity cannot come back on the retry', () => {
+    // Review round 2 (B2). `observe` runs inside `commitIngestBatch`'s
+    // transaction, so its row writes roll back with the batch — the buffered
+    // display name did not. The sequence the reviewer reproduced: attribute a
+    // message, fail the checkpoint so the batch rolls back, let the 30-day sweep
+    // delete the (now unrefreshed) row, then redeliver the same `messageId`.
+    // The retry is anonymous — the row is gone — but the old actor was still
+    // waiting under that id, so a deleted person's name reached the screen.
+    const storeClock = new ArmedClock(new FakeClock({ epochMs: TEST_EPOCH_MS }))
+    const active = build(true, { storeClock })
+    fixture = active
+    const directory = active.directory as ConsentDirectory
+
+    deliver(active, [
+      chatItem({
+        messageId: 'msg_test_join',
+        text: 'なのる',
+        channelId: JOINER,
+        displayName: JOINER_NAME,
+      }),
+    ])
+    const stored = active.harness.store.findConsentByChannelId(JOINER)
+    expect(stored).not.toBeNull()
+
+    // The checkpoint stamp is the last thing the transaction does, so this
+    // throws after the hook has attributed the message.
+    const attributed = {
+      messageId: 'msg_test_feed_rollback',
+      text: 'ごはん',
+      channelId: JOINER,
+      displayName: JOINER_NAME,
+    }
+    storeClock.armFailure()
+    expect(() =>
+      active.sink.commit({
+        sourceShape: 'grpc',
+        items: [chatItem(attributed)],
+        nextPageToken: 'token_test_rollback',
+      }),
+    ).toThrow('checkpoint write failed')
+
+    // Rolled back: no inbox row, and no buffered name either.
+    expect(active.harness.store.countRows('ingest_inbox')).toBe(1)
+    expect(directory.pendingCount).toBe(0)
+
+    // 31 days without a refresh, and the sweep takes the row ([S41] III.E.4.c).
+    const sweeper = new RetentionSweeper({
+      store: active.harness.store,
+      clock: active.harness.clock,
+      config: loadRetentionConfig(),
+      identity: directory,
+    })
+    active.harness.clock.advance(31 * 24 * 60 * 60 * 1000)
+    expect(sweeper.run().entries.find((entry) => entry.table === 'viewer_consent')).toMatchObject({
+      outcome: 'deleted',
+      rowsDeleted: 1,
+    })
+    expect(active.harness.store.findConsentByChannelId(JOINER)).toBeNull()
+
+    // The retry of the same message: anonymous, because the row is gone. Before
+    // the fix this returned the buffered actor of a viewer who had been deleted.
+    // Committed without a writer pass on purpose — `engine.pump()` after a
+    // 31-day virtual jump catches up beat by beat and does not return, which is
+    // the engine's own behaviour and unrelated to this path. `takeActor` is the
+    // only way an actor reaches an effect, so it is the assertion that matters.
+    const inboxBefore = active.harness.store.countRows('ingest_inbox')
+    active.sink.commit({
+      sourceShape: 'grpc',
+      items: [chatItem(attributed)],
+      nextPageToken: 'token_test_retry',
+    })
+    // The retry really is a fresh insert — the rolled-back batch left no row for
+    // it to be deduplicated against.
+    expect(active.harness.store.countRows('ingest_inbox')).toBe(inboxBefore + 1)
+    expect(directory.takeActor(attributed.messageId)).toBeNull()
+    expect(directory.pendingCount).toBe(0)
+  })
+
+  it('drops a buffered actor whose row the sweep deleted', () => {
+    // The other half of B2: the sweep deletes by SQL batch and cannot use the
+    // directory's deletion boundary, so the boundary is reached from the buffer
+    // instead. Without this a name buffered before the sweep stayed attributable
+    // until the engine happened to drain it.
+    const active = build(true)
+    fixture = active
+    const directory = active.directory as ConsentDirectory
+
+    deliver(active, [
+      chatItem({
+        messageId: 'msg_test_join',
+        text: 'なのる',
+        channelId: JOINER,
+        displayName: JOINER_NAME,
+      }),
+    ])
+    // Committed, but not drained by the writer: the actor is buffered.
+    active.sink.commit({
+      sourceShape: 'grpc',
+      items: [
+        chatItem({
+          messageId: 'msg_test_feed_buffered',
+          text: 'ごはん',
+          channelId: JOINER,
+          displayName: JOINER_NAME,
+        }),
+      ],
+      nextPageToken: 'token_test_buffered',
+    })
+    expect(directory.pendingCount).toBe(1)
+    const channelRef = active.harness.store.findConsentByChannelId(JOINER)?.channelRef
+
+    const sweeper = new RetentionSweeper({
+      store: active.harness.store,
+      clock: active.harness.clock,
+      config: loadRetentionConfig(),
+      identity: directory,
+    })
+    // Move past the window without a refresh, then sweep.
+    active.harness.clock.advance(31 * 24 * 60 * 60 * 1000)
+    sweeper.run()
+
+    expect(active.harness.store.countRows('viewer_consent')).toBe(0)
+    expect(directory.pendingCount).toBe(0)
+    expect(directory.takeActor('msg_test_feed_buffered')).toBeNull()
+    // The reference goes to the arbiter purge queue with the row (round 1, M4).
+    expect(directory.drainForgotten()).toContain(channelRef)
   })
 
   it('is inert in the closed configuration', () => {

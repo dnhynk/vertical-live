@@ -9,7 +9,7 @@ import {
 
 import type { Clock } from '../../clock.js'
 import type { InboxWriter } from '../../engine/ingest.js'
-import type { SourceCheckpoint } from '../../db/types.js'
+import type { IngestBatchResult, SourceCheckpoint } from '../../db/types.js'
 
 /**
  * The one write path from a YouTube response into the world (spec §7.3(2)).
@@ -50,6 +50,11 @@ import type { SourceCheckpoint } from '../../db/types.js'
  * before the dedupe and a replayed `JOIN` **revives** an identity its `LEAVE`
  * already deleted, with a fresh `channelRef` (review round 1, B1). The dedupe
  * decides once, and the consent decision follows it.
+ *
+ * The directory's own memory is put on the same boundary by `duringCommit`: the
+ * hook's row writes roll back with the batch, and the buffered display names —
+ * which no transaction covers — are applied only once the write returns
+ * (review round 2, B2).
  */
 
 /**
@@ -59,6 +64,14 @@ import type { SourceCheckpoint } from '../../db/types.js'
  */
 export interface ConsentObserver {
   observe(rawItem: unknown, envelope: IngestEnvelope): { readonly kind: string }
+  /**
+   * Runs the inbox write, and applies whatever `observe` decided to keep in
+   * memory only after that write commits (review round 2, B2).
+   *
+   * Required, not optional: an implementation that only answers `observe` keeps
+   * memory the rollback cannot reach, which is the defect this exists to close.
+   */
+  duringCommit<T>(write: () => T): T
 }
 
 /**
@@ -298,15 +311,20 @@ export class ChatIngestSink {
     // an older point.
     const token =
       batch.nextPageToken === null || batch.nextPageToken === '' ? null : batch.nextPageToken
-    const result = this.#options.inbox.ingest(
-      entries.map((entry) => entry.envelope),
-      {
-        sourceKey: this.#options.sourceKey,
-        liveChatId: this.#options.liveChatId,
-        nextPageToken: token ?? this.#pageToken,
-      },
-      consent === undefined ? {} : { onInserted },
-    )
+    const write = (): IngestBatchResult =>
+      this.#options.inbox.ingest(
+        entries.map((entry) => entry.envelope),
+        {
+          sourceKey: this.#options.sourceKey,
+          liveChatId: this.#options.liveChatId,
+          nextPageToken: token ?? this.#pageToken,
+        },
+        consent === undefined ? {} : { onInserted },
+      )
+    // Inside `duringCommit` when there is a directory: the hook's row writes are
+    // already covered by the batch's transaction, and this covers the half a
+    // transaction cannot reach — the buffered display names (review round 2, B2).
+    const result = consent === undefined ? write() : consent.duringCommit(write)
     this.#pageToken = result.checkpoint.nextPageToken
     if (result.insertedCount > 0) this.#options.onIngested?.(result.insertedCount)
 

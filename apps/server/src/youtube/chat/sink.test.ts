@@ -190,6 +190,7 @@ describe('ChatIngestSink', () => {
           if (seen.length === 1) throw new Error('consent store unavailable')
           return { kind: 'joined' }
         },
+        duringCommit: (write) => write(),
       },
     })
 
@@ -224,6 +225,7 @@ describe('ChatIngestSink', () => {
           seen.push(rawItem)
           return { kind: 'joined' }
         },
+        duringCommit: (write) => write(),
       },
     })
 
@@ -266,6 +268,7 @@ describe('ChatIngestSink', () => {
           if (failNext) throw new Error('consent store unavailable')
           return { kind: 'left' }
         },
+        duringCommit: (write) => write(),
       },
       onConsentFailure: (failure) => failures.push(failure),
     })

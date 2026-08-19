@@ -74,11 +74,27 @@ export type ReverifyVerdict =
  */
 export type Reverifier = (field: RetentionRefreshField) => ReverifyVerdict
 
+/**
+ * The in-memory half of a consent deletion, when this process has a consent
+ * directory (`ConsentDirectory.forgetDeleted`).
+ *
+ * A sweep deletes `viewer_consent` rows with a batched `DELETE`, so it never
+ * learns which references it removed and cannot use the directory's own deletion
+ * boundary. Without this the buffered display name of a viewer whose row the
+ * sweep just deleted stayed attributable (review round 2, B2).
+ */
+export interface ConsentBufferReconciler {
+  /** Drops buffered actors whose row is gone; returns how many. Never a name. */
+  forgetDeleted(): number
+}
+
 export interface RetentionSweeperOptions {
   readonly store: PersistenceStore
   readonly clock: Clock
   readonly config: RetentionConfig
   readonly reverify?: Reverifier
+  /** Passed only while the consent gate is open; closed, nothing buffers a name. */
+  readonly identity?: ConsentBufferReconciler
   readonly logger?: Logger
 }
 
@@ -119,6 +135,7 @@ export class RetentionSweeper {
   readonly #clock: Clock
   readonly #config: RetentionConfig
   readonly #reverify: Reverifier | undefined
+  readonly #identity: ConsentBufferReconciler | undefined
   readonly #logger: Logger
 
   constructor(options: RetentionSweeperOptions) {
@@ -126,6 +143,7 @@ export class RetentionSweeper {
     this.#clock = options.clock
     this.#config = options.config
     this.#reverify = options.reverify
+    this.#identity = options.identity
     this.#logger = options.logger ?? silentLogger
     // A table with no declared policy — or a field whose declared columns no
     // longer match the table — is a policy hole, so it is refused at construction
@@ -146,6 +164,10 @@ export class RetentionSweeper {
     for (const field of orderedFields(this.#config.fields)) {
       entries.push(this.#sweepField(field))
     }
+    // Unconditional, and after every field: a row deleted here is deleted for
+    // good, so the buffer must not be able to outlive it by one sweep. The cost
+    // is bounded by the buffer (see `forgetDeleted`), not by the tables.
+    const buffered = this.#identity?.forgetDeleted() ?? 0
     const finishedAt = this.#clock.nowUtcIso()
     const result: RetentionSweepResult = {
       startedAt,
@@ -168,6 +190,7 @@ export class RetentionSweeper {
       rowsUnprocessed: result.rowsUnprocessed,
       reverificationDue: result.reverificationDue.length,
       failed: result.failed.length,
+      bufferedActorsDropped: buffered,
     })
     return result
   }

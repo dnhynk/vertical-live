@@ -46,6 +46,7 @@ import { CONSENT_NOTICE_VERSION } from './notice.js'
 export interface ConsentStorePort {
   upsertConsent(record: ConsentRecord): ConsentRecord
   findConsentByChannelId(channelId: string): ConsentRecord | null
+  findConsentByChannelRef(channelRef: string): ConsentRecord | null
   refreshConsent(input: { channelId: string; displayName: string; lastActiveAt: string }): boolean
   deleteConsent(selector: ConsentSelector, audit: ConsentDeleteAudit): ConsentDeleteResult
 }
@@ -84,6 +85,21 @@ export interface ConsentDirectoryOptions {
  */
 const DEFAULT_PENDING_LIMIT = 1024
 
+/**
+ * One memory-only effect of an observation, held back until the write that
+ * produced it commits (review round 2, B2).
+ *
+ * The DB writes of `observe` run inside the caller's transaction and roll back
+ * with it; these two do not, because a `Map` has no transaction. Staging them is
+ * what makes the memory and the row agree in both directions — a rolled-back
+ * attribution is discarded instead of surviving as a name for a row that was
+ * never written, and a rolled-back deletion does not forget a viewer who is
+ * still stored.
+ */
+type StagedEffect =
+  | { readonly kind: 'remember'; readonly messageId: string; readonly actor: ConsentedActor }
+  | { readonly kind: 'forget'; readonly channelRef: string }
+
 export class ConsentDirectory {
   readonly #store: ConsentStorePort
   readonly #clock: Clock
@@ -97,6 +113,8 @@ export class ConsentDirectory {
   readonly #pending = new Map<string, ConsentedActor>()
   /** References deleted and not yet purged from the arbiter (`drainForgotten`). */
   readonly #forgotten = new Set<string>()
+  /** Effects of the write currently in flight; `null` outside `duringCommit`. */
+  #staged: StagedEffect[] | null = null
 
   constructor(options: ConsentDirectoryOptions) {
     const field = options.retention.fields.find((entry) => entry.key === CONSENT_FIELD_KEY)
@@ -156,6 +174,48 @@ export class ConsentDirectory {
   }
 
   /**
+   * Runs one inbox write with every memory-only effect of what it observes held
+   * back, and applies them only after it returns (review round 2, B2).
+   *
+   * `observe` is called from inside `commitIngestBatch`'s transaction, so its
+   * row writes roll back with the batch. The buffered actors did not: a
+   * checkpoint that failed after an attribution left the name in this map for a
+   * message the inbox never stored, and once the 30-day sweep deleted that
+   * viewer's row the retry of the same `messageId` — now anonymous, because the
+   * row is gone — still found the old actor waiting under its id and put a
+   * deleted person's name on screen.
+   *
+   * The window is the callback's lifetime, so staging without an apply or a
+   * discard is not expressible. A throw from `write` is a rollback: the staged
+   * effects are dropped. Anything the caller does after the SQL commit and
+   * before returning (`StateEngine.ingest` notifies its writer) also throws into
+   * the discard path, which errs the safe way — a reaction is published without
+   * a name rather than with one the store no longer backs.
+   */
+  duringCommit<T>(write: () => T): T {
+    if (this.#staged !== null) {
+      throw new Error(
+        'ConsentDirectory.duringCommit is already open: one inbox write is one commit boundary, and nesting them would apply an inner batch’s effects to an outer rollback',
+      )
+    }
+    const staged: StagedEffect[] = []
+    this.#staged = staged
+    let result: T
+    try {
+      result = write()
+    } catch (error) {
+      this.#staged = null
+      throw error
+    }
+    this.#staged = null
+    for (const effect of staged) {
+      if (effect.kind === 'remember') this.#applyRemember(effect.messageId, effect.actor)
+      else this.#applyForget(effect.channelRef)
+    }
+    return result
+  }
+
+  /**
    * The actor for a message, if one was remembered — and forgets it, because a
    * message produces one reaction. Returns `null` after a restart, after an
    * eviction, and for every viewer who never consented.
@@ -204,16 +264,38 @@ export class ConsentDirectory {
         ? selector.channelRef
         : (this.#store.findConsentByChannelId(selector.channelId)?.channelRef ?? null)
     const result = this.#store.deleteConsent(selector, audit)
-    if (channelRef !== null) {
-      this.#forgetPending(channelRef)
-      this.#forgotten.add(channelRef)
-      while (this.#forgotten.size > this.#pendingLimit) {
-        const oldest = this.#forgotten.values().next()
-        if (oldest.done === true) break
-        this.#forgotten.delete(oldest.value)
-      }
-    }
+    if (channelRef !== null) this.#forget(channelRef)
     return result
+  }
+
+  /**
+   * Drops every buffered actor whose consent row is gone, and queues its
+   * reference for the arbiter purge (review round 2, B2).
+   *
+   * `deleteWithAudit` is the deletion boundary for the two paths that name a
+   * viewer — `LEAVE` and a user deletion request. The 30-day sweep is the third
+   * path and it cannot use that boundary: `RetentionSweeper` deletes by SQL
+   * batch, so it never learns which references it removed. This is the same
+   * boundary reached from the other end — the buffer is asked which references
+   * it still holds, and each one that no longer has a row is dropped.
+   *
+   * Bounded by the buffer, not by the table: at most `pendingLimit` entries and
+   * one indexed lookup per distinct reference among them, which is why the
+   * sweeper can call it on every run instead of only after a consent delete.
+   *
+   * @returns how many buffered actors were dropped. Diagnostics only, never a name.
+   */
+  forgetDeleted(): number {
+    const refs = new Set<string>()
+    for (const actor of this.#pending.values()) refs.add(actor.channelRef)
+    let dropped = 0
+    for (const ref of refs) {
+      if (this.#store.findConsentByChannelRef(ref) !== null) continue
+      dropped += this.#applyForget(ref)
+    }
+    if (dropped > 0)
+      this.#logger.info('buffered actors dropped with their deleted rows', { dropped })
+    return dropped
   }
 
   /**
@@ -295,19 +377,48 @@ export class ConsentDirectory {
    * message received a moment before the withdrawal cannot still put the name on
    * screen (D-9 "철회/삭제 명령으로 즉시 삭제").
    */
-  #forgetPending(channelRef: string): void {
+  #forgetPending(channelRef: string): number {
+    let dropped = 0
     for (const [messageId, actor] of this.#pending) {
-      if (actor.channelRef === channelRef) this.#pending.delete(messageId)
+      if (actor.channelRef !== channelRef) continue
+      this.#pending.delete(messageId)
+      dropped += 1
     }
+    return dropped
   }
 
+  /** Buffers an attribution, or stages it when a write is in flight. */
   #remember(messageId: string, actor: ConsentedActor): void {
+    const staged = this.#staged
+    if (staged === null) this.#applyRemember(messageId, actor)
+    else staged.push({ kind: 'remember', messageId, actor })
+  }
+
+  /** Drops a deleted reference, or stages it when a write is in flight. */
+  #forget(channelRef: string): void {
+    const staged = this.#staged
+    if (staged === null) this.#applyForget(channelRef)
+    else staged.push({ kind: 'forget', channelRef })
+  }
+
+  #applyRemember(messageId: string, actor: ConsentedActor): void {
     this.#pending.set(messageId, actor)
     while (this.#pending.size > this.#pendingLimit) {
       const oldest = this.#pending.keys().next()
       if (oldest.done === true) break
       this.#pending.delete(oldest.value)
     }
+  }
+
+  #applyForget(channelRef: string): number {
+    const dropped = this.#forgetPending(channelRef)
+    this.#forgotten.add(channelRef)
+    while (this.#forgotten.size > this.#pendingLimit) {
+      const oldest = this.#forgotten.values().next()
+      if (oldest.done === true) break
+      this.#forgotten.delete(oldest.value)
+    }
+    return dropped
   }
 }
 
