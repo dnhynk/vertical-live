@@ -158,7 +158,7 @@
 | 2 | 10회 반복 flaky 0 | met | **라운드 1**: `ingest.test.ts` + `clock-jump.test.ts` 10회 연속 매회 `Tests 27 passed (27)`, 전체 `npm run test` 10회 연속 모두 `Tests 2091 passed \| 1 skipped (2092)` (아래 "정직 보고" 항목 참조). **라운드 2**(`engine.ts`를 고쳤으므로 엔진 디렉터리 전체): `npx vitest run apps/server/src/engine` 10회 연속 매회 `Test Files 17 passed (17) / Tests 124 passed (124)`, 실패 0 |
 | 3 | 게이트 5개 녹색 | met | 아래 Gates |
 | 4 | 기존 T8/T15 테스트 무변경 통과 | met | `apps/server/src/engine/ingest.test.ts`는 **§T8e가 직접 고치라고 지정한 예외**(108+/3-)이고, **그 외 T8/T15 테스트 파일은 무변경**이다(`git diff --stat origin/main...HEAD`에 `engine.ts`·`config.ts`·`config.test.ts`·`ingest.test.ts`·`clock-jump.test.ts`·`config/default.json`·티켓만). 전체 스위트 149파일 2,143건 통과(rebase 후) |
-| 5 | PR CI 녹색 | met | PR #31, CI run `32292215316` **pass** (3m31s) — https://github.com/dnhynk/vertical-live/actions/runs/32292215316 |
+| 5 | PR CI 녹색 | met | **라운드 1**: run `32292215316` pass (3m31s). **라운드 2**(rebase 후 `1919af5`): run `32299862258` **pass** (2m59s) — https://github.com/dnhynk/vertical-live/actions/runs/32299862258 (attempt 1은 아래 Follow-ups의 `replay.test.ts` 부하 타임아웃으로 실패, 같은 커밋 재실행에서 녹색) |
 
 ### Gates (executed — 라운드 1; 라운드 2 게이트는 아래 `## Review round 1` §Round 2 게이트)
 
@@ -242,6 +242,23 @@ rebase 전 기준으로 전체 `npm run test`도 4회 연속 `Tests 2093 passed 
   per-test 타임아웃만 바뀌었다.
 
 ## Follow-ups
+
+- **`apps/server/src/engine/replay.test.ts`의 vitest 기본 5 s 타임아웃이 CI 부하에서 끊어진다 — 이 PR
+  범위 밖(코디네이터 결정, 후속 T8f).** rebase 후 첫 CI(run `32299862258` **attempt 1**)가
+  `replay determinism > two boots over the same inbox reach the same snapshot and revision`에서
+  `Test timed out in 5000ms`로 실패했다. 이 파일은 T8 파일이고 이 브랜치가 건드리지 않았다. 로직이 아니라
+  러너 처리량 문제라는 관측 근거:
+  - 같은 커밋 `1919af5`의 **attempt 2는 그대로 통과**(2m59s).
+  - 같은 커밋 두 시도의 vitest `tests` CPU 시간이 **317.73 s vs 119.44 s**(2.7배). 같은 러너에서
+    `clock-jump.test.ts`도 **8,209 ms vs 2,489 ms**로 같이 느려졌다 — 특정 테스트의 회귀가 아니라 전체가
+    느려진 것이다.
+  - 로컬 단독 실행은 `199–203 ms`(5 s 대비 25배 여유). 이번 라운드의 `engine.ts` 수정 **전/후**가 각각
+    `201/199/199 ms` vs `203 ms`로 구분되지 않는다 — 이 브랜치가 느리게 만든 것이 아니다.
+  - rebase **전** 이 브랜치 CI는 `tests 73.76 s`(146파일)였는데 main 단독 CI는 `tests 271.98 s`(149파일)다.
+    최근 main 머지들로 스위트 CPU 시간이 3.7배 늘었고, 그 부하에서 스위트 전체를 통틀어 가장 얇은 여유였던
+    `replay.test.ts`의 기본 타임아웃이 먼저 끊어졌다.
+  - 후속에서 볼 것: main 스위트 CPU 시간 3.7배 증가의 원인 파일 계측, 그리고 기본 5 s 타임아웃에 기대고 있는
+    무거운 테스트들의 여유 점검.
 
 - `engine.deadlines.catchUpWindowMs`는 Gate 0/2 승인 수치로 교체 대상(A-15). 지금 값의 근거는 위 Assumptions.
 - `chapter_beat`는 `policy: replay`이므로 catch-up 뒤에도 밀린 만큼 순차 전달된다(day 스케일이라 31일 ≈ 90건,
