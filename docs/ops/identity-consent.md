@@ -5,7 +5,7 @@
 > 구현: `docs/tasks/TASK_SPECS.md` §T20a(계약)·§T20b(서버)·§T20c(렌더러).
 > 일본어 문구는 **원어민 검수 전**이다 — 모든 항목이 `nativeReview: pending`이며, 검수 전에는 "검수됨"이라 쓰지 않는다(스펙 §5.3, Gate 3).
 
-`noticeVersion: 2026-08-19`
+`noticeVersion: 2026-08-20`
 
 이 버전 문자열은 `apps/server/src/identity/notice.ts`의 `CONSENT_NOTICE_VERSION`과 같아야 하고,
 동의한 시청자마다 `viewer_consent.notice_version`에 기록된다. **아래 고지문을 고치면 이 날짜도
@@ -13,9 +13,16 @@
 있다. `apps/server/src/identity/identity.test.ts`가 문서와 상수의 불일치를 실패로 만든다.
 
 > 2026-08-19 리뷰 라운드 1(M2)에서 §2.2 전문의 "つかいみち / Used for" 항목을 실제 구현에 맞게
-> 고쳤다(동의자 한정 cooldown·한 표 용도 추가). 버전 문자열은 `2026-08-19` 그대로다 — 같은 날의
-> 정정이고, 이 문안은 아직 어디에도 게시되지 않았으며 gate가 닫혀 있어 이 문안에 동의한 레코드가
-> 0건이기 때문이다(`viewer_consent`는 비어 있다). 게시 이후의 수정은 반드시 날짜를 올린다.
+> 고쳤다(동의자 한정 cooldown·한 표 용도 추가). 그때는 버전 문자열을 `2026-08-19` 그대로 뒀다 —
+> 같은 날의 정정이었고, 이 문안은 아직 어디에도 게시되지 않았으며 gate가 닫혀 있어 이 문안에
+> 동의한 레코드가 0건이기 때문이다(`viewer_consent`는 비어 있다).
+>
+> 2026-08-20 리뷰 라운드 2(M1)에서 §1 요약표와 §2.2 전문의 "ほぞんするもの / Stored" 항목을
+> 실제 스키마에 맞게 고쳤다: 고지문이 "channel ID와 표시명 2개뿐"이라고 했지만 `viewer_consent`는
+> `channel_ref`·`consented_at`·`last_active_at`·`notice_version`도 함께 저장한다([S41] III.A.2(e)-(f)는
+> 저장 항목을 있는 그대로 고지할 것을 요구한다). **이번에는 날짜를 올렸다**(`2026-08-20`) — 다른
+> 날짜의 수정이므로 위 예외가 적용되지 않는다. 여전히 게시 전이고 동의 레코드는 0건이라 재동의
+> 대상은 없다. 게시 이후의 수정은 예외 없이 날짜를 올린다.
 
 ---
 
@@ -24,7 +31,7 @@
 | 항목 | 값 |
 |---|---|
 | 수집 대상 | **`なのる`(JOIN)를 보낸 시청자만.** 그 외 시청자는 지금까지와 똑같이 익명이다 |
-| 수집 항목 | YouTube channel ID, 표시명(display name) — `authorDetails`의 두 필드뿐 |
+| 수집 항목 | **YouTube에서 받는 값은 2개**: channel ID, 표시명(display name) — `authorDetails`의 두 필드뿐. 레코드에는 이 둘과 함께 시스템이 만드는 값 4개가 같이 저장된다: 무작위 `channel_ref`(ID·이름에서 파생하지 않음), 동의 시각, 마지막 활동 시각, 동의한 고지 버전 — 합쳐서 `viewer_consent` 6개 컬럼(마이그레이션 006) |
 | 저장 위치 | `viewer_consent` 테이블 **1개**(마이그레이션 006). 다른 어떤 테이블·로그·지표·화면에도 복사본이 없다 |
 | 사용 목적 | 화면의 '방금 반영된 행동' 슬롯에 표시명을 붙이는 것, 그리고 동의자 한정 cooldown·창당 한 표(A-9) — 후자는 표시명이 아니라 무작위 `channel_ref`만 쓴다. **그 외 용도 없음**(§2.2 전문도 두 용도를 모두 고지한다) |
 | 보존 | 메시지를 보낼 때마다 갱신(refresh)되고, **30일간 활동이 없으면 레코드 전체 자동 삭제** |
@@ -49,7 +56,16 @@
 チャットで「なのる」と おくると、あなたの YouTube チャンネル名を
 がめんに ひょうじします。おくらない かぎり、なにも ほぞんしません。
 
-・ほぞんするもの: チャンネル ID と ひょうじめい（なまえ）の 2つだけ
+・ほぞんするもの: つぎの 6つを、1つの きろくとして ほぞんします
+  (1) あなたの YouTube チャンネル ID
+  (2) ひょうじめい（なまえ）
+  (3) この システムが つくる ランダムな ID
+      （(1)や(2)から つくった ものでは ありません）
+  (4)「なのる」を おくった にちじ
+  (5) さいごに メッセージを おくった にちじ
+  (6) どの おしらせぶんに どういしたか（バージョン）
+  チャットの ないよう、コマンドの りれき、ひとりずつの かいすうは
+  ほぞんしません
 ・つかいみち: つぎの 2つだけです
   (1)「いま はんえいされた こうどう」の よこに なまえを だすこと
   (2) おなじ ひとが つづけて おくった コマンドの まちじかん（クールダウン）と、
@@ -71,7 +87,11 @@
 Send "JOIN" in chat and your YouTube channel name is shown on screen.
 Until you do, nothing about you is stored.
 
-- Stored: your channel ID and your display name. Nothing else.
+- Stored: one record with six values. (1) Your YouTube channel ID. (2) Your
+  display name. (3) A random reference this system generates, which is not
+  derived from either of those. (4) When you sent JOIN. (5) When you last sent
+  a message. (6) Which version of this notice you agreed to. No message text,
+  no command history, no per-person counters.
 - Used for: two things only. (1) Putting your name next to "the action just
   applied". (2) A short wait between your own commands (a cooldown), and one
   vote per branch, so one person cannot repeat or outvote the room. (2) uses a
@@ -167,10 +187,10 @@ Authorized Data를 **30 캘린더 일**을 넘겨 보관하지 못하게 한다.
 | 1 | III.A (API Client Terms of Use and Privacy Policies) | "Each API Client must require users to agree to a privacy policy before users can access the API Client's features and functionality." | 프라이버시 정책 게시 + 수집·저장·사용·공유 설명 | §2.2 전문 + 채널 프라이버시 정책 URL | **사용자 조치 필요** — URL 미정 |
 | 2 | III.D (User Authentication and Authorization) | 사용자 인증·권한 부여, 철회(Revocation) | OAuth 범위 최소화, 철회 경로 | `youtube/auth/*`(T3), `privacy/revocation.ts`(T13). 시청자 개인은 OAuth를 하지 않는다 — 방송자 1인 grant만 존재 | 충족 |
 | 3 | III.E.4.b | "data retrieved through the YouTube Analytics API service, data provided through the YouTube Reporting API service, or statistics provided through other YouTube API services" | 무기한 보관이 허용되는 예외 목록 | 표시명·channel ID는 이 목록에 **없다** → 예외 아님 | 해당 없음(판정 근거) |
-| 4 | III.E.4.b (예외 데이터의 재확인) | "the Client must still ensure every 30 days that it is still authorized by the user to access that data" | 예외 데이터도 30일마다 권한 재확인 | **이 조항의 대상이 없다**: 행 3대로 이 시스템은 III.E.4.b 예외로 보관하는 Authorized Data가 없다. `world_snapshot`(`dataClass: derived_state`)·`metrics_daily`(`identifier_free_aggregate`)의 `policy: refresh` + `reverifyPeriodDays: 30`은 그 조항이 아니라 스펙 §12.4의 **내부** 재확인 규칙이고, production `RetentionSweeper`는 `reverify` 콜백 없이 생성되므로(`apps/server/src/main.ts:487`) 30일이 지나면 `reverification_due`로 **보고만** 한다 — 판정은 운영자 몫이다 | 해당 없음(대상 없음) / 내부 규칙은 **부분** — 자동 재확인 미구현(후속) |
+| 4 | III.E.4.b (예외 데이터의 재확인) | "the Client must still ensure every 30 days that it is still authorized by the user to access that data" | 예외 데이터도 30일마다 권한 재확인 | **이 조항의 대상이 없다**: 행 3대로 이 시스템은 III.E.4.b 예외로 보관하는 Authorized Data가 없다. `world_snapshot`(`dataClass: derived_state`)·`metrics_daily`(`identifier_free_aggregate`)의 `policy: refresh` + `reverifyPeriodDays: 30`은 그 조항이 아니라 스펙 §12.4의 **내부** 재확인 규칙이고, production `RetentionSweeper`는 `reverify` 콜백 없이 생성되므로(`apps/server/src/main.ts`의 `RetentionScheduler` 생성) 30일이 지나면 `reverification_due`로 **보고만** 한다 — 판정은 운영자 몫이다 | 해당 없음(대상 없음) / 내부 규칙은 **부분** — 자동 재확인 미구현(후속) |
 | 5 | **III.E.4.c** | "API Clients may store all other types of Authorized Data not identified in section (III.E.4.b) for as long as is necessary for the purposes of the specific consent granted by an active user and for no longer than **30 calendar days**." | 동의 목적에 필요한 기간, 최대 30일 | `viewer_consent.identity`: `allowedPeriodDays: 30`, `expiry: last_active_at`; 메시지마다 refresh(`db/consent.ts` `refreshConsent`); 30 초과 값은 로더가 거부(`POLICY_MAX_CONSENT_IDENTITY_DAYS`). 나머지 `authorized_api_data` field(inbox·checkpoint·paid_ledger 등)도 같은 30일 delete 정책이다 | 충족 |
 | 6 | III.E.4.d | "API Clients may temporarily store limited amounts of Non-Authorized Data ... but not longer than 30 calendar days." | 비인가(Non-Authorized) 데이터 30일 | **이 조항으로 분류한 field가 없다**: `config/retention.json`에 `dataClass: non_authorized` 항목은 0건이다. 앞선 매핑이 가리켰던 inbox·checkpoint·paid_ledger는 모두 `authorized_api_data`이므로 행 5(III.E.4.c)의 30일 삭제 대상이고, 실제로 그렇게 설정돼 있다 | 해당 없음(대상 없음) — 30일 삭제 자체는 행 5에서 충족 |
-| 7 | **III.E.4.g** | "API Clients must delete stored data as soon as possible and within **7 calendar days**" (사용자 요청·계정 삭제) | 요청 시 7일 내 삭제 | `LEAVE` 즉시 삭제(`identity/directory.ts`), 요청 handler 즉시 삭제(`privacy/deletion-request.ts`), 기록 `retention_ledger(reason=user_request\|consent_revoked, allowedPeriodDays=7)`. 삭제는 **하나의 경계**다 — 행·메모리 상 표시명·arbiter의 `channel_ref`가 함께 지워지고(§3.3, `ConsentDirectory.deleteWithAudit`), 적용에 실패한 `LEAVE`는 batch·checkpoint를 되돌려 재시도한다(fail-closed, `youtube/chat/sink.ts`) | 충족(즉시, 7일보다 빠름) |
+| 7 | **III.E.4.g** | "API Clients must delete stored data as soon as possible and within **7 calendar days**" (사용자 요청·계정 삭제) | 요청 시 7일 내 삭제 | `LEAVE` 즉시 삭제(`identity/directory.ts`), 요청 handler 즉시 삭제(`privacy/deletion-request.ts`), 기록 `retention_ledger(reason=user_request\|consent_revoked, allowedPeriodDays=7)`. 삭제는 **하나의 경계**다 — 행·메모리 상 표시명·arbiter의 `channel_ref`가 함께 지워지고(§3.3, `ConsentDirectory.deleteWithAudit`), 적용에 실패한 `LEAVE`는 batch·checkpoint를 되돌려 재시도한다(fail-closed, `youtube/chat/sink.ts`). 30일 sweep은 SQL 일괄 삭제라 그 경계를 쓸 수 없으므로 버퍼 쪽에서 같은 경계에 닿는다 — 매 sweep마다 `ConsentDirectory.forgetDeleted()`가 행이 사라진 표시명을 버리고 그 `channel_ref`를 arbiter purge 큐에 넣는다(리뷰 라운드 2, B2) | 충족(즉시, 7일보다 빠름) |
 | 8 | 스펙 §12.4 (client-side 동의 철회) | — | 철회 시 token revoke + 7일 내 삭제 | `privacy/revocation.ts`(T13) | 충족 |
 | 9 | 스펙 §12.4 (field별 schedule) | — | field별 source·목적·기간·삭제 시각 기록 | `config/retention.json` → `docs/ops/data-map.md`(생성물), `retention_ledger` | 충족 |
 | 10 | [S42] derived metrics | — | 승인 전 파생 지표 계산·저장 금지 | `privacy/derived-metrics.ts` 레지스트리 + 전 소스 스캔 테스트. D-9는 이 게이트를 열지 **않았다** | 충족 |

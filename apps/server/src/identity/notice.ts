@@ -12,4 +12,4 @@
  * re-consent requirement visible instead of implied. `identity.test.ts` fails
  * when the document and this constant disagree.
  */
-export const CONSENT_NOTICE_VERSION = '2026-08-19'
+export const CONSENT_NOTICE_VERSION = '2026-08-20'
