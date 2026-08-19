@@ -136,9 +136,10 @@ worker는 실계정을 쓰지 않는다(runbook 3.3). 열림 모드의 실계정
   30일이 지나면 `reverification_due` 보고까지만 한다 — `docs/ops/identity-consent.md` §4 행 4·§5에 그대로
   적었고, 알림화는 T12 소관이다.
 - 30일 sweep이 지운 `channel_ref`는 round 2(B2)에서 purge 경로가 생겼다. sweeper는 여전히 SQL 일괄
-  삭제라 ref를 모르지만, 매 sweep 끝에 `ConsentDirectory.forgetDeleted()`가 **버퍼 쪽에서** 같은 경계에
-  닿는다 — 버퍼에 남은 ref 중 행이 사라진 것을 골라 표시명을 버리고 그 ref를 `drainForgotten` 큐에
-  넣는다. round 1에 적었던 "필요하지 않다"는 근거(arbiter viewer 항목은 cooldown 5초 뒤 prune, 투표한
+  삭제라 ref를 모르지만, `ConsentDirectory.forgetDeleted()`가 **버퍼 쪽에서** 같은 경계에 닿는다 —
+  버퍼에 남은 ref 중 행이 사라진 것을 골라 표시명을 버리고 그 ref를 `drainForgotten` 큐에 넣는다.
+  round 3에서 그 호출 지점을 "run 끝"에서 **consent field 직후 + abort 경로**로 옮겼고, 같은 경계를
+  `RevocationHandler`에도 붙였다(아래 "Review round 3"). round 1에 적었던 "필요하지 않다"는 근거(arbiter viewer 항목은 cooldown 5초 뒤 prune, 투표한
   viewer는 choice window 교체 시 `forgetVoteScope`)는 arbiter에 대해서는 그대로 유효하지만, **버퍼에
   대해서는 틀렸다** — 그것이 B2의 후반부다.
 - consent 경로의 지속 실패가 source를 영구 정지시키는지: 정지시키지 **않는다**(무한 재시도이며 영구
@@ -156,7 +157,9 @@ worker는 실계정을 쓰지 않는다(runbook 3.3). 열림 모드의 실계정
 - `StateEngine.pump()`를 31일치 가상 시간 점프 직후에 부르면 비트 단위로 따라잡느라 돌아오지 않는다.
   이 PR과 무관한 엔진 자체의 성질이며(변경 전 코드로 만든 최소 재현 테스트에서도 같았다), 그래서 B2
   회귀 테스트는 sweep 이후의 재시도를 writer pass 없이 `sink.commit`으로만 검증한다. 실서버는 시계가
-  그렇게 뛰지 않지만, 호스트가 31일 절전됐다 깨어나는 경우는 T12/T15에서 따로 볼 값어치가 있다.
+  그렇게 뛰지 않지만, 호스트가 31일 절전됐다 깨어나는 경우는 따로 볼 값어치가 있다. round 3 리뷰어가
+  build 산출물의 실제 engine으로 184.1초 timeout까지 미반환을 재현했고, **코디네이터가 T8e로
+  등록했다** — 이 PR의 변경과 무관한 엔진 자체의 성질이다.
 
 ## Review round 1
 
@@ -252,4 +255,58 @@ $ npm run build          → 전 워크스페이스 성공, "copied 6 migration(
 - **"반환 = commit"의 가정**: `duringCommit`은 write가 반환하면 적용한다. SQL commit 뒤 반환 전에
   던지는 경로(`StateEngine.ingest`의 `notifyIngest()`)는 폐기로 떨어지는데, 그쪽이 안전한 방향이다 —
   이름이 붙지 않은 반응이 나갈 뿐, 저장소가 뒷받침하지 않는 이름이 나가지는 않는다. 주석에 적었다.
+- **`packages/contract` 무변경**, `package.json`/lockfile 무변경, 새 dependency 0.
+
+## Review round 3
+
+리뷰어 판정: `request_changes` (blocker 1). round 2의 B1·M1과 B2의 정상 경로는 해소 확인을 받았고,
+남은 한 건은 **B2가 닫은 경계의 예외 경로**다. 타당해 반박 없이 고쳤다. 고치면서 같은 부류의 네 번째
+경로를 하나 더 찾았고(리뷰 지적 아님), 코디네이터 판단으로 같은 PR에 넣었다.
+
+| finding | 출처 | 처리 | 고침 SHA | 근거·테스트 |
+|---|---|---|---|---|
+| **B1** `privacy/retention.ts:164-170` — `forgetDeleted()`가 field loop **전체가 끝난 뒤** 한 번만 불린다. 배포 config에서 consent는 10번째, `metrics_daily`는 11번째라, consent row가 삭제·commit된 뒤 `metrics_daily`의 ledger write가 실패하면 run이 abort하며 reconcile을 건너뛴다 → `consentExists:false`인데 `pendingCount:1`·`takeActor`가 삭제된 사람의 표시명을 반환. scheduler는 실패를 잡고 1시간 뒤를 예약하므로 그 사이 single writer가 그 이름을 소비할 수 있다 | 리뷰 round 3 | 삭제와 reconcile을 **같은 경계**로 옮겼다. (1) `personalIdentifiers === 'consented_identity'`인 field가 반환하는 즉시 `forgetDeleted()`를 부른다 — 뒤 field가 abort해도 건너뛸 구간 자체가 없다. (2) loop를 `try`로 감싸 abort 경로에서도 reconcile한다 — consent field 자신의 ledger가 죽어 (1)에 닿지 못하는 경우까지 덮는다. (3) run 끝의 기존 무조건 호출은 그대로 뒀다(이번 run이 지우지 않은 행에 대한 보증이라 성격이 다르다). abort 중에 reconcile이 또 실패하면 **던지지 않고 error 로그로 남긴다** — 원래 abort 사유를 덮으면 왜 죽었는지가 사라진다 | `af8f73d` | `consent-mode.test.ts` "drops the buffered actor even when a later field aborts the sweep": 버퍼에 이름이 남은 상태에서 `retention_ledger`에 `field_key = 'metrics_daily.aggregates'`만 막는 SQLite trigger를 걸고 31일 점프 후 sweep → run은 `ledger unavailable for metrics_daily`로 abort하고, `viewer_consent` 0행·`pendingCount 0`·`takeActor null`·`drainForgotten()`에 ref. **고침을 빼고 돌리면 리뷰어가 본 그대로 `expected 1 to be +0`으로 실패한다(실제 확인)** |
+| **자체 발견** `privacy/revocation.ts:126` — `RevocationHandler`가 `authorized_api_data` + `present` field를 전부 `deleteAllRows`로 지우는데 그 목록에 `viewer_consent.identity`가 있고, 이 handler는 reconciler를 **아예 받지 않았다**. `main.ts:344`에서 live `ConsentDirectory`와 같은 프로세스에 배선돼 있으므로, OAuth 철회가 행을 지운 뒤에도 버퍼의 표시명이 프로세스가 죽을 때까지 `takeActor`로 나온다 | 리뷰 지적 외 자체 발견 (코디네이터 승인으로 같은 PR) | sweeper와 **같은 모양**으로 닫았다: optional `identity: ConsentBufferReconciler`를 받아 identity field 직후 + abort 경로에서 `forgetDeleted()`. `main.ts`가 sweeper와 같은 조건(`consentDirectory === null`)으로 넘긴다 | `4314664` | `consent-mode.test.ts` 2건. "drops the buffered actor when a revocation deletes the consent rows"(정상 경로 — 이게 실제 production 결함이다): 철회 → `viewer_consent` 0행·`pendingCount 0`·`takeActor null`·ref purge. "drops the buffered actor when a field after the consent field aborts a revocation"(순서 비의존성): 배포 config에서 consent는 authorized field 중 **마지막**이라 오늘은 뒤 field가 없다 — 그래서 배포 파일의 **같은 두 field를 순서만 바꿔** 걸고 뒤 field의 ledger를 막아 abort시킨다. 두 건 다 고침을 빼면 `expected 1 to be +0`으로 실패한다(실제 확인) |
+
+### `viewer_consent` 행을 지우는 경로 전수 (코디네이터 요청, rg)
+
+`deleteAllRows`·`deleteExpiredByColumn`·`deleteConsent`·raw `DELETE FROM`의 호출부를 전부 훑었다.
+`viewer_consent` 행이 사라지는 경로는 네 개뿐이고, 이번 라운드 뒤로는 넷 다 메모리 경계에 닿는다.
+
+| 경로 | 삭제 수단 | 메모리 경계 | 판정 |
+|---|---|---|---|
+| `LEAVE` 명령 (`ConsentDirectory.#leave` → `#delete`) | `store.deleteConsent` | `#forget(channelRef)` 내부 호출 | 이상 없음 (round 1) |
+| T13 삭제 요청 (`UserDeletionRequestHandler`) | `directory.deleteWithAudit` | 같은 메서드가 소유 | 이상 없음 (round 1 B2). `directory`가 없는 프로세스에서만 store 직접 경로로 떨어지는데, 그때는 버퍼 자체가 없다 |
+| 30일 sweep (`RetentionSweeper`) | `deleteExpiredByColumn` (SQL 일괄) | identity field 직후 + abort 경로 `forgetDeleted()` | **이번 라운드 B1** — 고쳤다 |
+| OAuth 철회 (`RevocationHandler`) | `deleteAllRows` (SQL 일괄) | 같음 | **자체 발견** — 고쳤다 |
+
+`db/consent.ts:161`의 raw `DELETE FROM viewer_consent`는 위 1·2번이 쓰는 `deleteConsent` 구현체이고,
+`db/retention.ts:302`는 3·4번이 쓰는 batch 삭제 공용 구현체다. 그 밖에 `viewer_consent`를 지우는
+statement는 저장소에 없다(테스트 fixture 포함).
+
+### Round 4 gates (executed)
+
+```text
+$ npm run format:check   → All matched files use Prettier code style!
+$ npm run lint           → eslint 0 errors; check-no-legacy-imports: ok (0); check-install-scripts: ok (4)
+$ npm run typecheck      → tsc --build, 오류 없음
+$ npm run test           → Test Files 145 passed (145) / Tests 2085 passed | 1 skipped (2086)
+$ npm run build          → 전 워크스페이스 성공, "copied 6 migration(s)", "docs/ops/data-map.md up to date"
+```
+
+### Round 4 노트
+
+- **round 2의 판정이 과장이었다는 지적은 맞다.** "B2를 모든 sweep 경계에서 해소했다"고 썼지만 확인한
+  것은 정상 경로뿐이었다. 이번엔 정상 경로와 abort 경로를 **각각** 테스트했고, 각 테스트가 고침을
+  빼면 실패하는 것을 실제로 돌려 확인했다.
+- **`finally` 대신 `try/catch` + rethrow를 쓴 이유**: `finally` 안에서 reconcile이 던지면 원래 abort
+  사유를 조용히 덮는다. 지금 구조는 reconcile 실패를 error 로그로 남기고 원래 오류를 그대로 올린다 —
+  둘 다 같은 실패한 run으로 scheduler/error sink에 닿는다.
+- **batch commit 직후 hook(`duringCommit` 재사용)을 쓰지 않은 이유**: `runBatched`는 batch마다 별도
+  트랜잭션이라 hook을 넣으면 경계가 batch 단위로 더 좁아지지만, field 직후 호출 + abort 경로 reconcile을
+  둔 지금 상태와의 실질 차이는 "batch 사이에 프로세스가 죽는 경우"뿐이고 그때는 버퍼도 함께 사라진다.
+  `db/retention.ts`의 공용 삭제 코어를 건드리지 않는 쪽을 골랐다(요청 범위·최소 diff).
+- **`StateEngine.pump()` 관측은 Follow-up으로 유지**한다. 리뷰어가 build 산출물의 실제 engine으로
+  `start → FakeClock +31d → pump()`를 돌려 184.1초 timeout까지 미반환을 재현했다. 이 PR의 변경과 무관한
+  엔진 catch-up loop의 성질이며(코드는 `origin/main`에도 있다), 코디네이터가 T8e로 등록했다.
 - **`packages/contract` 무변경**, `package.json`/lockfile 무변경, 새 dependency 0.
