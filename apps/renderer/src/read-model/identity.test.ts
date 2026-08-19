@@ -300,8 +300,10 @@ describe('selectActionActorName (BOARD D-9, spec §5.2(2))', () => {
 
   it('survives a retransmitted reaction, which is one effect twice', () => {
     // Spec §7.3(7): the server resends an effect it holds no ACK for. The read
-    // model keeps one copy — and even when both copies are handed over, a
-    // duplicate of one commit's single reaction must not read as two viewers.
+    // model is keyed by `effectId`, so a resend never reaches the selector as a
+    // second effect and the name stays where it is. Handed two copies anyway,
+    // the "exactly one candidate" rule refuses rather than picks — it loses a
+    // name, which is the direction this module is allowed to be wrong in.
     const named = action({ actor: SAMPLE_CONSENTED_ACTOR })
     expect(selectActionActorName(snapshotWith(), [named], ACTION_REVISION)).toBe(
       SAMPLE_CONSENTED_ACTOR.displayName,
