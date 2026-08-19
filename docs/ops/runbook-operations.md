@@ -180,7 +180,7 @@ curl -s http://127.0.0.1:8787/health | jq '.supervisor.families[] | select(.stat
 | `rights_or_policy` | 권리·정책·약관 문제, 방송 한도에서 복구 불가 | **자동으로 재개하지 않는다.** 권리·정책 판단이 먼저다(§9.1) |
 | `data_integrity` | DB 파일 손상(`SQLITE_CORRUPT`/`SQLITE_NOTADB`) 또는 검증 불가한 마이그레이션 이력 | 4.4 |
 | `account_action` | 계정 정지·strike·재동의 필요, grant 철회 | Studio·Google 계정 상태 확인 후 재동의([`youtube-auth-setup.md`](youtube-auth-setup.md)) |
-| `moderation_unhealthy` | 승인된 호출표의 safe-stop 조건에 해당 | [`moderation-call-table.md`](moderation-call-table.md) 4장 |
+| `moderation_unhealthy` | 승인된 호출표(BOARD D-13, 2026-08-19)의 safe-stop 조건에 해당 | [`moderation-call-table.md`](moderation-call-table.md) 4장 |
 | `restart_budget_exhausted` | 컴포넌트 재시도 예산 또는 시작 순서 재시도 소진 | 로그에서 마지막 실패 원인을 찾고 그것을 고친 뒤 재시작 |
 
 재개 절차(공통):
@@ -239,7 +239,7 @@ npm run start -w @vl/server
 | `supervisor.preflight_failed` | warning | 사전 점검 실패(자동 재시도 중) | 실패 항목 이름 확인(1.4) |
 | `supervisor.startup_failed` | warning | 시작 순서 실패 | 로그의 실패 step |
 | `supervisor.restart_escalated` | warning | 예산 소진 → 상위 컴포넌트로 escalation | 4.3 |
-| `moderation.unhealthy` | warning | 모더레이션 제어 불건전, CTA off | [`moderation-call-table.md`](moderation-call-table.md) 4장. `safeStopConditionMatched`를 본다 |
+| `moderation.unhealthy` | warning | 모더레이션 제어 불건전, CTA off | [`moderation-call-table.md`](moderation-call-table.md) 4장(승인표 2번의 최대 응답시간 안에 응답). `safeStopConditionMatched`를 본다 |
 | `retention.sweep_incomplete` / `retention.sweep_failed` | warning | 보존 sweep 미완·실패 | [`data-map.md`](data-map.md). 기한(§12.4)을 넘기기 전에 해소 |
 | `privacy.revocation_incomplete` | critical | 철회 후 삭제 기한 위험 | **즉시.** §12.4의 7일·30일 규칙 |
 | `supervisor.safe_stopped` | critical | 안전 정지 | 4.2 |

@@ -58,13 +58,7 @@
       "exitAggregateAtCommands": 10,
       "maxDirectPerWindow": 20
     },
-    "provisional": [
-      "maxRawLength",
-      "window.windowMs",
-      "window.enterAggregateAtCommands",
-      "window.exitAggregateAtCommands",
-      "window.maxDirectPerWindow"
-    ]
+    "provisional": ["maxRawLength"]
   },
   "renderer": {
     "staticDir": "apps/renderer/dist",
@@ -209,12 +203,17 @@
       "imageWidth": 540
     },
     "moderation": {
-      "approved": false,
-      "onCallOwner": null,
-      "maxResponseMinutes": null,
-      "escalationChannel": null,
-      "autoBlockScope": null,
-      "safeStopConditions": []
+      "approved": true,
+      "onCallOwner": "owner-operator",
+      "maxResponseMinutes": 60,
+      "escalationChannel": "discord-webhook",
+      "autoBlockScope": "youtube-default-filters",
+      "safeStopConditions": [
+        "targeted_harassment",
+        "pii_exposure",
+        "sexual_or_self_harm_risk",
+        "filter_evasion_surge"
+      ]
     },
     "provisional": [
       "evaluateIntervalMs",

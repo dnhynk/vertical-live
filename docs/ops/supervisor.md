@@ -141,14 +141,14 @@ npm run secrets -w @vl/server -- set alerts.discordWebhookUrl   # 값은 stdin�
 
 ### 4.3 모더레이션 호출표 (§12.3, Gate 0)
 
-`supervisor.moderation`은 **자리만** 있고 값은 비어 있다(`approved: false`). 스펙 §12.3은 "24시간 호출 책임자, 최대 응답시간, escalation 채널, 자동 차단 범위와 safe-stop 조건"을 Gate 0에서 승인하도록 하고, 그 표가 없으면 Gate 3 public 파일럿을 시작하지 않는다. `assertModerationCallTableApproved(config.moderation)`가 그 게이트이며, 승인 전에는 무엇이 비었는지 이름을 대고 throw한다. **코드가 값을 채우지 않는다.**
+`supervisor.moderation`은 **Gate 0 승인표가 들어가는 자리**다. 스펙 §12.3은 "24시간 호출 책임자, 최대 응답시간, escalation 채널, 자동 차단 범위와 safe-stop 조건"을 Gate 0에서 승인하도록 하고, 그 표가 없으면 Gate 3 public 파일럿을 시작하지 않는다. `assertModerationCallTableApproved(config.moderation)`가 그 게이트이며, 승인 전에는 무엇이 비었는지 이름을 대고 throw한다. **코드가 값을 채우지 않는다** — 값은 사람의 승인이고, 지금 들어 있는 것은 2026-08-19 사용자 승인분(BOARD **D-13**, `approved: true`)이다. 승인 내용은 [`moderation-call-table.md`](moderation-call-table.md) 1·2장이 정본이다.
 
 모더레이션 제어 불건전은 `supervisor.reportModerationHealth('degraded', '<사유>')`로 보고한다. §12.3의 2단계가 그대로 코드다.
 
 1. **CTA를 끈다** — 항상. 그리고 `moderation.unhealthy` warning alert를 보낸다(리뷰 round 1 M2: 조용히 CTA만 끄는 것은 사람 호출이 아니다).
 2. **안전을 보장할 수 없으면 멈춘다** — 보고된 사유가 `supervisor.moderation.safeStopConditions`에 있으면 `moderation_unhealthy` → `safe_stopped` + critical alert.
 
-어떤 사유가 2단계인지는 사람의 판단이라 코드가 정하지 않는다. 목록이 비어 있는 동안(=Gate 0 미승인) 불건전 보고는 CTA를 끄고 알림만 보내며, alert 본문의 `safeStopConditionMatched=false`가 왜 멈추지 않았는지 알려준다. 사유 토큰은 보고하는 쪽과 호출표가 같은 문자열을 쓴다.
+어떤 사유가 2단계인지는 사람의 판단이라 코드가 정하지 않는다. 목록에 없는 사유(그리고 Gate 0 승인 전이라 목록이 비어 있는 배포)의 불건전 보고는 CTA를 끄고 알림만 보내며, alert 본문의 `safeStopConditionMatched=false`가 왜 멈추지 않았는지 알려준다. 사유 토큰은 보고하는 쪽과 호출표가 같은 문자열을 쓴다. D-13이 승인한 4개 토큰(`targeted_harassment`·`pii_exposure`·`sexual_or_self_harm_risk`·`filter_evasion_surge`)은 [`moderation-call-table.md`](moderation-call-table.md) 2장이 정본이고, **그 토큰을 실제로 보고하는 production 경로는 아직 없다**(같은 절의 정직 표기 참조).
 
 ### 4.4 진단 screenshot (§9.4)
 

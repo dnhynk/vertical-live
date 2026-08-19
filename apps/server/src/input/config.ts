@@ -8,10 +8,11 @@ import type { ParserLimits } from './parse.js'
  * Input settings from `config/default.json` with env overrides (the shared
  * convention in `docs/tasks/TASK_SPECS.md` 공통 규약).
  *
- * Every number here is **provisional** (BOARD A-3, A-15): spec §6.4 fixes the
- * switching threshold and the window length only after real event rates are
- * measured, so these are starting values, not pass/fail lines. `provisional`
- * lists them so a reader cannot mistake them for approved limits.
+ * `window.*` is **approved** (BOARD D-11, 2026-08-19): direct + non-competitive
+ * aggregation with windowMs 5000, maxDirectPerWindow 20, enter/exit 30/10, off
+ * the `provisional` list. Gate 2 real traffic may re-tune it. `maxRawLength` has
+ * no approved value yet and stays in `provisional` (BOARD A-15), which lists
+ * what a reader must not mistake for an approved limit.
  */
 export interface InputConfig {
   readonly maxRawLength: number
