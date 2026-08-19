@@ -35,11 +35,11 @@
 | T8d | 엔진 버그픽스: `#publish` markEffectPublished store 실패 시 미발행 row 고아화(T8c 발견) | T8c | — | merged | t8d-publish-store-failure | #22 | `task_43eb61f3968d` |
 | T17b | CI 버그픽스: T17 Windows 경로 의미론(ubuntu CI 실패 3건) + client.test 호스트 vault 의존 | T17 | — | merged | t17b-ci-path-semantics | #23 | `task_70edf8e8feff` |
 | T18 | D-6/D-7 구현·문서(OBS 버전 고정 승인, safe-mode sentinel 정책, public 문구) | T17, T2 | — | merged | t18-obs-safemode-policy | #24 | `task_0d996db3c12a` |
-| T19 | Gate 0 승인 반영(체크리스트·config·모더레이션 호출표) | T16, T18 | — | in_review | t19-gate0-apply | #25 | `task_8633302d4f33` |
+| T19 | Gate 0 승인 반영(체크리스트·config·모더레이션 호출표) | T16, T18 | — | changes_requested | t19-gate0-apply | #25 | `task_8633302d4f33` |
 | T20a | identity (B) 계약: 동의자 한정 actor·join/leave 명령 | T1b, T6 | ✔ | merged | t20a-identity-contract | #26 | `task_a7a6d0666e7c` |
 | T20b | identity (B) 서버: 동의 저장·authorDetails 처리·삭제·보존·compliance 문서 | T20a, T9, T13, T8 | — | dispatched | t20b-identity-server | | `task_d221f62c9dae` |
 | T20c | identity (B) 렌더러: 동의자 표시명·고지 CTA | T20a, T14 | — | pending | t20c-identity-renderer | | |
-| T21 | 일본 패널·5초 테스트·24h 콘텐츠 목록·증빙 초안(D-15) | T14, T16 | — | in_review | t21-japan-panel-draft | #27 | `task_5ccfd178a887` |
+| T21 | 일본 패널·5초 테스트·24h 콘텐츠 목록·증빙 초안(D-15) | T14, T16 | — | changes_requested | t21-japan-panel-draft | #27 | `task_5ccfd178a887` |
 | T22 | 모더레이션 사유 보고 경로(사람 트리거 admin 엔드포인트 + filter_evasion_surge 휴리스틱; D-13 토큰 4개) | T12, T19 | — | pending | t22-moderation-report | | |
 
 디스패치 순서 원칙: `ready` 중 T-ID 낮은 것부터, 동시 2, `[contract]`는 하나만. 리뷰 Task는 `R-<T-ID>-<round>`로 별도 등록하고 아래 이력에만 남긴다.
@@ -233,3 +233,4 @@
 | 2026-08-19 11:15 | R-T19-1 request_changes(major 2: 잔여 건수 서술(A-20 반영 필요)·T22 귀속 누락) → **F-T19-1** `task_b8187fb847c4`. R-T20a-1 **approve**(acceptance 6/6, finding 0) → 최종 게이트(contract만 20파일, apps 변경 0, deps 0, 생성물 --check) → **PR #26 squash merge**(main c56f9d4). T20a worker release·worktree 제거. **T20b** `task_d221f62c9dae` 디스패치 `ctx_db0ddb93029b`. 진행: T21, F-T19-1, T20b |
 | 2026-08-19 11:25 | T20b 질문(D-9 90일 vs [S41] III.E.4.c 30일 상한) → **A 채택**: 30일 미refresh 삭제, 30 초과 설정 금지 검증, D-9 정정(사용자 보고). F-T19-1 완료(e0fb59f/01a35ca/cc203b6: 잔여 3+가정 1(A-20) 서술, T22 귀속; CI 32247104953 녹색; **T22 §1 행 추가**(이전 삽입 누락 정정)) → R-T19-2 `task_27986edcfd21` → `ctx_4bc6ea168590`(review) |
 | 2026-08-19 11:29 | T21 worker_done(succeeded, PR #27: japan-panel-plan.md 6장 — 패널 n=5/40·5초 테스트 문항/채점/통과선(근거 없음 표기)·24h 콘텐츠 목록(T7 코드 식별자 grep + runWorld 5시드 측정)·JP Analytics aggregate 증빙·Gate 4 절대 숫자 미제안; 출처 P1–P8; Follow-up 코드 갭 2건(명령 성공률 /metrics 미배선, choice.previewLeadMs 미사용)). R-T21-1 `task_479970810a9e` → `ctx_e35197aa2e57`(review2). 진행: R-T19-2(review), T20b |
+| 2026-08-19 11:49 | R-T19-2 request_changes(잔여 1: 문서 D-9 요약 90일 → BOARD 정정 30일 반영) → **F-T19-2** `task_503de3a832ee`. R-T21-1 request_changes(major: Gate 4 절대 숫자(≥70%·≥90%) 사전 제안 — §14.1 위반; minor 5: P7 enum 귀속·`crisis_sleeping` 부재 식별자·라벨 누락·previewLeadMs grep 주장·Result 파일 수) → **F-T21-1** `task_d839630345ac`. 진행: T20b |
