@@ -7,7 +7,7 @@
 
 상태: `pending`(의존 대기) · `ready` · `dispatched` · `in_review` · `changes_requested` · `merged` · `blocked` · `failed`
 
-> **현재(2026-08-19 UTC): Gate 0 사용자 결정 D-8~D-16 수집 완료, 후속 T19/T20a 진행 중(T20b/c·T21 대기).** 이전: 스펙 v1 구현 task 전부 머지 + T17b·T18 머지. T0–T17 + T1b·T8b·T8c·T8d·T17b·T18 = PR 24개, open PR 0, main `34a8f0d`. **main CI 녹색**(run 32121339258: npm ci/format/lint/typecheck/test/build/soak:ci 전부 success — E-5 해제 후 소급 확인 완료). 사용자 결정 반영: D-4 public·D-6 OBS 고정·D-7 sentinel 정책; E-1·E-2·E-3·E-5·E-7 해결. 남은 것: Gate 0(`docs/ops/gate0-checklist.md`) 사용자 승인 항목과 실 YouTube 계정·OAuth·첫 private 기술 방송(사용자 계정 작업) — 사용자 지시 없이는 진행하지 않는다.
+> **현재(2026-08-20 UTC): Gate 0 반영(T19)·identity (B) 3종(T20a/b/c)·일본 패널 초안(T21) 전부 머지(PR 29개). 진행: T22(모더레이션 보고 경로), T8e(엔진 후속). 사용자 대기: japan-panel-plan §5 A-1~A-8 승인, Discord webhook 저장, YouTube/Cloud/OAuth 설정.** 이전: 스펙 v1 구현 task 전부 머지 + T17b·T18 머지. T0–T17 + T1b·T8b·T8c·T8d·T17b·T18 = PR 24개, open PR 0, main `34a8f0d`. **main CI 녹색**(run 32121339258: npm ci/format/lint/typecheck/test/build/soak:ci 전부 success — E-5 해제 후 소급 확인 완료). 사용자 결정 반영: D-4 public·D-6 OBS 고정·D-7 sentinel 정책; E-1·E-2·E-3·E-5·E-7 해결. 남은 것: Gate 0(`docs/ops/gate0-checklist.md`) 사용자 승인 항목과 실 YouTube 계정·OAuth·첫 private 기술 방송(사용자 계정 작업) — 사용자 지시 없이는 진행하지 않는다.
 
 | T-ID | 제목 | 의존 | [contract] | 상태 | 브랜치 slug | PR | Orca task |
 |---|---|---|---|---|---|---|---|
@@ -37,11 +37,11 @@
 | T18 | D-6/D-7 구현·문서(OBS 버전 고정 승인, safe-mode sentinel 정책, public 문구) | T17, T2 | — | merged | t18-obs-safemode-policy | #24 | `task_0d996db3c12a` |
 | T19 | Gate 0 승인 반영(체크리스트·config·모더레이션 호출표) | T16, T18 | — | merged | t19-gate0-apply | #25 | `task_8633302d4f33` |
 | T20a | identity (B) 계약: 동의자 한정 actor·join/leave 명령 | T1b, T6 | ✔ | merged | t20a-identity-contract | #26 | `task_a7a6d0666e7c` |
-| T20b | identity (B) 서버: 동의 저장·authorDetails 처리·삭제·보존·compliance 문서 | T20a, T9, T13, T8 | — | changes_requested | t20b-identity-server | #28 | `task_d221f62c9dae` |
+| T20b | identity (B) 서버: 동의 저장·authorDetails 처리·삭제·보존·compliance 문서 | T20a, T9, T13, T8 | — | merged | t20b-identity-server | #28 | `task_d221f62c9dae` |
 | T20c | identity (B) 렌더러: 동의자 표시명·고지 CTA | T20a, T14 | — | merged | t20c-identity-renderer | #29 | `task_f15883c91c9d` |
 | T21 | 일본 패널·5초 테스트·24h 콘텐츠 목록·증빙 초안(D-15) | T14, T16 | — | merged | t21-japan-panel-draft | #27 | `task_5ccfd178a887` |
-| T22 | 모더레이션 사유 보고 경로(사람 트리거 admin 엔드포인트 + filter_evasion_surge 휴리스틱; D-13 토큰 4개) | T12, T19 | — | pending | t22-moderation-report | | |
-| T8e | 엔진: StateEngine.pump()가 31일 가상 시계 점프 후 미반환(184s timeout; T20b 리뷰 관측) + engine/ingest.test.ts:442 SQLite write lock flaky(T21 관측) 조사·수정 | T8 | — | pending | t8e-clock-jump-flaky | | |
+| T22 | 모더레이션 사유 보고 경로(사람 트리거 admin 엔드포인트 + filter_evasion_surge 휴리스틱; D-13 토큰 4개) | T12, T19 | — | dispatched | t22-moderation-report | | `task_43f8dd164d5a` |
+| T8e | 엔진: StateEngine.pump()가 31일 가상 시계 점프 후 미반환(184s timeout; T20b 리뷰 관측) + engine/ingest.test.ts:442 SQLite write lock flaky(T21 관측) 조사·수정 | T8 | — | dispatched | t8e-clock-jump-flaky | | `task_364b480f6a22` |
 
 디스패치 순서 원칙: `ready` 중 T-ID 낮은 것부터, 동시 2, `[contract]`는 하나만. 리뷰 Task는 `R-<T-ID>-<round>`로 별도 등록하고 아래 이력에만 남긴다.
 
@@ -251,3 +251,4 @@
 | 2026-08-19 16:47 | F-T20b-2 완료(411549a/2338cdd/35c5bb8: chatRuntimeDeps() 배선으로 훅 유실 불가 + wiring.test, duringCommit 스테이징·sweeper identity port, 고지 6필드·notice version 2026-08-20; 2082 tests; CI 32277356904 녹색; 무관 관측: StateEngine.pump()가 31일 가상 시계 점프 후 미반환 — 확인 후 T8e 후보) → R-T20b-3 `task_40147c5d566d` → `ctx_e1c1765f564b`(review2) |
 | 2026-08-19 17:11 | R-T20b-3 request_changes(round 2 해소 확인; 잔여 blocker 1: RetentionSweeper가 consent 삭제 후 다음 field abort 시 forgetDeleted 누락 → pending 재노출) → **F-T20b-3** `task_ab81fb91a508`. **T8e 등록**(pump() 31일 점프 미반환 + ingest.test flaky). review2 정리 |
 | 2026-08-19 17:34 | F-T20b-3 완료(af8f73d/4314664: sweeper consent-field 직후·abort 경로 reconcile, 자체 발견한 4번째 삭제 경로 RevocationHandler도 같은 경계로 — 코디네이터 승인; fault test 3; 2085 tests; CI 32281849411 녹색) → R-T20b-4 `task_af0fa820f85f` → `ctx_e88d4c4b76cf`(review2) |
+| 2026-08-19 17:56 | R-T20b-4 **approve** → 최종 게이트(59파일, contract·deps 0, config perUser.cooldownMs provisional 추가·retention.json viewer_consent 필드, CI 32281849411 녹색) → **PR #28 squash merge**(main ead0ee9). T20b worker release·worktree 제거. **identity (B) 3종 전부 머지**(T20a #26, T20b #28, T20c #29). TASK_SPECS §T22·§T8e 추가 → **T22** `task_43f8dd164d5a`·**T8e** `task_364b480f6a22` 디스패치 |
