@@ -9,9 +9,17 @@
  * hold a metric back and they are recorded separately, because they open
  * separately (spec §17, BOARD A-1):
  *
- * - `identity` — the metric needs a per-person identifier, which is not stored.
+ * - `identity` — the metric needs a per-person identifier.
  * - `derived_metric` — the metric combines YouTube API Data with internal or
  *   settlement data, which needs the [S42] analytics-use-case approval.
+ *
+ * **BOARD D-9 did not open the `identity` gate for these.** It bought exactly one
+ * thing: a consenting viewer's name shown next to the action they just took. It
+ * did not authorize counting, comparing or remembering what any viewer does —
+ * `viewer_consent` has no per-viewer counter, the arbiter's per-viewer state is
+ * a cooldown that forgets itself, and the tokens below stay forbidden. D-9's
+ * text says so in as many words: "개인 D1/D7/D30·§14.1 '승인 후 후보' 지표는 계속
+ * 계산·저장하지 않음".
  */
 
 export type MetricGate = 'identity' | 'derived_metric' | 'identity_and_derived_metric'
@@ -51,7 +59,7 @@ export const APPROVAL_GATED_METRICS: readonly ApprovalGatedMetric[] = Object.fre
     axis: '반복 참여',
     definition: '개인 D1·D7·D30 재명령률',
     gate: 'identity_and_derived_metric',
-    specRef: '§14.1 반복 참여, §14.2(7)',
+    specRef: '§14.1 반복 참여, §14.2(7), BOARD D-9 (여전히 금지)',
     forbiddenTokens: Object.freeze([
       'd1retention',
       'd7retention',
@@ -62,6 +70,15 @@ export const APPROVAL_GATED_METRICS: readonly ApprovalGatedMetric[] = Object.fre
       'recommandrate',
       'returningcommander',
       'repeatcommanderrate',
+      // Spellings a consented-viewer build (BOARD D-9, T20b) would reach for.
+      // The consent record exists to show a name, not to accumulate a history.
+      'consentedretention',
+      'consentedreturn',
+      'returningviewerrate',
+      'repeatjoinrate',
+      'perviewerhistory',
+      'channelrefhistory',
+      'channelrefsessions',
     ]),
   }),
   Object.freeze({

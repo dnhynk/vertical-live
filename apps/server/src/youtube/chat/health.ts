@@ -27,6 +27,8 @@ export const CHAT_TRANSPORT_SIGNAL = 'youtube.chat.transport'
 export const CHAT_KEEPALIVE_SIGNAL = 'youtube.chat.keepalive'
 export const CHAT_RECONNECT_SIGNAL = 'youtube.chat.reconnect'
 export const CHAT_USER_EVENTS_SIGNAL = 'youtube.chat.user_events'
+/** Emitted **only** while the consent gate is open (BOARD D-9, T20b). */
+export const CHAT_CONSENT_SIGNAL = 'youtube.chat.consent'
 
 export const CHAT_HEALTH_SIGNAL_NAMES = [
   CHAT_TRANSPORT_SIGNAL,
@@ -88,6 +90,23 @@ export interface ChatUserEventObservation {
   readonly total: number
 }
 
+/**
+ * What the source did with the consent decisions it carried (BOARD D-9, T20b).
+ *
+ * Anonymous integers: the source never learns whose decision any of them was.
+ * `withdrawalRetrying` is the one that means something is *wrong* — a `LEAVE`
+ * whose deletion could not be applied, whose batch was therefore rolled back,
+ * and which has not succeeded since (review round 1, B3).
+ */
+export interface ChatConsentObservation {
+  readonly joined: number
+  readonly left: number
+  readonly failures: number
+  readonly lastFailureKind: string | null
+  readonly lastFailureAt: string | null
+  readonly withdrawalRetrying: boolean
+}
+
 /** Everything the source knows about itself at one instant. */
 export interface ChatObservation {
   readonly mode: ChatMode
@@ -109,6 +128,12 @@ export interface ChatObservation {
   /** Last `nextPageToken` (a pagination cursor, not a credential; §9.4(3)). */
   readonly pageToken: string | null
   readonly userEvents: ChatUserEventObservation
+  /**
+   * Consent counters. Absent or `null` while the gate is closed — and that is
+   * what keeps the closed configuration's `/health` byte-for-byte what it was
+   * before T20b, because no consent signal is built from it (review round 1, M1).
+   */
+  readonly consent?: ChatConsentObservation | null
 }
 
 export function buildChatHealthSignals(observation: ChatObservation, clock: Clock): HealthSignal[] {
@@ -116,12 +141,19 @@ export function buildChatHealthSignals(observation: ChatObservation, clock: Cloc
   const observedAtMonotonicMs = clock.monotonicMs()
   const base = { component: 'youtube-chat' as const, observedAtUtc, observedAtMonotonicMs }
 
-  return [
+  const signals: HealthSignal[] = [
     { ...base, name: CHAT_TRANSPORT_SIGNAL, ...transport(observation) },
     { ...base, name: CHAT_KEEPALIVE_SIGNAL, ...keepalive(observation, observedAtMonotonicMs) },
     { ...base, name: CHAT_RECONNECT_SIGNAL, ...reconnect(observation) },
     { ...base, name: CHAT_USER_EVENTS_SIGNAL, ...userEvents(observation, observedAtMonotonicMs) },
   ]
+  // Appended, never inserted: a closed gate produces exactly the four signals it
+  // produced before T20b, in the same order.
+  const consentObservation = observation.consent ?? null
+  if (consentObservation !== null) {
+    signals.push({ ...base, name: CHAT_CONSENT_SIGNAL, ...consent(consentObservation) })
+  }
+  return signals
 }
 
 type SignalBody = Pick<HealthSignal, 'status' | 'detail'> & { reason?: string }
@@ -190,6 +222,30 @@ function reconnect(observation: ChatObservation): SignalBody {
   }
   if (observation.reconnect.tokenRejected) {
     return { status: 'degraded', reason: 'resumed_without_token', detail }
+  }
+  return { status: 'ok', detail }
+}
+
+/**
+ * The consent decisions this source applied, and the one state that is a fault.
+ *
+ * A failed `JOIN` or name refresh is reported but not `degraded`: nothing was
+ * stored, the viewer can send the command again, and the batch went through. A
+ * `LEAVE` that could not be applied *is* `degraded` until a later commit proves
+ * the retry landed — until then a viewer has asked to be deleted and has not
+ * been (spec §12.4, [S41] III.E.4.g).
+ */
+function consent(observation: ChatConsentObservation): SignalBody {
+  const detail = {
+    joined: observation.joined,
+    left: observation.left,
+    failures: observation.failures,
+    lastFailureKind: observation.lastFailureKind,
+    lastFailureAt: observation.lastFailureAt,
+    withdrawalRetrying: observation.withdrawalRetrying,
+  }
+  if (observation.withdrawalRetrying) {
+    return { status: 'degraded', reason: 'consent_withdrawal_retrying', detail }
   }
   return { status: 'ok', detail }
 }

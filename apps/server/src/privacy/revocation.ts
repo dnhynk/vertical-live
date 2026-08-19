@@ -11,7 +11,7 @@ import type { SecretVault } from '../secrets/vault.js'
 import type { AuthEvent, AuthEventSink, AuthRevokedEvent } from '../youtube/auth/events.js'
 import { REFRESH_TOKEN_SECRET } from '../youtube/auth/token-manager.js'
 import type { RetentionConfig, RetentionField, RevocationClass } from './config.js'
-import { plusDays } from './retention.js'
+import { plusDays, type ConsentBufferReconciler } from './retention.js'
 
 /**
  * Consent-withdrawal automation (spec §12.4):
@@ -69,6 +69,15 @@ export interface RevocationHandlerOptions {
   readonly clock: Clock
   readonly config: RetentionConfig
   readonly grantRevoker: GrantRevoker
+  /**
+   * The in-memory half of the consent deletion, when this process has a consent
+   * directory. Passed only while the identity gate is open; closed, nothing
+   * buffers a name.
+   *
+   * A revocation deletes `viewer_consent` by SQL batch exactly as the sweep
+   * does, so it cannot use the directory's own deletion boundary either.
+   */
+  readonly identity?: ConsentBufferReconciler
   readonly logger?: Logger
 }
 
@@ -107,6 +116,7 @@ export class RevocationHandler {
   readonly #clock: Clock
   readonly #config: RetentionConfig
   readonly #grantRevoker: GrantRevoker
+  readonly #identity: ConsentBufferReconciler | undefined
   readonly #logger: Logger
 
   constructor(options: RevocationHandlerOptions) {
@@ -114,6 +124,7 @@ export class RevocationHandler {
     this.#clock = options.clock
     this.#config = options.config
     this.#grantRevoker = options.grantRevoker
+    this.#identity = options.identity
     this.#logger = options.logger ?? silentLogger
   }
 
@@ -138,9 +149,33 @@ export class RevocationHandler {
     // in the middle still ends with "no token", which re-triggers this path.
     const grantOutcome = await this.#grantRevoker.revoke()
 
-    const entries = this.authorizedFields.map((field) =>
-      this.#deleteField(field, { reason, allowedPeriodDays, deadlineAt }),
-    )
+    const entries: RevocationEntryResult[] = []
+    try {
+      for (const field of this.authorizedFields) {
+        entries.push(this.#deleteField(field, { reason, allowedPeriodDays, deadlineAt }))
+        // The same boundary the sweep uses (review round 3): the consent rows are
+        // gone as soon as this field returns, so the buffered names those rows
+        // authorized are dropped here rather than after the remaining fields —
+        // a later field aborting must not be able to leave a deleted viewer's
+        // name attributable by `takeActor` for the rest of the process's life.
+        if (field.personalIdentifiers === 'consented_identity') {
+          this.#identity?.forgetDeleted()
+        }
+      }
+    } catch (error) {
+      // The abort is the error sink's to report; the buffer is reconciled first,
+      // including when the consent field itself was the one that threw.
+      try {
+        this.#identity?.forgetDeleted()
+      } catch (reconcileError) {
+        // Logged, never thrown: replacing `error` would hide why the revocation
+        // failed, and both failures end the same revocation.
+        this.#logger.error('buffered actors could not be reconciled after a failed revocation', {
+          message: (reconcileError as Error).message,
+        })
+      }
+      throw error
+    }
     const completedAt = this.#clock.nowUtcIso()
     const incomplete = entries
       .filter((entry) => entry.truncated || entry.outcome === 'failed')

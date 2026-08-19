@@ -6,6 +6,7 @@ import {
   type BroadcastLifecycle,
   type CanonicalEvent,
   type CommandName,
+  type ConsentedActor,
   type Effect,
   type InputMode,
   type PaidEventKind,
@@ -21,6 +22,7 @@ import type {
   InboxProcessingRecord,
   InboxRow,
   IngestBatchResult,
+  IngestCommitHooks,
   PaidLedgerRecord,
   PersistedEffect,
   SourceCheckpointInput,
@@ -107,6 +109,25 @@ export interface EnginePublisher {
   publishEffect(effect: Effect): void
 }
 
+/**
+ * Where a consented viewer's display name comes from (BOARD D-9, T20b).
+ *
+ * The chat source resolved it while the message still had `authorDetails`; the
+ * engine asks for it by message id when the row reaches the writer, and the
+ * resolver forgets it at the same moment. Absent in the closed configuration and
+ * after a restart, which is why every consumer treats `null` as normal.
+ */
+export interface ActorResolver {
+  takeActor(messageId: string): ConsentedActor | null
+  /**
+   * References whose identity was deleted since the last call (`LEAVE`, a user
+   * deletion request, the 30-day sweep). The engine purges each one from the
+   * input arbiter, which is the only other place a `channelRef` lives (review
+   * round 1, M4). Optional: a resolver that never deletes anything has none.
+   */
+  drainForgotten?(): readonly string[]
+}
+
 export const nullPublisher: EnginePublisher = {
   rendererCount: 0,
   publishSnapshot() {},
@@ -120,6 +141,12 @@ export interface StateEngineOptions {
   readonly inputConfig?: InputConfig
   readonly publisher?: EnginePublisher
   readonly logger?: Logger
+  /**
+   * Consented display names for the messages being processed (BOARD D-9). Absent
+   * while the consent gate is closed, in which case every `actor` stays `null`
+   * exactly as it was under A-1.
+   */
+  readonly identity?: ActorResolver
   /**
    * Schedule the periodic wake-up on `start()`. `false` leaves the loop entirely
    * in the caller's hands, which is what the tests and T11's virtual clock need:
@@ -210,6 +237,8 @@ export class StateEngine {
   readonly #inputConfig: InputConfig
   readonly #publisher: EnginePublisher
   readonly #logger: Logger
+  /** Consented actor lookup (BOARD D-9); absent while the gate is closed. */
+  readonly #identity: ActorResolver | undefined
   readonly #metrics: EngineMetrics
 
   #world: WorldState
@@ -217,6 +246,8 @@ export class StateEngine {
   #processedSeq = 0
   #inputMode: InputMode = 'direct'
   #arbiter: InputArbiter
+  /** Choice window the arbiter's remembered votes belong to; see `#syncVoteScope`. */
+  #lastVoteScope: string | null = null
   #ready = false
   #started = false
   #lastCommittedAt: string | null = null
@@ -271,6 +302,7 @@ export class StateEngine {
     this.#inputConfig = options.inputConfig ?? loadInputConfig()
     this.#publisher = options.publisher ?? nullPublisher
     this.#logger = options.logger ?? silentLogger
+    this.#identity = options.identity
     this.#autoTick = options.autoTick !== false
     this.#metrics = new EngineMetrics(this.#config.engine.metricsSampleSize)
     this.#world = initialWorldState({
@@ -283,6 +315,7 @@ export class StateEngine {
     this.#arbiter = new InputArbiter({
       clock: this.#clock,
       config: this.#inputConfig.window,
+      perUser: this.#inputConfig.perUser,
     })
   }
 
@@ -323,6 +356,7 @@ export class StateEngine {
     this.#arbiter = new InputArbiter({
       clock: this.#clock,
       config: this.#inputConfig.window,
+      perUser: this.#inputConfig.perUser,
       initialMode: this.#inputMode,
     })
 
@@ -365,18 +399,37 @@ export class StateEngine {
    * puts the storage-boundary sanitizer in exactly one place, so an argument
    * outside the content's choice vocabulary cannot be persisted by *any* source —
    * this endpoint today, T9's adapter tomorrow (R-T8-1 blocker 4).
+   *
+   * `hooks` is passed straight through to the store: the sanitizer keeps input
+   * order and count, so a hook's index still names the envelope the caller sent.
    */
   ingest(
     envelopes: readonly IngestEnvelope[],
     checkpoint: SourceCheckpointInput,
+    hooks: IngestCommitHooks = {},
   ): IngestBatchResult {
     const sanitized = sanitizeEnvelopeArguments(envelopes)
     if (sanitized.droppedCount > 0) {
       this.#metrics.count('ingest_argument_dropped', sanitized.droppedCount)
     }
-    const result = this.#store.commitIngestBatch(sanitized.submissions, checkpoint)
+    const result = this.#store.commitIngestBatch(sanitized.submissions, checkpoint, hooks)
     this.notifyIngest()
     return result
+  }
+
+  /**
+   * One consent decision the ingest path could not apply (T20b, review round 1
+   * B3). `/metrics` is this engine's snapshot, so the counter lives here; the
+   * name is a machine token and the value an anonymous integer, and the key
+   * exists only once a failure has happened — the closed configuration's
+   * `/metrics` output is unchanged.
+   *
+   * The union repeats `ConsentFailureKind` on purpose: the engine does not
+   * import from the YouTube adapter (the dependency runs the other way), and the
+   * one caller in `main.ts` fails to typecheck if the two ever drift.
+   */
+  countConsentFailure(kind: 'withdrawal' | 'join' | 'message'): void {
+    this.#metrics.count(`consent_observe_failed_${kind}`)
   }
 
   /**
@@ -627,6 +680,8 @@ export class StateEngine {
 
   #runPending(): number {
     let commits = 0
+    this.#purgeForgottenViewers()
+    this.#syncVoteScope()
     // Every pass re-asks the inbox: a batch committed by another path (the
     // simulator endpoint, T9's adapter) between two ticks must not wait for a
     // `notifyIngest` that a future caller might forget.
@@ -653,7 +708,39 @@ export class StateEngine {
     commits += this.#flushResolved(now)
     commits += this.#reconcileInteraction(now)
     this.#sweepEffects(now)
+    // After the pass as well as before it: the choice window this pass opened or
+    // closed is what decides whose vote the arbiter is still holding.
+    this.#syncVoteScope()
     return commits
+  }
+
+  /**
+   * Drops the arbiter state of every identity that has been deleted (review
+   * round 1, M4).
+   *
+   * The deletion itself happened elsewhere — inside the chat source's ingest
+   * transaction, or in the T13 request handler — and the arbiter belongs to the
+   * single writer, so the references are handed over as a queue and purged here.
+   */
+  #purgeForgottenViewers(): void {
+    const forgotten = this.#identity?.drainForgotten?.() ?? []
+    for (const channelRef of forgotten) this.#arbiter.forgetViewer(channelRef)
+  }
+
+  /**
+   * Retires the vote the arbiter is still remembering once the choice window it
+   * belongs to is over (review round 1, M4).
+   *
+   * A viewer who voted is exempt from the arbiter's own pruning for as long as
+   * the vote is remembered, so without this call their `channelRef` would sit in
+   * memory for the rest of the broadcast. With it, the exemption lasts exactly
+   * as long as the decision does.
+   */
+  #syncVoteScope(): void {
+    const scope = this.#voteScope()
+    if (scope === this.#lastVoteScope) return
+    if (this.#lastVoteScope !== null) this.#arbiter.forgetVoteScope(this.#lastVoteScope)
+    this.#lastVoteScope = scope
   }
 
   /**
@@ -790,7 +877,11 @@ export class StateEngine {
       return null
     }
 
-    const event = toCanonicalEvent(row.envelope, row.ingestSeq)
+    const event = toCanonicalEvent(
+      row.envelope,
+      row.ingestSeq,
+      this.#identity?.takeActor(row.envelope.messageId) ?? null,
+    )
     const paidKind = paidEventKindOf(event)
 
     if (paidKind === null && this.#isExpired(event, now)) {
@@ -810,7 +901,15 @@ export class StateEngine {
       return null
     }
 
-    const admission = this.#arbiter.admit(command)
+    const admission = this.#arbiter.admit(command, event.actor, this.#voteScope())
+    if (admission.disposition === 'suppressed') {
+      // A consented viewer's own cooldown or one-vote rule (BOARD D-9, A-9).
+      // Recorded as processed with its reason, so the row is not re-drained and
+      // the audit trail says why nothing happened (spec §7.3(3)).
+      this.#resolve(row.ingestSeq, `suppressed:${admission.reason ?? 'unknown'}`)
+      this.#metrics.count(`command_suppressed_${admission.reason ?? 'unknown'}`)
+      return null
+    }
     if (admission.disposition === 'aggregated') {
       // Held, not resolved: the recovery cursor stays below this row until the
       // window closes, so a crash re-drains it (spec §6.4 "기여 수 보존").
@@ -868,6 +967,16 @@ export class StateEngine {
     this.#resolve(row.ingestSeq, 'applied')
     this.#metrics.count('paid_applied')
     return { input: { kind: 'event', event }, now: this.#advanceTo(event.receivedAt), event }
+  }
+
+  /**
+   * Identity of the open choice window, so "one vote" means one vote per
+   * decision (BOARD A-9). `null` when no window is open, which is when a vote
+   * command cannot be accepted at all (spec §7.1).
+   */
+  #voteScope(): string | null {
+    const choice = this.#world.world.choice
+    return choice === null ? null : `${choice.choiceSetId}:${choice.opensAt}`
   }
 
   #isExpired(event: CanonicalEvent, now: string): boolean {
@@ -986,7 +1095,16 @@ export class StateEngine {
     const effects = drafts.map((entry, index) =>
       assembleEffect(
         entry.draft,
-        { revision, ...(entry.deadline === undefined ? {} : { deadline: entry.deadline }) },
+        {
+          revision,
+          ...(entry.deadline === undefined ? {} : { deadline: entry.deadline }),
+          // Only an event-caused draft can name anyone, and only the actor of
+          // the very event that caused it (BOARD D-9).
+          actor:
+            entry.draft.cause.kind === 'event'
+              ? (eventsByKey.get(entry.draft.cause.eventKey)?.actor ?? null)
+              : null,
+        },
         index,
       ),
     )
@@ -1444,7 +1562,19 @@ export class StateEngine {
 }
 
 /** The §7.4 canonical event for a validated envelope, plus its issued sequence. */
-export function toCanonicalEvent(envelope: ValidIngestEnvelope, ingestSeq: number): CanonicalEvent {
+/**
+ * The §7.4 canonical event for one inbox row.
+ *
+ * `actor` is the only value that does not come from the row: the envelope has no
+ * identity field at all (that is the point), so a consented viewer's name is
+ * supplied by the caller from memory and defaults to `null` — for everyone who
+ * did not consent, for every replay, and for every restart (BOARD D-9).
+ */
+export function toCanonicalEvent(
+  envelope: ValidIngestEnvelope,
+  ingestSeq: number,
+  actor: ConsentedActor | null = null,
+): CanonicalEvent {
   return CanonicalEventSchema.parse({
     schemaVersion: envelope.schemaVersion,
     eventKey: eventKeyForEnvelope(envelope),
@@ -1455,7 +1585,7 @@ export function toCanonicalEvent(envelope: ValidIngestEnvelope, ingestSeq: numbe
     kind: envelope.kind,
     occurredAt: envelope.occurredAt,
     receivedAt: envelope.receivedAt,
-    actor: null,
+    actor,
     command: envelope.command,
     payment: envelope.payment,
     sourceDataExpiresAt: sourceDataExpiresAt(envelope.receivedAt),

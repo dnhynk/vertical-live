@@ -11,7 +11,7 @@ import { GrpcChatSource } from './grpc-source.js'
 import { buildChatHealthSignals, type ChatObservation } from './health.js'
 import { RestChatSource } from './rest-source.js'
 import { CancellableDelay, type ChatAccessTokens, type ChatRunResult } from './retry.js'
-import { ChatIngestSink } from './sink.js'
+import { ChatIngestSink, type ConsentFailure, type ConsentObserver } from './sink.js'
 import { ChatSourceState } from './state.js'
 import {
   GrpcStreamListTransport,
@@ -70,6 +70,14 @@ export interface ChatSourceOptions {
   readonly quota?: QuotaTracker
   readonly healthSink?: HealthSignalSink
   readonly onIngested?: (insertedCount: number) => void
+  /** Consent directory; passed only while the consent gate is open (BOARD D-9). */
+  readonly consent?: ConsentObserver
+  /**
+   * Notified for every consent decision the ingest path could not apply. The
+   * source records it on its own health either way; this is the hook `main.ts`
+   * uses to count it on `/metrics` too (review round 1, B3).
+   */
+  readonly onConsentFailure?: (failure: ConsentFailure) => void
   readonly logger?: Logger
   /** Replaced in tests by a transport pointed at the fake gRPC server. */
   readonly transport?: StreamListTransport
@@ -98,7 +106,11 @@ export class ChatSource {
 
   constructor(options: ChatSourceOptions) {
     this.#options = options
-    this.#state = new ChatSourceState(options.clock, options.config.grpc.keepalive)
+    this.#state = new ChatSourceState(
+      options.clock,
+      options.config.grpc.keepalive,
+      options.consent !== undefined,
+    )
     this.#logger = options.logger ?? silentLogger
     this.#readyDelay = new CancellableDelay(options.clock)
   }
@@ -171,6 +183,21 @@ export class ChatSource {
       broadcastId: target.broadcastId,
       initialPageToken: stored?.nextPageToken ?? null,
       ...(this.#options.onIngested === undefined ? {} : { onIngested: this.#options.onIngested }),
+      ...(this.#options.consent === undefined
+        ? {}
+        : {
+            consent: this.#options.consent,
+            // One place both surfaces are fed from: the source's own health
+            // signal and — through the caller's hook — `/metrics`.
+            onConsentFailure: (failure: ConsentFailure): void => {
+              this.#state.recordConsentFailure(failure)
+              this.#logger.warn('youtube chat: a consent decision could not be applied', {
+                kind: failure.kind,
+                failClosed: failure.kind === 'withdrawal',
+              })
+              this.#options.onConsentFailure?.(failure)
+            },
+          }),
     })
     this.#sink = sink
     this.#logger.info('youtube chat: starting', {

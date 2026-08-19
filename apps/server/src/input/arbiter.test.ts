@@ -266,3 +266,150 @@ describe('snapshot view (spec §6.4)', () => {
     expect(arbiter.remainingMs()).toBe(3500)
   })
 })
+
+/**
+ * Per-consented-viewer rules (BOARD D-9, A-9). Everything below needs an
+ * `actor`; the anonymous path above must behave exactly as it did before, which
+ * is what the rest of this file already pins down.
+ */
+describe('consented viewers', () => {
+  const ACTOR_ONE = {
+    kind: 'consented',
+    displayName: 'synthetic-viewer-1',
+    channelRef: 'ref_00000000000000000000000000000001',
+  } as const
+  const ACTOR_TWO = {
+    kind: 'consented',
+    displayName: 'synthetic-viewer-2',
+    channelRef: 'ref_00000000000000000000000000000002',
+  } as const
+
+  function withPerUser(cooldownMs = 5000) {
+    const clock = new FakeClock()
+    const arbiter = new InputArbiter({ clock, config: CONFIG, perUser: { cooldownMs } })
+    return { clock, arbiter }
+  }
+
+  it('suppresses a second command inside the cooldown and lets the next one through', async () => {
+    const { clock, arbiter } = withPerUser(5000)
+
+    expect(arbiter.admit(command('FEED'), ACTOR_ONE).disposition).toBe('direct')
+
+    await advance(clock, 1000)
+    const blocked = arbiter.admit(command('PET'), ACTOR_ONE)
+    expect(blocked.disposition).toBe('suppressed')
+    expect(blocked.reason).toBe('cooldown')
+
+    await advance(clock, 4100)
+    expect(arbiter.admit(command('PET'), ACTOR_ONE).disposition).toBe('direct')
+  })
+
+  it('does not let one viewer cooldown touch anybody else', async () => {
+    const { clock, arbiter } = withPerUser(5000)
+    arbiter.admit(command('FEED'), ACTOR_ONE)
+    await advance(clock, 1000)
+
+    expect(arbiter.admit(command('FEED'), ACTOR_TWO).disposition).toBe('direct')
+    // And an anonymous viewer is never subject to it: `actor` is null, so no
+    // per-user claim is made at all (spec §6.4, BOARD A-1).
+    expect(arbiter.admit(command('FEED')).disposition).toBe('direct')
+    expect(arbiter.admit(command('FEED')).disposition).toBe('direct')
+  })
+
+  it('leaves a suppressed command out of the tally entirely', async () => {
+    // A cooldown that folded the command into the aggregate would not be a
+    // cooldown: the contribution would still count.
+    const { clock, arbiter } = withPerUser(5000)
+    arbiter.admit(command('FEED'), ACTOR_ONE)
+    await advance(clock, 100)
+    arbiter.admit(command('FEED'), ACTOR_ONE)
+
+    await advance(clock, 5000)
+    const [closed] = arbiter.drainClosedWindows()
+    expect(closed?.acceptedCount).toBe(1)
+    expect(sumTallies(closed?.counts, 'directApplied')).toBe(1)
+    expect(sumTallies(closed?.counts, 'aggregatedOnly')).toBe(0)
+  })
+
+  it('counts one vote per viewer per choice window', async () => {
+    const { clock, arbiter } = withPerUser(0)
+    const scope = 'gathering:2026-01-01T00:00:00.000Z'
+
+    expect(arbiter.admit(command('VOTE_A'), ACTOR_ONE, scope).disposition).toBe('direct')
+    const second = arbiter.admit(command('VOTE_B'), ACTOR_ONE, scope)
+    expect(second.disposition).toBe('suppressed')
+    expect(second.reason).toBe('already_voted')
+    // Another viewer votes freely in the same window.
+    expect(arbiter.admit(command('VOTE_B'), ACTOR_TWO, scope).disposition).toBe('direct')
+
+    // A care command is not a vote, so it is not blocked by having voted.
+    expect(arbiter.admit(command('FEED'), ACTOR_ONE, scope).disposition).toBe('direct')
+
+    // The next choice window is a different decision.
+    await advance(clock, 6000)
+    const next = 'festival_prep:2026-01-01T00:10:00.000Z'
+    expect(arbiter.admit(command('VOTE_C'), ACTOR_ONE, next).disposition).toBe('direct')
+  })
+
+  it('forgets a vote when its window is dropped', () => {
+    const { arbiter } = withPerUser(0)
+    const scope = 'gathering:2026-01-01T00:00:00.000Z'
+    arbiter.admit(command('VOTE_A'), ACTOR_ONE, scope)
+    expect(arbiter.admit(command('VOTE_A'), ACTOR_ONE, scope).disposition).toBe('suppressed')
+
+    arbiter.forgetVoteScope(scope)
+    expect(arbiter.admit(command('VOTE_A'), ACTOR_ONE, scope).disposition).toBe('direct')
+  })
+
+  it('keeps a voter out of the prune until their scope is retired', async () => {
+    // Review round 1 (M4): a viewer with a remembered vote is exempt from
+    // `#pruneViewers`, so their `channelRef` stays in memory across window
+    // closes — for the whole broadcast if nothing ever retires the scope. The
+    // engine retires it when the choice window changes; this is what that does.
+    const { clock, arbiter } = withPerUser(5000)
+    const scope = 'gathering:2026-01-01T00:00:00.000Z'
+    arbiter.admit(command('VOTE_A'), ACTOR_ONE, scope)
+
+    // Two windows later, with the cooldown long expired, the vote is still known.
+    await advance(clock, 11_000)
+    arbiter.drainClosedWindows()
+    expect(arbiter.admit(command('VOTE_A'), ACTOR_ONE, scope).disposition).toBe('suppressed')
+
+    arbiter.forgetVoteScope(scope)
+    await advance(clock, 11_000)
+    arbiter.drainClosedWindows()
+    expect(arbiter.admit(command('VOTE_B'), ACTOR_ONE, scope).disposition).toBe('direct')
+  })
+
+  it('purges a viewer whose identity was deleted', async () => {
+    // `LEAVE`, a deletion request or the 30-day sweep: the consent row is gone,
+    // so the arbiter must not keep the reference it was keyed by (review round
+    // 1, M4). Observable as the cooldown disappearing with it.
+    const { clock, arbiter } = withPerUser(5000)
+    arbiter.admit(command('FEED'), ACTOR_ONE)
+    await advance(clock, 100)
+    expect(arbiter.admit(command('FEED'), ACTOR_ONE).disposition).toBe('suppressed')
+
+    arbiter.forgetViewer(ACTOR_ONE.channelRef)
+    expect(arbiter.admit(command('FEED'), ACTOR_ONE).disposition).toBe('direct')
+    // And it is only that viewer: nobody else's state is touched.
+    arbiter.admit(command('FEED'), ACTOR_TWO)
+    await advance(clock, 100)
+    expect(arbiter.admit(command('FEED'), ACTOR_TWO).disposition).toBe('suppressed')
+  })
+
+  it('applies no per-user rule at all when none is configured', async () => {
+    // The closed configuration and any caller that does not pass `perUser`.
+    const { clock, arbiter } = makeArbiter()
+    expect(arbiter.admit(command('FEED'), ACTOR_ONE).disposition).toBe('direct')
+    await advance(clock, 1)
+    expect(arbiter.admit(command('FEED'), ACTOR_ONE).disposition).toBe('direct')
+  })
+
+  it('rejects a negative cooldown', () => {
+    const clock = new FakeClock()
+    expect(() => new InputArbiter({ clock, config: CONFIG, perUser: { cooldownMs: -1 } })).toThrow(
+      InputArbiterConfigError,
+    )
+  })
+})

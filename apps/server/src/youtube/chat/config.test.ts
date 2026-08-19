@@ -38,10 +38,30 @@ describe('loadChatConfig', () => {
     expect(config.liveChatId).toBe('chat_test_env')
   })
 
-  it('refuses to request authorDetails while the identity gate is closed', () => {
+  it('requests no author identity while the consent gate is closed', () => {
+    // BOARD A-1 / D-9 closed: exactly the two parts spec §7.2 always allows.
+    const config = loadChatConfig({ identityGateOpen: false })
+    expect(config.parts).toEqual(['id', 'snippet'])
+    expect(config.identityGateOpen).toBe(false)
+  })
+
+  it('adds authorDetails only when the consent gate is open', () => {
+    // D-9: opening the gate is what adds the part, so a viewer who sends JOIN
+    // can be recognized (spec §7.2 "authorDetails는 identity feature gate가
+    // 승인된 경우에만 추가한다").
+    const config = loadChatConfig({ identityGateOpen: true })
+    expect(config.parts).toEqual(['id', 'snippet', 'authorDetails'])
+    expect(config.identityGateOpen).toBe(true)
+  })
+
+  it('refuses a config file that names authorDetails itself, gate open or shut', () => {
     const path = withChatSection({ parts: ['id', 'snippet', 'authorDetails'] })
-    expect(() => loadChatConfig({ configPath: path })).toThrow(ChatConfigError)
-    expect(() => loadChatConfig({ configPath: path })).toThrow(/identity gate is closed/)
+    for (const identityGateOpen of [false, true]) {
+      expect(() => loadChatConfig({ configPath: path, identityGateOpen })).toThrow(ChatConfigError)
+      expect(() => loadChatConfig({ configPath: path, identityGateOpen })).toThrow(
+        /decided by engine\.identityGateOpen/,
+      )
+    }
   })
 
   it('refuses parts the API does not define', () => {

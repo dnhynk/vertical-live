@@ -3,6 +3,7 @@ import {
   type AggregateWindow,
   type CommandName,
   type CommandRef,
+  type ConsentedActor,
   type InputMode,
 } from '@vl/contract'
 
@@ -21,10 +22,21 @@ import type { Clock } from '../clock.js'
  * - `aggregate` — nothing is applied individually; every command counts toward
  *   the window tally, and the world reads the tally when the window closes.
  *
- * There is deliberately **no per-user cooldown and no one-vote-per-user rule**:
- * `actor` is `null` while the identity gate is closed (spec §7.4, BOARD A-1),
- * so a per-user claim would be a claim we cannot back. Spec §6.4 says as much —
- * this mode may not claim per-user fairness.
+ * Per-user fairness applies to **consented viewers only** (BOARD D-9, A-9).
+ * A viewer who sent `JOIN` has a `channelRef`, so two rules the anonymous path
+ * cannot make become possible for them:
+ *
+ * - a cooldown: their next command is not applied individually until
+ *   `perUser.cooldownMs` has passed;
+ * - one vote: a second `VOTE_A/B/C` inside the same open choice window is not
+ *   counted twice.
+ *
+ * Both are `suppressed` rather than aggregated — the point of a cooldown is that
+ * the command does not contribute, so folding it into the tally would defeat it.
+ * For everyone else nothing changes: `actor` is `null`, no per-user claim is
+ * made, and the global flood control of the window is the only limit (spec §6.4,
+ * §7.3(4), BOARD A-1). The state is keyed by `channelRef` and never by a channel
+ * id — the arbiter has no way to learn one.
  *
  * All time comes from the injected `Clock`: intervals from `monotonicMs()`,
  * reported instants from `nowUtcIso()` captured once at construction (spec
@@ -42,14 +54,40 @@ export interface InputWindowConfig {
   readonly maxDirectPerWindow: number
 }
 
+/**
+ * Per-consented-viewer rules (BOARD D-9, A-9). Inert while the consent gate is
+ * closed, because no message then carries an actor.
+ */
+export interface InputPerUserConfig {
+  /**
+   * Minimum gap between two individually applied commands from one consented
+   * viewer. Provisional (BOARD A-3/A-15): spec §6.4 fixes no number, and this
+   * one is the tally window length, so a consented viewer contributes at most
+   * once per window — the same pacing the on-screen tally already shows.
+   */
+  readonly cooldownMs: number
+}
+
+/** Why a consented viewer's command was not counted at all. */
+export type SuppressionReason =
+  /** Their previous command is still inside `perUser.cooldownMs`. */
+  | 'cooldown'
+  /** They already voted in this choice window (spec §6.4 한 표, BOARD A-9). */
+  | 'already_voted'
+
 /** What the arbiter decided for one accepted command. */
 export interface ArbiterAdmission {
-  /** `direct` = apply in order; `aggregated` = counted in the window tally only. */
-  readonly disposition: 'direct' | 'aggregated'
+  /**
+   * `direct` = apply in order; `aggregated` = counted in the window tally only;
+   * `suppressed` = not applied and **not** tallied (consented viewers only).
+   */
+  readonly disposition: 'direct' | 'aggregated' | 'suppressed'
   /** Mode of the window the command landed in. */
   readonly mode: InputMode
   readonly command: CommandRef
   readonly windowSequence: number
+  /** Present exactly when `disposition` is `suppressed`. */
+  readonly reason?: SuppressionReason
 }
 
 /**
@@ -91,6 +129,8 @@ export interface AggregateWindowResult {
 export interface InputArbiterOptions {
   readonly clock: Clock
   readonly config: InputWindowConfig
+  /** Per-consented-viewer rules; omitted means the rules are off. */
+  readonly perUser?: InputPerUserConfig
   /**
    * Starting mode; `direct` per BOARD A-3. T8 passes the recovered
    * `WorldSnapshot.inputMode` here so a restart does not silently drop a
@@ -129,11 +169,26 @@ function freezeCounts(
   return copy
 }
 
+/** What one consented viewer has done recently. Keyed by `channelRef` only. */
+interface ViewerState {
+  /** Monotonic reading of their last individually applied command. */
+  lastAdmittedMs: number
+  /** Choice window they have already voted in, or `null`. */
+  votedScope: string | null
+}
+
 export class InputArbiter {
   readonly #clock: Clock
   readonly #config: InputWindowConfig
+  readonly #perUser: InputPerUserConfig | undefined
   readonly #baseMonotonicMs: number
   readonly #baseEpochMs: number
+  /**
+   * Per-viewer state, dropped as soon as its cooldown has expired and its vote
+   * scope is stale (`#pruneViewers`). It holds no name and no channel id — a
+   * `channelRef` whose consent row was deleted is an unresolvable random string.
+   */
+  readonly #viewers = new Map<string, ViewerState>()
 
   #windowIndex = 0
   #mode: InputMode
@@ -157,8 +212,12 @@ export class InputArbiter {
     if (maxDirectPerWindow < 0) {
       throw new InputArbiterConfigError('maxDirectPerWindow must not be negative')
     }
+    if (options.perUser !== undefined && options.perUser.cooldownMs < 0) {
+      throw new InputArbiterConfigError('perUser.cooldownMs must not be negative')
+    }
     this.#clock = options.clock
     this.#config = options.config
+    this.#perUser = options.perUser
     this.#mode = options.initialMode ?? 'direct'
     this.#baseMonotonicMs = options.clock.monotonicMs()
     this.#baseEpochMs = Date.parse(options.clock.nowUtcIso())
@@ -177,11 +236,34 @@ export class InputArbiter {
    * Records one accepted command and says how the engine should treat it.
    * Closing any window that came due first is what makes the decision depend
    * only on the clock and not on call order.
+   *
+   * `actor` is the consented viewer who sent it, when there is one (BOARD D-9),
+   * and `voteScope` identifies the open choice window so "one vote" means one
+   * vote per decision rather than one vote ever. Both are optional and both
+   * default to the anonymous behaviour this method had before D-9.
    */
-  admit(command: CommandRef): ArbiterAdmission {
+  admit(
+    command: CommandRef,
+    actor: ConsentedActor | null = null,
+    voteScope: string | null = null,
+  ): ArbiterAdmission {
     this.#sync()
-    this.#accepted += 1
 
+    const suppression = this.#suppressionFor(command, actor, voteScope)
+    if (suppression !== null) {
+      // Not counted in `#accepted` either: the mode threshold measures how much
+      // input the room is producing, and a command that changes nothing is not
+      // input the world has to protect itself from.
+      return {
+        disposition: 'suppressed',
+        mode: this.#mode,
+        command,
+        windowSequence: this.#windowIndex,
+        reason: suppression,
+      }
+    }
+
+    this.#accepted += 1
     const applyDirectly =
       this.#mode === 'direct' && this.#directApplied < this.#config.maxDirectPerWindow
     if (applyDirectly) {
@@ -191,12 +273,89 @@ export class InputArbiter {
       this.#counts[command.name].aggregatedOnly += 1
       this.#aggregated += 1
     }
+    if (actor !== null) this.#recordViewer(actor.channelRef, command, voteScope)
     return {
       disposition: applyDirectly ? 'direct' : 'aggregated',
       mode: this.#mode,
       command,
       windowSequence: this.#windowIndex,
     }
+  }
+
+  /**
+   * The per-user rules, applied only to a consented viewer. Returns `null` when
+   * the command may proceed, which is always the case for `actor === null`.
+   */
+  #suppressionFor(
+    command: CommandRef,
+    actor: ConsentedActor | null,
+    voteScope: string | null,
+  ): SuppressionReason | null {
+    if (actor === null || this.#perUser === undefined) return null
+    const viewer = this.#viewers.get(actor.channelRef)
+    if (viewer === undefined) return null
+    if (isVote(command.name) && voteScope !== null && viewer.votedScope === voteScope) {
+      return 'already_voted'
+    }
+    const elapsed = this.#clock.monotonicMs() - viewer.lastAdmittedMs
+    return elapsed < this.#perUser.cooldownMs ? 'cooldown' : null
+  }
+
+  #recordViewer(channelRef: string, command: CommandRef, voteScope: string | null): void {
+    const votedScope = isVote(command.name) && voteScope !== null ? voteScope : null
+    const existing = this.#viewers.get(channelRef)
+    this.#viewers.set(channelRef, {
+      lastAdmittedMs: this.#clock.monotonicMs(),
+      votedScope: votedScope ?? existing?.votedScope ?? null,
+    })
+  }
+
+  /**
+   * Forgets viewers whose cooldown has expired and who have no vote to remember.
+   * Called when a window closes, so the map tracks the recently active room
+   * rather than growing for the length of the broadcast.
+   */
+  #pruneViewers(): void {
+    if (this.#perUser === undefined) {
+      this.#viewers.clear()
+      return
+    }
+    const now = this.#clock.monotonicMs()
+    for (const [channelRef, viewer] of this.#viewers) {
+      if (viewer.votedScope === null && now - viewer.lastAdmittedMs >= this.#perUser.cooldownMs) {
+        this.#viewers.delete(channelRef)
+      }
+    }
+  }
+
+  /**
+   * Drops the remembered vote of a choice window that has closed.
+   *
+   * Called by the engine every time the open choice changes (review round 1,
+   * M4): a viewer who voted is exempt from `#pruneViewers` while the vote is
+   * remembered, so without this their `channelRef` would stay in memory for the
+   * rest of the broadcast — long after the decision it belonged to.
+   */
+  forgetVoteScope(voteScope: string): void {
+    for (const [channelRef, viewer] of this.#viewers) {
+      if (viewer.votedScope === voteScope) {
+        this.#viewers.set(channelRef, { ...viewer, votedScope: null })
+      }
+    }
+    this.#pruneViewers()
+  }
+
+  /**
+   * Drops one viewer's state outright, because the identity behind the reference
+   * has been deleted — `LEAVE`, a user deletion request, or the 30-day sweep
+   * (BOARD D-9, spec §12.4).
+   *
+   * The entry holds no name and no channel id, so what is removed is a random
+   * string and two numbers; it is removed anyway, because "deleted immediately"
+   * should not have a footnote about a cooldown table (review round 1, M4).
+   */
+  forgetViewer(channelRef: string): void {
+    this.#viewers.delete(channelRef)
   }
 
   /**
@@ -281,6 +440,7 @@ export class InputArbiter {
   }
 
   #resetCounters(): void {
+    this.#pruneViewers()
     this.#counts = emptyCounts()
     this.#accepted = 0
     this.#directApplied = 0
@@ -294,4 +454,10 @@ export class InputArbiter {
   #instantAt(monotonicMs: number): string {
     return new Date(this.#baseEpochMs + (monotonicMs - this.#baseMonotonicMs)).toISOString()
   }
+}
+
+const VOTE_COMMANDS: ReadonlySet<CommandName> = new Set(['VOTE_A', 'VOTE_B', 'VOTE_C'])
+
+function isVote(name: CommandName): boolean {
+  return VOTE_COMMANDS.has(name)
 }

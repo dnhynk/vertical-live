@@ -4,6 +4,7 @@ import { loadEngineConfig } from './engine/config.js'
 import { StateEngine } from './engine/engine.js'
 import { SimulatorIngestEndpoint } from './engine/ingest.js'
 import { RendererHub } from './engine/publisher.js'
+import { ConsentDirectory } from './identity/directory.js'
 import { loadInputConfig } from './input/config.js'
 import { loadRetentionConfig } from './privacy/config.js'
 import { RetentionSweeper } from './privacy/retention.js'
@@ -51,6 +52,7 @@ import { StreamKeyCustodian } from './youtube/broadcast/stream-key.js'
 import type { ChatSource } from './youtube/chat/chat-source.js'
 import { loadChatConfig } from './youtube/chat/config.js'
 import { createChatSource } from './youtube/chat/runtime.js'
+import { chatRuntimeDeps } from './youtube/chat/wiring.js'
 import { createExponentialBackoff } from './youtube/quota/backoff.js'
 import { loadQuotaConfig } from './youtube/quota/config.js'
 import { QuotaTracker } from './youtube/quota/tracker.js'
@@ -174,7 +176,9 @@ const simulatorToken = config.simulator.enabled
 const ingest = new SimulatorIngestEndpoint({
   // Through the engine, not the store: that is where the storage-boundary
   // sanitizer and the inbox notification live.
-  inbox: { ingest: (envelopes, checkpoint) => engine.ingest(envelopes, checkpoint) },
+  inbox: {
+    ingest: (envelopes, checkpoint, hooks) => engine.ingest(envelopes, checkpoint, hooks),
+  },
   enabled: config.simulator.enabled,
   token: simulatorToken,
   onIngested: () => {
@@ -226,6 +230,20 @@ const hub = new RendererHub({
   },
 })
 
+/**
+ * The consent directory exists only while the consent gate is open (BOARD D-9).
+ * Closed, nothing constructs it, the chat request carries no `authorDetails`
+ * part, and every `actor` stays `null` exactly as it was under BOARD A-1.
+ */
+const consentDirectory = config.engine.identityGateOpen
+  ? new ConsentDirectory({
+      store,
+      clock: systemClock,
+      retention: loadRetentionConfig(),
+      logger: stdoutLogger,
+    })
+  : null
+
 const engine = new StateEngine({
   store,
   clock: systemClock,
@@ -233,6 +251,7 @@ const engine = new StateEngine({
   inputConfig,
   publisher: hub,
   logger: stdoutLogger,
+  ...(consentDirectory === null ? {} : { identity: consentDirectory }),
 })
 
 // --------------------------------------------------------------------- OBS
@@ -303,7 +322,9 @@ if (supervisorConfig.integrations.obs) {
  * because a revoked or unrenewable grant is outside the automation boundary
  * (§9.1).
  */
-const chatConfig = loadChatConfig()
+// The gate decides the requested parts, so it is passed rather than read from
+// the chat section (spec §7.2, BOARD D-9).
+const chatConfig = loadChatConfig({ identityGateOpen: config.engine.identityGateOpen })
 const needsGrant = chatConfig.enabled || supervisorConfig.integrations.broadcast
 
 let tokens: TokenManager | null = null
@@ -325,6 +346,10 @@ if (needsGrant) {
       clock: systemClock,
       config: loadRetentionConfig(),
       grantRevoker: vaultGrantRevoker(vault),
+      // A revocation deletes `viewer_consent` by SQL batch just as the sweep
+      // does, so the directory's buffered display names are reconciled on the
+      // same boundary (review round 3).
+      ...(consentDirectory === null ? {} : { identity: consentDirectory }),
       logger: stdoutLogger,
     }),
     onResult: (result) => {
@@ -470,6 +495,9 @@ const runtimeDeps = {
       store,
       clock: systemClock,
       config: loadRetentionConfig(),
+      // The sweep deletes consent rows by SQL batch, so the directory's buffered
+      // display names have to be reconciled against what is left (round 2, B2).
+      ...(consentDirectory === null ? {} : { identity: consentDirectory }),
       logger: stdoutLogger,
     }),
     clock: systemClock,
@@ -614,35 +642,28 @@ new KillSwitchFileWatcher({
  * comes from the open attempt in `broadcast_resources` when the lifecycle is
  * wired; the config value stays as the development injection point §T9 allows.
  */
-chatSource = await createChatSource({
-  store,
-  inbox: { ingest: (envelopes, checkpoint) => engine.ingest(envelopes, checkpoint) },
-  engine: {
-    get ready() {
-      return engine.ready
-    },
-    snapshot: () => engine.snapshot(),
-  },
-  clock: systemClock,
-  inputConfig,
-  identityGateOpen: config.engine.identityGateOpen,
-  config: chatConfig,
-  logger: stdoutLogger,
-  ...(tokens === null ? {} : { auth: tokens }),
-  ...(broadcastLifecycle === null
-    ? {}
-    : {
-        resolveTarget: async () => {
-          const binding = await broadcastLifecycle.ensureBound()
-          return binding.liveChatId === null
-            ? null
-            : { liveChatId: binding.liveChatId, broadcastId: binding.broadcastId }
-        },
-      }),
-  onIngested: () => {
-    engine.pump()
-  },
-})
+chatSource = await createChatSource(
+  chatRuntimeDeps({
+    store,
+    engine,
+    clock: systemClock,
+    inputConfig,
+    identityGateOpen: config.engine.identityGateOpen,
+    consent: consentDirectory,
+    config: chatConfig,
+    logger: stdoutLogger,
+    auth: tokens,
+    resolveTarget:
+      broadcastLifecycle === null
+        ? null
+        : async () => {
+            const binding = await broadcastLifecycle.ensureBound()
+            return binding.liveChatId === null
+              ? null
+              : { liveChatId: binding.liveChatId, broadcastId: binding.broadcastId }
+          },
+  }),
+)
 
 httpServer.listen(port, DEFAULT_HOST, () => {
   process.stdout.write(`@vl/server listening on http://${DEFAULT_HOST}:${port}\n`)

@@ -12,7 +12,7 @@ import { createTempStore, type TempStore } from '../../db/testing/temp-store.js'
 import { loadInputConfig, type InputConfig } from '../../input/config.js'
 import { FakeClock } from '../../testing/fake-clock.js'
 import { loadEngineConfig, type EngineRuntimeConfig } from '../config.js'
-import { StateEngine, type EnginePublisher } from '../engine.js'
+import { StateEngine, type ActorResolver, type EnginePublisher } from '../engine.js'
 import type { InboxWriter } from '../ingest.js'
 
 /**
@@ -69,6 +69,8 @@ export interface HarnessOptions {
   readonly inputConfig?: InputConfig
   /** Reuse an existing store/directory, as a restart would. */
   readonly temp?: TempStore
+  /** Consented actor lookup (BOARD D-9); omitted leaves every `actor` null. */
+  readonly identity?: ActorResolver
 }
 
 export interface EngineHarness {
@@ -113,6 +115,7 @@ export function createEngineHarness(options: HarnessOptions = {}): EngineHarness
     inputConfig: options.inputConfig ?? testInputConfig(),
     publisher,
     autoTick: false,
+    ...(options.identity === undefined ? {} : { identity: options.identity }),
   })
   return {
     engine,

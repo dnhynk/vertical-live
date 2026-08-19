@@ -135,7 +135,7 @@ describe('GrpcChatSource', () => {
     expect(temp.store.getSourceCheckpoint(TEST_SOURCE_KEY)?.nextPageToken).toBe('token_1')
   })
 
-  it('requests id,snippet only — never authorDetails', async () => {
+  it('requests id,snippet only while the consent gate is closed', async () => {
     const h = await harness([
       { responses: [{ items: [TEXT_MESSAGE], next_page_token: 'token_1' }] },
       { end: { errorCode: status.PERMISSION_DENIED } },
@@ -150,6 +150,27 @@ describe('GrpcChatSource', () => {
       expect(request.parts).not.toContain('authorDetails')
       expect(request.authorized).toBe(true)
       expect(request.liveChatId).toBe(TEST_LIVE_CHAT_ID)
+    }
+  })
+
+  it('adds authorDetails to the request when the consent gate is open', async () => {
+    // BOARD D-9: the part is what makes a `JOIN` recognizable. `loadChatConfig`
+    // derives the list from the gate, and this asserts the derived list actually
+    // reaches the wire (spec §7.2).
+    const h = await harness(
+      [
+        { responses: [{ items: [TEXT_MESSAGE], next_page_token: 'token_1' }] },
+        { end: { errorCode: status.PERMISSION_DENIED } },
+        { end: { errorCode: status.PERMISSION_DENIED } },
+      ],
+      { config: { identityGateOpen: true, parts: ['id', 'snippet', 'authorDetails'] } },
+    )
+
+    await h.source.run()
+
+    expect(h.server.requests.length).toBeGreaterThan(0)
+    for (const request of h.server.requests) {
+      expect(request.parts).toEqual(['id', 'snippet', 'authorDetails'])
     }
   })
 

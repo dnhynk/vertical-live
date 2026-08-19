@@ -107,7 +107,7 @@ describe('RestChatSource', () => {
     expect(temp.store.getSourceCheckpoint(TEST_SOURCE_KEY)?.nextPageToken).toBe('rest_token_1')
   })
 
-  it('requests id,snippet only and resumes from the stored token', async () => {
+  it('requests id,snippet only while the consent gate is closed, and resumes', async () => {
     const h = await harness(
       [
         { body: { items: [], nextPageToken: 'rest_token_2' } },
@@ -124,6 +124,19 @@ describe('RestChatSource', () => {
     expect(first?.pageToken).toBe('rest_token_restored')
     expect(first?.authorized).toBe(true)
     expect(h.server.requests[1]?.pageToken).toBe('rest_token_2')
+  })
+
+  it('adds authorDetails to the request when the consent gate is open', async () => {
+    // Same rule as the gRPC path (BOARD D-9, spec §7.2): the two shapes request
+    // the same parts, they only spell the response fields differently.
+    const h = await harness(
+      [{ status: 403, body: { error: { code: 403, errors: [{ reason: 'liveChatEnded' }] } } }],
+      { config: { identityGateOpen: true, parts: ['id', 'snippet', 'authorDetails'] } },
+    )
+
+    await h.source.run()
+
+    expect(h.server.requests[0]?.parts).toEqual(['id', 'snippet', 'authorDetails'])
   })
 
   it('never waits less than the interval the server asked for', () => {

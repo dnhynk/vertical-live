@@ -23,10 +23,15 @@
 //      and the fields this product reads are unchanged.
 //
 // This file is the wire contract only. The normalization of an item into an
-// `IngestEnvelope` lives in `@vl/contract` (`fromGrpcStreamListItem`), and V1
-// requests `part = id,snippet` only: `author_details` and
-// `snippet.author_channel_id` are never requested, read or stored while the
-// identity gate is closed (spec §7.2, §7.4, BOARD A-1).
+// `IngestEnvelope` lives in `@vl/contract` (`fromGrpcStreamListItem`), and that
+// adapter never reads an author field at all — the envelope has no place for
+// one. While the consent gate is closed the request is `part = id,snippet` and
+// `author_details` is not even delivered (spec §7.2, §7.4, BOARD A-1); when it
+// is open (BOARD D-9) the part is added and `author_details.channel_id` /
+// `.display_name` are read in exactly one place,
+// `apps/server/src/identity/author-details.ts`, which either writes the one
+// consent row or drops both values inside the same call.
+// `snippet.author_channel_id` is never read in either configuration.
 
 syntax = "proto2";
 

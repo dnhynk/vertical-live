@@ -58,7 +58,10 @@
       "exitAggregateAtCommands": 10,
       "maxDirectPerWindow": 20
     },
-    "provisional": ["maxRawLength"]
+    "perUser": {
+      "cooldownMs": 5000
+    },
+    "provisional": ["maxRawLength", "perUser.cooldownMs"]
   },
   "renderer": {
     "staticDir": "apps/renderer/dist",

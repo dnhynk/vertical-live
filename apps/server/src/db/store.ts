@@ -15,6 +15,15 @@ import {
 import { systemClock, type Clock } from '../clock.js'
 import { loadDatabaseConfig, type LoadDatabaseConfigOptions } from './config.js'
 import {
+  deleteConsent,
+  findConsentByChannelId,
+  findConsentByChannelRef,
+  refreshConsent,
+  upsertConsent,
+  type ConsentDeleteAudit,
+  type ConsentDeleteResult,
+} from './consent.js'
+import {
   EffectNotPublishedError,
   PersistenceInvariantError,
   ProcessedCursorError,
@@ -53,6 +62,8 @@ import {
   type BroadcastTransitionTarget,
 } from './types.js'
 import type {
+  ConsentRecord,
+  ConsentSelector,
   DeadlineRecord,
   InboxInput,
   InboxSubmission,
@@ -62,6 +73,7 @@ import type {
   InboxProcessingRecord,
   InboxRow,
   IngestBatchResult,
+  IngestCommitHooks,
   IngestInsertResult,
   PaidLedgerRecord,
   PersistedDeadline,
@@ -259,10 +271,16 @@ export class PersistenceStore {
    * A duplicate event key is not an error — the same message can arrive again
    * after a reconnect. It is reported per envelope so the adapter can publish a
    * duplicate estimate (spec §11 연결 복구) without a second query.
+   *
+   * `hooks.onInserted` is how a caller puts its own side effect on that same
+   * boundary: it is called for the envelopes this transaction inserted and not
+   * for the ones it recognized, so a replayed page cannot re-run it, and a throw
+   * takes the rows and the checkpoint down with it.
    */
   commitIngestBatch(
     inputs: readonly InboxInput[],
     checkpoint: SourceCheckpointInput,
+    hooks: IngestCommitHooks = {},
   ): IngestBatchResult {
     const validated = inputs.map((input) => {
       const submission = toSubmission(input)
@@ -292,7 +310,7 @@ export class PersistenceStore {
 
     const commit = this.#db.transaction((): IngestBatchResult => {
       const results: IngestInsertResult[] = []
-      for (const { envelope, argumentRejected } of validated) {
+      for (const [index, { envelope, argumentRejected }] of validated.entries()) {
         const giftCount = giftEffectiveCountOf(envelope)
         const inserted = insert.get(
           envelope.messageId,
@@ -312,6 +330,10 @@ export class PersistenceStore {
             messageId: envelope.messageId,
             duplicate: false,
           })
+          // Inside the transaction, and only for a row this call inserted: a
+          // caller's side effect gets the inbox's own idempotency and its own
+          // rollback (`IngestCommitHooks`).
+          hooks.onInserted?.(envelope, index)
           continue
         }
         // Only a row with a `message_id` can conflict: the unique index treats
@@ -1014,6 +1036,36 @@ export class PersistenceStore {
 
   listRetentionLedger(filter: RetentionLedgerFilter = {}): RetentionLedgerRow[] {
     return listRetentionLedger(this.#db, filter)
+  }
+
+  // --------------------------------------------------------- viewer consent
+  //
+  // T20b's surface (BOARD D-9, migration 006). The statements live in
+  // `db/consent.ts`; these methods keep the consent store on the same
+  // connection as everything else, so a deletion and its `retention_ledger` row
+  // share one transaction (spec §12.4).
+
+  /** Records or renews one viewer's consent, keeping the issued `channelRef`. */
+  upsertConsent(record: ConsentRecord): ConsentRecord {
+    return upsertConsent(this.#db, record)
+  }
+
+  findConsentByChannelId(channelId: string): ConsentRecord | null {
+    return findConsentByChannelId(this.#db, channelId)
+  }
+
+  findConsentByChannelRef(channelRef: string): ConsentRecord | null {
+    return findConsentByChannelRef(this.#db, channelRef)
+  }
+
+  /** Re-reads the Authorized Data columns from a new message ([S41] III.E.4.c). */
+  refreshConsent(input: { channelId: string; displayName: string; lastActiveAt: string }): boolean {
+    return refreshConsent(this.#db, input)
+  }
+
+  /** Deletes one viewer's consent row and its audit row in one transaction. */
+  deleteConsent(selector: ConsentSelector, audit: ConsentDeleteAudit): ConsentDeleteResult {
+    return deleteConsent(this.#db, selector, audit)
   }
 
   // ------------------------------------------------------- broadcast resources

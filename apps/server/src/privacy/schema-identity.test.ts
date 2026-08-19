@@ -2,7 +2,9 @@ import { afterEach, describe, expect, it } from 'vitest'
 
 import { openDatabase } from '../db/index.js'
 import {
+  CONSENT_TABLE,
   IDENTITY_NAME_PARTS,
+  findConsentIdentityColumns,
   findIdentityColumns,
   findIdentitySchemaText,
   matchIdentityPart,
@@ -11,8 +13,15 @@ import {
 import { createRetentionHarness, type RetentionHarness } from './testing/harness.js'
 
 /**
- * TASK_SPECS §T13 acceptance 2: no table in the whole schema has an author,
- * channel or hash column (spec §7.4, §12.4, BOARD A-1).
+ * TASK_SPECS §T13 acceptance 2, revised for BOARD D-9 (TASK_SPECS §T20b
+ * acceptance 2): identity columns exist in **exactly one** table,
+ * `viewer_consent`, and in no other.
+ *
+ * D-9 opened identity for viewers who send `JOIN`, so the original rule ("no
+ * table anywhere has an author, channel or hash column") is now the rule for
+ * every table except that one. The single-table property is what the deletion
+ * promises rest on: `LEAVE`, a user deletion request and the 30-day sweep each
+ * delete one row, and there is provably no second copy to chase.
  *
  * The audit runs against a *migrated database*, not against the migration files:
  * what matters is the schema the server actually opens, including anything a
@@ -31,14 +40,15 @@ function open(): RetentionHarness {
   return harness
 }
 
-describe('the persisted schema cannot hold a personal identifier', () => {
-  it('has no author, channel or hash column in any table', () => {
+describe('identity columns live in the consent table and nowhere else', () => {
+  it('has no author, channel or hash column in any other table', () => {
     const active = open()
     const tables = active.store.listTables()
 
     // Guards the audit itself: an empty schema would make the assertion vacuous.
     expect(tables).toContain('ingest_inbox')
     expect(tables).toContain('retention_ledger')
+    expect(tables).toContain(CONSENT_TABLE)
     expect(tables.length).toBeGreaterThan(8)
     const columnCount = tables.reduce(
       (sum, table) => sum + active.store.listColumns(table).length,
@@ -49,12 +59,35 @@ describe('the persisted schema cannot hold a personal identifier', () => {
     expect(findIdentityColumns(active.store)).toEqual([])
   })
 
+  it('does hold the consented viewer identity in that one table (BOARD D-9)', () => {
+    // The other half of the rule. Without this the audit would still pass on a
+    // build where migration 006 silently stopped creating the table, and the
+    // deletion paths would then quietly have nothing to delete.
+    const active = open()
+    expect(active.store.listColumns(CONSENT_TABLE)).toEqual([
+      'channel_ref',
+      'channel_id',
+      'display_name',
+      'consented_at',
+      'last_active_at',
+      'notice_version',
+    ])
+    expect(findConsentIdentityColumns(active.store).map((hit) => hit.column)).toEqual([
+      'channel_ref',
+      'channel_id',
+      'display_name',
+    ])
+  })
+
   it('has no identity-shaped expression in any index or view either', () => {
     // A stable hash needs no column of its own: an expression index over a digest
-    // would store one just as durably (spec §12.4 "가역 또는 안정적 hash").
+    // would store one just as durably (spec §12.4 "가역 또는 안정적 hash"). The
+    // consent table's own objects are exempt by name — and only those, so a new
+    // index over a digest elsewhere is still caught.
     const active = open()
     const definitions = active.store.listSchemaDefinitions()
     expect(definitions.length).toBeGreaterThan(10)
+    expect(definitions.map((entry) => entry.name)).toContain(CONSENT_TABLE)
     expect(findIdentitySchemaText(active.store)).toEqual([])
   })
 
@@ -64,7 +97,7 @@ describe('the persisted schema cannot hold a personal identifier', () => {
     }
   })
 
-  it('finds an identity column when one exists', () => {
+  it('finds an identity column when one exists outside the consent table', () => {
     // Positive control: without this, a broken audit would report a clean schema.
     const active = open()
     const database = openDatabase({ file: active.temp.file, busyTimeoutMs: 1000 })

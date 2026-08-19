@@ -31,6 +31,15 @@ export {
   type SqliteFailureKind,
 } from './errors.js'
 export {
+  deleteConsent,
+  findConsentByChannelId,
+  findConsentByChannelRef,
+  refreshConsent,
+  upsertConsent,
+  type ConsentDeleteAudit,
+  type ConsentDeleteResult,
+} from './consent.js'
+export {
   MIGRATIONS_DIR,
   MigrationError,
   listAppliedMigrations,

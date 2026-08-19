@@ -1,10 +1,10 @@
-import type { CommandParser, CommandRef } from '@vl/contract'
+import type { AnyCommandRef, CommandParser } from '@vl/contract'
 
 import { parseMessage, type ParserLimits } from './parse.js'
 import type { CommandMetrics } from './metrics.js'
 import type { ParseContext, ParseResult } from './types.js'
 
-export { matchAlias, aliasKeys } from './aliases.js'
+export { matchAlias, aliasKeys, isConsentCommandName } from './aliases.js'
 export {
   InputArbiter,
   InputArbiterConfigError,
@@ -12,7 +12,9 @@ export {
   type CommandWindowTally,
   type ArbiterAdmission,
   type InputArbiterOptions,
+  type InputPerUserConfig,
   type InputWindowConfig,
+  type SuppressionReason,
 } from './arbiter.js'
 export {
   InputConfigError,
@@ -36,6 +38,7 @@ export {
   REJECTION_REASONS,
   type ParseContext,
   type ParsedCommand,
+  type ParsedConsentCommand,
   type ParseResult,
   type Rejection,
   type RejectionReason,
@@ -54,11 +57,18 @@ export interface CommandParserPortOptions {
  * adapters call with raw chat text and which may only ever hand back a command
  * or `null` (spec §7.3(1)). The rejection code is counted here and goes no
  * further: nothing about a rejected message crosses into an envelope.
+ *
+ * A consent command leaves through the same port (BOARD D-9); the contract's
+ * `buildValidEnvelope` is what files it under `consentCommand` rather than
+ * `command`, so the split survives the boundary instead of depending on this
+ * function's caller.
  */
 export function createCommandParserPort(options: CommandParserPortOptions): CommandParser {
-  return (rawText: string): CommandRef | null => {
+  return (rawText: string): AnyCommandRef | null => {
     const result: ParseResult = parseMessage(rawText, options.context(), options.limits)
     options.metrics?.recordParse(result)
-    return result.status === 'accepted' ? result.command : null
+    if (result.status === 'accepted') return result.command
+    if (result.status === 'accepted_consent') return result.consentCommand
+    return null
   }
 }

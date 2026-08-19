@@ -69,11 +69,24 @@ describe('stream_list.proto contents', () => {
     expect(names).not.toContain('polling_interval_millis')
   })
 
-  it('still declares author_details, which is precisely what we never request', () => {
+  it('declares author_details with the two fields the consent path reads', () => {
+    // BOARD D-9: the part is requested only while the consent gate is open, and
+    // then only `channel_id` and `display_name` are read
+    // (`identity/author-details.ts`). This asserts the spellings that reader
+    // depends on, so a proto refresh that renamed them fails here rather than
+    // silently making every consented viewer anonymous.
     const message = definition['youtube.api.v3.LiveChatMessage'] as {
       type: { field: { name: string }[] }
     }
-    const names = message.type.field.map((field) => field.name)
-    expect(names).toContain('author_details')
+    expect(message.type.field.map((field) => field.name)).toContain('author_details')
+
+    const authorDetails = definition['youtube.api.v3.LiveChatMessageAuthorDetails'] as {
+      type: { field: { name: string }[] }
+    }
+    const names = authorDetails.type.field.map((field) => field.name)
+    expect(names).toContain('channel_id')
+    expect(names).toContain('display_name')
+    // Never read: an avatar is not needed to show a name (spec §12.3).
+    expect(names).toContain('profile_image_url')
   })
 })
