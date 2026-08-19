@@ -49,6 +49,15 @@ function ja(key: string, params: Readonly<Record<string, string | number>> = {})
   return text
 }
 
+/** The same, for the short English alias a slot shows after the Japanese. */
+function en(key: string, params: Readonly<Record<string, string | number>> = {}): string {
+  let text = JA_ENTRIES[key]?.en ?? ''
+  for (const [name, value] of Object.entries(params)) {
+    text = text.replace(`{${name}}`, String(value))
+  }
+  return text
+}
+
 interface Harness {
   runtime: RendererRuntime
   clock: FakeClock
@@ -376,6 +385,22 @@ describe('Screen (spec §5.2, §6.4, §8.4, §9.2, §12.3)', () => {
     expect(query(harness, 'cta-consent-command-LEAVE')?.textContent).toContain(
       ja('ui.identity.leave'),
     )
+
+    // The English line is not a shorter notice (review round 1, major 1): it
+    // says the same three things, so a viewer who reads only English is told how
+    // to take the name off again and when it goes by itself
+    // (`docs/ops/identity-consent.md` §2.1 plus D-9's 30 days).
+    const english = query(harness, 'cta-identity-notice-en')?.textContent
+    expect(english).toBe(
+      en('ui.identity.notice', {
+        join: CONSENT_COMMAND_ALIASES.JOIN.en[0] ?? '',
+        leave: CONSENT_COMMAND_ALIASES.LEAVE.en[0] ?? '',
+        days: CONSENT_RETENTION_DAYS,
+      }),
+    )
+    expect(english).toContain(CONSENT_COMMAND_ALIASES.LEAVE.en[0])
+    expect(english).toContain('DELETE')
+    expect(english).toContain(String(CONSENT_RETENTION_DAYS))
   })
 
   it('withdraws the consent notice together with the CTA (TASK_SPECS §T14, §T20c)', () => {

@@ -29,7 +29,7 @@
 
     "ui.identity.notice": {
       "text": "{join} を おくった ひとだけ なまえを ひょうじ・{leave} で すぐ さくじょ・{days}にち かつどうなしで じどうさくじょ",
-      "en": "YOUR NAME IS SHOWN ONLY IF YOU OPT IN",
+      "en": "{join} = SHOW MY NAME, {leave} = DELETE IT NOW, AUTO-DELETED AFTER {days} DAYS WITHOUT ACTIVITY",
       "nativeReview": "pending"
     },
     "ui.identity.join": {

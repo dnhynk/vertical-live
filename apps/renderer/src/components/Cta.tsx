@@ -24,8 +24,12 @@ import { CONSENT_RETENTION_DAYS } from '../read-model/identity'
  *   notice is one line — only a viewer who sends the consent command is named,
  *   the withdrawal command deletes the record immediately, and 30 days without
  *   activity deletes it by itself — and the two commands are shown next to it in
- *   the same spellings the parser accepts. The full text lives in the channel
- *   description and the pinned comment (`docs/ops/identity-consent.md` §2.2);
+ *   the same spellings the parser accepts. **Both languages say all three
+ *   things**: the English alias is not a shorter notice but the same one
+ *   (`docs/ops/identity-consent.md` §2.1, `JOIN = show my name · LEAVE = delete
+ *   it`, plus the 30 days), because a viewer who reads only the English line
+ *   would otherwise be told how to give a name and not how to take it back. The
+ *   full text lives in the channel description and the pinned comment (§2.2);
  *   what has to be *on air* is the line and the two commands;
  * - nothing at all, when the server reports `interactionEnabled: false`. Input or
  *   renderer ACK is unhealthy then, so the CTA disappears and the screen shows
@@ -103,7 +107,13 @@ export default function Cta({ cta, translate, alias }: CtaProps) {
               days: CONSENT_RETENTION_DAYS,
             })}
           </span>
-          <span className="cta-identity-en">{alias('ui.identity.notice')}</span>
+          <span className="cta-identity-en" data-testid="cta-identity-notice-en">
+            {alias('ui.identity.notice', {
+              join: consentCommandLabel('JOIN').en,
+              leave: consentCommandLabel('LEAVE').en,
+              days: CONSENT_RETENTION_DAYS,
+            })}
+          </span>
         </p>
 
         <ul className="cta-identity-commands">
