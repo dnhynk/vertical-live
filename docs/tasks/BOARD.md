@@ -7,7 +7,7 @@
 
 상태: `pending`(의존 대기) · `ready` · `dispatched` · `in_review` · `changes_requested` · `merged` · `blocked` · `failed`
 
-> **현재(2026-08-18 UTC): 스펙 v1 구현 task 전부 머지 + 사용자 결정 후속(T17b·T18)까지 머지.** T0–T17 + T1b·T8b·T8c·T8d·T17b·T18 = PR 24개, open PR 0, main `34a8f0d`. **main CI 녹색**(run 32121339258: npm ci/format/lint/typecheck/test/build/soak:ci 전부 success — E-5 해제 후 소급 확인 완료). 사용자 결정 반영: D-4 public·D-6 OBS 고정·D-7 sentinel 정책; E-1·E-2·E-3·E-5·E-7 해결. 남은 것: Gate 0(`docs/ops/gate0-checklist.md`) 사용자 승인 항목과 실 YouTube 계정·OAuth·첫 private 기술 방송(사용자 계정 작업) — 사용자 지시 없이는 진행하지 않는다.
+> **현재(2026-08-19 UTC): Gate 0 사용자 결정 D-8~D-16 수집 완료, 후속 T19/T20a 진행 중(T20b/c·T21 대기).** 이전: 스펙 v1 구현 task 전부 머지 + T17b·T18 머지. T0–T17 + T1b·T8b·T8c·T8d·T17b·T18 = PR 24개, open PR 0, main `34a8f0d`. **main CI 녹색**(run 32121339258: npm ci/format/lint/typecheck/test/build/soak:ci 전부 success — E-5 해제 후 소급 확인 완료). 사용자 결정 반영: D-4 public·D-6 OBS 고정·D-7 sentinel 정책; E-1·E-2·E-3·E-5·E-7 해결. 남은 것: Gate 0(`docs/ops/gate0-checklist.md`) 사용자 승인 항목과 실 YouTube 계정·OAuth·첫 private 기술 방송(사용자 계정 작업) — 사용자 지시 없이는 진행하지 않는다.
 
 | T-ID | 제목 | 의존 | [contract] | 상태 | 브랜치 slug | PR | Orca task |
 |---|---|---|---|---|---|---|---|
@@ -35,6 +35,11 @@
 | T8d | 엔진 버그픽스: `#publish` markEffectPublished store 실패 시 미발행 row 고아화(T8c 발견) | T8c | — | merged | t8d-publish-store-failure | #22 | `task_43eb61f3968d` |
 | T17b | CI 버그픽스: T17 Windows 경로 의미론(ubuntu CI 실패 3건) + client.test 호스트 vault 의존 | T17 | — | merged | t17b-ci-path-semantics | #23 | `task_70edf8e8feff` |
 | T18 | D-6/D-7 구현·문서(OBS 버전 고정 승인, safe-mode sentinel 정책, public 문구) | T17, T2 | — | merged | t18-obs-safemode-policy | #24 | `task_0d996db3c12a` |
+| T19 | Gate 0 승인 반영(체크리스트·config·모더레이션 호출표) | T16, T18 | — | dispatched | t19-gate0-apply | | `task_8633302d4f33` |
+| T20a | identity (B) 계약: 동의자 한정 actor·join/leave 명령 | T1b, T6 | ✔ | dispatched | t20a-identity-contract | | `task_a7a6d0666e7c` |
+| T20b | identity (B) 서버: 동의 저장·authorDetails 처리·삭제·보존·compliance 문서 | T20a, T9, T13, T8 | — | pending | t20b-identity-server | | |
+| T20c | identity (B) 렌더러: 동의자 표시명·고지 CTA | T20a, T14 | — | pending | t20c-identity-renderer | | |
+| T21 | 일본 패널·5초 테스트·24h 콘텐츠 목록·증빙 초안(D-15) | T14, T16 | — | ready | t21-japan-panel-draft | | |
 
 디스패치 순서 원칙: `ready` 중 T-ID 낮은 것부터, 동시 2, `[contract]`는 하나만. 리뷰 Task는 `R-<T-ID>-<round>`로 별도 등록하고 아래 이력에만 남긴다.
 
@@ -221,3 +226,4 @@
 | 2026-08-18 09:12 | F-T18-3 완료(fb67a6b/f824225: 부모 기준 canonical root 대조 `sentinel_dir_mismatch`, 보장/비보장 목록 공개, 테스트 31→35(리뷰어 NTFS 재현·junction 부모 통과); CI 32119989569 녹색). R-T18-4 `task_fcbdace17b10` → `ctx_d2aef4824f82`(review; 구속력 있는 판정 원칙 명시) |
 | 2026-08-18 09:26 | R-T18-4 verdict **approve**(round 3 재현·junction 부모 정상 배치·guard 무력화 대조 모두 확인) → 최종 게이트(contract·deps 0, supervisor 변경은 lastNote 관측 채널만, config `obs.process.sentinelDir` ""=APPDATA 파생, CLAUDE.md/런북/TASK_SPECS public 문구) → **PR #24 squash merge**(main 34a8f0d). T18 worker release·worktree 제거. **main CI run 32121339258 성공**(7 step 전부). 사용자 결정 5건 처리 완료 — 무인 루프 종료, 남은 것은 Gate 0 사용자 항목 |
 | 2026-08-19 10:00 | **Gate 0 사용자 결정 수집(UI 4라운드, 16문항)** → D-8~D-16 기록. 후속 작업 등록 예정: T19(Gate 0 반영: gate0-checklist 체크·config input.window 승인값·supervisor.moderation 승인표·moderation-call-table·ROADMAP), T20a[contract]/T20b/T20c(identity (B) 동의자 한정 개방), T21(일본 패널·5초 테스트·콘텐츠 목록 초안). 사용자 수동 단계(Discord 서버·webhook, Google 계정·채널·Cloud·OAuth)는 안내문으로 전달 |
+| 2026-08-19 10:08 | TASK_SPECS에 §T18(완료 기록)·§T19·§T20a/b/c·§T21 추가. **T19** `task_8633302d4f33` 디스패치 `ctx_d9382cedc69a`, **T20a**[contract] `task_a7a6d0666e7c` 디스패치 `ctx_e3bb7d6ceff7`. T21은 다음 슬롯. 사용자에게 Discord·YouTube/Cloud/OAuth 수동 단계 안내문 전달 |
