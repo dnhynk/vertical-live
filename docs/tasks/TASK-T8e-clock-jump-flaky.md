@@ -1,7 +1,7 @@
 # TASK-T8e-clock-jump-flaky
 
 - Task: T8e 엔진 후속 — 가상 시계 31일 점프 후 `pump()` 미반환 · `ingest.test.ts` SQLite write lock flaky (`docs/tasks/TASK_SPECS.md` §T8e)
-- Branch: `dnhynk/t8e-clock-jump-flaky` · PR: #29
+- Branch: `dnhynk/t8e-clock-jump-flaky` · PR: #31
 - Orca: task `task_364b480f6a22` · dispatch `ctx_e18ea3300000`
 - Spec sections read: §7.3(3), §9.2, §10.2, §11 "상태 복구"
 - BOARD decisions/assumptions relied on: A-15(월드 튜닝 provisional), D-4(public repo)
