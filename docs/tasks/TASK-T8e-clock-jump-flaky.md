@@ -158,7 +158,7 @@
 | 2 | 10회 반복 flaky 0 | met | **라운드 1**: `ingest.test.ts` + `clock-jump.test.ts` 10회 연속 매회 `Tests 27 passed (27)`, 전체 `npm run test` 10회 연속 모두 `Tests 2091 passed \| 1 skipped (2092)` (아래 "정직 보고" 항목 참조). **라운드 2**(`engine.ts`를 고쳤으므로 엔진 디렉터리 전체): `npx vitest run apps/server/src/engine` 10회 연속 매회 `Test Files 17 passed (17) / Tests 124 passed (124)`, 실패 0 |
 | 3 | 게이트 5개 녹색 | met | 아래 Gates |
 | 4 | 기존 T8/T15 테스트 무변경 통과 | met | `apps/server/src/engine/ingest.test.ts`는 **§T8e가 직접 고치라고 지정한 예외**(108+/3-)이고, **그 외 T8/T15 테스트 파일은 무변경**이다(`git diff --stat origin/main...HEAD`에 `engine.ts`·`config.ts`·`config.test.ts`·`ingest.test.ts`·`clock-jump.test.ts`·`config/default.json`·티켓만). 전체 스위트 149파일 2,143건 통과(rebase 후) |
-| 5 | PR CI 녹색 | met | **라운드 1**: run `32292215316` pass (3m31s). **라운드 2**(rebase 후 `1919af5`): run `32299862258` **pass** (2m59s) — https://github.com/dnhynk/vertical-live/actions/runs/32299862258 (attempt 1은 아래 Follow-ups의 `replay.test.ts` 부하 타임아웃으로 실패, 같은 커밋 재실행에서 녹색) |
+| 5 | PR CI 녹색 | met | **라운드 1**: run `32292215316` pass (3m31s). **라운드 2**(rebase 후 `1919af5`): run `32299862258` **pass** (2m59s) — https://github.com/dnhynk/vertical-live/actions/runs/32299862258 (attempt 1은 아래 Follow-ups의 `replay.test.ts` 부하 타임아웃으로 실패, 같은 커밋 재실행에서 녹색). 그 뒤 Follow-ups만 추가한 docs 커밋 `acbc5ef`의 run `32300903178`도 **pass** — https://github.com/dnhynk/vertical-live/actions/runs/32300903178 |
 
 ### Gates (executed — 라운드 1; 라운드 2 게이트는 아래 `## Review round 1` §Round 2 게이트)
 
