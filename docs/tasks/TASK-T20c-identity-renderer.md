@@ -143,11 +143,13 @@ node apps/renderer/scripts/capture.mjs --only consented-action --prefix TASK-T20
 minor 1. **셋 다 타당하다**고 판단해 전부 고쳤고, 반박한 항목은 없다. 이 라운드에서도
 `packages/contract`는 건드리지 않았다(계약 변경이 필요한지는 blocker 항목에서 따로 따진다).
 
-| # | 지적 | 판단 | 무엇을 고쳤나 | 고침 SHA |
+SHA는 rebase로 바뀔 수 있으므로 커밋 제목을 함께 적는다(제목이 안정된 키다).
+
+| # | 지적 | 판단 | 무엇을 고쳤나 | 고침 커밋 |
 |---|---|---|---|---|
-| blocker | `read-model/identity.ts:185` — 조인에 인과/리비전 키가 없다. '현재 수신된 가장 새 반응'을 명령·횟수와 `startsAt <= appliedAt`으로만 고르는데, 서버는 snapshot을 effect보다 **먼저** 발행하므로(`apps/server/src/engine/engine.ts:1182`·`:1192`) 시청자 A의 아직 재생 중인 이름 붙은 FEED/1 반응이 시청자 B의 새 snapshot에 귀속된다(리뷰어 재현: `delayedAckSelection='viewer-A'`). 스펙 §2.6이 금지하는 가짜 귀속 | 타당 | 조인 키를 **커밋(`stateRevision`)**으로 바꿨다. 아래 상세 | `4718187` |
-| major | `i18n/ja.json:32` — 영어 고지가 `YOUR NAME IS SHOWN ONLY IF YOU OPT IN`뿐이라, LEAVE 즉시 삭제와 30일 자동 삭제가 영어에는 없다. PR #28 `docs/ops/identity-consent.md` §2.1(`JOIN = show my name · LEAVE = delete it`)과도 어긋난다 | 타당 | 영어 별칭이 일본어와 **같은 세 가지**를 말하도록 고치고, 명령 문자열과 30을 영어 쪽에서도 계약·상수에서 보간하도록 `Alias`에 params를 붙였다. 렌더된 DOM 텍스트로 단언 | `920521f` |
-| minor | `identity.ts:106` — `raw.length`는 UTF-16 code unit이고 계약 `DisplayNameSchema`는 `u` 플래그 아래 code point를 센다. 이모지 60개(120 code unit / 60 code point)는 계약이 받아들이는데 렌더러가 거부한다 | 타당 | 상한을 계약과 같은 단위(code point)로 재고, 그 뒤 20 grapheme 말줄임. astral 경계 테스트 추가 | `80fa2a2` |
+| blocker | `read-model/identity.ts:185` — 조인에 인과/리비전 키가 없다. '현재 수신된 가장 새 반응'을 명령·횟수와 `startsAt <= appliedAt`으로만 고르는데, 서버는 snapshot을 effect보다 **먼저** 발행하므로(`apps/server/src/engine/engine.ts:1182`·`:1192`) 시청자 A의 아직 재생 중인 이름 붙은 FEED/1 반응이 시청자 B의 새 snapshot에 귀속된다(리뷰어 재현: `delayedAckSelection='viewer-A'`). 스펙 §2.6이 금지하는 가짜 귀속 | 타당 | 조인 키를 **커밋(`stateRevision`)**으로 바꿨다. 아래 상세 | `fd75fcb` *fix(renderer): key the last-action name on the commit that applied it* |
+| major | `i18n/ja.json:32` — 영어 고지가 `YOUR NAME IS SHOWN ONLY IF YOU OPT IN`뿐이라, LEAVE 즉시 삭제와 30일 자동 삭제가 영어에는 없다. PR #28 `docs/ops/identity-consent.md` §2.1(`JOIN = show my name · LEAVE = delete it`)과도 어긋난다 | 타당 | 영어 별칭이 일본어와 **같은 세 가지**를 말하도록 고치고, 명령 문자열과 30을 영어 쪽에서도 계약·상수에서 보간하도록 `Alias`에 params를 붙였다. 렌더된 DOM 텍스트로 단언 | `7c57c97` *fix(renderer): say LEAVE and the 30-day deletion in the English notice too* |
+| minor | `identity.ts:106` — `raw.length`는 UTF-16 code unit이고 계약 `DisplayNameSchema`는 `u` 플래그 아래 code point를 센다. 이모지 60개(120 code unit / 60 code point)는 계약이 받아들이는데 렌더러가 거부한다 | 타당 | 상한을 계약과 같은 단위(code point)로 재고, 그 뒤 20 grapheme 말줄임. astral 경계 테스트 추가 | `709f82e` *fix(renderer): bound a display name in code points, as the contract does* |
 
 ### blocker 1 — 조인 키를 '시간'에서 '커밋'으로
 
@@ -220,7 +222,7 @@ follow-up 한 줄은 round 1 기준으로는 사실이 아니었고, 이 라운�
 ### Gates (round 2, executed)
 
 ```text
-git fetch origin && git rebase origin/main   -> Successfully rebased (origin/main e9e93d9)
+git fetch origin && git rebase origin/main   -> Successfully rebased (origin/main 6610709)
 npm run format:check -> All matched files use Prettier code style!
 npm run lint         -> eslint 0 problems; check-no-legacy-imports: ok (0 legacy imports);
                         check-install-scripts: ok (4 reviewed, better-sqlite3 binding loads)
