@@ -10,3 +10,7 @@
 | `start_reviewer.py <review_task_id> <pr_number>` | `review` worktree에 codex(gpt-5.6-sol/xhigh/fast, bypass) 터미널 생성 → tui-idle → dispatch --inject → 필요 시 Enter | 2.4 |
 
 세션 scratchpad에 두면 세션 소실 시 함께 사라지므로(2026-08-17 복구 사례) 여기 보존한다. 비밀정보 없음.
+
+## cleanup_review.py
+
+리뷰어 `worker_done` 수신 **즉시** 실행: `python cleanup_review.py <review|review2>` — 해당 리뷰 워크트리의 codex 터미널을 모두 stop하고, `review*/pr-N` 로컬 브랜치를 지우고, 워크트리를 `origin/main` detached로 되돌린다(사용자 지시 2026-08-19: 브랜치·워크트리·리뷰어 세션은 끝나는 즉시 정리). 두 리뷰 워크트리는 병렬 리뷰(처리량) 용도로만 둔다.
