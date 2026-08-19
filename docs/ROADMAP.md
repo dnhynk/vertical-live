@@ -24,9 +24,12 @@
 ## Gate 0 — 스펙 승인
 
 **성격**: 사람의 결정. 코드로 통과할 수 없다.
-**상태: 부분 승인(2026-08-19, BOARD D-8~D-16). 잔여 3건** — §1.2 계정 audit 값(전용 채널 생성 후 기입),
-§1.4 일본 패널·콘텐츠 기준 초안 승인(T21), §1.7 운영 합격선(Gate 2 baseline 후 잠금). **잔여가 있으므로 Gate 0
-통과 선언은 하지 않는다.**
+**상태: 부분 승인(2026-08-19, BOARD D-8~D-16). 미승인 잔여 3건 + 가정 1건.**
+**잔여 3건(사용자 승인 필요)** — §1.2 계정 audit 값(전용 채널 생성 후 기입), §1.4 일본 패널·콘텐츠 기준 초안
+승인(T21), §1.7 운영 합격선(Gate 2 baseline 후 잠금).
+**가정 1건** — §1.5 `direct↔vote 실험 순서`는 D-8~D-16에 결정이 없어 BOARD **A-20**(direct 먼저, vote는 T20a/b/c
+머지 후 Gate 2에서 동의자 표본으로 실험)으로 두었다. 가정은 승인이 아니므로 체크리스트 항목은 열려 있다.
+따라서 체크리스트에서 **열려 있는 항목은 4건**이다. **잔여가 있으므로 Gate 0 통과 선언은 하지 않는다.**
 **체크리스트**: [`docs/ops/gate0-checklist.md`](ops/gate0-checklist.md) · **결정 기록**: `docs/tasks/BOARD.md` §2(D-*)
 
 | § 15 Gate 0 항목 | 현재 상태 |
@@ -37,7 +40,7 @@
 | identity 고지·동의·삭제·compliance 경로 또는 개인 식별 기능 비활성화 결정 | **승인 2026-08-19(D-9)**: (B) 동의자 한정 개방(opt-in 동의·즉시 삭제·90일 미활동 자동 삭제). 구현은 T20a/b/c이고 **머지 전까지 코드는 비활성화(A-1)를 유지**한다 |
 | 첫 5초 일본 패널 모집 조건·통과 기준, 24시간 콘텐츠 목록과 반복 표본 기준 승인 | **미승인**. 절차만 승인(D-15: 코디네이터 초안 → 사용자 승인). 초안은 T21 |
 | 정책상 허용되는 일본 시장 증빙 방식과 일본 범위 합격 기준 승인 | **미승인**. 절차만 승인(D-15), 초안은 T21 |
-| 파일럿 기본 입력 모드, hard backlog·flood 보호값, direct↔vote 실험 순서 승인 | **입력 모드·보호값 승인 2026-08-19(D-11)**: direct + 비경쟁 집계, `input.window` 5000/20/30/10 → provisional 해제. direct↔vote 실험 순서는 identity 개방 구현 뒤로 남았다 |
+| 파일럿 기본 입력 모드, hard backlog·flood 보호값, direct↔vote 실험 순서 승인 | **입력 모드·보호값 승인 2026-08-19(D-11)**: direct + 비경쟁 집계, `input.window` 5000/20/30/10 → provisional 해제. **direct↔vote 실험 순서는 미승인** — D-8~D-16에 결정이 없어 BOARD **A-20**(가정: direct 먼저, vote는 T20a/b/c 머지 후 Gate 2에서 동의자 표본)으로 두었고 identity 개방 구현 뒤 사용자가 확정한다 |
 | 방송 길이 실험 순서와 Gate 3 자동화 전략 선택 절차 승인 | **승인 2026-08-19(D-12)**: 단일 장기 Live 먼저, rolling(<12h)은 그다음 비교. 선택 절차는 `gate2-experiments.md` 1장 |
 | 72시간·장기 운영 측정식과 provisional 목표, 24시간 moderation 호출표, public 예산·손실 중단선·최대 관측기간 승인 | **호출표 승인 2026-08-19(D-13)** — [`docs/ops/moderation-call-table.md`](ops/moderation-call-table.md) 1·2장, 코드 게이트 `assertModerationCallTableApproved()` 통과. **예산 승인(D-14)**: 월 10만원 · 누적 손실 중단선 50만원 · 최대 관측기간 6개월. **운영 합격선은 provisional 유지 → Gate 2 72h baseline 후 잠금(D-14, A-15)** |
 
