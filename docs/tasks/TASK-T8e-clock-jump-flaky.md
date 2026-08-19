@@ -1,7 +1,7 @@
 # TASK-T8e-clock-jump-flaky
 
 - Task: T8e 엔진 후속 — 가상 시계 31일 점프 후 `pump()` 미반환 · `ingest.test.ts` SQLite write lock flaky (`docs/tasks/TASK_SPECS.md` §T8e)
-- Branch: `dnhynk/t8e-clock-jump-flaky` · PR: #<n>
+- Branch: `dnhynk/t8e-clock-jump-flaky` · PR: #29
 - Orca: task `task_364b480f6a22` · dispatch `ctx_e18ea3300000`
 - Spec sections read: §7.3(3), §9.2, §10.2, §11 "상태 복구"
 - BOARD decisions/assumptions relied on: A-15(월드 튜닝 provisional), D-4(public repo)
@@ -78,7 +78,50 @@
 
 ## Debugging record — (2) `ingest.test.ts:442` write lock flaky
 
-<pending>
+### 가설과 반증 관측
+
+명세가 제시한 두 후보부터 코드로 확인했다.
+
+| 후보 | 관측 | 결론 |
+|---|---|---|
+| 다른 테스트·워커와 DB 파일·WAL 공유 | `createEngineHarness()` → `createTempStore()`가 `mkdtempSync(join(tmpdir(), 'vl-db-'))`로 **테스트마다 새 디렉터리**를 만들고 `dispose()`가 지운다(`apps/server/src/db/testing/temp-store.ts`). vitest 4는 파일마다 격리 프로세스다 | **기각.** 공유 없음 |
+| `busy_timeout` 부재 | `openDatabase()`가 `PRAGMA busy_timeout`을 반드시 설정하고 `assertPragmas()`가 되읽어 검증한다. 테스트 값은 `TEST_BUSY_TIMEOUT_MS = 250` | **기각.** 설정돼 있음 |
+
+남은 가설: **엔드포인트는 정확히 답하지만 테스트의 `AbortSignal.timeout(2_000)` 예산보다 늦게 답한다.**
+이 요청은 `commitIngestBatch`의 `BEGIN IMMEDIATE`가 동기(better-sqlite3) 호출 안에서 `busy_timeout`을 다 기다린
+뒤에야 `SQLITE_BUSY`를 던지고, 그동안 이벤트 루프가 막힌다. 격리 실행에서는 여유가 크지만 전체 스위트가 병렬로
+도는 호스트에서는 그렇지 않을 것이다.
+
+반증 관측: 부하 아래에서도 요청 지연이 격리 실행과 비슷하게 400 ms 안팎이면 예산은 원인이 아니다.
+
+### 실제 관측 — 요청 지연 계측
+
+`post()`에 소요 시간 출력을 임시로 넣고(커밋하지 않음) `AbortSignal`을 30 s로 올려 **중단 대신 실제 지연을**
+측정했다. write lock을 쥔 채 보내는 요청(`:442`가 그 첫 번째다):
+
+| 조건 | 측정값 |
+|---|---|
+| `ingest.test.ts` 단독 실행 3회 | **418 ms · 392 ms · 425 ms** |
+| 전체 `npm run test` 3회 | **1,384 ms · 661 ms · 808 ms** |
+| 당시 예산 | **2,000 ms** |
+
+즉 부하 아래 최악값이 예산의 **69 %**까지 올라간다. 이 호스트는 오케스트레이션 모델상 worker 2 + 리뷰어 1이
+동시에 도는 상자이고(runbook §0), 내 측정은 세션 1개만 도는 상태였다. T21이 본 1/3 실패는 여기서 나온다.
+
+### 원인
+
+`AbortSignal.timeout(2_000)`은 **행(hang) 감지기**이지 지연 단언이 아니다(T8b가 고친 버그는 *무한* 대기였다).
+그런데 값이 유휴 호스트 기준으로 잡혀 있어, 부하 아래의 정상 지연과 겹친다. SQLite도, 격리도, `busy_timeout`도
+원인이 아니다.
+
+### 수정
+
+- 예산을 이름 있는 상수 `RESPONSE_BUDGET_MS = 15_000`으로 올리고 위 측정값을 주석에 남겼다. 함께
+  `TEST_TIMEOUT_MS = 30_000`을 그 위에 두어, 실제로 행이 나면 vitest 기본 타임아웃(5 s)이 아니라 예산이
+  보고하도록 했다. **재시도는 넣지 않았다.**
+- 부하에 의존하지 않는 **결정적 재현 테스트**를 추가했다(`POST /ingest/simulator while the write lock outlasts
+  the old budget`): write lock을 `busy_timeout = 2,500 ms`로 잡아 요청이 **매번** 2,000 ms를 넘게 만들고,
+  그래도 503 `db_busy`가 오는지, 그리고 테스트가 그것을 보는지 검사한다. 이 테스트는 옛 예산에서 100 % 실패한다.
 
 ## Sources consulted (official docs)
 
@@ -94,24 +137,53 @@
 
 | 항목 | 값 | 라벨 | 이유 |
 |---|---|---|---|
+| `engine.deadlines.catchUpWindowMs` | 3600000 (1시간) | `provisional`(BOARD A-15) | 스펙 §10.2는 downtime 정책만 정하고 "얼마나 밀리면 downtime인가"는 정하지 않는다. 하한: 엔진은 `tickIntervalMs`(250 ms)마다 pump하므로 정상 운전에서 1시간 지연은 나올 수 없다. 상한: 창 안쪽을 1건씩 걷는 비용은 측정값 ≈118 commits/world-hour × ≈2–3 ms ≈ **0.3 s**로, writer 패스가 동기라서 그 시간 동안 프로세스 전체가 관측 불가가 되는 `supervisor.signalStaleAfterMs`(30 s)의 **1 %**에 머문다. Gate 0/2 승인값으로 교체 대상 |
+| `RESPONSE_BUDGET_MS` (테스트 상수, `ingest.test.ts`) | 15000 | 측정 기반 | 부하 아래 최악 측정값 1,384 ms의 약 11배. config가 아니라 테스트 내부의 행 감지기이므로 `config/default.json`에 넣지 않았다 |
 
 ## Result
 
 ### Acceptance criteria
 
-| # | 기준 | 상태(met/unmet/unverifiable) | 근거(테스트 파일·명령·출력) |
+| # | 기준 | 상태 | 근거 |
 |---|---|---|---|
+| 1a | (1) 재현 테스트가 수정 전 실패·수정 후 통과(되돌려 확인) | met | `apps/server/src/engine/clock-jump.test.ts`. **수정 전**(`#catchUpOverdueDeadlines(passNow)` 호출 1줄만 제거하고 실행): `× returns after a 31-day jump ... 251546ms → expected 88479 to be less than 200`, `× recovers once per pass ... 419433ms → expected undefined to be 1`. 창 안쪽 케이스(`leaves a gap inside the catch-up window`)는 수정 전후 모두 통과 — 루프 동작이 안 바뀐 증거다. **수정 후**: 4/4 통과, 31일 점프가 commits 4 · 27 ms |
+| 1b | (2) 재현 테스트가 수정 전 실패·수정 후 통과(되돌려 확인) | met | `ingest.test.ts` › `while the write lock outlasts the old budget`. **`RESPONSE_BUDGET_MS`를 2_000으로 되돌리면**: `× ... 3081ms → TimeoutError: The operation was aborted due to timeout`(100 % 실패). **15_000에서**: 통과, 요청 실측 2,864 ms |
+| 2 | 10회 반복 flaky 0 | met | `ingest.test.ts` + `clock-jump.test.ts` 10회 연속: 매회 `Tests 27 passed (27)`, 실패 0. 추가로 **전체 `npm run test` 10회 연속** 모두 `Tests 2091 passed \| 1 skipped (2092)` (아래 "정직 보고" 항목 참조) |
+| 3 | 게이트 5개 녹색 | met | 아래 Gates |
+| 4 | 기존 T8/T15 테스트 무변경 통과 | met | T8/T15 테스트 파일은 **하나도 수정하지 않았다**(`git diff --stat origin/main...HEAD`에 `engine.ts`·`config.ts`·`config.test.ts`·`ingest.test.ts`·`clock-jump.test.ts`·`config/default.json`·티켓만). 전체 스위트 146파일 2,091건 통과 |
+| 5 | PR CI 녹색 | met | 아래 Gates의 CI run |
 
 ### Gates (executed)
 
 ```text
-<pending>
+npm run format:check  -> pass ("All matched files use Prettier code style!")
+npm run lint          -> pass (eslint 0, check-no-legacy-imports: ok (0 legacy imports),
+                               check-install-scripts: ok (4 reviewed, better-sqlite3 binding loads))
+npm run typecheck     -> pass (tsc --build tsconfig.json, 출력 없음, exit 0)
+npm run test          -> pass, 10회 연속 (Test Files 146 passed (146),
+                               Tests 2091 passed | 1 skipped (2092))
+npm run build         -> pass (contract/renderer/server/simulator/soak, migrations 6,
+                               docs/ops/data-map.md up to date)
 ```
+
+실행하지 않은 게이트: 없음.
+
+**정직 보고 — 식별하지 못한 실패 1건.** 수정을 모두 넣은 뒤 처음 돌린 `npm run test`에서
+`Tests 1 failed | 2090 passed | 1 skipped (2092)`가 나왔는데, **출력을 파일로 남기지 않아 어떤 테스트인지
+확인하지 못했다.** 곧바로 출력을 캡처하며 **10회 연속 재실행했고 모두 통과**했으므로(위 수치), 재현하지 못한
+상태로 남긴다. 해결했다고 쓰지 않는다. 이 브랜치가 건드린 두 테스트 파일은 별도로 10회 반복해 실패 0이다.
 
 ## Not done / out of scope
 
-- …
+- `MAX_STEPS_PER_PASS`(100,000)는 그대로 뒀다. 31일 점프에서도 88,479 < 100,000이라 이 가드는 **한 번도
+  발동하지 않았고**(관측표의 `pass_limit_reached` = 0), 따라서 이번 증상의 원인도 해법도 아니다.
+- 러닝 루프의 catch-up은 `#recoverDeadlines`를 **그대로 재사용**한다. §10.2 정책 자체(T7 `deadlines.ts`)는
+  건드리지 않았다.
+- `ingest.test.ts`의 나머지 단언(503·`db_busy`·미처리 rejection 0·inbox 미유입)은 그대로다. 예산 상수와
+  per-test 타임아웃만 바뀌었다.
 
 ## Follow-ups
 
-- …
+- `engine.deadlines.catchUpWindowMs`는 Gate 0/2 승인 수치로 교체 대상(A-15). 지금 값의 근거는 위 Assumptions.
+- `chapter_beat`는 `policy: replay`이므로 catch-up 뒤에도 밀린 만큼 순차 전달된다(day 스케일이라 31일 ≈ 90건,
+  측정상 총 4 commits로 수렴). 더 짧은 주기의 `replay` 종류가 생기면 그때 다시 볼 것.
