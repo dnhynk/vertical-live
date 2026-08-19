@@ -5,14 +5,16 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { IngestEnvelope } from '@vl/contract'
 
 import { openDatabase } from '../db/open.js'
-import { TEST_BUSY_TIMEOUT_MS } from '../db/testing/temp-store.js'
+import { createTempStore, TEST_BUSY_TIMEOUT_MS } from '../db/testing/temp-store.js'
 import { createServer } from '../server.js'
+import { FakeClock } from '../testing/fake-clock.js'
 import { SimulatorIngestEndpoint, simulatorSourceKey } from './ingest.js'
 import {
   at,
   commandEnvelope,
   createEngineHarness,
   resetMessageIds,
+  TEST_EPOCH_MS,
   type EngineHarness,
 } from './testing/harness.js'
 
@@ -361,7 +363,28 @@ describe('SimulatorIngestEndpoint write failures', () => {
  * These tests are HTTP-level on purpose: the hang was a property of the
  * request/response pair, not of `handle()`'s return value.
  */
-describe('POST /ingest/simulator when the inbox write fails', () => {
+
+/**
+ * How long one request may take before the test calls it a hang (T8e).
+ *
+ * This is a hang detector, not a latency assertion: the bug it guards against
+ * was an *unbounded* wait, so the budget only has to be shorter than "forever".
+ * It was 2,000ms, which is what made these tests flaky — the request waits out
+ * `TEST_BUSY_TIMEOUT_MS` inside a synchronous `better-sqlite3` call while the
+ * host runs the whole suite in parallel. Measured on the T8e host: 392–425ms for
+ * this request with the file run alone, but 661ms, 808ms and 1,384ms during
+ * three full `vitest run`s — up to 69% of the old budget, with two more agent
+ * sessions still to come on this host. That is the 1-in-3 failure T21 recorded.
+ * The database is already per-test isolated (`createTempStore` uses
+ * `mkdtempSync`) and `busy_timeout` is already set, so neither was the cause.
+ *
+ * `TEST_TIMEOUT_MS` is above it, so a real hang is reported by the budget rather
+ * than by vitest's own per-test timeout firing first with a vaguer message.
+ */
+const RESPONSE_BUDGET_MS = 15_000
+const TEST_TIMEOUT_MS = 30_000
+
+describe('POST /ingest/simulator when the inbox write fails', { timeout: TEST_TIMEOUT_MS }, () => {
   let harness: EngineHarness
   let server: Server
   let baseUrl: string
@@ -423,7 +446,7 @@ describe('POST /ingest/simulator when the inbox write fails', () => {
           envelopes: [commandEnvelope({ command: 'FEED', receivedAt: at(1_000) })],
         }),
         // Turns the hang into a bounded failure instead of a stuck test run.
-        signal: AbortSignal.timeout(2_000),
+        signal: AbortSignal.timeout(RESPONSE_BUDGET_MS),
       })
     } catch {
       return null
@@ -503,3 +526,85 @@ describe('POST /ingest/simulator when the inbox write fails', () => {
     expect(harness.store.drainUnprocessed(0, 10)).toHaveLength(1)
   })
 })
+
+/**
+ * The write lock held for longer than the old request budget (T8e).
+ *
+ * The describe above was 1-in-3 flaky under a full `vitest run`, and the cause
+ * was not SQLite: the endpoint answers correctly, just later than the 2,000ms
+ * `AbortSignal` the test used to allow. `busy_timeout` decides how long the
+ * answer takes and a loaded host adds the rest.
+ *
+ * So this pins the relationship the flake broke, without depending on load: the
+ * lock is held across a `busy_timeout` deliberately longer than that old budget,
+ * which makes the request take longer than 2,000ms *every* time. The endpoint
+ * still has to answer 503 — and the test still has to see it.
+ */
+describe(
+  'POST /ingest/simulator while the write lock outlasts the old budget',
+  { timeout: TEST_TIMEOUT_MS },
+  () => {
+    /** Longer than the 2,000ms budget these tests allowed before T8e. */
+    const SLOW_BUSY_TIMEOUT_MS = 2_500
+
+    let temp: ReturnType<typeof createTempStore>
+    let harness: EngineHarness
+    let server: Server
+    let baseUrl: string
+    let blocker: ReturnType<typeof openDatabase> | null = null
+
+    beforeEach(async () => {
+      resetMessageIds()
+      const clock = new FakeClock({ epochMs: TEST_EPOCH_MS })
+      temp = createTempStore({ clock, busyTimeoutMs: SLOW_BUSY_TIMEOUT_MS })
+      harness = createEngineHarness({ clock, temp })
+      server = createServer({
+        ingest: new SimulatorIngestEndpoint({ inbox: harness.engine, enabled: true, token: TOKEN }),
+      })
+      await new Promise<void>((resolve) => {
+        server.listen(0, '127.0.0.1', resolve)
+      })
+      baseUrl = `http://127.0.0.1:${String((server.address() as AddressInfo).port)}`
+    })
+
+    afterEach(async () => {
+      if (blocker !== null) {
+        blocker.exec('ROLLBACK')
+        blocker.close()
+        blocker = null
+      }
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()))
+      })
+      harness.dispose()
+      temp.dispose()
+    })
+
+    it('is answered, not abandoned, when the wait outlasts the old 2,000ms budget', async () => {
+      blocker = openDatabase({ file: temp.file, busyTimeoutMs: SLOW_BUSY_TIMEOUT_MS })
+      blocker.exec('BEGIN IMMEDIATE')
+      blocker.prepare('INSERT INTO gift_combo (base_key, stored_max) VALUES (?, ?)').run('t8e', 1)
+
+      const startedAt = process.hrtime.bigint()
+      const response = await fetch(`${baseUrl}/ingest/simulator`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' },
+        body: JSON.stringify({
+          envelopes: [commandEnvelope({ command: 'FEED', receivedAt: at(1_000) })],
+        }),
+        signal: AbortSignal.timeout(RESPONSE_BUDGET_MS),
+      })
+      const elapsedMs = Number(process.hrtime.bigint() - startedAt) / 1e6
+
+      // The premise: this request really did outlast the budget that made the
+      // describe above flaky, so a 2,000ms guard would have abandoned it.
+      expect(elapsedMs).toBeGreaterThan(2_000)
+      expect(response.status).toBe(503)
+      await expect(response.json()).resolves.toEqual({
+        error: 'ingest_unavailable',
+        reason: 'db_busy',
+      })
+      expect(harness.store.drainUnprocessed(0, 10)).toEqual([])
+    })
+  },
+)

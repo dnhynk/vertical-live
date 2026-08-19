@@ -39,6 +39,9 @@
       "eventValidityMs": 900000,
       "rendererAckTimeoutMs": 15000
     },
+    "deadlines": {
+      "catchUpWindowMs": 3600000
+    },
     "metricsSampleSize": 1024,
     "provisional": [
       "drainBatchSize",
@@ -47,6 +50,7 @@
       "effects.expiryGraceMs",
       "degraded.eventValidityMs",
       "degraded.rendererAckTimeoutMs",
+      "deadlines.catchUpWindowMs",
       "metricsSampleSize"
     ]
   },
