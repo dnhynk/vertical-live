@@ -74,7 +74,10 @@
 창 안쪽이면 루프 동작은 이전과 완전히 동일하다. 재시도·특수 케이스 분기가 아니라, 이미 있는 §10.2 경로를 러닝
 루프에도 적용하는 것이다.
 
-수정 후 같은 31일 점프: **commits 4, 27 ms**, `deadline_gap_recovered=1`, `deadline_expired=2`.
+수정 후 같은 31일 점프: **commits 10, 27 ms**, `deadline_gap_recovered=1`, `deadline_expired=2`.
+(리뷰 라운드 1 M1 정정: 최초 보고의 "commits 4"는 `pump()`의 **반환값**이었고, 그 패스가 실제로 쓴
+`commitStateTransition`은 10건이었다 — recovery 내부 트랜잭션이 반환값에 합산되지 않았다. 반환 계약을
+고쳐 이제 둘이 같은 수다. 자세한 것은 아래 `## Review round 1`.)
 
 ## Debugging record — (2) `ingest.test.ts:442` write lock flaky
 
@@ -150,14 +153,14 @@
 
 | # | 기준 | 상태 | 근거 |
 |---|---|---|---|
-| 1a | (1) 재현 테스트가 수정 전 실패·수정 후 통과(되돌려 확인) | met | `apps/server/src/engine/clock-jump.test.ts`. **수정 전**(`#catchUpOverdueDeadlines(passNow)` 호출 1줄만 제거하고 실행): `× returns after a 31-day jump ... 251546ms → expected 88479 to be less than 200`, `× recovers once per pass ... 419433ms → expected undefined to be 1`. 창 안쪽 케이스(`leaves a gap inside the catch-up window`)는 수정 전후 모두 통과 — 루프 동작이 안 바뀐 증거다. **수정 후**: 4/4 통과, 31일 점프가 commits 4 · 27 ms |
+| 1a | (1) 재현 테스트가 수정 전 실패·수정 후 통과(되돌려 확인) | met | `apps/server/src/engine/clock-jump.test.ts`. **수정 전**(`#catchUpOverdueDeadlines(passNow)` 호출 1줄만 제거하고 실행): `× returns after a 31-day jump ... 251546ms → expected 88479 to be less than 200`, `× recovers once per pass ... 419433ms → expected undefined to be 1`. 창 안쪽 케이스(`leaves a gap inside the catch-up window`)는 수정 전후 모두 통과 — 루프 동작이 안 바뀐 증거다. **수정 후**: 6/6 통과, 31일 점프가 commits 10 · 27 ms(라운드 1 M1으로 정정된 실측 커밋 수) |
 | 1b | (2) 재현 테스트가 수정 전 실패·수정 후 통과(되돌려 확인) | met | `ingest.test.ts` › `while the write lock outlasts the old budget`. **`RESPONSE_BUDGET_MS`를 2_000으로 되돌리면**: `× ... 3081ms → TimeoutError: The operation was aborted due to timeout`(100 % 실패). **15_000에서**: 통과, 요청 실측 2,864 ms |
-| 2 | 10회 반복 flaky 0 | met | `ingest.test.ts` + `clock-jump.test.ts` 10회 연속: 매회 `Tests 27 passed (27)`, 실패 0. 추가로 **전체 `npm run test` 10회 연속** 모두 `Tests 2091 passed \| 1 skipped (2092)` (아래 "정직 보고" 항목 참조) |
+| 2 | 10회 반복 flaky 0 | met | **라운드 1**: `ingest.test.ts` + `clock-jump.test.ts` 10회 연속 매회 `Tests 27 passed (27)`, 전체 `npm run test` 10회 연속 모두 `Tests 2091 passed \| 1 skipped (2092)` (아래 "정직 보고" 항목 참조). **라운드 2**(`engine.ts`를 고쳤으므로 엔진 디렉터리 전체): `npx vitest run apps/server/src/engine` 10회 연속 매회 `Test Files 17 passed (17) / Tests 124 passed (124)`, 실패 0 |
 | 3 | 게이트 5개 녹색 | met | 아래 Gates |
-| 4 | 기존 T8/T15 테스트 무변경 통과 | met | T8/T15 테스트 파일은 **하나도 수정하지 않았다**(`git diff --stat origin/main...HEAD`에 `engine.ts`·`config.ts`·`config.test.ts`·`ingest.test.ts`·`clock-jump.test.ts`·`config/default.json`·티켓만). 전체 스위트 146파일 2,091건 통과 |
+| 4 | 기존 T8/T15 테스트 무변경 통과 | met | `apps/server/src/engine/ingest.test.ts`는 **§T8e가 직접 고치라고 지정한 예외**(108+/3-)이고, **그 외 T8/T15 테스트 파일은 무변경**이다(`git diff --stat origin/main...HEAD`에 `engine.ts`·`config.ts`·`config.test.ts`·`ingest.test.ts`·`clock-jump.test.ts`·`config/default.json`·티켓만). 전체 스위트 146파일 2,093건 통과 |
 | 5 | PR CI 녹색 | met | PR #31, CI run `32292215316` **pass** (3m31s) — https://github.com/dnhynk/vertical-live/actions/runs/32292215316 |
 
-### Gates (executed)
+### Gates (executed — 라운드 1; 라운드 2 게이트는 아래 `## Review round 1` §Round 2 게이트)
 
 ```text
 npm run format:check  -> pass ("All matched files use Prettier code style!")
@@ -177,6 +180,55 @@ npm run build         -> pass (contract/renderer/server/simulator/soak, migratio
 확인하지 못했다.** 곧바로 출력을 캡처하며 **10회 연속 재실행했고 모두 통과**했으므로(위 수치), 재현하지 못한
 상태로 남긴다. 해결했다고 쓰지 않는다. 이 브랜치가 건드린 두 테스트 파일은 별도로 10회 반복해 실패 0이다.
 
+## Review round 1
+
+리뷰어 verdict: `request_changes` (blocker 2 · major 1 · minor 1). 네 건 모두 타당했고, CLAUDE.md 디버깅
+절차대로 **각각 먼저 재현한 뒤** 고치고, 고친 코드를 되돌려 재현 테스트가 다시 실패하는 것까지 확인했다.
+
+| # | 지적 | 재현(수정 전) | 고침 | SHA |
+|---|---|---|---|---|
+| B1 | `engine.ts:750`·`:1554`·`:1563` — 러닝 catch-up이 부르는 `#recoverDeadlines()`가 `this.#world = recovery.state`를 DB commit **앞**에 대입. `deadline_recovery` commit에 `SQLITE_BUSY` 1회를 주입하면 DB엔 과거 pending deadline이 남는데 메모리는 이미 제거/재무장돼 다음 pass가 재시도하지 않고 health가 `degraded`→`live`로 거짓 회복(SQL 저장소 권위·§10.2·§11 위반) | `first pump returned 0` / `lastFailure "database is locked"` / **`db overdue pending 7`** / `degraded ["writer_failing"]` → 락 해제 후 **`second pump returned 0`**, **`db overdue pending 7`**, `degraded []`, `lifecycle live` | commit 성공 뒤에만 `recovery.state` 채택(store-first, `#applySteps()`와 같은 원칙). deliver 중 거부되면 마지막으로 저장소가 확인한 state로 메모리 되돌림 → 다음 pass가 같은 gap을 다시 보고 재시도, 그때까지 health 유지. `start()`도 같은 함수를 쓰므로 동일 수정이 start 경로에 그대로 적용된다 | `17fee1a` |
+| B2 | `engine.ts:1584` — recovery의 `plan.deliver`가 ordinary loop의 `#settleAcknowledgedFallback()` durable-ACK 검사를 건너뜀. 원본 `PAID_THANKS` ACK 후 audit-state commit 전 재시작 + 31일 전진 + `start()`이면 원본 row `ackedAt`이 있는데도 `fallback:true` 효과 1건 발행(§9.2 "대체 감사 연출 **한 번**"·§11 유료 무결성 위반) | `acked_at 2026-08-16T00:00:01.100Z` 인데 **`fallback stagings 1`**, `settled_by_ack undefined` | recovered deliver도 `#settleAcknowledgedFallback()`을 먼저 통과시켜, ACK가 durable하면 효과를 내지 않고 의무만 원자적으로 닫는다(ordinary loop와 완전히 같은 경유) | `17fee1a` |
+| M1 | `engine.ts:693` — `#catchUpOverdueDeadlines()`/`#recoverDeadlines()`가 `void`라 recovery 내부 트랜잭션이 `runPending()` 반환값에 합산되지 않음. 31일 점프에서 `pump()`는 4를 반환했지만 `stateRevision`은 10 증가 | `returned 4` / `revision delta 10` / `metrics.commit delta 9` / `deadline_recovery_commit 1` (합계 = 10 `commitStateTransition`) | 두 메서드가 커밋 수를 반환하고 `#runPending()`이 합산 → 반환값 = 그 패스의 실제 `commitStateTransition` 수. 테스트가 `expect(commits).toBe(stateRevision 증가분)`으로 계약을 고정한다. 티켓의 "4 commits" 근거를 **10**으로 정정(위 §수정, §Result, §Follow-ups) | `17fee1a` |
+| m1 | 티켓 `:157` — "T8/T15 테스트 파일은 하나도 수정하지 않았다"가 같은 문장의 `ingest.test.ts` 108+/3-와 모순 | — | "`ingest.test.ts`는 §T8e가 직접 지정한 예외, **그 외** T8/T15 테스트 파일 무변경"으로 정정 | 이 커밋 |
+
+### 회귀 테스트 (되돌려 확인)
+
+`apps/server/src/engine/clock-jump.test.ts`에 2건 추가 + 기존 1건에 반환 계약 단언 1줄 추가. `engine.ts`만
+`git stash`로 되돌려 실행한 결과 — 세 지적이 각각 정확히 하나의 실패를 만든다:
+
+```text
+FAIL  ... > returns after a 31-day jump without walking the gap occurrence by occurrence
+      AssertionError: expected 4 to be 10                                       (M1)
+FAIL  ... > does not adopt a recovery the store refused, and retries it on the next pass
+      AssertionError: expected 0 to be greater than 0                           (B1)
+FAIL  ... > does not stage a substitute for a recovered fallback the renderer already acked
+      AssertionError: expected [ { schemaVersion: 1, …(9) } ] to have a length of +0 but got 1   (B2)
+Tests  3 failed | 3 passed (6)
+```
+
+수정 후: `Tests 6 passed (6)`.
+
+B1 재현은 **실제 SQLite 락**이다(`better-sqlite3` 두 번째 연결이 `BEGIN IMMEDIATE`를 잡고, 프로덕션 연결의
+`busy_timeout`이 지나 `SQLITE_BUSY`). 배치되는 것은 *시점*뿐이고 스토어·트랜잭션·에러는 전부 진짜다 — §11
+fault matrix의 "DB lock" 행이며, 라이브 중 백업이 파일을 잡는 상황이 정확히 이 창에 들어온다.
+
+### Round 2 게이트
+
+```text
+npm run format:check  -> pass ("All matched files use Prettier code style!")
+npm run lint          -> pass (eslint 0, check-no-legacy-imports: ok (0 legacy imports),
+                               check-install-scripts: ok (4 reviewed, better-sqlite3 binding loads))
+npm run typecheck     -> pass (tsc --build tsconfig.json, 출력 없음, exit 0)
+npm run test          -> pass (Test Files 146 passed (146),
+                               Tests 2093 passed | 1 skipped (2094))
+npm run build         -> pass (contract/renderer/server/simulator/soak, migrations 6,
+                               docs/ops/data-map.md up to date)
+```
+
+반복: `npx vitest run apps/server/src/engine` **10회 연속** 매회 `Test Files 17 passed (17) / Tests 124
+passed (124)`, 실패 0. 이번 라운드는 `engine.ts`를 고쳤으므로 두 파일이 아니라 엔진 디렉터리 전체를 반복했다.
+
 ## Not done / out of scope
 
 - `MAX_STEPS_PER_PASS`(100,000)는 그대로 뒀다. 31일 점프에서도 88,479 < 100,000이라 이 가드는 **한 번도
@@ -190,4 +242,4 @@ npm run build         -> pass (contract/renderer/server/simulator/soak, migratio
 
 - `engine.deadlines.catchUpWindowMs`는 Gate 0/2 승인 수치로 교체 대상(A-15). 지금 값의 근거는 위 Assumptions.
 - `chapter_beat`는 `policy: replay`이므로 catch-up 뒤에도 밀린 만큼 순차 전달된다(day 스케일이라 31일 ≈ 90건,
-  측정상 총 4 commits로 수렴). 더 짧은 주기의 `replay` 종류가 생기면 그때 다시 볼 것.
+  측정상 패스 전체가 10 commits로 수렴). 더 짧은 주기의 `replay` 종류가 생기면 그때 다시 볼 것.
