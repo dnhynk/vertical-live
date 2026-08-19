@@ -7,7 +7,7 @@
 
 상태: `pending`(의존 대기) · `ready` · `dispatched` · `in_review` · `changes_requested` · `merged` · `blocked` · `failed`
 
-> **현재(2026-08-20 UTC): Gate 0 반영(T19)·identity (B) 3종(T20a/b/c)·일본 패널 초안(T21) 전부 머지(PR 29개). 진행: T22(모더레이션 보고 경로), T8e(엔진 후속). 사용자 대기: japan-panel-plan §5 A-1~A-8 승인, Discord webhook 저장, YouTube/Cloud/OAuth 설정.** 이전: 스펙 v1 구현 task 전부 머지 + T17b·T18 머지. T0–T17 + T1b·T8b·T8c·T8d·T17b·T18 = PR 24개, open PR 0, main `34a8f0d`. **main CI 녹색**(run 32121339258: npm ci/format/lint/typecheck/test/build/soak:ci 전부 success — E-5 해제 후 소급 확인 완료). 사용자 결정 반영: D-4 public·D-6 OBS 고정·D-7 sentinel 정책; E-1·E-2·E-3·E-5·E-7 해결. 남은 것: Gate 0(`docs/ops/gate0-checklist.md`) 사용자 승인 항목과 실 YouTube 계정·OAuth·첫 private 기술 방송(사용자 계정 작업) — 사용자 지시 없이는 진행하지 않는다.
+> **현재(2026-08-20 UTC): PR 31개 전부 머지, open PR 0, main CI 녹색.** Gate 0 반영(T19)·identity (B) 3종(T20a/b/c)·일본 패널 초안(T21)·모더레이션 보고 경로(T22)·엔진 후속(T8e) 완료. 남은 코드 작업: T8f(스위트 CPU 계측, 낮은 우선순위). **사용자 대기: japan-panel-plan §5 A-1~A-8 승인, Discord webhook 저장(vault `missing`), YouTube 채널·Cloud·OAuth 설정.** 이전: 스펙 v1 구현 task 전부 머지 + T17b·T18 머지. T0–T17 + T1b·T8b·T8c·T8d·T17b·T18 = PR 24개, open PR 0, main `34a8f0d`. **main CI 녹색**(run 32121339258: npm ci/format/lint/typecheck/test/build/soak:ci 전부 success — E-5 해제 후 소급 확인 완료). 사용자 결정 반영: D-4 public·D-6 OBS 고정·D-7 sentinel 정책; E-1·E-2·E-3·E-5·E-7 해결. 남은 것: Gate 0(`docs/ops/gate0-checklist.md`) 사용자 승인 항목과 실 YouTube 계정·OAuth·첫 private 기술 방송(사용자 계정 작업) — 사용자 지시 없이는 진행하지 않는다.
 
 | T-ID | 제목 | 의존 | [contract] | 상태 | 브랜치 slug | PR | Orca task |
 |---|---|---|---|---|---|---|---|
@@ -41,7 +41,7 @@
 | T20c | identity (B) 렌더러: 동의자 표시명·고지 CTA | T20a, T14 | — | merged | t20c-identity-renderer | #29 | `task_f15883c91c9d` |
 | T21 | 일본 패널·5초 테스트·24h 콘텐츠 목록·증빙 초안(D-15) | T14, T16 | — | merged | t21-japan-panel-draft | #27 | `task_5ccfd178a887` |
 | T22 | 모더레이션 사유 보고 경로(사람 트리거 admin 엔드포인트 + filter_evasion_surge 휴리스틱; D-13 토큰 4개) | T12, T19 | — | merged | t22-moderation-report | #30 | `task_43f8dd164d5a` |
-| T8e | 엔진: StateEngine.pump()가 31일 가상 시계 점프 후 미반환(184s timeout; T20b 리뷰 관측) + engine/ingest.test.ts:442 SQLite write lock flaky(T21 관측) 조사·수정 | T8 | — | changes_requested | t8e-clock-jump-flaky | #31 | `task_364b480f6a22` |
+| T8e | 엔진: StateEngine.pump()가 31일 가상 시계 점프 후 미반환(184s timeout; T20b 리뷰 관측) + engine/ingest.test.ts:442 SQLite write lock flaky(T21 관측) 조사·수정 | T8 | — | merged | t8e-clock-jump-flaky | #31 | `task_364b480f6a22` |
 | T8f | 테스트 스위트 CPU 3.7배 증가(73.76s→271.98s, T20b/T22 머지 후) 원인 규명 + 얇은 타임아웃(replay.test.ts 5s) 점검 | T8e, T20b, T22 | — | pending | t8f-suite-time | | |
 
 디스패치 순서 원칙: `ready` 중 T-ID 낮은 것부터, 동시 2, `[contract]`는 하나만. 리뷰 Task는 `R-<T-ID>-<round>`로 별도 등록하고 아래 이력에만 남긴다.
@@ -264,3 +264,4 @@
 | 2026-08-19 21:01 | F-T8e-1 완료(store-first recovery 채택·durable-ACK 경유·commit 수 합산·티켓 정정; 2143 tests; CI 32301155923 녹색; 관측: rebase 후 첫 CI attempt가 replay.test.ts 5s 타임아웃 부하 flake, main 스위트 CPU 3.7배 증가 → **T8f 등록**) → R-T8e-2 `task_cd71ebf65e21` → `ctx_61ff6817780f`(review2) |
 | 2026-08-19 21:20 | R-T8e-2 request_changes(round 1 해소; 잔여 blocker: recovery commit 후 전달 commit 실패 시 cancelled 기록으로 재시도 대상 소실 → 거짓 회복; start 동일) → **F-T8e-2** `task_29351f77c985`(원자적 recovery 또는 전달 성공까지 durable pending). review2 정리 |
 | 2026-08-19 21:48 | F-T8e-2 완료(옵션 b: withDeliveriesPending — 전달이 남은 timer는 durable pending 유지, pump/start 두 창 회귀 테스트; 2145 tests; CI 32305049033/32305415298 녹색) → R-T8e-3 `task_f8b713bb2af4` → `ctx_aae365adca5a`(review2) |
+| 2026-08-19 22:05 | R-T8e-3 **approve**(post-recovery 락 창 재현·pump 7 commits·start 리비전 9 확인) → 최종 게이트(engine 7파일, contract·deps 0, catchUpWindowMs provisional, CI 32305415298 녹색) → **PR #31 squash merge**(main 56ec78c). T8e worker release·worktree 제거. **PR 31개 전부 머지, open PR 0.** 남은 등록 task: T8f(pending, 낮은 우선순위 — 스위트 CPU 3.7배·얇은 타임아웃 계측) |
