@@ -1,7 +1,7 @@
 # TASK-T20a-identity-contract
 
 - Task: T20a identity (B) 계약: 동의자 한정 `actor`·동의/철회 명령 (`docs/tasks/TASK_SPECS.md` §T20a)
-- Branch: `dnhynk/t20a-identity-contract` · PR: #<n>
+- Branch: `dnhynk/t20a-identity-contract` · PR: #26 (https://github.com/dnhynk/vertical-live/pull/26)
 - Orca: task `task_a7a6d0666e7c` · dispatch `ctx_d9382cedc69a`
 - Spec sections read: §7.1, §7.2, §7.3, §7.4, §12.4, §14.1
 - BOARD decisions/assumptions relied on: D-9(2026-08-19 사용자 결정), A-1(부분 뒤집힘), A-9, A-17
@@ -63,7 +63,7 @@ T20b, 렌더러 표시는 T20c이며 이 PR은 계약만 바꾼다.
 
 | 질문 | 답(코디네이터) | 반영 |
 |---|---|---|
-| 설계 6건(명령 문자열·channelRef 형식·Effect.actor 배치·동의 명령 운반 경로·envelope에 actor 미배치·확인 effect/fixture 범위)에 대한 권장안 승인 여부 | (대기 중 — 답이 오면 이 표와 코드에 반영) | 권장안대로 구현함. 답이 다르면 해당 항목만 수정 |
+| 설계 6건 — (1) 동의/철회 명령 문자열, (2) `channelRef` 형식, (3) `Effect.actor`를 ACTION_REACTION에만 두고 집계 반응에 이름 금지, (4) 동의 명령을 `command` 확장이 아니라 `consentCommand`로 분리, (5) envelope에 `actor` 미배치, (6) 확인 effect kind·새 fixture 파일 만들지 않음 | **답 없음**(2026-08-19 19:13 UTC ask, 30분 대기 후에도 미응답. `orca orchestration check --peek` = 0건) | 각 항목의 권장안대로 구현하고 근거를 코드 주석·PR·이 티켓에 남겼다. (1)(2)는 데이터·정규식 한 줄이라 리뷰 라운드에서 답이 오면 그대로 교체 가능하다 |
 
 ## Assumptions / provisional values
 
@@ -86,7 +86,7 @@ T20b, 렌더러 표시는 T20c이며 이 PR은 계약만 바꾼다.
 | 1d | `UC`로 시작하는 24자 channelId 패턴이 contract 전체(스키마·fixture·테스트)에 0건 | met | `packages/contract/src/privacy.test.ts` "has no channel id anywhere in the package, schema and fixtures included" — `/UC[A-Za-z0-9_-]{22}/`로 `packages/contract` 전 텍스트 파일(node_modules·dist 제외)을 검사, 파일 수 하한 assert 포함 |
 | 2 | 닫힘(actor=null) 기존 fixture·테스트 무변경 통과(하위 호환) | met | fixture 24×2개 무변경. `apps/server`·`apps/renderer`·`tools/*` 소스는 **변경 0**이며 전체 1955 tests 통과. 계약 쪽에서 손댄 기존 테스트는 `privacy.test.ts`(명세가 개정을 지시), `event.test.ts`의 actor 1건(닫힘 단정을 D-9 규칙으로 재기술), `commands.test.ts`·`read-model.test.ts`·`adapters.test.ts`는 **추가만** |
 | 3 | 게이트 5개 녹색 | met | 아래 Gates |
-| 4 | PR CI 녹색 | (PR 생성 후 기입) | |
+| 4 | PR CI 녹색 | met | PR #26 `ci` workflow (run URL은 worker_done 본문에) |
 
 ### Gates (executed)
 
