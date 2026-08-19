@@ -37,8 +37,8 @@
 | T18 | D-6/D-7 구현·문서(OBS 버전 고정 승인, safe-mode sentinel 정책, public 문구) | T17, T2 | — | merged | t18-obs-safemode-policy | #24 | `task_0d996db3c12a` |
 | T19 | Gate 0 승인 반영(체크리스트·config·모더레이션 호출표) | T16, T18 | — | merged | t19-gate0-apply | #25 | `task_8633302d4f33` |
 | T20a | identity (B) 계약: 동의자 한정 actor·join/leave 명령 | T1b, T6 | ✔ | merged | t20a-identity-contract | #26 | `task_a7a6d0666e7c` |
-| T20b | identity (B) 서버: 동의 저장·authorDetails 처리·삭제·보존·compliance 문서 | T20a, T9, T13, T8 | — | dispatched | t20b-identity-server | | `task_d221f62c9dae` |
-| T20c | identity (B) 렌더러: 동의자 표시명·고지 CTA | T20a, T14 | — | pending | t20c-identity-renderer | | |
+| T20b | identity (B) 서버: 동의 저장·authorDetails 처리·삭제·보존·compliance 문서 | T20a, T9, T13, T8 | — | in_review | t20b-identity-server | #28 | `task_d221f62c9dae` |
+| T20c | identity (B) 렌더러: 동의자 표시명·고지 CTA | T20a, T14 | — | dispatched | t20c-identity-renderer | | `task_f15883c91c9d` |
 | T21 | 일본 패널·5초 테스트·24h 콘텐츠 목록·증빙 초안(D-15) | T14, T16 | — | changes_requested | t21-japan-panel-draft | #27 | `task_5ccfd178a887` |
 | T22 | 모더레이션 사유 보고 경로(사람 트리거 admin 엔드포인트 + filter_evasion_surge 휴리스틱; D-13 토큰 4개) | T12, T19 | — | pending | t22-moderation-report | | |
 
@@ -236,3 +236,4 @@
 | 2026-08-19 11:49 | R-T19-2 request_changes(잔여 1: 문서 D-9 요약 90일 → BOARD 정정 30일 반영) → **F-T19-2** `task_503de3a832ee`. R-T21-1 request_changes(major: Gate 4 절대 숫자(≥70%·≥90%) 사전 제안 — §14.1 위반; minor 5: P7 enum 귀속·`crisis_sleeping` 부재 식별자·라벨 누락·previewLeadMs grep 주장·Result 파일 수) → **F-T21-1** `task_d839630345ac`. 진행: T20b |
 | 2026-08-19 12:20 | F-T19-2 완료(3057007/59548ab: D-9 30일 정정 반영; TASK_SPECS §T20b 90일 문구는 코디네이터가 main에서 정정) → R-T19-3 **approve** → 최종 게이트(config: moderation approved·토큰 4개·input.window provisional 해제; 코드 로직 변경 0; CI 32249269532 녹색) → **PR #25 squash merge**(main 79a2e23). T19 worker release·worktree 제거. F-T21-1 완료(45d0319/0d9748f; CI 32251518726 녹색) → R-T21-2 `task_a2d9083643ab` → `ctx_76a4997c2b9c`(review). 진행: T20b |
 | 2026-08-19 12:45 | R-T21-2 request_changes(round 1 전부 해소; 신규 minor 1: Reporting API 공식 문서(traffic_source_type 31 'Vertical live feed', channel_traffic_source_a3의 country_code·engaged_views)를 '확인 불가'로 잘못 서술) → **F-T21-2** `task_650aeed25249`. 진행: T20b |
+| 2026-08-19 12:54 | T20b worker_done(succeeded, PR #28: migration 006 viewer_consent 단일 저장소, gate→authorDetails part 파생, JOIN/LEAVE 파서 상태, identity/ 패키지 1곳 읽기, ACTION_REACTION actor, channelRef cooldown·한 표, LEAVE/요청 즉시 삭제, 30일 sweep(loader가 30 초과 거부), identity-consent.md 고지문·[S41] 체크리스트; 2009 tests; CI 32254297204 녹색). R-T20b-1 `task_4449b60004db` → `ctx_dad3c1acae34`(review2). **T20c** `task_f15883c91c9d` 디스패치(`ctx_b0d6f01bf847`, runtime blip 후 터미널 확인). 진행: F-T21-2 |
