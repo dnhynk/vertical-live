@@ -117,8 +117,12 @@
 ### 수정
 
 - 예산을 이름 있는 상수 `RESPONSE_BUDGET_MS = 15_000`으로 올리고 위 측정값을 주석에 남겼다. 함께
-  `TEST_TIMEOUT_MS = 30_000`을 그 위에 두어, 실제로 행이 나면 vitest 기본 타임아웃(5 s)이 아니라 예산이
-  보고하도록 했다. **재시도는 넣지 않았다.**
+  `TEST_TIMEOUT_MS = 30_000`을 **describe 옵션**(`describe(name, { timeout }, fn)`)으로 두어, 실제로 행이
+  나면 vitest 기본 타임아웃(5 s)이 아니라 예산이 보고하도록 했다. **재시도는 넣지 않았다.**
+  (describe 옵션을 쓴 이유: `it`마다 세 번째 인자를 붙이면 prettier가 네 개의 `it` 본문을 전부 재들여쓰기해
+  손대지도 않은 테스트가 diff에 잡힌다. 옵션 방식은 삭제 3줄로 끝난다. 옵션이 실제로 먹는지는 임시 probe로
+  확인했다 — 기본 5 s에서는 6 s 테스트가 `Test timed out in 5000ms`로 실패하고, `{ timeout: 30_000 }`에서는
+  통과한다.)
 - 부하에 의존하지 않는 **결정적 재현 테스트**를 추가했다(`POST /ingest/simulator while the write lock outlasts
   the old budget`): write lock을 `busy_timeout = 2,500 ms`로 잡아 요청이 **매번** 2,000 ms를 넘게 만들고,
   그래도 503 `db_busy`가 오는지, 그리고 테스트가 그것을 보는지 검사한다. 이 테스트는 옛 예산에서 100 % 실패한다.
