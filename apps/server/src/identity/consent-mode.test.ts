@@ -8,7 +8,12 @@ import {
   TEST_EPOCH_MS,
   type EngineHarness,
 } from '../engine/testing/harness.js'
-import { createCommandParserPort, loadInputConfig, parserLimits } from '../input/index.js'
+import {
+  CommandMetrics,
+  createCommandParserPort,
+  loadInputConfig,
+  parserLimits,
+} from '../input/index.js'
 import { loadRetentionConfig } from '../privacy/config.js'
 import { UserDeletionRequestHandler } from '../privacy/deletion-request.js'
 import { RetentionSweeper } from '../privacy/retention.js'
@@ -180,6 +185,7 @@ function build(identityGateOpen: boolean, options: BuildOptions = {}): Fixture {
     engine: harness.engine,
     clock,
     inputConfig,
+    commandMetrics: new CommandMetrics({ consentGateOpen: identityGateOpen }),
     identityGateOpen,
     consent: observer,
     config: testChatConfig({ enabled: true }),

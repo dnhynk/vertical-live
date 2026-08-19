@@ -1,10 +1,9 @@
-import { timingSafeEqual } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 
 import { systemClock, type Clock, type TimerHandle } from '../clock.js'
-import { isLoopbackAddress } from '../engine/ingest.js'
 import { silentLogger, type Logger } from '../secrets/redaction.js'
+import { authorizeAdmin, readTokenField, type AdminRequest, type AdminResponse } from './admin-auth.js'
 import type { KillSwitchConfig } from './config.js'
 
 /**
@@ -35,16 +34,8 @@ export interface KillSwitchRequest {
 
 export type KillSwitchHandler = (request: KillSwitchRequest) => void
 
-export interface AdminKillRequest {
-  readonly authorization: string | null
-  readonly remoteAddress: string | null
-  readonly body: unknown
-}
-
-export interface AdminKillResponse {
-  readonly status: number
-  readonly body: Record<string, unknown>
-}
+export type AdminKillRequest = AdminRequest
+export type AdminKillResponse = AdminResponse
 
 export interface AdminKillEndpointOptions {
   /** `server.adminToken` from the vault. `null` closes the door (spec §10.2). */
@@ -64,38 +55,15 @@ export class AdminKillEndpoint {
   }
 
   handle(request: AdminKillRequest): AdminKillResponse {
-    if (!isLoopbackAddress(request.remoteAddress)) {
-      return { status: 403, body: { error: 'loopback_only' } }
-    }
-    if (!this.#authorized(request.authorization)) {
-      return { status: 401, body: { error: 'unauthorized' } }
-    }
-    const reason = readReason(request.body) ?? 'admin_http'
+    const refusal = authorizeAdmin(request, this.#options.token)
+    if (refusal !== null) return refusal
+    // Operator text is not echoed into the world: only a bounded, printable
+    // token reaches the alert and `/health`.
+    const reason = readTokenField(request.body, 'reason') ?? 'admin_http'
     const at = this.#clock.nowUtcIso()
     this.#options.onKill({ source: 'http', reason, at })
     return { status: 202, body: { accepted: true, source: 'http', reason, at } }
   }
-
-  #authorized(authorization: string | null): boolean {
-    const expected = this.#options.token
-    // No token configured is a closed door, not an open one.
-    if (expected === null || expected === '') return false
-    const prefix = 'Bearer '
-    if (authorization === null || !authorization.startsWith(prefix)) return false
-    const presented = Buffer.from(authorization.slice(prefix.length))
-    const secret = Buffer.from(expected)
-    if (presented.length !== secret.length) return false
-    return timingSafeEqual(presented, secret)
-  }
-}
-
-function readReason(body: unknown): string | null {
-  if (typeof body !== 'object' || body === null || Array.isArray(body)) return null
-  const reason = (body as Record<string, unknown>)['reason']
-  if (typeof reason !== 'string' || reason === '') return null
-  // Operator text is not echoed into the world: only a bounded, printable token
-  // reaches the alert and `/health`.
-  return reason.slice(0, 120).replace(/[^\p{L}\p{N} ._:-]/gu, '')
 }
 
 export interface KillSwitchFileOptions {
@@ -202,7 +170,7 @@ export class KillSwitchFileWatcher {
   #readReason(): string {
     try {
       const contents = this.#fs.read(this.path).trim()
-      const reason = readReason({ reason: contents })
+      const reason = readTokenField({ reason: contents }, 'reason')
       return reason ?? 'kill_switch_file'
     } catch {
       return 'kill_switch_file'

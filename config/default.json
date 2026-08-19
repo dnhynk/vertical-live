@@ -216,7 +216,17 @@
         "pii_exposure",
         "sexual_or_self_harm_risk",
         "filter_evasion_surge"
-      ]
+      ],
+      "heuristics": {
+        "filterEvasion": {
+          "enabled": true,
+          "windowMs": 60000,
+          "minMessages": 20,
+          "rejectRatio": 0.5,
+          "enterWindows": 3,
+          "clearWindows": 3
+        }
+      }
     },
     "provisional": [
       "evaluateIntervalMs",
@@ -235,7 +245,12 @@
       "deadMan.intervalMs",
       "deadMan.requestTimeoutMs",
       "killSwitch.pollIntervalMs",
-      "screenshot"
+      "screenshot",
+      "moderation.heuristics.filterEvasion.windowMs",
+      "moderation.heuristics.filterEvasion.minMessages",
+      "moderation.heuristics.filterEvasion.rejectRatio",
+      "moderation.heuristics.filterEvasion.enterWindows",
+      "moderation.heuristics.filterEvasion.clearWindows"
     ]
   },
   "world": {

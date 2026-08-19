@@ -3,7 +3,12 @@ import type { CommandParser, WorldSnapshot } from '@vl/contract'
 import type { Clock } from '../../clock.js'
 import type { PersistenceStore } from '../../db/store.js'
 import type { InboxWriter } from '../../engine/ingest.js'
-import { createCommandParserPort, parserLimits, type InputConfig } from '../../input/index.js'
+import {
+  createCommandParserPort,
+  parserLimits,
+  type CommandMetrics,
+  type InputConfig,
+} from '../../input/index.js'
 import { SecretRedactor, silentLogger, type Logger } from '../../secrets/redaction.js'
 import { resolveSecretVault } from '../../secrets/resolve.js'
 import { loadOAuthClientCredentials, loadYouTubeAuthConfig } from '../auth/config.js'
@@ -52,6 +57,13 @@ export interface ChatRuntimeDeps {
   readonly onConsentFailure?: (failure: ConsentFailure) => void
   readonly onIngested?: (insertedCount: number) => void
   readonly resolveTarget?: LiveChatTargetResolver
+  /**
+   * The process's `CommandMetrics` (spec §14.1). It is also the input the
+   * `filter_evasion_surge` heuristic reads (§12.3, TASK_SPECS §T22), so the
+   * production parser port has to be the one counting — an uncounted parser
+   * leaves that detector observing a chat that never says anything.
+   */
+  readonly commandMetrics?: CommandMetrics
   readonly logger?: Logger
   readonly config?: ChatConfig
   /**
@@ -136,8 +148,10 @@ export function chatParserPort(deps: {
   readonly engine: { snapshot(): WorldSnapshot }
   readonly inputConfig: InputConfig
   readonly identityGateOpen: boolean
+  readonly commandMetrics?: CommandMetrics
 }): CommandParser {
   return createCommandParserPort({
+    ...(deps.commandMetrics === undefined ? {} : { metrics: deps.commandMetrics }),
     context: () => {
       const snapshot = deps.engine.snapshot()
       const mission = snapshot.mission

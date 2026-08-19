@@ -7,7 +7,12 @@ import {
   TEST_EPOCH_MS,
 } from '../../engine/testing/harness.js'
 import { ConsentDirectory } from '../../identity/directory.js'
-import { createCommandParserPort, loadInputConfig, parserLimits } from '../../input/index.js'
+import {
+  CommandMetrics,
+  createCommandParserPort,
+  loadInputConfig,
+  parserLimits,
+} from '../../input/index.js'
 import { loadRetentionConfig } from '../../privacy/config.js'
 import { silentLogger } from '../../secrets/redaction.js'
 import { testChatConfig } from '../../testing/chat-test-support.js'
@@ -69,6 +74,7 @@ function wire(identityGateOpen: boolean): Wired {
     engine: harness.engine,
     clock,
     inputConfig: loadInputConfig({ env: {} }),
+    commandMetrics: new CommandMetrics({ consentGateOpen: identityGateOpen }),
     identityGateOpen,
     consent: directory,
     config: testChatConfig({ enabled: true }),

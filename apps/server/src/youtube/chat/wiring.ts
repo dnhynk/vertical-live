@@ -3,7 +3,7 @@ import type { WorldSnapshot } from '@vl/contract'
 import type { Clock } from '../../clock.js'
 import type { PersistenceStore } from '../../db/store.js'
 import type { InboxWriter } from '../../engine/ingest.js'
-import type { InputConfig } from '../../input/index.js'
+import type { CommandMetrics, InputConfig } from '../../input/index.js'
 import type { Logger } from '../../secrets/redaction.js'
 import type { LiveChatTargetResolver } from './chat-source.js'
 import type { ChatConfig } from './config.js'
@@ -47,6 +47,8 @@ export interface ChatWiring {
   readonly engine: ChatWiringEngine
   readonly clock: Clock
   readonly inputConfig: InputConfig
+  /** Counts parses for §14.1 and feeds the §12.3 evasion heuristic (§T22). */
+  readonly commandMetrics: CommandMetrics
   readonly identityGateOpen: boolean
   /** The consent directory, or `null` while the gate is closed (BOARD D-9). */
   readonly consent: ConsentObserver | null
@@ -73,6 +75,7 @@ export function chatRuntimeDeps(wiring: ChatWiring): ChatRuntimeDeps {
     },
     clock: wiring.clock,
     inputConfig: wiring.inputConfig,
+    commandMetrics: wiring.commandMetrics,
     identityGateOpen: wiring.identityGateOpen,
     ...(wiring.consent === null
       ? {}

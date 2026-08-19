@@ -118,6 +118,16 @@ describe('moderation call table (spec §12.3, Gate 0)', () => {
     escalationChannel: null,
     autoBlockScope: null,
     safeStopConditions: [],
+    heuristics: {
+      filterEvasion: {
+        enabled: false,
+        windowMs: 60000,
+        minMessages: 20,
+        rejectRatio: 0.5,
+        enterWindows: 3,
+        clearWindows: 3,
+      },
+    },
   } as const
 
   it('carries the Gate 0 approved table (BOARD D-13, 2026-08-19)', () => {

@@ -2,6 +2,7 @@ import type { Clock, TimerHandle } from '../clock.js'
 import type { EngineHealth, InputHealth } from '../engine/engine.js'
 import type { RendererHealthReport } from '../engine/publisher.js'
 import type { HealthSignal, HealthStatus } from '../health/types.js'
+import type { CommandMetricsSnapshot } from '../input/metrics.js'
 import { silentLogger, type Logger } from '../secrets/redaction.js'
 import type { AuthEvent, AuthEventSink } from '../youtube/auth/events.js'
 import type { SafeStopRequest } from '../youtube/broadcast/alerts.js'
@@ -10,6 +11,7 @@ import { nullAlertSink, type Alert, type AlertSeverity, type AlertSink } from '.
 import type { SupervisorConfig } from './config.js'
 import type { DeadManMonitor } from './deadman.js'
 import type { KillSwitchRequest } from './kill-switch.js'
+import { FilterEvasionDetector, type FilterEvasionState } from './moderation-heuristic.js'
 import { runPreflight, type PreflightProbes } from './preflight.js'
 import {
   RestartSupervisor,
@@ -26,6 +28,7 @@ import {
   HEALTH_FAMILY_SPEC_ITEM,
   type ComponentHealth,
   type HealthAggregate,
+  type ModerationHealthSummary,
   type PreflightResult,
   type SafeStopKind,
   type SafeStopTrigger,
@@ -105,6 +108,13 @@ export interface SupervisorOptions {
   readonly random?: () => number
   /** Schedule the evaluation loop on `start()`. Off in tests (fake clocks). */
   readonly autoEvaluate?: boolean
+  /**
+   * Cumulative input counters (`CommandMetrics.snapshot()`), read by the
+   * `filter_evasion_surge` heuristic of §12.3 (TASK_SPECS §T22). Absent when
+   * nothing in this process parses chat — then the heuristic reports itself as
+   * not running rather than as quiet.
+   */
+  readonly commandMetrics?: () => CommandMetricsSnapshot
 }
 
 const OWNER_OBS_CLIENT = 'obs.ObsClient'
@@ -128,6 +138,9 @@ export class Supervisor {
   #startupResult: StartupResult | null = null
   #startupAttempts = 0
   #moderation: ModerationHealth = MODERATION_HEALTHY
+  #moderationReportedAt: string | null = null
+  readonly #filterEvasion: FilterEvasionDetector | null
+  #observingHeuristics = false
   #lastEvaluationMonotonicMs: number | null = null
   #lastPreflightMonotonicMs: number | null = null
   #lastAggregate: HealthAggregate | null = null
@@ -142,6 +155,14 @@ export class Supervisor {
     this.#logger = options.logger ?? silentLogger
     this.#alerts = options.alerts ?? nullAlertSink
     this.#aggregator = new HealthAggregator(options.config)
+    this.#filterEvasion =
+      options.commandMetrics === undefined
+        ? null
+        : new FilterEvasionDetector({
+            config: options.config.moderation.heuristics.filterEvasion,
+            clock: options.clock,
+            metrics: options.commandMetrics,
+          })
     this.#since = options.clock.nowUtcIso()
     this.#startupBackoff = createExponentialBackoff({
       initialDelayMs: options.config.restart.initialDelayMs,
@@ -231,9 +252,14 @@ export class Supervisor {
    */
   reportModerationHealth(status: HealthStatus, reason: string | null = null): void {
     const previous = this.#moderation
+    const changed = previous.status !== status || previous.reason !== reason
     this.#moderation = { status, reason }
+    // The instant belongs to the report, not to the reading of it: a repeat of
+    // the same status leaves it where it was, so `/health` keeps saying when the
+    // condition actually started (TASK_SPECS §T22: "토큰·시각만").
+    if (changed) this.#moderationReportedAt = status === 'ok' ? null : this.#clock.nowUtcIso()
     if (status === 'ok') return
-    if (previous.status === status && previous.reason === reason) return
+    if (!changed) return
 
     const token = reason ?? 'moderation_unhealthy'
     if (reason !== null && this.#config.moderation.safeStopConditions.includes(reason)) {
@@ -395,6 +421,7 @@ export class Supervisor {
       lastTransitionReason: this.#lastTransitionReason,
       safeStop: this.#safeStop,
       interactionEnabled: this.#interactionEnabled,
+      moderation: this.moderationHealth(),
       families: HEALTH_FAMILIES.map((family) => ({
         ...(aggregate?.families[family] ?? {
           family,
@@ -421,6 +448,16 @@ export class Supervisor {
 
   components(): readonly ComponentHealth[] {
     return this.registry.all().map((supervisor) => supervisor.health())
+  }
+
+  /** Spec §12.3 on `/health`: the reported token, when, and the detector. */
+  moderationHealth(): ModerationHealthSummary {
+    return {
+      status: this.#moderation.status,
+      reason: this.#moderation.reason,
+      reportedAtUtc: this.#moderationReportedAt,
+      filterEvasion: this.#filterEvasion?.state() ?? NO_FILTER_EVASION_DETECTOR,
+    }
   }
 
   /**
@@ -648,6 +685,7 @@ export class Supervisor {
   }
 
   async #evaluate(cause: string): Promise<HealthAggregate> {
+    this.#observeModerationHeuristics()
     await this.#maybeRetryPreflight()
     const nowMonotonicMs = this.#clock.monotonicMs()
     for (const signal of this.#options.sources?.() ?? []) this.#aggregator.report(signal)
@@ -696,6 +734,35 @@ export class Supervisor {
 
     if (this.#state !== 'safe_stopped') this.#driveRecovery(aggregate)
     return aggregate
+  }
+
+  /**
+   * Runs the automatic `filter_evasion_surge` detector for one evaluation
+   * (spec §12.3, TASK_SPECS §T22).
+   *
+   * Re-entrant on purpose-proofing: reporting an approved token reaches
+   * `requestSafeStop`, which evaluates again synchronously, and the detector
+   * must not be asked for a second verdict inside its own. The nested pass skips
+   * it and the outer one has already applied the verdict.
+   */
+  #observeModerationHeuristics(): void {
+    if (this.#filterEvasion === null || this.#observingHeuristics) return
+    this.#observingHeuristics = true
+    try {
+      const verdict = this.#filterEvasion.observe()
+      if (verdict === 'report') {
+        this.reportModerationHealth('degraded', 'filter_evasion_surge')
+      } else if (verdict === 'clear') {
+        // Only the detector's own report is cleared here. A person's report of
+        // another token is theirs to clear (`POST /admin/moderation/clear`), and
+        // a run already stopped stays stopped either way (spec §9.2).
+        if (this.#moderation.reason === 'filter_evasion_surge') {
+          this.reportModerationHealth('ok')
+        }
+      }
+    } finally {
+      this.#observingHeuristics = false
+    }
   }
 
   #applyInteractionGate(aggregate: HealthAggregate): void {
@@ -815,5 +882,15 @@ export class Supervisor {
     }, this.#config.evaluateIntervalMs)
   }
 }
+
+/** What `/health` shows when no chat parser feeds the detector. */
+const NO_FILTER_EVASION_DETECTOR: FilterEvasionState = Object.freeze({
+  enabled: false,
+  reported: false,
+  consecutiveExceeding: 0,
+  consecutiveBelow: 0,
+  windowsClosed: 0,
+  lastWindow: null,
+})
 
 export type { SafeStopKind }

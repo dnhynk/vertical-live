@@ -223,6 +223,19 @@ describe('supervisor routes', () => {
     lastTransitionReason: 'signals:all_families_ok',
     safeStop: null,
     interactionEnabled: true,
+    moderation: {
+      status: 'ok',
+      reason: null,
+      reportedAtUtc: null,
+      filterEvasion: {
+        enabled: true,
+        reported: false,
+        consecutiveExceeding: 0,
+        consecutiveBelow: 0,
+        windowsClosed: 2,
+        lastWindow: null,
+      },
+    },
     families: [
       {
         family: 'obs_output',

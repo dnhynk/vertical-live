@@ -19,10 +19,17 @@ export {
   type DeadManConfig,
   type KillSwitchConfig,
   type ModerationCallTableConfig,
+  type ModerationHeuristicsConfig,
   type ScreenshotConfig,
   type SupervisorAlertConfig,
   type SupervisorConfig,
 } from './config.js'
+export {
+  authorizeAdmin,
+  readTokenField,
+  type AdminRequest,
+  type AdminResponse,
+} from './admin-auth.js'
 export { classifyStoreFailure, type StoreFailure } from './db-integrity.js'
 export { DeadManMonitor, type DeadManMonitorOptions } from './deadman.js'
 export {
@@ -37,6 +44,22 @@ export {
   type KillSwitchHandler,
   type KillSwitchRequest,
 } from './kill-switch.js'
+export {
+  FILTER_EVASION_REJECTION_REASONS,
+  FilterEvasionDetector,
+  type FilterEvasionHeuristicConfig,
+  type FilterEvasionState,
+  type FilterEvasionVerdict,
+  type FilterEvasionWindow,
+} from './moderation-heuristic.js'
+export { runModerationCli, type ModerationCliDeps } from './moderation-cli.js'
+export {
+  AdminModerationEndpoint,
+  isModerationReasonToken,
+  MODERATION_REASON_TOKENS,
+  type ModerationReasonToken,
+  type ModerationReport,
+} from './moderation-report.js'
 export {
   PREFLIGHT_OK,
   runPreflight,
@@ -104,6 +127,7 @@ export {
   type FamilyVerdict,
   type HealthAggregate,
   type HealthFamily,
+  type ModerationHealthSummary,
   type PreflightResult,
   type SafeStopKind,
   type SafeStopTrigger,
