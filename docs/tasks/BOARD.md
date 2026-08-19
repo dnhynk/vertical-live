@@ -38,7 +38,7 @@
 
 디스패치 순서 원칙: `ready` 중 T-ID 낮은 것부터, 동시 2, `[contract]`는 하나만. 리뷰 Task는 `R-<T-ID>-<round>`로 별도 등록하고 아래 이력에만 남긴다.
 
-## 2. 결정 (사용자 확정, 2026-08-16 / 2026-08-18 추가)
+## 2. 결정 (사용자 확정, 2026-08-16 / 2026-08-18 / 2026-08-19 Gate 0 추가)
 
 | # | 결정 | 근거·출처 |
 |---|---|---|
@@ -48,13 +48,22 @@
 | D-4 | 저장소 `dnhynk/vertical-live` **public(2026-08-18 사용자 전환; 원래 private)**, `main`, squash merge만, 브랜치 자동 삭제; 구현 worker 2 + 리뷰어 1 | 오케스트레이션 안전(2026-08-16 BSOD 이력) |
 | D-6 | OBS Studio **32.0.2** / obs-websocket **5.6.3**(RPC v1) 고정 승인(E-2, 2026-08-18) | 사용자 승인; `docs/ops/obs-setup.md` §1 |
 | D-7 | OBS 32 safe-mode 프롬프트(E-7): **선택지 A** — 우리가 OBS를 띄우는 경로(자동시작·supervisor obs-process 재시작)에서 실행 직전 `%APPDATA%\obs-studio\.sentinel\*` 파일을 지우고 로그·health detail에 남긴다. OBS 반복 크래시는 obs-process 재시작 예산(F-18→safe_stopped)이 표면화한다. 공식 문서에 없는 방법임을 문서에 명시하고, 무력화되면 기존 동작(포트 대기 타임아웃 + 실패 기록)으로 떨어진다 | 사용자 결정 2026-08-18; `docs/ops/windows-host.md` §5.7 |
+| D-8 | **Gate 0 §1.1 제품 방향 5개 항목 승인**(절대 목표·오리지널 IP·무료 핵심 플레이·V1 단일 채널 크리처 돌봄(영토전 없음)·수익화 금지선). '바꾸지 않겠다'는 확인 — 코드·테스트 강제 유지 | 사용자 2026-08-19; gate0-checklist §1.1 |
+| D-9 | **Gate 0 §1.3 identity = (B)**, 범위: **opt-in 명령으로 고지문에 동의한 시청자만** channelId·표시명 저장·화면 표시, 철회/삭제 명령으로 즉시 삭제, **90일 미활동 시 자동 삭제**, 고지 = 방송 화면 CTA 한 줄 + 채널 설명/고정 댓글 전문. 미동의자는 현재처럼 익명(`actor=null`). 사용자별 cooldown·한 표·분기 투표는 동의자 한정. 개인 D1/D7/D30·§14.1 '승인 후 후보' 지표는 계속 계산·저장하지 않음. **A-1은 부분적으로 뒤집힘**(동의자 한정 개방) — 구현 T20a/b/c, 그 전까지 코드는 A-1 상태 유지 | 사용자 2026-08-19; 스펙 §7.4 §12.4 [S41] |
+| D-10 | **Gate 0 §1.2 채널 = 전용 새 채널**(Brand Account, 2026-08-19 현재 미생성). 계정 audit은 새 채널이라 전 항목 '없음/미달'(YPP 미가입, Supers/Gifts/Membership/Shopping 비활성, AdSense 미연결, strike 없음). 국가는 **한국(가정, 채널 생성 시 확인)**. 기준선 없음 → 수익 전부 이 Live 귀속 | 사용자 2026-08-19; gate0-checklist §1.2 |
+| D-11 | **Gate 0 §1.5 입력 모드 = direct + flood 시 비경쟁 집계**(A-3 확정), 보호값 **승인**: `input.window.windowMs=5000`, `maxDirectPerWindow=20`, `enterAggregateAtCommands=30`, `exitAggregateAtCommands=10` → provisional 목록에서 제거(근거: T11 local replay 처리량 시험). Gate 2 실트래픽 후 재조정 가능 | 사용자 2026-08-19 |
+| D-12 | **Gate 0 §1.6 Gate 2 방송 길이 실험 순서 = 단일 장기 Live 먼저**(A-4 유지), rolling(<12h)은 그 다음 비교. Gate 3 전략 선택 절차 = gate2-experiments.md 1장의 관측 | 사용자 2026-08-19 |
+| D-13 | **Gate 0 §1.8 모더레이션 호출표 승인**: 호출 책임자 = 사용자 본인 1인(JST 24h), 최대 응답시간 60분, 부재 구간(수면 등)은 아래 자동 safe-stop 4개 사유가 덮음(사전 safe-stop 정책), escalation 2차 = 본인 휴대폰 문자/전화(번호는 문서에 적지 않음; **V1에 자동 발송 미구현 → Discord 모바일 알림이 사실상 유일한 자동 경로임을 표에 명시**), 자동 차단 범위 = YouTube 기본 필터 전부(blocked words·URL hold·부적절 메시지 hold for review·slow mode; timeout/ban은 사람), safe-stop 조건 = `targeted_harassment`·`pii_exposure`·`sexual_or_self_harm_risk`·`filter_evasion_surge` 4개 전부 | 사용자 2026-08-19; moderation-call-table.md |
+| D-14 | **Gate 0 §1.7**: 운영 합격선은 **provisional 유지 → Gate 2 72h baseline 후 잠금**(A-15 유지); supervisor 현재 값은 '운영 시작값'으로 승인(provisional 표기 유지). public 운영 **월 예산 10만원 · 누적 손실 중단선 50만원 · 최대 관측기간 6개월** | 사용자 2026-08-19 |
+| D-15 | **Gate 0 §1.4 일본 패널 조건·5초 이해 테스트 통과 기준·24h 콘텐츠 목록/반복 표본 기준·일본 시장 증빙 방식 = 코디네이터가 초안 제안 → 사용자 승인**(T21). 숫자는 '제안'으로 표기, 승인 전 합격선 아님 | 사용자 2026-08-19 |
+| D-16 | 운영 자격정보 준비: Discord 서버·webhook **신규 생성(사용자)**, YouTube 전용 채널·Google Cloud 프로젝트·OAuth 클라이언트 **처음부터(사용자, 코디네이터 안내)**. 값은 vault에만(stdin) | 사용자 2026-08-19 |
 | D-5 | 리뷰어 = Codex `gpt-5.6-sol` / `xhigh` / `service_tier=fast` | 사용자 지정("sol xhigh fast"); 카탈로그·공식 config reference로 값 확인 |
 
 ## 3. 가정 (코디네이터, 스펙이 방향을 정했거나 플래그로 양쪽을 구현하는 항목 — 사용자가 뒤집을 수 있음)
 
 | # | 가정 | 근거 | 영향 task |
 |---|---|---|---|
-| A-1 | identity feature gate는 V1에서 **닫힘**. `actor=null`, `authorDetails` 미저장, 사용자별 cooldown·투표 없음, 집계창 flood control만 | 스펙 §7.2, §7.4, §12.4 (Gate 0 결정 전 기본값) | T1, T6, T7, T13 |
+| A-1 | identity feature gate는 V1에서 **닫힘**. `actor=null`, `authorDetails` 미저장, 사용자별 cooldown·투표 없음, 집계창 flood control만 | 스펙 §7.2, §7.4, §12.4 (Gate 0 결정 전 기본값) | T1, T6, T7, T13  **→ D-9(2026-08-19)로 부분 뒤집힘: 동의자 한정 개방(T20). 구현 전까지 코드는 닫힘 상태 유지** |
 | A-2 | 4개 paid 타입(Super Chat·Super Sticker·Gift·Membership) adapter를 fixture 수준까지 모두 구현하고 Gift delta·Super Chat 멱등도 구현. 런타임 feature gate(`paidFeatures.*.enabled`)는 기본 off | 스펙 §15 Gate 1(활성 타입 전체/비활성 fixture) — 계정 audit 전이므로 규칙이 완전한 부분은 구현, 실계정 검증은 Gate 5 | T1, T4, T8 |
 | A-3 | 입력 기본 모드 `direct`, flood 시 비경쟁 `aggregate`; 전환 임계값·창 길이는 `provisional` config | 스펙 §6.4 "실제 이벤트율 측정 후 고정" | T6, T8 |
 | A-4 | broadcast 전략 기본 `single`, `rolling-experiment`는 실험 플래그. 프로덕션 자동화 전략은 Gate 2 후 선택 | 스펙 §9.3, §17 | T10, T12 |
@@ -211,3 +220,4 @@
 | 2026-08-18 08:46 | R-T18-3 첫 시도 `task_6238dab07bc2`는 codex 제공자 측 콘텐츠 차단(사이버보안 주의 안내)으로 리뷰 미게시 → failed 처리, 견고성 관점으로 재서술한 `task_5c7aa21d0545`로 재시도 → verdict request_changes(round 2 시나리오 해소 확인; 잔여: isReparsePoint→realPath 사이 root 교체 창 + 문서의 '남는 창' 서술 부정확). 코디네이터 판단: 핸들 기반 API 없이는 못 닫는 창이므로 **완화(부모 기준 canonical root 대조)+정확한 공개+회귀 테스트**로 종결 → **F-T18-3** `task_f2154b4990e8`. 런북 2.5(4) 관찰: round마다 지적이 좁아지며 수렴 중(E-4/E-6 패턴), 별도 에스컬레이션 없이 진행 |
 | 2026-08-18 09:12 | F-T18-3 완료(fb67a6b/f824225: 부모 기준 canonical root 대조 `sentinel_dir_mismatch`, 보장/비보장 목록 공개, 테스트 31→35(리뷰어 NTFS 재현·junction 부모 통과); CI 32119989569 녹색). R-T18-4 `task_fcbdace17b10` → `ctx_d2aef4824f82`(review; 구속력 있는 판정 원칙 명시) |
 | 2026-08-18 09:26 | R-T18-4 verdict **approve**(round 3 재현·junction 부모 정상 배치·guard 무력화 대조 모두 확인) → 최종 게이트(contract·deps 0, supervisor 변경은 lastNote 관측 채널만, config `obs.process.sentinelDir` ""=APPDATA 파생, CLAUDE.md/런북/TASK_SPECS public 문구) → **PR #24 squash merge**(main 34a8f0d). T18 worker release·worktree 제거. **main CI run 32121339258 성공**(7 step 전부). 사용자 결정 5건 처리 완료 — 무인 루프 종료, 남은 것은 Gate 0 사용자 항목 |
+| 2026-08-19 10:00 | **Gate 0 사용자 결정 수집(UI 4라운드, 16문항)** → D-8~D-16 기록. 후속 작업 등록 예정: T19(Gate 0 반영: gate0-checklist 체크·config input.window 승인값·supervisor.moderation 승인표·moderation-call-table·ROADMAP), T20a[contract]/T20b/T20c(identity (B) 동의자 한정 개방), T21(일본 패널·5초 테스트·콘텐츠 목록 초안). 사용자 수동 단계(Discord 서버·webhook, Google 계정·채널·Cloud·OAuth)는 안내문으로 전달 |

@@ -312,3 +312,76 @@
 - **합격 기준**
   1. 스크립트 dry-run 모드와 단위 테스트(경로·용량 계산·삭제 대상 선정).
   2. 이 PC에서 자동시작 등록·해제 실행 로그 첨부(가능하면), 아니면 "실행하지 않았음".
+
+## T18 — OBS safe-mode sentinel 정책(D-7)·버전 고정(D-6)·public 문구 (완료, 2026-08-18)
+
+- slug `t18-obs-safemode-policy` · PR 접두 `feat(ops):` · 의존 T17, T2 · PR #24 머지. 사용자 결정 D-6/D-7/D-4 반영 — 상세는 `docs/tasks/TASK-T18-obs-safemode-policy.md`, `docs/ops/windows-host.md` §5.7.
+
+## T19 — Gate 0 승인 반영: 체크리스트·설정·모더레이션 호출표
+
+- slug `t19-gate0-apply` · PR 접두 `chore(gate0):` · 의존 T16, T18
+- **읽을 것**: `docs/tasks/BOARD.md` §2 **D-8~D-16**(정본), `docs/ops/gate0-checklist.md` 4장(승인 뒤에 할 일), `docs/ops/moderation-call-table.md`, 스펙 §12.3, §15, §17, `apps/server/src/supervisor/config.ts`(`assertModerationCallTableApproved`)
+- **범위**
+  - `docs/ops/gate0-checklist.md`: 1장 체크박스를 D-8~D-16대로 채우고 각 항목에 승인 날짜(2026-08-19)와 D-번호를 적는다. 미결 항목(§1.4는 T21 초안 대기, §1.2 audit은 채널 생성 후 값 기입, §1.7 합격선은 Gate 2 후 잠금)은 **체크하지 않고** 상태를 적는다. 3장 §17 표 '현재 취급' 열 갱신.
+  - `docs/ops/moderation-call-table.md` 1장 승인표와 2장 사유 토큰 표를 D-13 값으로 채운다(휴대폰 번호·webhook URL 등 값은 적지 않는다). "V1에서는 문자/전화 자동 발송이 없어 Discord 모바일 알림이 사실상 유일한 자동 경로"를 명시. 승인 날짜·D-13 기록.
+  - `config/default.json`: `supervisor.moderation` = D-13 승인표(`approved: true`, `onCallOwner`, `maxResponseMinutes: 60`, `escalationChannel`, `autoBlockScope`, `safeStopConditions` 4개 토큰) — `assertModerationCallTableApproved()`가 통과해야 하며 토큰 문자열은 `supervisor.reportModerationHealth()` 호출부(T12)와 정확히 같아야 한다(불일치면 코드 쪽 토큰을 바꾸지 말고 ask). `input.window.*` 4개를 D-11 승인값으로 확정하고 `input.provisional`에서 제거(`maxRawLength`는 남긴다).
+  - `docs/ROADMAP.md`: Gate 0 상태를 "부분 승인(D-8~D-16, 잔여: §1.2 audit 값·§1.4 초안 승인·§1.7 Gate 2 잠금)"으로 갱신. `docs/ops/runbook-operations.md`·`supervisor.md`에 호출표 참조가 있으면 승인 상태로 갱신.
+  - 새 사실을 만들지 않는다. BOARD는 코디네이터 소유라 건드리지 않는다.
+- **합격 기준**
+  1. `assertModerationCallTableApproved()` 통과 + 거부 경로 테스트(빈 칸 하나라도 있으면 이름을 대고 throw) 유지.
+  2. `input.provisional`에 `window.*`가 없고 값이 D-11과 일치함을 테스트 또는 설정 검증으로 확인.
+  3. 게이트 5개 + CI 녹색; 문서의 모든 값이 BOARD D-번호를 인용.
+
+## T20a — identity (B) 계약: 동의자 한정 `actor`·동의/철회 명령 `[contract]`
+
+- slug `t20a-identity-contract` · PR 접두 `feat(contract):` · 의존 T1b, T6 · **[contract]**
+- **읽을 것**: BOARD **D-9**, A-1(부분 뒤집힘), A-9; 스펙 §7.1(allowlist), §7.4(actor), §12.4, §14.1, [S41] https://developers.google.com/youtube/terms/developer-policies-guide , [S42]; `packages/contract/src/event.ts`(`actor: z.null()`), `commands.ts`, `privacy.test.ts`, `docs/ops/data-map.md`
+- **범위**
+  - `actor`: `null | { kind: 'consented', displayName: string, channelRef: string }` — `channelRef`는 **원 channelId가 아니라 서버가 consent 레코드에 매긴 불투명 id**(렌더러·fixture·로그에 channelId가 나가지 않도록). 미동의자는 계속 `null`. 스키마 주석에 D-9 인용.
+  - 명령 별칭 데이터에 동의/철회 명령 추가(예: `join`/`leave` 계열; ja·icons·en 별칭은 기존 규칙대로, 실제 문자열은 T14 CTA와 충돌하지 않게). 명령 의미: `join` = 고지문 동의 + 표시명 저장 시작, `leave` = 즉시 삭제. 두 명령은 세계 상태에 영향이 없다(§7.1 allowlist이지만 `effect`를 내지 않음 — 확인 effect는 익명 "참여 등록됨"류 1종만 허용, 이름 포함 금지).
+  - snapshot: 표시명은 snapshot에 넣지 않는다(read model 복구는 익명으로 충분). effect의 `actor`만 표시명을 싣는다(D-9 "화면 표시").
+  - JSON Schema·fixture 재생성(스크립트), fixture의 표시명은 명백한 합성값(`synthetic-viewer-1` 등). `privacy.test.ts`를 "동의자 한정" 규칙으로 개정: `actor`가 non-null이면 `kind==='consented'`이고 channelId 형식(`UC…`)이 어디에도 없음을 검사.
+- **합격 기준**
+  1. 계약 테스트·스키마 생성물 최신·fixture round-trip 통과; `UC`로 시작하는 24자 channelId 패턴이 contract 전체(스키마·fixture·테스트)에 0건.
+  2. 미동의 경로(`actor=null`)의 기존 fixture·테스트가 변경 없이 통과(하위 호환).
+
+## T20b — identity (B) 서버: 동의 저장·authorDetails 처리·삭제·보존·compliance 문서
+
+- slug `t20b-identity-server` · PR 접두 `feat(privacy):` · 의존 T20a, T9, T13, T8
+- **읽을 것**: BOARD D-9, D-13; 스펙 §7.2, §7.4, §12.3, §12.4(삭제 7일·보존 field별), [S41][S42]; `apps/server/src/youtube/chat/{config,grpc-source,rest-source}.ts`(`IDENTITY_PART`), `apps/server/src/privacy/*`, `apps/server/src/input/parse.ts`(`identityGateOpen`), `config/retention.json`, `docs/ops/data-map.md`
+- **범위**
+  - 설정: `engine.identityGateOpen`을 **동의 모드**로 재정의(`false`=A-1 닫힘, `true`=D-9 동의자 한정). 열림일 때만 chat source가 `authorDetails` part를 요청한다(닫힘이면 현재처럼 `id,snippet`).
+  - 수신 경로(열림): 메시지의 `authorDetails.channelId`·`displayName`은 **메모리에서만** 다룬다 — (a) `join` 명령이면 consent 레코드 생성(channelRef=불투명 id, channelId는 **해시가 아닌 원값을 별도 테이블에 저장하되 이 테이블만이 유일한 저장소**(§12.4 삭제 가능성), displayName, consentedAt, lastActiveAt, noticeVersion); (b) 동의자의 메시지면 `actor={consented, displayName, channelRef}`로 정규화하고 lastActiveAt 갱신; (c) 그 외는 authorDetails를 즉시 버리고 `actor=null`. inbox envelope·로그·metrics·health에 미동의자의 channelId·이름이 남지 않음을 테스트로 고정.
+  - `leave` 명령: consent 레코드·파생(표시명 캐시) 즉시 삭제, 이후 메시지는 익명. 사용자 삭제 요청 handler(T13)를 channelRef/channelId로 실제 삭제하도록 확장(7일 규칙보다 즉시).
+  - 보존: `config/retention.json`에 consent 필드(source·목적·90일 미활동 삭제·삭제 경로) 추가, T13 스케줄러가 `lastActiveAt+90d` 경과 레코드를 삭제하고 `retention_ledger`에 기록. 표시명은 YouTube Authorized/Non-Authorized API Data 규칙(30일 refresh) 대상인지 [S41] 원문으로 판단해 refresh 또는 재동의 절차를 문서에 명시(추측 금지 — 불명확하면 ask).
+  - 동의자 한정 기능: 사용자별 cooldown·한 표(A-9)는 channelRef 기준으로 열되 미동의자 경로는 집계창 그대로. 분기 투표는 이 PR 범위 밖(플래그만 유지).
+  - `docs/ops/data-map.md` 갱신; 신규 `docs/ops/identity-consent.md`: 고지문 초안(ja 주 표기 + 영어 별칭, `nativeReview: pending`; 수집 항목·목적·보존·삭제 방법·명령), 채널 설명/고정 댓글용 전문, **YouTube API Services compliance 체크리스트**(Developer Policies의 user data·privacy policy·데이터 보존·삭제 항목을 URL·조항 번호와 함께 나열하고 각 항목이 코드 어디에서 충족되는지 표) — 사용자가 audit 제출 전 검토.
+  - 금지: 개인 D1/D7/D30·재방문 지표 계산(§14.1 가드 테스트 유지·확장), 이름 표시 외 용도 사용, 미동의 데이터 영속.
+- **합격 기준**
+  1. 열림 모드 통합 테스트: join→표시명 부착→leave→익명 복귀, 미동의 메시지의 authorDetails가 어떤 저장소·로그에도 없음, 90일 미활동 자동 삭제(가상 시계), 닫힘 모드는 기존 테스트 전부 무변경 통과.
+  2. 스키마 검사 테스트를 "identity 컬럼은 consent 테이블에만 존재"로 개정하고 통과.
+  3. 게이트 5개 + CI 녹색; 새 외부 주장은 URL·확인 날짜.
+
+## T20c — identity (B) 렌더러: 동의자 표시명·고지 CTA
+
+- slug `t20c-identity-renderer` · PR 접두 `feat(renderer):` · 의존 T20a, T14
+- **읽을 것**: BOARD D-9; 스펙 §5.2(슬롯), §5.3, §8.4·§8.5(유료 연출에 이름 금지·순위표 금지), §12.3; `apps/renderer` 슬롯 구현, `i18n/ja.json`
+- **범위**
+  - '방금 반영된 행동' 슬롯에 `actor.kind==='consented'`일 때만 표시명을 붙인다(길이 제한·이모지/제어문자 정리·XSS 무해화; raw chat은 여전히 표시하지 않음). `actor=null`이면 현재와 동일.
+  - 유료 감사 연출에는 **이름을 붙이지 않는다**(§8.4 유지 — 동의자여도 익명 아이콘). 지출·참여 순위표 없음.
+  - CTA 영역에 고지 한 줄(ja 주 표기, `nativeReview: pending`)과 `join`/`leave` 명령 안내; T14의 CTA 비활성 상태에서는 함께 숨김.
+  - `?mode=dev` 대표 상태에 '동의자 행동 표시' 1종 추가, 스크린샷 첨부.
+- **합격 기준**
+  1. 표시명이 닫힘 모드 fixture에서는 절대 렌더되지 않음(테스트), 유료 연출 컴포넌트가 `actor`를 읽지 않음(정적 검사).
+  2. ja.json 키 전부 `nativeReview: pending`, 하드코딩 일본어 0건(기존 규칙 유지).
+
+## T21 — 일본 패널·5초 이해 테스트·24h 콘텐츠 목록·일본 시장 증빙 초안(D-15)
+
+- slug `t21-japan-panel-draft` · PR 접두 `docs(gate0):` · 의존 T14, T16
+- **읽을 것**: BOARD D-15, D-8; 스펙 §5.2, §5.3, §6.2, §12.5, §14.2(1), §15(Gate 0·Gate 3·Gate 4), §17; `docs/ops/gate0-checklist.md` §1.4, `docs/ops/gate2-experiments.md`; 콘텐츠 디렉터 구현(`apps/server/src/world`, T7)의 실제 사건·챕터 목록
+- **범위**
+  - 신규 `docs/ops/japan-panel-plan.md`: (1) 패널 모집 조건 **제안**(인원·연령대·기기(모바일 YouTube 앱)·언어·모집 경로 후보) — 숫자는 '제안'으로 표기하고 근거(스펙 문장 또는 일반적 UX 리서치 관행의 출처 URL)를 붙인다, 출처가 없으면 "제안(근거 없음)"으로 정직 표기; (2) 5초 무음 이해 테스트 절차와 **통과 기준 제안**(무엇을 묻고 몇 %를 통과로 볼지, 측정 방법); (3) 24시간 콘텐츠 목록 — T7 디렉터가 실제로 낼 수 있는 사건·챕터 조합을 코드에서 도출해 시간대별 표로, 반복 장면 표본 검토 기준(§12.5) 제안; (4) 일본 시장 증빙 방식 — 정책상 허용되는 YouTube Analytics geography aggregate(공식 문서 URL)와 패널 결과의 결합, Gate 4에서 쓸 발견·시청·참여 합격 기준 **제안**.
+  - 패널 실행·모집은 사용자 작업. 코드 변경 없음. `gate0-checklist.md` §1.4는 "초안 제출(T21 PR #n), 승인 대기"로만 갱신.
+- **합격 기준**
+  1. 모든 숫자에 '제안' 라벨과 근거/무근거 표기; 외부 주장에 URL·확인 날짜.
+  2. 콘텐츠 목록의 사건명이 T7 코드의 실제 사건 식별자와 일치(grep 증빙).
