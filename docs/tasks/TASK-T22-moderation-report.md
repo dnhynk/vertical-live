@@ -117,14 +117,14 @@ kill-cli는 파일 fallback이 있다. 이유가 "**프로세스가 응답하지
 | 1c | 정상 보고 | **met** | 같은 파일 202 + `{source:'http', reason, at}`; 라우팅은 `server.test.ts` "routes POST /admin/moderation to the report endpoint" |
 | 1d | clear | **met** | 같은 파일 "clears on the same admission rules…" (202, `resumesRun:false`); 라우팅 `server.test.ts` "routes POST /admin/moderation/clear" |
 | 1e | CLI 테스트 | **met** | `supervisor/moderation-cli.test.ts` 7케이스 — 정상 보고(URL·헤더·본문 검증), 미승인 토큰(요청 자체를 보내지 않음), clear, 서버 미응답(exit 1 + `ECONNREFUSED` + `npm run kill -w @vl/server -- --reason` 안내 — round 1 M2), `http_401`, 토큰 미설정, 잘못된 인자 |
-| 1f | 보고 시 CTA off + safe_stopped + alert 1회 (T12 전이 테스트 재사용) | **met** | `supervisor/supervisor.test.ts` "stops the run for an approved token from POST /admin/moderation (§T22)" — T12의 `createSupervisorHarness`/`goLive` 그대로 사용. `inputHealth='degraded'`, `interactionEnabled=false`, `state='safe_stopped'`, `safeStop.kind='moderation_unhealthy'`. **round 1 B1 이후** §12.3의 2단계를 함께 고정한다 — `ofKind('moderation.unhealthy')` 길이 **1**(severity warning, `reason='targeted_harassment'`, `detail.safeStopConditionMatched=true`)와 `ofKind('supervisor.safe_stopped')` 길이 **1**(severity critical), 그리고 전달 순서가 warning → critical임을 `alerts.alerts`의 index로 확인. 해제 경로는 "turns the CTA back on when a report is cleared" |
+| 1f | 보고 시 CTA off + safe_stopped + alert 1회 (T12 전이 테스트 재사용) | **met** | `supervisor/supervisor.test.ts` "stops the run for an approved token from POST /admin/moderation (§T22)" — T12의 `createSupervisorHarness`/`goLive` 그대로 사용. `inputHealth='degraded'`, `interactionEnabled=false`, `state='safe_stopped'`, `safeStop.kind='moderation_unhealthy'`. **round 1 B1 이후** §12.3의 2단계를 함께 고정한다 — `ofKind('moderation.unhealthy')` 길이 **1**(severity warning, `reason='targeted_harassment'`, `detail.safeStopConditionMatched=true`)와 `ofKind('supervisor.safe_stopped')` 길이 **1**(severity critical), 그리고 전달 순서가 warning → critical임을 `alerts.alerts`의 index로 확인. **round 2 B1 이후** 그 index 비교는 `RecordingAlertSink`가 동기 push라서 비동기 sink의 타이밍을 못 덮는다는 것이 드러났으므로, warning만 막는 sink로 전달 순서를 직접 고정한다 — "delivers the warning before the stop when the sink is slow (round 2, B1)"(막힌 동안 이미 `safe_stopped`·CTA off, 전달 0건 → 풀면 `['moderation.unhealthy','supervisor.safe_stopped']`)와 "lets a stuck sink time out instead of holding the stop alert (§T22)". 해제 경로는 "turns the CTA back on when a report is cleared" |
 | 2a | 합성 입력으로 창별 비율 계산 | **met** | `supervisor/moderation-heuristic.test.ts` "computes the ratio over messages that reached the parser" — 실제 `parseMessage`에 합성 문자열을 넣어 messages=60, evasion=35, ratio≈0.583. 창별 delta는 "counts only differences" |
 | 2b | 연속 N창 진입 / M창 해제 | **met** | 같은 파일 "reports only after enterWindows consecutive exceeding windows", "clears after clearWindows consecutive quiet windows", "one quiet window in the middle restarts the count" |
 | 2c | 임계 미만에서 오탐 없음 | **met** | 같은 파일 4케이스 — 평범한 채팅 20창, 비율 0.12로 10창, `minMessages` 미만(비율 1.0인데도 진입 안 함), 빈 창. supervisor 수준의 대조군은 `supervisor.test.ts` "leaves an ordinary chat alone however long it runs" (10창 후 `live` 유지) |
 | 2d | identity 닫힘/열림 무관 | **met** | 같은 파일 "reaches the same verdict with the consent gate open and closed" — 두 모드 모두 `report`, 같은 messages/evasion 수치 |
 | 2e | 우회 사유 집합의 근거 | **met** | 같은 파일 "is exactly the set `moderate()` produces" + "partitions every T6 rejection code exactly once" + 티켓 (a) 전수표 |
 | 3a | 게이트 5개 | **met** | 아래 Gates |
-| 3b | CI 녹색 | **met** | round 1 fix 이후 `45f67d6`에서 통과 — <https://github.com/dnhynk/vertical-live/actions/runs/32293554124> (`gh pr checks 30`: ci pass 2m5s) |
+| 3b | CI 녹색 | **met** | round 1 fix `b4895f8` — <https://github.com/dnhynk/vertical-live/actions/runs/32293554124>. **round 2 fix `22c4fe7`** — <https://github.com/dnhynk/vertical-live/actions/runs/32297198891> |
 | 3c | 문서의 모든 임계가 provisional 표기 | **met** | `config/default.json`의 `supervisor.provisional`에 5개 키 추가 + 테스트로 강제(`moderation-heuristic.test.ts` "carries the heuristic thresholds as provisional values"). 문서 3곳(`moderation-call-table.md` 2·3·5장, `runbook-operations.md` 3.1, `supervisor.md` 4.3)에 "합격선이 아니다 / Gate 2 baseline 뒤 잠금" 명시 |
 
 ### Gates (executed)
@@ -157,7 +157,7 @@ docs/ops/data-map.md up to date
 ✓ built in 9.12s
 ```
 
-`origin/main` rebase 후 실행했다(round 1 fix 뒤 base `ccf2ab4`에서 다시 실행, 5개 모두 통과). 신규 테스트 파일 3개 = 35 tests, 그 밖에 `supervisor.test.ts` +5,
+`origin/main` rebase 후 실행했다(round 1 fix 뒤 base `ccf2ab4`에서 다시 실행, 5개 모두 통과; round 2 fix 뒤 base `212e49b`에서 또 재실행 — §Review round 2). 신규 테스트 파일 3개 = 35 tests, 그 밖에 `supervisor.test.ts` +7,
 `server.test.ts` +5, `wiring.test.ts` +1.
 
 ### 추가로 실행한 end-to-end 스모크 (mock 없음)
@@ -201,9 +201,9 @@ moderation report failed: ECONNRESET (server not reachable; stop the broadcast w
 
 | 지적 | 무엇이 틀렸나 | 고침 | SHA |
 |---|---|---|---|
-| **[blocker] B1** `supervisor.ts:265` — 승인표 토큰이면 `requestSafeStop()` 후 `return`해서 1단계 `moderation.unhealthy` warning을 건너뜀 | §12.3의 1단계는 2단계의 전제 조건이지 대체물이 아니다. 리뷰어의 하네스 프로브에서 warning 0 / critical 1이 나왔고, `supervisor.test.ts:288`은 critical만 고정하고 있어서 이 누락을 못 잡았다 | 조건 분기를 `safeStopConditionMatched` 값으로 바꾸고 **warning을 항상 먼저** 보낸 뒤, 매치된 경우에만 `requestSafeStop()`을 호출한다. `#alert`가 `deliver()`를 동기적으로 부르므로 순서는 결정적이다. warning의 `detail.safeStopConditionMatched`도 하드코딩 `false`에서 실제 값으로 바뀌어, 멈춘 경우와 멈추지 않은 경우가 같은 필드로 구분된다 | `45f67d6` |
-| **[major] M1** `moderation-report.ts:104` — 제출 reason을 `readTokenField()`로 정제한 뒤 allowlist 비교 | 정제 후 비교는 sanitizer를 **세탁기**로 만든다. 비승인 원문이 승인 토큰이 되어 202로 통과한다 | allowlist는 **원문 그대로 exact match**한다(`readReason()`). `readTokenField()`는 경계가 필요한 자유 텍스트(kill의 reason)에 그대로 남는다 | `45f67d6` |
-| **[major] M2** `moderation-cli.ts:139`·`moderation-call-table.md:65` — 서버 미응답 시 안내하는 `npm run kill`이 루트에 없음 | 방송이 도는 중에 붙여넣으면 `Missing script: kill`이 난다. 즉 **가장 급할 때 동작하지 않는 안내**다 | CLI 3곳(모듈 주석·`--help`·실패 메시지)과 문서 4곳을 실행 가능한 workspace 형식으로 정정. 테스트도 `'npm run kill'`이 아니라 `'npm run kill -w @vl/server -- --reason'`을 요구한다 | `45f67d6` |
+| **[blocker] B1** `supervisor.ts:265` — 승인표 토큰이면 `requestSafeStop()` 후 `return`해서 1단계 `moderation.unhealthy` warning을 건너뜀 | §12.3의 1단계는 2단계의 전제 조건이지 대체물이 아니다. 리뷰어의 하네스 프로브에서 warning 0 / critical 1이 나왔고, `supervisor.test.ts:288`은 critical만 고정하고 있어서 이 누락을 못 잡았다 | 조건 분기를 `safeStopConditionMatched` 값으로 바꾸고 **warning을 항상 먼저** 보낸 뒤, 매치된 경우에만 `requestSafeStop()`을 호출한다. ~~`#alert`가 `deliver()`를 동기적으로 부르므로 순서는 결정적이다~~ — **이 문장은 round 2 B1에서 반증됐다**(동기 sink에서만 참, 아래 §Review round 2). warning의 `detail.safeStopConditionMatched`도 하드코딩 `false`에서 실제 값으로 바뀌어, 멈춘 경우와 멈추지 않은 경우가 같은 필드로 구분된다 | `b4895f8` |
+| **[major] M1** `moderation-report.ts:104` — 제출 reason을 `readTokenField()`로 정제한 뒤 allowlist 비교 | 정제 후 비교는 sanitizer를 **세탁기**로 만든다. 비승인 원문이 승인 토큰이 되어 202로 통과한다 | allowlist는 **원문 그대로 exact match**한다(`readReason()`). `readTokenField()`는 경계가 필요한 자유 텍스트(kill의 reason)에 그대로 남는다 | `b4895f8` |
+| **[major] M2** `moderation-cli.ts:139`·`moderation-call-table.md:65` — 서버 미응답 시 안내하는 `npm run kill`이 루트에 없음 | 방송이 도는 중에 붙여넣으면 `Missing script: kill`이 난다. 즉 **가장 급할 때 동작하지 않는 안내**다 | CLI 3곳(모듈 주석·`--help`·실패 메시지)과 문서 4곳을 실행 가능한 workspace 형식으로 정정. 테스트도 `'npm run kill'`이 아니라 `'npm run kill -w @vl/server -- --reason'`을 요구한다 | `b4895f8` |
 
 ### 재현 → 수정 → 확인 (CLAUDE.md 디버깅 절차)
 
@@ -253,6 +253,67 @@ EXIT=0
 리뷰어는 acceptance 1이 met으로 적혀 있으나 B1·M1을 반영하지 않았다고 지적했다. 위 세 건을 고치고 **1b·1e·1f의
 근거 칸을 새 단언으로 교체**했다(이 커밋). 1은 이제 met이다 — 그 근거는 새로 고정된 warning+critical 2단 단언과
 세탁 변형 12개의 400 고정이다.
+
+## Review round 2
+
+리뷰 verdict `request_changes` — round 1의 M1·M2는 해소 확인, **blocker 1건이 남았다.** 지적은 타당했다:
+round 1에서 warning을 *먼저 호출*하도록 고쳤지만, 그 칸에 적은 "`#alert`가 `deliver()`를 동기적으로 부르므로
+순서는 결정적이다"는 **`RecordingAlertSink`에서만 참**이다. production의 `AlertSink`(Discord webhook)는 비동기라,
+두 전달이 동시에 진행되면 critical이 warning을 앞지를 수 있다.
+
+| 지적 | 무엇이 틀렸나 | 고침 | SHA |
+|---|---|---|---|
+| **[blocker] B1** `supervisor.ts:272` — `void this.#alert(warning)` 직후 `void this.requestSafeStop(...)`이라 두 비동기 전달이 **동시 진행**. 느린 sink에서 critical(`supervisor.safe_stopped`)이 warning보다 먼저 도착한다 | *호출* 순서를 고쳤을 뿐 *전달* 순서를 고정하지 않았다. 기존 테스트가 이를 못 잡은 이유는 명확하다 — `RecordingAlertSink.deliver()`는 promise가 resolve되기 전에 배열에 **동기적으로 push**하므로, 배열 index 비교는 두 전달이 동시여도 항상 통과한다 | `#alert`가 전달을 **순서 보장 큐**에 넣는다(`#alertQueue` promise 체인). 각 전달은 자기 앞 전달이 끝난 뒤에 시작하므로 전달 순서 = 호출 순서다. **안전 정지는 큐 뒤에 있지 않다** — `#haltOutwardWork()`·`#state` 대입·CTA gate는 전부 첫 `await` 앞이라 sink가 막혀도 즉시 일어난다. 큐가 새로운 유실 경로가 되지 않도록 전달 하나는 `alerts.deliveryTimeoutMs`(10s, provisional)로 한계를 둔다 — 응답 없는 transport는 뒤의 alert를 잡아두지 못하고 로그(`alert delivery timed out`)를 남긴다 | `22c4fe7` |
+
+### 재현 → 수정 → 확인 (CLAUDE.md 디버깅 절차)
+
+1. **가설**: 두 전달이 동시 진행이라 순서는 sink 속도가 정한다. 원인은 `void #alert` + `void requestSafeStop`이지,
+   round 1이 고친 호출 순서가 아니다.
+2. **반증 관측**: `moderation.unhealthy`만 막는 sink에서 **warning을 풀기 전에는 어떤 전달도 완료되지 않아야**
+   한다. 하나라도 완료되면 가설이 맞고, 아무것도 완료되지 않으면 가설이 틀린다.
+3. **관측** — 테스트를 먼저 넣고 수정 전 코드로 실행했다(리뷰어의 `before_warning_release`와 같은 값):
+
+   ```text
+   $ npx vitest run apps/server/src/supervisor/supervisor.test.ts -t "round 2, B1"
+   AssertionError: expected [ 'supervisor.safe_stopped' ] to deeply equal []
+    ❯ apps/server/src/supervisor/supervisor.test.ts:354:45
+        354|       expect(delivered.slice(beforeReport)).toEqual([])
+   ```
+
+4. **수정 후 같은 명령**: `Test Files 1 passed / Tests 1 passed | 33 skipped`. 파일 전체는 34 tests 통과.
+
+### 새로 고정한 것 (`supervisor.test.ts` +2)
+
+- `delivers the warning before the stop when the sink is slow (round 2, B1)` — warning만 막는 sink.
+  막힌 동안 `state='safe_stopped'`, `safeStop={kind:'moderation_unhealthy', reason:'targeted_harassment'}`,
+  `interactionEnabled=false`, `inputHealth='degraded'`가 **이미** 참이고(= 안전 정지는 sink 지연과 무관), 전달은
+  0건이다. 풀고 나면 전달 순서가 정확히 `['moderation.unhealthy', 'supervisor.safe_stopped']`이다.
+- `lets a stuck sink time out instead of holding the stop alert (§T22)` — 영원히 resolve되지 않는 sink.
+  `clock.advance(alerts.deliveryTimeoutMs)` 뒤 `supervisor.safe_stopped`는 전달되고 `moderation.unhealthy`는
+  전달되지 않는다(= 큐가 막히지 않는다).
+
+### 이 수정이 바꾼 기존 동작 (T12 테스트 3건 수정)
+
+alert 전달이 이제 **최소 한 microtask 뒤**에 일어난다(동기 push에 의존할 수 없다). 이는 순서 보장의 대가이고,
+supervisor 바깥 production 코드는 `#alert`의 promise를 보지 않으므로 영향이 없다. 다만 `RecordingAlertSink`의
+동기성에 기대던 T12 테스트 3건이 `await flushMicrotasks()`를 필요로 했다 — 단언 자체는 그대로다:
+
+- `stops on a rights or policy request from the broadcast lifecycle` (`onSafeStop` 호출 카운트)
+- `alerts on a sweep that was not clean or left rows unprocessed`
+- `alerts when a revocation misses its deadline (spec §12.4)`
+
+`deliveryTimeoutMs`는 지금까지 Discord sink가 자기 fetch를 abort하는 데만 쓰였다. 이제 supervisor의 큐도 같은 값을
+쓰므로 `config.ts`의 필드 주석에 그 사실을 적었다. 새 config 키는 추가하지 않았다.
+
+### 게이트 (round 2 fix 뒤, base `212e49b`에서 재실행)
+
+```text
+$ npm run format:check   → All matched files use Prettier code style!
+$ npm run lint           → eslint 0 / legacy imports 0 / install scripts 4 reviewed
+$ npm run typecheck      → tsc --build tsconfig.json (출력 없음 = 통과)
+$ npm run test           → Test Files 148 passed (148) / Tests 2135 passed | 1 skipped (2136), 69.31s
+$ npm run build          → migrations 6 copied / data-map up to date / renderer·simulator·soak 빌드
+```
 
 ## Not done / out of scope
 
