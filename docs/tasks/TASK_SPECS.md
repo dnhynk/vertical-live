@@ -353,12 +353,12 @@
   - 설정: `engine.identityGateOpen`을 **동의 모드**로 재정의(`false`=A-1 닫힘, `true`=D-9 동의자 한정). 열림일 때만 chat source가 `authorDetails` part를 요청한다(닫힘이면 현재처럼 `id,snippet`).
   - 수신 경로(열림): 메시지의 `authorDetails.channelId`·`displayName`은 **메모리에서만** 다룬다 — (a) `join` 명령이면 consent 레코드 생성(channelRef=불투명 id, channelId는 **해시가 아닌 원값을 별도 테이블에 저장하되 이 테이블만이 유일한 저장소**(§12.4 삭제 가능성), displayName, consentedAt, lastActiveAt, noticeVersion); (b) 동의자의 메시지면 `actor={consented, displayName, channelRef}`로 정규화하고 lastActiveAt 갱신; (c) 그 외는 authorDetails를 즉시 버리고 `actor=null`. inbox envelope·로그·metrics·health에 미동의자의 channelId·이름이 남지 않음을 테스트로 고정.
   - `leave` 명령: consent 레코드·파생(표시명 캐시) 즉시 삭제, 이후 메시지는 익명. 사용자 삭제 요청 handler(T13)를 channelRef/channelId로 실제 삭제하도록 확장(7일 규칙보다 즉시).
-  - 보존: `config/retention.json`에 consent 필드(source·목적·90일 미활동 삭제·삭제 경로) 추가, T13 스케줄러가 `lastActiveAt+90d` 경과 레코드를 삭제하고 `retention_ledger`에 기록. 표시명은 YouTube Authorized/Non-Authorized API Data 규칙(30일 refresh) 대상인지 [S41] 원문으로 판단해 refresh 또는 재동의 절차를 문서에 명시(추측 금지 — 불명확하면 ask).
+  - 보존: `config/retention.json`에 consent 필드(source·목적·**30일 미refresh(미활동) 삭제**·삭제 경로) 추가, T13 스케줄러가 `lastActiveAt+30d` 경과 레코드를 삭제하고 `retention_ledger`에 기록. (2026-08-19 정정: D-9의 90일은 [S41] Developer Policies III.E.4.c의 Authorized Data 30일 상한에 막혀 30일로 정정됨 — 동의자 메시지마다 channel_id/display_name을 refresh하고, 30 초과 값은 설정 검증으로 금지.)
   - 동의자 한정 기능: 사용자별 cooldown·한 표(A-9)는 channelRef 기준으로 열되 미동의자 경로는 집계창 그대로. 분기 투표는 이 PR 범위 밖(플래그만 유지).
   - `docs/ops/data-map.md` 갱신; 신규 `docs/ops/identity-consent.md`: 고지문 초안(ja 주 표기 + 영어 별칭, `nativeReview: pending`; 수집 항목·목적·보존·삭제 방법·명령), 채널 설명/고정 댓글용 전문, **YouTube API Services compliance 체크리스트**(Developer Policies의 user data·privacy policy·데이터 보존·삭제 항목을 URL·조항 번호와 함께 나열하고 각 항목이 코드 어디에서 충족되는지 표) — 사용자가 audit 제출 전 검토.
   - 금지: 개인 D1/D7/D30·재방문 지표 계산(§14.1 가드 테스트 유지·확장), 이름 표시 외 용도 사용, 미동의 데이터 영속.
 - **합격 기준**
-  1. 열림 모드 통합 테스트: join→표시명 부착→leave→익명 복귀, 미동의 메시지의 authorDetails가 어떤 저장소·로그에도 없음, 90일 미활동 자동 삭제(가상 시계), 닫힘 모드는 기존 테스트 전부 무변경 통과.
+  1. 열림 모드 통합 테스트: join→표시명 부착→leave→익명 복귀, 미동의 메시지의 authorDetails가 어떤 저장소·로그에도 없음, 30일 미refresh 자동 삭제(가상 시계), 닫힘 모드는 기존 테스트 전부 무변경 통과.
   2. 스키마 검사 테스트를 "identity 컬럼은 consent 테이블에만 존재"로 개정하고 통과.
   3. 게이트 5개 + CI 녹색; 새 외부 주장은 URL·확인 날짜.
 
