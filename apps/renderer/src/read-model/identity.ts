@@ -16,13 +16,19 @@ import { DISPLAY_NAME_MAX_LENGTH, type Effect, type WorldSnapshot } from '@vl/co
  * 1. **A name is attached to an action only when the action is provably that
  *    person's.** The snapshot carries no name at all (T20a: the read model
  *    recovers anonymously), so the name has to be joined from the
- *    `ACTION_REACTION` effect that caused the slot's action. A join that is not
- *    certain is not made — crediting the wrong viewer would be a participation
- *    claim that is not true (spec §2.6).
+ *    `ACTION_REACTION` effect that caused the slot's action — and the join is
+ *    made on the **commit** the two messages came from (`stateRevision`), not on
+ *    which of them arrived last or on the times they carry. Two viewers can be
+ *    inside the same four-second window with the same command, and only the
+ *    revision tells their two actions apart. A join that is not certain is not
+ *    made: crediting the wrong viewer would be a participation claim that is not
+ *    true (spec §2.6).
  * 2. **The renderer remembers nothing.** The name lives exactly as long as the
  *    effect that carried it, so `LEAVE`'s "delete immediately" (D-9) cannot be
  *    undone by an afterimage held here, and a reload recovers a screen with no
- *    name on it from the snapshot alone (spec §10.2).
+ *    name on it from the snapshot alone (spec §10.2). The one value that is
+ *    carried between snapshots is a revision number — `trackActionRevision`
+ *    below — which names a commit and nobody at all.
  */
 
 /**
@@ -130,77 +136,116 @@ export function sanitizeDisplayName(raw: string): string | null {
 
 type ActionReactionEffect = Extract<Effect, { kind: 'ACTION_REACTION' }>
 
+/** The slot's action, as the snapshot carries it (spec §5.2(2)). */
+type LastAppliedAction = NonNullable<WorldSnapshot['display']['lastAppliedAction']>
+
 /**
- * The newest currently-playing reaction, or `null` when there is none, when two
- * are equally new, or when one of them carries a time that will not parse.
+ * Whether two snapshots describe the same applied action.
  *
- * A tie is refused rather than broken: two reactions staged in the same
- * millisecond are two different viewers' actions as far as this module can tell,
- * and picking either one would be a guess about whose name to print. Times are
- * compared as instants, not as strings — `IsoUtcInstantSchema` accepts both
- * `…:00Z` and `…:00.000Z`, which do not sort the way they read.
+ * Times are compared as instants, not as strings: `IsoUtcInstantSchema` accepts
+ * both `…:30Z` and `…:30.000Z` for the same moment, and reading a re-spelling of
+ * one instant as a *new* action would move the revision below onto a commit that
+ * staged nothing — which costs a name and can never invent one.
  */
-function newestReaction(effects: readonly Effect[]): ActionReactionEffect | null {
-  let newest: ActionReactionEffect | null = null
-  let newestMs = Number.NEGATIVE_INFINITY
-  let tied = false
+function sameAction(before: LastAppliedAction | null, after: LastAppliedAction | null): boolean {
+  if (before === null || after === null) return before === after
+  return (
+    before.commandName === after.commandName &&
+    before.contributionCount === after.contributionCount &&
+    Date.parse(before.appliedAt) === Date.parse(after.appliedAt)
+  )
+}
 
-  for (const effect of effects) {
-    if (effect.kind !== 'ACTION_REACTION') continue
-    const startsAtMs = Date.parse(effect.startsAt)
-    if (Number.isNaN(startsAtMs)) return null
-    if (newest === null || startsAtMs > newestMs) {
-      newest = effect
-      newestMs = startsAtMs
-      tied = false
-      continue
-    }
-    if (startsAtMs === newestMs) tied = true
-  }
-
-  return tied ? null : newest
+/**
+ * The revision the slot's action was committed at — the causal key the join
+ * below needs and the snapshot does not carry.
+ *
+ * `Effect.stateRevision` is the revision of the commit that produced that effect
+ * (contract `effect.ts`), and a command's reaction is staged by the same
+ * transition that writes `display.lastAppliedAction` (spec §7.3(6); server
+ * `world/reducer.ts` pushes the one `ACTION_REACTION` draft and sets
+ * `lastAppliedAction` in a single reduction, and `engine/effects.ts` and
+ * `engine/snapshot.ts` stamp both with the same `revision`). So the reaction of
+ * the action on screen carries exactly the revision at which that action
+ * appeared — but only the *sequence* of snapshots says which revision that was,
+ * because a later snapshot repeats an unchanged `lastAppliedAction` under its
+ * own, higher revision. This function is that sequence, one step at a time:
+ * `ReadModel.receiveSnapshot` carries the answer forward and the join reads it.
+ *
+ * The three edge paths, and what each of them yields:
+ *
+ * - **first snapshot** (`previous === null`, on load and after every reconnect):
+ *   the revision of that snapshot is taken as the action's. It cannot name the
+ *   wrong viewer, because a reaction carrying that revision was staged by that
+ *   commit, and that commit is the one whose `lastAppliedAction` is being shown;
+ *   a reaction still playing from an earlier commit carries an earlier revision
+ *   and is refused. When the snapshot's action is in fact older than the
+ *   snapshot itself, nothing matches and the slot stays anonymous;
+ * - **a skipped revision** (spec §10.2 coalescing, or a snapshot dropped as
+ *   stale): the change is noticed at the revision it was *seen* at, which is
+ *   later than the one it happened at, so the reaction no longer matches and the
+ *   slot stays anonymous;
+ * - **an unchanged or unreadable action**: `sameAction` keeps the carried
+ *   revision, and `lastAppliedAction: null` clears it.
+ *
+ * Every one of them fails to *anonymous*, never to somebody else's name.
+ */
+export function trackActionRevision(
+  previous: WorldSnapshot | null,
+  next: WorldSnapshot,
+  carried: number | null,
+): number | null {
+  const after = next.display.lastAppliedAction
+  if (after === null) return null
+  if (previous !== null && sameAction(previous.display.lastAppliedAction, after)) return carried
+  return next.stateRevision
 }
 
 /**
  * The display name to put in the "just applied action" slot (spec §5.2(2)), or
  * `null` for the anonymous slot the screen has drawn until now.
  *
- * The join, and why each condition is there:
+ * The join is by commit, not by time. A candidate is an `ACTION_REACTION` that
  *
- * - the newest playing `ACTION_REACTION` is the candidate, because the server
- *   stages one for every applied command and the slot always shows the newest
- *   applied command. An older reaction that is still playing therefore belongs
- *   to an *older* action, and taking the newest is what stops viewer A's name
- *   from being printed over viewer B's action;
- * - its command and contribution count must equal the slot's. A reaction the
- *   slot is not describing cannot lend it a name;
- * - it must not have started after the slot's action was applied. A reaction
- *   newer than the snapshot means the two messages are out of step, and the name
- *   would be attached to the wrong one of them;
- * - an aggregated reaction never names anyone. The contract already refuses
- *   `actor` when `contributionCount > 1` (spec §6.4, §7.3); the equality above
- *   carries that through to the slot and the tests assert it.
+ * - carries `actionRevision` — the revision the slot's action was committed at,
+ *   from `trackActionRevision` above. This is the whole of the correlation: the
+ *   snapshot of a *later* action is published before that action's own effects
+ *   reach the renderer (server `engine/engine.ts` publishes the snapshot first),
+ *   so a previous viewer's reaction can still be playing when the new snapshot
+ *   lands. Arrival order, staging time and application time cannot tell those
+ *   two apart; the revision can, because it names the commit;
+ * - describes the same command and the same contribution count. A reaction the
+ *   slot is not describing cannot lend it a name, and an aggregated reaction
+ *   never names anyone — the contract refuses `actor` above a count of one
+ *   (spec §6.4, §7.3) and the equality carries that through to the slot.
  *
- * Anything short of all of that yields `null`. Anonymous is a state the screen is
- * already correct in; wrong about who acted is not one it can recover from.
+ * **Exactly one** candidate is required. Two of them mean one commit applied two
+ * indistinguishable actions, and picking either name would be a guess about who
+ * acted; zero means the reaction is not here — not yet, not any more, or not
+ * from this commit. Both are drawn anonymously, which is a state the screen is
+ * already correct in; wrong about who acted is not one it can recover from
+ * (spec §2.6).
  */
 export function selectActionActorName(
   snapshot: WorldSnapshot | null,
   activeEffects: readonly Effect[],
+  actionRevision: number | null,
 ): string | null {
   const action = snapshot?.display.lastAppliedAction ?? null
-  if (action === null) return null
+  if (action === null || actionRevision === null) return null
 
-  const reaction = newestReaction(activeEffects)
-  if (reaction === null) return null
-  if (reaction.payload.commandName !== action.commandName) return null
-  if (reaction.payload.contributionCount !== action.contributionCount) return null
+  let candidate: ActionReactionEffect | null = null
+  for (const effect of activeEffects) {
+    if (effect.kind !== 'ACTION_REACTION') continue
+    if (effect.stateRevision !== actionRevision) continue
+    if (effect.payload.commandName !== action.commandName) continue
+    if (effect.payload.contributionCount !== action.contributionCount) continue
+    if (candidate !== null) return null
+    candidate = effect
+  }
+  if (candidate === null) return null
 
-  const appliedAtMs = Date.parse(action.appliedAt)
-  if (Number.isNaN(appliedAtMs)) return null
-  if (Date.parse(reaction.startsAt) > appliedAtMs) return null
-
-  const actor = reaction.actor ?? null
+  const actor = candidate.actor ?? null
   if (actor === null) return null
   return sanitizeDisplayName(actor.displayName)
 }

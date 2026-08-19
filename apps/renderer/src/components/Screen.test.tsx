@@ -162,6 +162,23 @@ function consentedSnapshot(): WorldSnapshot {
   })
 }
 
+/**
+ * The next viewer's identical command, one second later and one commit on: the
+ * shape the review's counterexample needs (round 1, blocker 1).
+ */
+const NEXT_ACTION_AT = '2026-08-17T00:00:01.000Z'
+
+function nextActionSnapshot(): WorldSnapshot {
+  const base = sampleSnapshot()
+  return sampleSnapshot({
+    stateRevision: 2,
+    display: {
+      ...base.display,
+      lastAppliedAction: { commandName: 'FEED', appliedAt: NEXT_ACTION_AT, contributionCount: 1 },
+    },
+  })
+}
+
 function reaction(overrides: Record<string, unknown> = {}): Effect {
   return sampleActionEffect({
     startsAt: NAMED_ACTION_AT,
@@ -330,6 +347,69 @@ describe('Screen (spec §5.2, §6.4, §8.4, §9.2, §12.3)', () => {
     expect(query(harness, 'slot-last-action')?.textContent).toContain(
       ja('ui.contributions', { count: 1 }),
     )
+  })
+
+  it('does not lend a name to the next action whose snapshot arrives first (BOARD D-9)', () => {
+    // Review round 1, blocker 1, on the screen itself. Viewer A opted in and fed
+    // the creature; their reaction plays for four seconds. A second later
+    // somebody else feeds, and the server publishes that snapshot **before** its
+    // effect (`apps/server/src/engine/engine.ts`), so for a moment the slot
+    // describes the new action while only A's named reaction is on screen —
+    // same command, same count, staged before the new action was applied. No
+    // frame is run in this test, so nothing is acknowledged either: the join may
+    // not depend on an ACK having gone out.
+    const harness = mount()
+    show(harness, consentedSnapshot())
+    sendEffect(harness, reaction({ actor: SAMPLE_CONSENTED_ACTOR }))
+    expect(query(harness, 'slot-last-action-actor')?.textContent).toBe(
+      SAMPLE_CONSENTED_ACTOR.displayName,
+    )
+
+    harness.clock.advance(1_000)
+    show(harness, nextActionSnapshot())
+    expect(query(harness, 'slot-last-action-actor')).toBeNull()
+    expect(harness.container.textContent).not.toContain(SAMPLE_CONSENTED_ACTOR.displayName)
+
+    // The new viewer's own reaction arrives. They never opted in, so the slot
+    // stays anonymous while A's named effect is still playing.
+    sendEffect(
+      harness,
+      reaction({
+        effectId: 'sample-effect-action-b',
+        stateRevision: 2,
+        startsAt: NEXT_ACTION_AT,
+        endsAt: '2026-08-17T00:00:06.000Z',
+      }),
+    )
+    expect(query(harness, 'slot-last-action-actor')).toBeNull()
+    expect(harness.container.textContent).not.toContain(SAMPLE_CONSENTED_ACTOR.displayName)
+
+    // And a retransmit of A's reaction (spec §7.3(7)) puts no name back either.
+    sendEffect(harness, reaction({ actor: SAMPLE_CONSENTED_ACTOR }))
+    expect(query(harness, 'slot-last-action-actor')).toBeNull()
+    expect(harness.container.textContent).not.toContain(SAMPLE_CONSENTED_ACTOR.displayName)
+  })
+
+  it('names the next consented viewer once their own commit is on screen', () => {
+    // The other half of the rule: refusing A's name must not cost B theirs.
+    const harness = mount()
+    show(harness, consentedSnapshot())
+    sendEffect(harness, reaction({ actor: SAMPLE_CONSENTED_ACTOR }))
+
+    harness.clock.advance(1_000)
+    show(harness, nextActionSnapshot())
+    sendEffect(
+      harness,
+      reaction({
+        effectId: 'sample-effect-action-b',
+        stateRevision: 2,
+        startsAt: NEXT_ACTION_AT,
+        endsAt: '2026-08-17T00:00:06.000Z',
+        actor: { ...SAMPLE_CONSENTED_ACTOR, displayName: 'sample-viewer-2' },
+      }),
+    )
+    expect(query(harness, 'slot-last-action-actor')?.textContent).toBe('sample-viewer-2')
+    expect(harness.container.textContent).not.toContain(SAMPLE_CONSENTED_ACTOR.displayName)
   })
 
   it('renders no name at all on a closed-gate screen', () => {

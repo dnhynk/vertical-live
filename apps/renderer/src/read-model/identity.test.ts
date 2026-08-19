@@ -17,6 +17,7 @@ import {
   DISPLAY_NAME_SCREEN_MAX_GRAPHEMES,
   sanitizeDisplayName,
   selectActionActorName,
+  trackActionRevision,
 } from './identity'
 
 /**
@@ -44,15 +45,37 @@ function action(overrides: Record<string, unknown> = {}): Effect {
   })
 }
 
-function snapshotWith(display: Partial<WorldSnapshot['display']> = {}): WorldSnapshot {
+/**
+ * The revision the fixtures commit the slot's action at. Both `sampleSnapshot`
+ * and `sampleActionEffect` carry `stateRevision: 1`, which is what a snapshot
+ * and the effects of one commit look like on the wire.
+ */
+const ACTION_REVISION = 1
+
+function snapshotWith(
+  display: Partial<WorldSnapshot['display']> = {},
+  stateRevision = ACTION_REVISION,
+): WorldSnapshot {
   const base = sampleSnapshot()
   return sampleSnapshot({
+    stateRevision,
     display: {
       ...base.display,
       lastAppliedAction: { commandName: 'FEED', appliedAt: APPLIED_AT, contributionCount: 1 },
       ...display,
     },
   })
+}
+
+/** The revision the slot's action was committed at, after this run of snapshots. */
+function revisionAfter(...snapshots: readonly WorldSnapshot[]): number | null {
+  let previous: WorldSnapshot | null = null
+  let carried: number | null = null
+  for (const snapshot of snapshots) {
+    carried = trackActionRevision(previous, snapshot, carried)
+    previous = snapshot
+  }
+  return carried
 }
 
 function graphemeCount(value: string): number {
@@ -147,56 +170,234 @@ describe('sanitizeDisplayName (spec §12.3)', () => {
   })
 })
 
+describe('trackActionRevision (the causal key of the join)', () => {
+  it('remembers the revision the action first appeared at, not the newest one', () => {
+    const applied = snapshotWith({}, 7)
+    // Two later commits that changed something else entirely: the slot still
+    // shows the same action, so the join must still point at commit 7.
+    const later = snapshotWith({}, 8)
+    const latest = snapshotWith({}, 9)
+    expect(revisionAfter(applied, later, latest)).toBe(7)
+  })
+
+  it('moves to the new commit when the action changes', () => {
+    const first = snapshotWith({}, 7)
+    const second = snapshotWith(
+      { lastAppliedAction: { commandName: 'PET', appliedAt: APPLIED_AT, contributionCount: 1 } },
+      8,
+    )
+    expect(revisionAfter(first, second)).toBe(8)
+  })
+
+  it('compares instants, not strings', () => {
+    // `IsoUtcInstantSchema` accepts both spellings of the same moment. Reading
+    // one as a new action would move the key onto a commit that staged nothing.
+    const first = snapshotWith({}, 7)
+    const respelled = snapshotWith(
+      {
+        lastAppliedAction: {
+          commandName: 'FEED',
+          appliedAt: '2026-08-17T00:00:30Z',
+          contributionCount: 1,
+        },
+      },
+      8,
+    )
+    expect(revisionAfter(first, respelled)).toBe(7)
+  })
+
+  it('takes the first snapshot at its word, and an empty slot clears the key', () => {
+    // On load and after every reconnect there is no previous snapshot to compare
+    // against. The revision of that snapshot is used, which can only ever be
+    // matched by an effect from that same commit — see the selector's tests.
+    expect(revisionAfter(snapshotWith({}, 7))).toBe(7)
+    expect(revisionAfter(snapshotWith({ lastAppliedAction: null }, 7))).toBeNull()
+    expect(
+      revisionAfter(snapshotWith({}, 7), snapshotWith({ lastAppliedAction: null }, 8)),
+    ).toBeNull()
+  })
+})
+
 describe('selectActionActorName (BOARD D-9, spec §5.2(2))', () => {
   it('names the consented viewer whose action the slot is showing', () => {
     const effects = [action({ actor: SAMPLE_CONSENTED_ACTOR })]
-    expect(selectActionActorName(snapshotWith(), effects)).toBe(SAMPLE_CONSENTED_ACTOR.displayName)
+    expect(selectActionActorName(snapshotWith(), effects, ACTION_REVISION)).toBe(
+      SAMPLE_CONSENTED_ACTOR.displayName,
+    )
   })
 
   it('shows no name while the gate is closed, whatever else is on screen', () => {
     // The closed-mode wire shape: no `actor` on anything (BOARD A-1, T20a).
     const effects = [action(), samplePaidThanksEffect(), sampleDeadlineEffect()]
-    expect(selectActionActorName(snapshotWith(), effects)).toBeNull()
+    expect(selectActionActorName(snapshotWith(), effects, ACTION_REVISION)).toBeNull()
   })
 
   it('shows no name for a viewer who has not opted in', () => {
-    expect(selectActionActorName(snapshotWith(), [action({ actor: null })])).toBeNull()
+    expect(
+      selectActionActorName(snapshotWith(), [action({ actor: null })], ACTION_REVISION),
+    ).toBeNull()
   })
 
   it('shows no name before the first snapshot or before the first action', () => {
-    expect(selectActionActorName(null, [action({ actor: SAMPLE_CONSENTED_ACTOR })])).toBeNull()
+    const named = [action({ actor: SAMPLE_CONSENTED_ACTOR })]
+    expect(selectActionActorName(null, named, null)).toBeNull()
     const empty = snapshotWith({ lastAppliedAction: null })
-    expect(selectActionActorName(empty, [action({ actor: SAMPLE_CONSENTED_ACTOR })])).toBeNull()
+    expect(selectActionActorName(empty, named, revisionAfter(empty))).toBeNull()
   })
 
   it('shows no name when no reaction is playing', () => {
     // `activeEffects` is the read model's window on what is on screen, so an
     // expired reaction is simply not here — and the name goes with it. The
     // renderer keeps no copy (BOARD D-9, "delete immediately").
-    expect(selectActionActorName(snapshotWith(), [])).toBeNull()
-    expect(selectActionActorName(snapshotWith(), [sampleDeadlineEffect()])).toBeNull()
+    expect(selectActionActorName(snapshotWith(), [], ACTION_REVISION)).toBeNull()
+    expect(
+      selectActionActorName(snapshotWith(), [sampleDeadlineEffect()], ACTION_REVISION),
+    ).toBeNull()
   })
 
-  it('does not lend an older viewer name to a newer action', () => {
-    // The misattribution that matters: a consented viewer fed the creature, then
-    // somebody anonymous fed it again while the first reaction was still
-    // playing. The slot describes the second action now, so it stays anonymous.
-    const older = action({
-      effectId: 'sample-effect-action-older',
+  it('does not lend a viewer name to the next action whose snapshot arrives first', () => {
+    // The review's counterexample, and the reason the join is keyed on the
+    // commit. Viewer A's named FEED/1 was committed at revision 10 and is still
+    // playing. Viewer B feeds too; the server publishes B's snapshot *before*
+    // B's effect (`apps/server/src/engine/engine.ts`), so for a moment the slot
+    // describes B's action while only A's reaction is on screen. Command, count
+    // and staging time all match — only the revision does not.
+    const applied = snapshotWith({}, 10)
+    const byViewerA = action({
+      effectId: 'sample-effect-action-a',
       actor: SAMPLE_CONSENTED_ACTOR,
-      startsAt: '2026-08-17T00:00:29.000Z',
-      endsAt: '2026-08-17T00:00:33.000Z',
+      stateRevision: 10,
     })
-    const newer = action({ effectId: 'sample-effect-action-newer' })
-    expect(selectActionActorName(snapshotWith(), [older, newer])).toBeNull()
-    // and the order of arrival changes nothing.
-    expect(selectActionActorName(snapshotWith(), [newer, older])).toBeNull()
+    expect(selectActionActorName(applied, [byViewerA], revisionAfter(applied))).toBe(
+      SAMPLE_CONSENTED_ACTOR.displayName,
+    )
+
+    const nextAction = snapshotWith(
+      {
+        lastAppliedAction: {
+          commandName: 'FEED',
+          appliedAt: '2026-08-17T00:00:32.000Z',
+          contributionCount: 1,
+        },
+      },
+      11,
+    )
+    const key = revisionAfter(applied, nextAction)
+    expect(key).toBe(11)
+    expect(selectActionActorName(nextAction, [byViewerA], key)).toBeNull()
+
+    // B's own reaction lands a moment later. A's is still playing; B never opted
+    // in, so the slot stays anonymous rather than falling back to the name it
+    // can still see.
+    const byViewerB = action({
+      effectId: 'sample-effect-action-b',
+      stateRevision: 11,
+      startsAt: '2026-08-17T00:00:32.000Z',
+      endsAt: '2026-08-17T00:00:36.000Z',
+    })
+    expect(selectActionActorName(nextAction, [byViewerA, byViewerB], key)).toBeNull()
   })
 
-  it('refuses to choose between two reactions staged in the same millisecond', () => {
+  it('survives a retransmitted reaction, which is one effect twice', () => {
+    // Spec §7.3(7): the server resends an effect it holds no ACK for. The read
+    // model keeps one copy — and even when both copies are handed over, a
+    // duplicate of one commit's single reaction must not read as two viewers.
+    const named = action({ actor: SAMPLE_CONSENTED_ACTOR })
+    expect(selectActionActorName(snapshotWith(), [named], ACTION_REVISION)).toBe(
+      SAMPLE_CONSENTED_ACTOR.displayName,
+    )
+    expect(selectActionActorName(snapshotWith(), [named, named], ACTION_REVISION)).toBeNull()
+  })
+
+  it('follows two named actions in a row, one commit at a time', () => {
+    const first = snapshotWith({}, 10)
+    const byViewerA = action({
+      effectId: 'sample-effect-action-a',
+      actor: SAMPLE_CONSENTED_ACTOR,
+      stateRevision: 10,
+    })
+    const second = snapshotWith(
+      {
+        lastAppliedAction: {
+          commandName: 'FEED',
+          appliedAt: '2026-08-17T00:00:32.000Z',
+          contributionCount: 1,
+        },
+      },
+      11,
+    )
+    const byViewerB = action({
+      effectId: 'sample-effect-action-b',
+      actor: { ...SAMPLE_CONSENTED_ACTOR, displayName: 'sample-viewer-2' },
+      stateRevision: 11,
+      startsAt: '2026-08-17T00:00:32.000Z',
+      endsAt: '2026-08-17T00:00:36.000Z',
+    })
+
+    // Both reactions play at once; the slot names the one whose commit it is
+    // describing, and the other name is never on screen.
+    expect(selectActionActorName(first, [byViewerA], revisionAfter(first))).toBe('sample-viewer-1')
+    expect(
+      selectActionActorName(second, [byViewerA, byViewerB], revisionAfter(first, second)),
+    ).toBe('sample-viewer-2')
+  })
+
+  it('refuses to choose between two reactions from the same commit', () => {
+    // A commit that applied the same command twice is a commit whose reactions
+    // this module cannot tell apart. Naming either viewer would be a guess.
     const named = action({ effectId: 'sample-effect-action-a', actor: SAMPLE_CONSENTED_ACTOR })
     const other = action({ effectId: 'sample-effect-action-b' })
-    expect(selectActionActorName(snapshotWith(), [named, other])).toBeNull()
+    expect(selectActionActorName(snapshotWith(), [named, other], ACTION_REVISION)).toBeNull()
+    expect(selectActionActorName(snapshotWith(), [other, named], ACTION_REVISION)).toBeNull()
+  })
+
+  it('shows no name for a reaction that arrives before the snapshot it belongs to', () => {
+    // The other order spec §7.3(6) allows: the effect is on screen while the
+    // snapshot that moves the slot onto it is still in flight. Until that
+    // snapshot lands the key still points at the previous commit, so the slot is
+    // anonymous — and the name appears when the two messages agree, not before.
+    const applied = snapshotWith({}, 10)
+    const ahead = action({
+      actor: SAMPLE_CONSENTED_ACTOR,
+      stateRevision: 11,
+      startsAt: '2026-08-17T00:00:32.000Z',
+      endsAt: '2026-08-17T00:00:36.000Z',
+    })
+    expect(selectActionActorName(applied, [ahead], revisionAfter(applied))).toBeNull()
+
+    const nextAction = snapshotWith(
+      {
+        lastAppliedAction: {
+          commandName: 'FEED',
+          appliedAt: '2026-08-17T00:00:32.000Z',
+          contributionCount: 1,
+        },
+      },
+      11,
+    )
+    expect(selectActionActorName(nextAction, [ahead], revisionAfter(applied, nextAction))).toBe(
+      SAMPLE_CONSENTED_ACTOR.displayName,
+    )
+  })
+
+  it('shows no name when a revision was skipped, rather than guessing at it', () => {
+    // Spec §10.2 lets snapshots coalesce, and `ReadModel` drops a stale one. The
+    // change is then noticed at a revision later than the one it happened at, so
+    // the reaction no longer matches: anonymous, never somebody else's name.
+    const before = snapshotWith(
+      { lastAppliedAction: { commandName: 'PET', appliedAt: APPLIED_AT, contributionCount: 1 } },
+      10,
+    )
+    const afterSkip = snapshotWith({}, 20)
+    const key = revisionAfter(before, afterSkip)
+    expect(key).toBe(20)
+    expect(
+      selectActionActorName(
+        afterSkip,
+        [action({ actor: SAMPLE_CONSENTED_ACTOR, stateRevision: 15 })],
+        key,
+      ),
+    ).toBeNull()
   })
 
   it('shows no name when the playing reaction is not the action in the slot', () => {
@@ -204,7 +405,7 @@ describe('selectActionActorName (BOARD D-9, spec §5.2(2))', () => {
       actor: SAMPLE_CONSENTED_ACTOR,
       payload: { commandName: 'PET', contributionCount: 1 },
     })
-    expect(selectActionActorName(snapshotWith(), [otherCommand])).toBeNull()
+    expect(selectActionActorName(snapshotWith(), [otherCommand], ACTION_REVISION)).toBeNull()
 
     // Same command, different count: the slot is showing an aggregated FEED and
     // the playing reaction is one viewer's single FEED. The contract forbids the
@@ -214,24 +415,12 @@ describe('selectActionActorName (BOARD D-9, spec §5.2(2))', () => {
       lastAppliedAction: { commandName: 'FEED', appliedAt: APPLIED_AT, contributionCount: 2 },
     })
     expect(
-      selectActionActorName(aggregated, [action({ actor: SAMPLE_CONSENTED_ACTOR })]),
+      selectActionActorName(
+        aggregated,
+        [action({ actor: SAMPLE_CONSENTED_ACTOR })],
+        ACTION_REVISION,
+      ),
     ).toBeNull()
-  })
-
-  it('shows no name when the reaction is newer than the snapshot it would name', () => {
-    const ahead = action({
-      actor: SAMPLE_CONSENTED_ACTOR,
-      startsAt: '2026-08-17T00:00:31.000Z',
-      endsAt: '2026-08-17T00:00:35.000Z',
-    })
-    expect(selectActionActorName(snapshotWith(), [ahead])).toBeNull()
-  })
-
-  it('compares instants, not strings', () => {
-    // `IsoUtcInstantSchema` accepts both spellings of the same moment, and they
-    // do not sort the way they read.
-    const named = action({ actor: SAMPLE_CONSENTED_ACTOR, startsAt: '2026-08-17T00:00:30Z' })
-    expect(selectActionActorName(snapshotWith(), [named])).toBe(SAMPLE_CONSENTED_ACTOR.displayName)
   })
 
   it('never names an aggregated reaction, because it stands for many viewers', () => {
@@ -249,7 +438,7 @@ describe('selectActionActorName (BOARD D-9, spec §5.2(2))', () => {
     const long = action({
       actor: { ...SAMPLE_CONSENTED_ACTOR, displayName: 'sample-viewer-with-a-very-long-name' },
     })
-    const shown = selectActionActorName(snapshotWith(), [long]) ?? ''
+    const shown = selectActionActorName(snapshotWith(), [long], ACTION_REVISION) ?? ''
     expect(graphemeCount(shown)).toBe(DISPLAY_NAME_SCREEN_MAX_GRAPHEMES + 1)
   })
 })

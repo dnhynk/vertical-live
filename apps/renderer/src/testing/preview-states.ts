@@ -469,11 +469,10 @@ const CONSENTED_ACTION: PreviewState = {
     display: {
       currentNeedOrMission: { textKey: 'need.affection', iconId: 'icon_need_affection' },
       // One viewer, one command: the count is 1 because a name may only ride on
-      // an action that is one person's (spec §6.4, §7.3, BOARD D-9). The instant
-      // is `at(0)` — the world time itself — because `preview-server.mjs` shifts
-      // the snapshot onto the current clock while starting every effect one
-      // second before it, and the slot only names an action its reaction did not
-      // start *after* (`read-model/identity.ts`).
+      // an action that is one person's (spec §6.4, §7.3, BOARD D-9). What joins
+      // this action to the reaction below is the revision the two share, not the
+      // instants — `preview-server.mjs` shifts both onto the current clock and
+      // leaves `stateRevision` alone (`read-model/identity.ts`).
       lastAppliedAction: { commandName: 'PET', appliedAt: at(0), contributionCount: 1 },
       growthOrChapterProgress: {
         textKey: 'chapter.gathering',
@@ -488,9 +487,10 @@ const CONSENTED_ACTION: PreviewState = {
       effectId: 'sample-effect-consented-1',
       cause: { kind: 'event', eventKey: SAMPLE_EVENT_KEY },
       causedByEventKey: SAMPLE_EVENT_KEY,
+      // Staged by the same commit that set `lastAppliedAction` above — this is
+      // the join: same revision, same command, same count, and exactly one such
+      // reaction (T20c).
       stateRevision: 64,
-      // Staged by the same commit that set `lastAppliedAction` above, which is
-      // what lets the slot join the two and show the name (T20c).
       startsAt: at(-2_000),
       endsAt: at(600_000),
       paid: false,

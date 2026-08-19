@@ -26,8 +26,9 @@ import ModeBadge from './ModeBadge'
  * The name of a consented viewer is the one value the DOM layer joins from two
  * messages: the slot's action comes from the snapshot and the name from the
  * effect that staged it, because the snapshot deliberately carries no name
- * (BOARD D-9, T20a). `read-model/identity.ts` owns that join and is the only
- * module allowed to read `actor`.
+ * (BOARD D-9, T20a). The key of that join is the commit both messages came from,
+ * which the read model carries as `actionRevision`; `read-model/identity.ts`
+ * owns the join and is the only module allowed to read `actor`.
  */
 export interface ScreenProps {
   runtime: RendererRuntime
@@ -41,7 +42,7 @@ export interface ScreenProps {
 export const COUNTDOWN_TICK_MS = 1_000
 
 export default function Screen({ runtime }: ScreenProps) {
-  const { snapshot, activeEffects } = useReadModel(runtime.model)
+  const { snapshot, activeEffects, actionRevision } = useReadModel(runtime.model)
   useTick(COUNTDOWN_TICK_MS)
 
   const { translate, alias } = runtime
@@ -74,7 +75,7 @@ export default function Screen({ runtime }: ScreenProps) {
             slots={selectSlots(snapshot, nowMs)}
             translate={translate}
             alias={alias}
-            actorName={selectActionActorName(snapshot, activeEffects)}
+            actorName={selectActionActorName(snapshot, activeEffects, actionRevision)}
           />
           <Cta cta={cta} translate={translate} alias={alias} />
         </div>

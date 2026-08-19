@@ -1,6 +1,7 @@
 import type { Effect, EffectId, IsoUtcInstant, WorldSnapshot } from '@vl/contract'
 
 import type { Clock } from './clock'
+import { trackActionRevision } from './identity'
 import type { RendererLog } from './log'
 
 /**
@@ -54,6 +55,14 @@ export class ReadModel {
   readonly #maxRememberedEffects: number
 
   #snapshot: WorldSnapshot | null = null
+  /**
+   * The revision `display.lastAppliedAction` last changed at (T20c). It is the
+   * causal key the identity join needs and the snapshot alone cannot give: only
+   * the *sequence* of snapshots says which commit the action on screen came
+   * from. `read-model/identity.ts` decides it; this class is where the answer
+   * lives, because this is what sees one snapshot after another.
+   */
+  #actionRevision: number | null = null
   /** Received, not yet committed by React. */
   #pendingStateRevision: number | null = null
   /** Committed by React, not yet seen by a frame callback. */
@@ -102,6 +111,11 @@ export class ReadModel {
     return this.#activeEffects
   }
 
+  /** Commit the slot's action was applied at, or `null` when it is unknown. */
+  get actionRevision(): number | null {
+    return this.#actionRevision
+  }
+
   get lastAppliedStateRevision(): number | null {
     return this.#ackedStateRevision
   }
@@ -142,6 +156,7 @@ export class ReadModel {
       return 'stale'
     }
 
+    this.#actionRevision = trackActionRevision(this.#snapshot, snapshot, this.#actionRevision)
     this.#snapshot = snapshot
     this.#pendingStateRevision = snapshot.stateRevision
     this.#refreshActiveEffects()

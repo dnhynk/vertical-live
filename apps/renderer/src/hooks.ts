@@ -9,6 +9,8 @@ import type { ReadModel } from './read-model/store'
 export function useReadModel(model: ReadModel): {
   snapshot: WorldSnapshot | null
   activeEffects: readonly Effect[]
+  /** Commit the slot's action was applied at (T20c); `null` when unknown. */
+  actionRevision: number | null
 } {
   const subscribe = useCallback((onChange: () => void) => model.subscribe(onChange), [model])
   useSyncExternalStore(
@@ -23,7 +25,11 @@ export function useReadModel(model: ReadModel): {
     model.markCommitted()
   })
 
-  return { snapshot: model.snapshot, activeEffects: model.activeEffects }
+  return {
+    snapshot: model.snapshot,
+    activeEffects: model.activeEffects,
+    actionRevision: model.actionRevision,
+  }
 }
 
 export function useConnectionVersion(connection: RendererConnection): number {
