@@ -385,3 +385,27 @@
 - **합격 기준**
   1. 모든 숫자에 '제안' 라벨과 근거/무근거 표기; 외부 주장에 URL·확인 날짜.
   2. 콘텐츠 목록의 사건명이 T7 코드의 실제 사건 식별자와 일치(grep 증빙).
+
+## T22 — 모더레이션 사유 보고 경로: 사람 트리거 admin 엔드포인트 + filter_evasion_surge 휴리스틱
+
+- slug `t22-moderation-report` · PR 접두 `feat(supervisor):` · 의존 T12, T19
+- **읽을 것**: BOARD **D-13**(토큰 4개: `targeted_harassment`·`pii_exposure`·`sexual_or_self_harm_risk`·`filter_evasion_surge`; 전부 safe-stop), 스펙 §12.3(2단계: CTA off → safe_stopped), §9.2, §10.2(loopback+token), §11; `docs/ops/moderation-call-table.md`(2장 토큰 표·5장), `apps/server/src/supervisor/supervisor.ts:232 reportModerationHealth`, `kill-switch.ts`/`kill-cli.ts`(admin 엔드포인트·CLI 패턴), `apps/server/src/input/metrics.ts`(rejectedByReason·commandLike), `config/default.json` `supervisor.moderation`
+- **범위**
+  - **사람 트리거 경로**: `POST /admin/moderation`(loopback + bearer `server.adminToken`, kill-switch와 동일 인증/거부 규칙) `{ "reason": "<토큰>", "note"?: string }` → `supervisor.reportModerationHealth('degraded', reason)`; `POST /admin/moderation/clear` → `'ok'`. 승인표에 없는 토큰은 400(토큰 이름만 응답, 본문 echo 금지). CLI `npm run moderation -w @vl/server -- --reason <토큰> [--clear]`(kill-cli 패턴: 서버 미응답 시 실패를 명확히, 플래그 파일 fallback은 두지 않는다 — 모더레이션은 kill이 아니므로 근거를 티켓에). 호출 결과는 alert(warning: CTA off / critical: safe_stopped)와 `/health` detail에 토큰·시각만(자유 텍스트 note는 로그에만, raw chat 금지).
+  - **자동 휴리스틱(filter_evasion_surge 전용)**: 입력 metrics의 집계창 단위로 `commandLike` 대비 거부(`rejectedByReason` 중 allowlist 불일치·길이 초과·반복 차단 등 '우회 시도'로 분류되는 사유)의 비율과 절대 건수가 **provisional 임계**(config `supervisor.moderation.heuristics.filterEvasion: { windowMs, minCommandLike, rejectRatio }`, `provisional` 목록에 추가 — 임의 합격선 금지 원칙대로 문서에 '잠정'으로)를 연속 N창 넘으면 `reportModerationHealth('degraded','filter_evasion_surge')`, 연속 M창 아래면 clear. 어떤 거부 사유를 '우회'로 분류하는지는 T6 파서의 실제 사유 목록을 보고 티켓에 근거와 함께 고정하고, 확신이 없으면 `ask`. 나머지 3개 토큰은 **자동 탐지하지 않는다**(사람 판단 대상, §12.3) — 문서에 명시.
+  - `docs/ops/moderation-call-table.md` 2장 토큰 표에 '보고 경로(사람/자동)' 열 채움, 5장 'T22에서 구현' 문구 갱신; `docs/ops/runbook-operations.md`에 운영 절차(알림 수신 → 판단 → CLI 1줄 → 해제); `docs/ops/supervisor.md` 4.3 갱신.
+  - 가짜 참여·raw chat 표시 금지 유지; 결제 무영향.
+- **합격 기준**
+  1. 엔드포인트/CLI 테스트: 인증 실패·잘못된 토큰·정상 보고·clear; 보고 시 CTA off + 승인표 토큰이면 `safe_stopped`(T12 전이 테스트 재사용) + alert 1회.
+  2. 휴리스틱 테스트: 합성 입력으로 창별 비율 계산·연속 N창 진입·M창 해제, 임계 미만에서 오탐 없음; 닫힘/열림 identity 모드 무관.
+  3. 게이트 5개 + CI 녹색; 문서의 모든 임계가 provisional로 표기.
+
+## T8e — 엔진 후속: 가상 시계 31일 점프 후 `pump()` 미반환 · `ingest.test.ts` SQLite write lock flaky
+
+- slug `t8e-clock-jump-flaky` · PR 접두 `fix(engine):` · 의존 T8, T8d
+- **읽을 것**: `apps/server/src/engine/engine.ts`(`pump`, `#runPending`, deadline/expiry 루프), `apps/server/src/engine/ingest.test.ts:442` 근처, T20b 리뷰 관측(BOARD 이력 2026-08-20: 31일 가상 시계 점프 후 `StateEngine.pump()`가 184초 timeout까지 반환하지 않음), T21 관측(`ingest.test.ts:442` SQLite write lock 1/3 실패)
+- **범위**
+  - 디버깅 절차(CLAUDE.md): 가설 → 반증 관측 → 수정. (1) 31일 점프: 재현 테스트(가상 시계로 31일 전진 후 `pump()` 1회 호출이 유한 시간에 반환) 작성 → 원인 규명(예: 만료/deadline 재스케줄 루프가 점프 크기에 비례해 틱을 하나씩 소모, 또는 while 조건) → 최소 수정(틱 상한·점프 시 일괄 처리)과 근거. (2) flaky: `ingest.test.ts:442`가 다른 테스트/워커와 같은 DB 파일·WAL을 공유하는지, busy_timeout 부재인지 관측 → 원인별 최소 수정(격리된 temp DB 또는 busy_timeout 설정). 증상만 가리는 재시도 추가 금지.
+- **합격 기준**
+  1. 두 재현 테스트가 수정 전 실패·수정 후 통과(되돌려 확인), `vitest --repeat` 또는 10회 반복으로 flaky 0.
+  2. 게이트 5개 + CI 녹색, 기존 T8/T15 테스트 무변경 통과.
