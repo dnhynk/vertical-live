@@ -147,6 +147,8 @@ export class Supervisor {
   #interactionEnabled = true
   #timer: TimerHandle | undefined
   #stopped = false
+  /** Tail of the alert delivery queue — see `#alert` (review round 2, B1). */
+  #alertQueue: Promise<void> = Promise.resolve()
 
   constructor(options: SupervisorOptions) {
     this.#options = options
@@ -268,7 +270,12 @@ export class Supervisor {
     // token used to return straight out of `requestSafeStop`, so the run stopped
     // with a critical alert and no warning — but §12.3's first stage is not
     // conditional on the second, and the warning is the record of *which*
-    // control went unhealthy. It goes out first, in that order, on purpose.
+    // control went unhealthy.
+    //
+    // Raising it before the stop is what fixes its place in the queue `#alert`
+    // keeps (review round 2, B1): the operator reads the warning first however
+    // slow the sink is, while the stop below happens at the speed of the
+    // process, not of the webhook.
     void this.#alert('warning', 'moderation.unhealthy', {
       reason: token,
       detail: {
@@ -856,23 +863,73 @@ export class Supervisor {
     }
   }
 
-  async #alert(
+  /**
+   * Hands one alert to the sink, after every alert raised before it.
+   *
+   * Round 2 (B1) found why the order has to be enforced here. §12.3's two
+   * stages were started concurrently — `void this.#alert(warning)` and then the
+   * safe stop, whose own critical alert is raised a few `await`s later — so a
+   * sink that takes any time at all could deliver `supervisor.safe_stopped`
+   * first and an operator would read the stop before the reason for it. The
+   * reviewer's probe, with a sink that blocked only `moderation.unhealthy`:
+   * `before_warning_release=["supervisor.safe_stopped"]`. Delivery order is now
+   * call order, because each delivery waits for the queue ahead of it.
+   *
+   * Reporting still never gates safety (spec §9.1, §9.2). Everything that stops
+   * work — `#haltOutwardWork()`, the state assignment, the CTA gate — runs
+   * before any of these promises is awaited, so a slow sink delays the telling
+   * and never the stopping.
+   */
+  #alert(
     severity: AlertSeverity,
     kind: string,
     body: { readonly reason: string; readonly detail: Alert['detail'] },
   ): Promise<void> {
-    try {
-      await this.#alerts.deliver({
-        kind,
-        severity,
-        at: this.#clock.nowUtcIso(),
-        reason: body.reason,
-        detail: body.detail,
+    // Stamped when the condition was observed, not when the queue reaches it.
+    const alert: Alert = {
+      kind,
+      severity,
+      at: this.#clock.nowUtcIso(),
+      reason: body.reason,
+      detail: body.detail,
+    }
+    const delivered = this.#alertQueue.then(() => this.#deliverAlert(alert))
+    this.#alertQueue = delivered
+    return delivered
+  }
+
+  /**
+   * One queued delivery, bounded by `alerts.deliveryTimeoutMs`. The bound is
+   * what keeps the queue from becoming a new way to lose an alert: a transport
+   * that never answers stops holding the alerts behind it, so the critical one
+   * still reaches a human. Never rejects — `#deliverOnce` absorbs the failure.
+   */
+  async #deliverAlert(alert: Alert): Promise<void> {
+    let timer: TimerHandle | undefined
+    const timedOut = new Promise<'timeout'>((resolve) => {
+      timer = this.#clock.setTimeout(() => {
+        resolve('timeout')
+      }, this.#config.alerts.deliveryTimeoutMs)
+    })
+    const outcome = await Promise.race([this.#deliverOnce(alert), timedOut])
+    if (timer !== undefined) this.#clock.clearTimeout(timer)
+    if (outcome === 'timeout') {
+      this.#logger.error('alert delivery timed out', {
+        kind: alert.kind,
+        sink: this.#alerts.name,
+        timeoutMs: this.#config.alerts.deliveryTimeoutMs,
       })
+    }
+  }
+
+  /** The sink call itself. Never rejects: a sink that throws is logged. */
+  async #deliverOnce(alert: Alert): Promise<void> {
+    try {
+      await this.#alerts.deliver(alert)
     } catch (error) {
       // An alert sink that throws must not take the supervisor with it.
       this.#logger.error('alert sink threw', {
-        kind,
+        kind: alert.kind,
         error: error instanceof Error ? error.message : String(error),
       })
     }

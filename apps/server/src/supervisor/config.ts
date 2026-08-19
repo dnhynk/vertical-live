@@ -69,6 +69,11 @@ export interface SupervisorAlertConfig {
     readonly warning: number
     readonly critical: number
   }
+  /**
+   * How long one delivery may hold the supervisor's alert queue before the next
+   * alert goes out without it (`Supervisor#deliverAlert`, review round 2 B1);
+   * the Discord sink also aborts its own request at it.
+   */
   readonly deliveryTimeoutMs: number
   /** Discord webhook sink (BOARD D-3). The URL itself lives in the vault. */
   readonly discordEnabled: boolean

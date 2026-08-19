@@ -313,6 +313,84 @@ describe('supervisor state machine', () => {
       expect(JSON.stringify(harness.supervisor.health())).not.toContain('synthetic operator note')
     })
 
+    it('delivers the warning before the stop when the sink is slow (round 2, B1)', async () => {
+      // The reviewer's round-2 reproduction, which the assertion above cannot
+      // make: `RecordingAlertSink` pushes synchronously, before its promise
+      // resolves, so an index comparison on its array holds even when the two
+      // deliveries are concurrent. With a sink that blocks only the warning, the
+      // critical one used to complete first —
+      // `before_warning_release=["supervisor.safe_stopped"]`.
+      const delivered: string[] = []
+      let releaseWarning = (): void => {}
+      const blocked = new Promise<void>((resolve) => {
+        releaseWarning = resolve
+      })
+      const alerts: AlertSink = {
+        name: 'delayed-warning',
+        deliver: async (alert) => {
+          if (alert.kind === 'moderation.unhealthy') await blocked
+          delivered.push(alert.kind)
+          return DELIVERED
+        },
+      }
+      const harness = createSupervisorHarness({ preflight: passingPreflight(), alerts })
+      await goLive(harness)
+      const beforeReport = delivered.length
+
+      harness.supervisor.reportModerationHealth('degraded', 'targeted_harassment')
+      await flushMicrotasks()
+
+      // Stopping does not wait for the telling (spec §9.1, §9.2): the state, the
+      // trigger and the CTA are already where they belong while the sink is
+      // still holding the warning.
+      expect(harness.supervisor.state).toBe('safe_stopped')
+      expect(harness.supervisor.health().safeStop).toMatchObject({
+        kind: 'moderation_unhealthy',
+        reason: 'targeted_harassment',
+      })
+      expect(harness.supervisor.health().interactionEnabled).toBe(false)
+      expect(harness.inputHealth).toBe('degraded')
+      // …and nothing was delivered ahead of the warning that is still blocked.
+      expect(delivered.slice(beforeReport)).toEqual([])
+
+      releaseWarning()
+      await flushMicrotasks()
+
+      expect(delivered.slice(beforeReport)).toEqual([
+        'moderation.unhealthy',
+        'supervisor.safe_stopped',
+      ])
+    })
+
+    it('lets a stuck sink time out instead of holding the stop alert (§T22)', async () => {
+      // The queue must not become a new way to lose the critical alert: a
+      // delivery that outlives `alerts.deliveryTimeoutMs` stops holding the ones
+      // behind it, so the stop still reaches a human.
+      const delivered: string[] = []
+      const wedged = new Promise<void>(() => {
+        // Never resolves on purpose: the transport is wedged, not slow.
+      })
+      const alerts: AlertSink = {
+        name: 'wedged-warning',
+        deliver: async (alert) => {
+          if (alert.kind === 'moderation.unhealthy') await wedged
+          delivered.push(alert.kind)
+          return DELIVERED
+        },
+      }
+      const harness = createSupervisorHarness({ preflight: passingPreflight(), alerts })
+      await goLive(harness)
+
+      harness.supervisor.reportModerationHealth('degraded', 'targeted_harassment')
+      await flushMicrotasks()
+      expect(delivered).not.toContain('supervisor.safe_stopped')
+
+      await harness.clock.advance(harness.config.alerts.deliveryTimeoutMs)
+
+      expect(delivered).toContain('supervisor.safe_stopped')
+      expect(delivered).not.toContain('moderation.unhealthy')
+    })
+
     it('turns the CTA back on when a report is cleared (§T22)', async () => {
       // A reason the Gate 0 table does not list: the CTA goes off, the run keeps
       // going, and `/admin/moderation/clear` puts it back.
@@ -651,6 +729,9 @@ describe('supervisor state machine', () => {
         detail: { kind: 'userBroadcastsExceedLimit' },
       })
       await harness.supervisor.evaluate()
+      // The stop itself is synchronous; `onSafeStop` runs after the alert, and
+      // alerts are delivered in order off a queue now (round 2, B1).
+      await flushMicrotasks()
 
       expect(harness.supervisor.state).toBe('safe_stopped')
       expect(stopped).toBe(1)
@@ -943,19 +1024,23 @@ describe('supervisor state machine', () => {
   })
 
   describe('retention and revocation reporting (TASK_SPECS §T12 배선)', () => {
-    it('alerts on a sweep that was not clean or left rows unprocessed', () => {
+    it('alerts on a sweep that was not clean or left rows unprocessed', async () => {
       const harness = createSupervisorHarness()
 
       harness.supervisor.onRetentionResult({ clean: true, rowsUnprocessed: 0 })
+      await flushMicrotasks()
       expect(harness.alerts.alerts).toHaveLength(0)
 
       harness.supervisor.onRetentionResult({ clean: false, rowsUnprocessed: 0 })
       harness.supervisor.onRetentionResult({ clean: true, rowsUnprocessed: 4 })
+      // Delivery is queued, so it is one microtask away rather than immediate
+      // (round 2, B1) — the order it arrives in is the order it was raised in.
+      await flushMicrotasks()
 
       expect(harness.alerts.ofKind('retention.sweep_incomplete')).toHaveLength(2)
     })
 
-    it('alerts when a revocation misses its deadline (spec §12.4)', () => {
+    it('alerts when a revocation misses its deadline (spec §12.4)', async () => {
       const harness = createSupervisorHarness()
 
       harness.supervisor.onRevocationResult({
@@ -963,6 +1048,7 @@ describe('supervisor state machine', () => {
         incomplete: ['inbox.envelope'],
         reason: 'invalid_grant',
       })
+      await flushMicrotasks()
 
       const alert = harness.alerts.ofKind('privacy.revocation_incomplete')[0]
       expect(alert?.severity).toBe('critical')
