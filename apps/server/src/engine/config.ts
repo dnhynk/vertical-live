@@ -38,6 +38,16 @@ export interface EngineDegradedConfig {
   readonly rendererAckTimeoutMs: number
 }
 
+export interface EngineDeadlineConfig {
+  /**
+   * The largest gap in world time one writer pass walks one deadline occurrence
+   * at a time. Past it the gap is downtime and spec §10.2's policies apply
+   * instead (`StateEngine`'s catch-up). Provisional (BOARD A-15): spec §10.2
+   * names the policies and fixes no window.
+   */
+  readonly catchUpWindowMs: number
+}
+
 export interface EngineConfig {
   /** Seed of the world RNG; fixing it is what makes a replay reproducible. */
   readonly worldSeed: string
@@ -50,6 +60,7 @@ export interface EngineConfig {
   readonly tickIntervalMs: number
   readonly effects: EngineEffectConfig
   readonly degraded: EngineDegradedConfig
+  readonly deadlines: EngineDeadlineConfig
   /** Samples kept per latency stage for the `/metrics` percentiles. */
   readonly metricsSampleSize: number
   readonly provisional: readonly string[]
@@ -99,6 +110,7 @@ export function loadEngineConfig(options: LoadEngineConfigOptions = {}): EngineR
   const section = readObject(root['engine'], 'engine')
   const effects = readObject(section['effects'], 'engine.effects')
   const degraded = readObject(section['degraded'], 'engine.degraded')
+  const deadlines = readObject(section['deadlines'], 'engine.deadlines')
   const world = readObject(root['world'], 'world')
   const simulator = readObject(root['simulator'], 'simulator')
 
@@ -129,6 +141,12 @@ export function loadEngineConfig(options: LoadEngineConfigOptions = {}): EngineR
       rendererAckTimeoutMs: readPositiveInt(
         degraded['rendererAckTimeoutMs'],
         'engine.degraded.rendererAckTimeoutMs',
+      ),
+    }),
+    deadlines: Object.freeze({
+      catchUpWindowMs: readPositiveInt(
+        env['VL_DEADLINE_CATCH_UP_MS'] ?? deadlines['catchUpWindowMs'],
+        'engine.deadlines.catchUpWindowMs',
       ),
     }),
     metricsSampleSize: readPositiveInt(section['metricsSampleSize'], 'engine.metricsSampleSize'),

@@ -105,6 +105,17 @@ describe('loadEngineConfig', () => {
     expect(config.simulator.enabled).toBe(true)
   })
 
+  it('reads the deadline catch-up window and takes an env override (T8e)', () => {
+    const config = loadEngineConfig({ env: {} })
+
+    expect(config.engine.deadlines.catchUpWindowMs).toBeGreaterThan(0)
+    expect(config.engine.provisional).toContain('deadlines.catchUpWindowMs')
+    expect(
+      loadEngineConfig({ env: { VL_DEADLINE_CATCH_UP_MS: '60000' } }).engine.deadlines
+        .catchUpWindowMs,
+    ).toBe(60_000)
+  })
+
   it('refuses a missing section rather than inventing a default', () => {
     const path = writeConfig({ input: {} })
 

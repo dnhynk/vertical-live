@@ -688,7 +688,9 @@ export class StateEngine {
     this.#inboxExhausted = false
     // Reconciled before the loop as well as after it: an event must never be
     // applied while the published snapshot still says interaction is suspended.
-    commits += this.#reconcileInteraction(this.#clock.nowUtcIso())
+    const passNow = this.#clock.nowUtcIso()
+    commits += this.#reconcileInteraction(passNow)
+    this.#catchUpOverdueDeadlines(passNow)
     for (let iteration = 0; ; iteration += 1) {
       if (iteration >= MAX_STEPS_PER_PASS) {
         // A timer that never leaves the due set would spin here. Stopping and
@@ -712,6 +714,40 @@ export class StateEngine {
     // closed is what decides whose vote the arbiter is still holding.
     this.#syncVoteScope()
     return commits
+  }
+
+  /**
+   * Spec §10.2 for a gap the writer did not run through (T8e).
+   *
+   * The loop below walks world time one occurrence at a time, which is right
+   * while the engine is keeping up: it pumps every `tickIntervalMs` (250ms)
+   * against an idle beat of at least 30s, so a re-armed timer is never already
+   * due. It is wrong after a gap — a suspended host, a corrected clock, a
+   * virtual clock jumped by a test — because every occurrence inside the gap is
+   * one the world could not stage, which is exactly the case §10.2's downtime
+   * policies decide (`skip` expires and re-arms, `coalesce` delivers the last
+   * one, `replay` delivers each). Walking them instead costs one
+   * `commitStateTransition` per occurrence: a 31-day gap measured 88,479 commits
+   * and 266s in one `pump()`, which is the T20b observation.
+   *
+   * So the same recovery `start()` applies is applied here, once per pass, and
+   * only when a timer is overdue by more than `engine.deadlines.catchUpWindowMs`
+   * — under that window the loop keeps its exact previous behaviour.
+   */
+  #catchUpOverdueDeadlines(now: string): void {
+    const cutoff = toMillis(now) - this.#config.engine.deadlines.catchUpWindowMs
+    const overdue = pendingDeadlines(this.#world).filter(
+      (deadline) => toMillis(deadline.dueAt) < cutoff,
+    )
+    if (overdue.length === 0) return
+    this.#metrics.count('deadline_gap_recovered')
+    this.#logger.warn('engine.deadline_gap', {
+      now,
+      revision: this.#revision,
+      overdue: overdue.length,
+      oldestDueAt: overdue.reduce((a, b) => (toMillis(a.dueAt) <= toMillis(b.dueAt) ? a : b)).dueAt,
+    })
+    this.#recoverDeadlines(now)
   }
 
   /**

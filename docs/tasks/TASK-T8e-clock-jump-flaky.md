@@ -22,6 +22,64 @@
 6. **(2) 수정** — 관측된 원인에 대한 최소 수정.
 7. 게이트 5개 + 10회 반복 flaky 0 확인 → PR.
 
+## Debugging record — (1) 31일 점프 후 `pump()` 미반환
+
+### 가설
+
+`#runPending`의 루프가 **반복 deadline의 모든 발생을 1건씩** 소비한다. `#advanceOnce`가 가장 이른 due deadline을
+골라 `#prepareDeadline`에서 내부 시각을 그 `dueAt`으로 전진시키고 `#applySteps`가 `commitStateTransition`
+트랜잭션을 1건 커밋한다. 핸들러가 다음 발생을 재무장하면 그것도 이미 due이므로 루프가 계속된다. 따라서 소요 시간은
+점프 크기에 **비례**하고, 무한 루프가 아니라 "매우 긴 유한 루프"다.
+
+### 이 가설을 반증할 관측
+
+- 무한 루프(진행 없음)라면 커밋 수가 점프 크기에 비례하지 않고, `MAX_STEPS_PER_PASS`(100,000) 상한에 걸려
+  `pass_limit_reached` 카운터가 1이 되며 곧바로 반환한다.
+- 비례하지 않는다면(예: 점프 크기와 무관하게 일정) 원인은 다른 곳이다.
+
+### 실제 관측
+
+`createEngineHarness()` + `FakeClock.advance(N)` 후 `runPending()` 1회의 커밋 수·소요 시간을 측정했다
+(관측용 임시 테스트, 커밋하지 않음):
+
+| 점프 | commits | elapsed | `pass_limit_reached` |
+|---|---|---|---|
+| 1h | 113 | 249 ms | 0 |
+| 2h | 226 | 461 ms | 0 |
+| 4h | 458 | 656 ms | 0 |
+| 8h | 935 | 2,156 ms | 0 |
+| 24h | 2,836 | 6,341 ms | 0 |
+| **31d** | **88,479** | **265,863 ms (4분 26초)** | **0** |
+
+- 커밋 수는 점프 크기에 선형(≈118 commits / world-hour)이고 `pass_limit_reached`는 0 — 즉 무한 루프도,
+  런어웨이 가드에 걸린 것도 아니다. **가설 확인.**
+- 88,479건은 콘텐츠 정의로 설명된다: `idle_beat` 30–75 s(평균 ≈52.5 s) ≈51,000회 + `need_decay` 90 s
+  ≈29,760회 + `crisis_recovery` 300 s + `weather_change` 150 min + `visitor_arrival` 210 min +
+  `world_phase` + `chapter_beat`.
+- T20b가 본 "184 s timeout까지 미반환"은 실제 265.9 s < 반환 시점이므로 정확히 일치한다.
+
+### 원인
+
+러닝 루프에는 **downtime 정책이 적용되지 않는다.** 스펙 §10.2는 deadline 종류마다 downtime 뒤 정책
+(`replay`/`coalesce`/`skip`)을 두라고 하고, T7 `planDeadlineRecovery`와 엔진의 `#recoverDeadlines`가 이미
+그것을 구현해 `start()` 경로에서 쓴다. 그런데 점프는 재시작이 아니므로 그 경로를 타지 않고, 루프가 간격 안의 모든
+발생을 하나씩 스테이징한다. 이는 성능 문제일 뿐 아니라 **§10.2 위반**이다 — `idle_beat`가 `skip`인 이유가
+"지나간 순간의 연출을 뒤늦게 재생하지 않는다"이고, `need_decay`가 `coalesce`인 이유가 "경과 시간으로 적분하므로
+1회 전달이 downtime 전체를 정확히 재현한다"인데, 루프는 둘 다 어긴다.
+
+### 수정
+
+`#runPending`이 패스마다 한 번, `engine.deadlines.catchUpWindowMs`보다 오래 밀린 pending deadline이 있으면
+`start()`가 쓰는 것과 **같은** `#recoverDeadlines(now)`를 적용한다(`engine.ts` `#catchUpOverdueDeadlines`).
+창 안쪽이면 루프 동작은 이전과 완전히 동일하다. 재시도·특수 케이스 분기가 아니라, 이미 있는 §10.2 경로를 러닝
+루프에도 적용하는 것이다.
+
+수정 후 같은 31일 점프: **commits 4, 27 ms**, `deadline_gap_recovered=1`, `deadline_expired=2`.
+
+## Debugging record — (2) `ingest.test.ts:442` write lock flaky
+
+<pending>
+
 ## Sources consulted (official docs)
 
 | 주제 | URL | 확인일 | 결론 |
