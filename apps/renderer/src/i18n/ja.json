@@ -27,6 +27,22 @@
       "nativeReview": "pending"
     },
 
+    "ui.identity.notice": {
+      "text": "{join} を おくった ひとだけ なまえを ひょうじ。{leave} で すぐ さくじょ。{days}にち かつどうが なければ じどうで さくじょ",
+      "en": "YOUR NAME IS SHOWN ONLY IF YOU OPT IN",
+      "nativeReview": "pending"
+    },
+    "ui.identity.join": {
+      "text": "なまえを ひょうじ",
+      "en": "SHOW MY NAME",
+      "nativeReview": "pending"
+    },
+    "ui.identity.leave": {
+      "text": "なまえを さくじょ",
+      "en": "DELETE MY NAME",
+      "nativeReview": "pending"
+    },
+
     "ui.interactionPaused": {
       "text": "相互作用一時停止",
       "en": "INPUT PAUSED",

@@ -1,4 +1,10 @@
-import { COMMAND_ALIASES, type CommandName, type WorldSnapshot } from '@vl/contract'
+import {
+  COMMAND_ALIASES,
+  CONSENT_COMMAND_ALIASES,
+  type CommandName,
+  type ConsentCommandName,
+  type WorldSnapshot,
+} from '@vl/contract'
 
 /**
  * What the screen invites a viewer to do (spec §5.2(3), §7.1) and what the room
@@ -100,5 +106,36 @@ export function commandLabel(name: CommandName): CommandLabel {
     emoji: entry.icons[0] ?? null,
     en: entry.en[0] ?? name,
     iconId: COMMAND_ICON_IDS[name] ?? null,
+  }
+}
+
+/** The two consent commands, in the order the notice explains them (BOARD D-9). */
+export const CONSENT_COMMANDS: readonly ConsentCommandName[] = ['JOIN', 'LEAVE']
+
+export interface ConsentCommandLabel {
+  readonly name: ConsentCommandName
+  /** Japanese spelling a viewer types, from the contract's alias table. */
+  readonly ja: string
+  readonly en: string
+  /** i18n key for what this command does, one short line. */
+  readonly meaningKey: string
+}
+
+/**
+ * Wording for a consent command (BOARD D-9). Same rule as `commandLabel`: the
+ * spellings come from the contract's alias table and are never written here, so
+ * what the screen shows is exactly what the parser accepts.
+ *
+ * `CONSENT_COMMAND_ALIASES` gives both commands a Japanese spelling and no icon
+ * on purpose, so unlike the care commands there is nothing to fall back to and
+ * nothing to draw an icon for.
+ */
+export function consentCommandLabel(name: ConsentCommandName): ConsentCommandLabel {
+  const entry = CONSENT_COMMAND_ALIASES[name]
+  return {
+    name,
+    ja: entry.ja[0] ?? name,
+    en: entry.en[0] ?? name,
+    meaningKey: `ui.identity.${name.toLowerCase()}`,
   }
 }

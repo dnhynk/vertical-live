@@ -14,15 +14,29 @@ import Icon from '../visual/icons'
  * numbers that remain are participation counts, which spec §7.3 requires to be
  * preserved, and a clock time.
  *
- * There is no raw chat and no name anywhere on this screen (spec §12.3): the
- * display fields carry i18n keys, identifiers and counts only, and the renderer
- * has no field it could put a person's name in.
+ * There is no raw chat here (spec §12.3): the display fields carry i18n keys,
+ * identifiers and counts only, and no message text reaches this file.
+ *
+ * The one thing a viewer can put on this screen is their own name, in the "just
+ * applied action" slot and only after opting in (BOARD D-9). It arrives as an
+ * already-selected, already-shortened string — `read-model/identity.ts` decides
+ * whether an action may be named at all — and is drawn as a React text node,
+ * which is why nothing here escapes, parses or injects anything.
  */
 
 export interface HudProps {
   slots: SlotViews
   translate: Translate
   alias: Alias
+}
+
+export interface HudBottomProps extends HudProps {
+  /**
+   * Display name of the consented viewer whose action the slot is showing, or
+   * `null` — which is every viewer until they opt in, every viewer again after
+   * they withdraw, and any case where the join was not certain (BOARD D-9).
+   */
+  actorName: string | null
 }
 
 function SlotLabel({
@@ -63,7 +77,7 @@ export function HudTop({ slots, translate, alias }: HudProps) {
 }
 
 /** Slots 2–4: the last applied action, the progress, and the next decision. */
-export function HudBottom({ slots, translate, alias }: HudProps) {
+export function HudBottom({ slots, translate, alias, actorName }: HudBottomProps) {
   const { action, progress, nextChoice } = slots
   const label = action.commandName === null ? null : commandLabel(action.commandName)
   const beats = Array.from({ length: progress.beatCount }, (_unused, index) => index)
@@ -81,6 +95,11 @@ export function HudBottom({ slots, translate, alias }: HudProps) {
             {label.iconId === null ? null : <Icon iconId={label.iconId} className="icon-action" />}
             <span className="slot-text">{label.ja ?? label.en}</span>
             <span className="slot-en-inline">{label.en}</span>
+            {actorName === null ? null : (
+              <span className="slot-actor" data-testid="slot-last-action-actor">
+                {actorName}
+              </span>
+            )}
             <span className="slot-count" data-testid="slot-last-action-count">
               {translate('ui.contributions', { count: action.contributionCount })}
             </span>
