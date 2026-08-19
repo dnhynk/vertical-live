@@ -333,6 +333,11 @@ npm run build         -> pass (contract/renderer/server/simulator/soak, migratio
 반복: `npx vitest run apps/server/src/engine` **10회 연속** 매회 `Test Files 17 passed (17) / Tests 126
 passed (126)`, 실패 0.
 
+CI: head `7be10ee`에서 run
+[`32305049033`](https://github.com/dnhynk/vertical-live/actions/runs/32305049033) **success**(3m31s,
+attempt 1). 라운드 2의 후속 항목이던 `replay.test.ts` 5 s 타임아웃은 이번 attempt 1에서 재현되지 않았다 —
+후속 T8f의 진단(러너 처리량)과 모순되지 않지만, 해결됐다는 근거도 아니므로 후속은 그대로 둔다.
+
 ## Not done / out of scope
 
 - `MAX_STEPS_PER_PASS`(100,000)는 그대로 뒀다. 31일 점프에서도 88,479 < 100,000이라 이 가드는 **한 번도
