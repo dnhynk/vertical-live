@@ -162,11 +162,40 @@ describe('CanonicalEvent (spec §7.4)', () => {
     expect(CanonicalEventSchema.parse(event)).toEqual(event)
   })
 
-  it('accepts only null for actor while the identity gate is closed', () => {
+  it('keeps actor null for a viewer who has not consented', () => {
+    // The default of spec §7.4, unchanged by D-9: opting in is what changes it,
+    // and nothing else can.
+    expect(CanonicalEventSchema.parse(event).actor).toBeNull()
     expect(
       CanonicalEventSchema.safeParse({ ...event, actor: { channelId: 'UC_TEST_0001' } }).success,
     ).toBe(false)
     expect(CanonicalEventSchema.safeParse({ ...event, actor: 'anonymous' }).success).toBe(false)
+  })
+
+  it('carries a consented viewer as the only non-null actor (BOARD D-9)', () => {
+    const consented = {
+      ...event,
+      actor: {
+        kind: 'consented',
+        displayName: 'synthetic-viewer-1',
+        channelRef: 'ref_0123456789abcdef0123456789abcdef',
+      },
+    }
+    expect(CanonicalEventSchema.parse(consented)).toEqual(consented)
+    // The raw channel id has no field of its own and cannot take the
+    // reference's place either (TASK_SPECS §T20a acceptance 1).
+    expect(
+      CanonicalEventSchema.safeParse({
+        ...consented,
+        actor: { ...consented.actor, channelRef: 'UC_TEST_SYNTHETIC_0001' },
+      }).success,
+    ).toBe(false)
+    expect(
+      CanonicalEventSchema.safeParse({
+        ...consented,
+        actor: { ...consented.actor, channelId: 'UC_TEST_SYNTHETIC_0001' },
+      }).success,
+    ).toBe(false)
   })
 
   it('rejects an added identity field', () => {

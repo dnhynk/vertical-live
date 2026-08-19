@@ -84,7 +84,11 @@ function isConsentedActorSchema(node: Record<string, unknown>): boolean {
   if (bag === null) return false
   if (Object.keys(bag).sort().join(',') !== CONSENTED_ACTOR_PROPERTIES.join(',')) return false
   const kind = bag.kind
-  return typeof kind === 'object' && kind !== null && (kind as Record<string, unknown>).const === 'consented'
+  return (
+    typeof kind === 'object' &&
+    kind !== null &&
+    (kind as Record<string, unknown>).const === 'consented'
+  )
 }
 
 interface SchemaScan {
@@ -124,7 +128,8 @@ function scanDocument(node: unknown, out: SchemaScan): SchemaScan {
         typeof value === 'object' &&
         value !== null
       ) {
-        for (const name of Object.keys(value as Record<string, unknown>)) out.propertyNames.add(name)
+        for (const name of Object.keys(value as Record<string, unknown>))
+          out.propertyNames.add(name)
       }
       if (key === 'required' && Array.isArray(value)) {
         for (const name of value) if (typeof name === 'string') out.propertyNames.add(name)

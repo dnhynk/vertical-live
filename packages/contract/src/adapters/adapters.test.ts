@@ -745,3 +745,44 @@ describe('no identity or raw text survives normalization (spec §7.3(1), §12.3)
     expect(JSON.stringify(envelope)).not.toContain('chat_test_OTHER')
   })
 })
+
+describe('a consent command is filed apart from the world commands (BOARD D-9)', () => {
+  /** Parser that only ever produces the consent half of the allowlist. */
+  const consentParser: CommandParser = (rawText) =>
+    rawText === 'なのる' ? { name: 'JOIN', argument: null } : null
+
+  it.each(SHAPES)('%s leaves both command fields empty when nothing matched', (shape) => {
+    // The fixture's text is `ごはん`, which this parser does not know.
+    const item = loadSourceFixture(shape, 'text-message-event').item
+    const envelope = ADAPTERS[shape](item, context(consentParser))
+    expect(envelope.validationStatus).toBe('valid')
+    if (envelope.validationStatus !== 'valid') return
+    expect(envelope.command).toBeNull()
+    expect(envelope.consentCommand ?? null).toBeNull()
+  })
+
+  it.each(SHAPES)('%s routes the parser result by which half it belongs to', (shape) => {
+    const item = loadSourceFixture(shape, 'text-message-event').item
+    const always: CommandParser = () => ({ name: 'JOIN', argument: null })
+    const envelope = ADAPTERS[shape](item, context(always))
+    expect(envelope.validationStatus).toBe('valid')
+    if (envelope.validationStatus !== 'valid') return
+    // A consent decision moves no world state, so nothing that reads `command`
+    // can see it (TASK_SPECS §T20a).
+    expect(envelope.command).toBeNull()
+    expect(envelope.consentCommand).toEqual({ name: 'JOIN', argument: null })
+    // …and it still carries no identity of its own: whose decision it was lives
+    // only in the consent record T20b owns.
+    expect(JSON.stringify(envelope)).not.toContain('UC_TEST_SYNTHETIC_0001')
+  })
+
+  it.each(SHAPES)('%s leaves the key set unchanged for a world command', (shape) => {
+    const item = loadSourceFixture(shape, 'text-message-event').item
+    const envelope = ADAPTERS[shape](item, context())
+    expect(Object.keys(envelope).sort()).toEqual(VALID_KEYS)
+    expect(envelope.validationStatus === 'valid' && envelope.command).toEqual({
+      name: 'FEED',
+      argument: null,
+    })
+  })
+})
