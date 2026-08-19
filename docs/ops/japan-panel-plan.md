@@ -104,7 +104,7 @@
 |---|---|---|---|
 | Q1 | 살아 있는 크리처의 현재 상황 | いま、この生きものはどんな様子でしたか？ | `ui.slot.needOrMission` → `need.*` / `crisis.*` (`apps/renderer/src/i18n/ja.json`) |
 | Q2 | 지금 달성할 공동 목표 하나 | いま、みんなで達成しようとしている目標は何でしたか？ | `ui.slot.needOrMission` → `mission.*` 와 목표 진행도 |
-| Q3 | 무료로 입력할 명령 하나 | 参加するには、チャットに何と送ればいいですか？ | CTA 영역 — `ごはん`(🍙) / `あそぶ`(🎾) / `なでる`(❤️) (`packages/contract/src/commands.ts:36`) |
+| Q3 | 무료로 입력할 명령 하나 | 参加するには、チャットに何と送ればいいですか？ | CTA 영역 — `ごはん`(🍙) / `あそぶ`(🎾) / `なでる`(❤️) (`packages/contract/src/commands.ts:85`) |
 | Q4 | 다음 변화까지 남은 진행도 | 次の変化まで、あとどれくらいでしたか？ | `ui.slot.progress`(성장·챕터)와 `ui.slot.nextChoice`(다음 선택 시점) |
 
 ### 2.3 채점
@@ -177,6 +177,9 @@
 - Gate 3 선행조건(§15 Gate 3): "실제 YouTube 모바일 UI가 겹친 첫 화면 이해 테스트를 Gate 0 기준으로 통과".
   즉 **여기서 승인한 기준으로** 통과해야 public 파일럿을 시작한다.
 - 4개 슬롯의 문구·아이콘·레이아웃, 크리처 자산, CTA 문구가 바뀌면 2단계를 다시 돌린다 `제안(근거 없음)`.
+- **T20c(identity (B) 렌더러)가 머지되면 CTA에 고지 한 줄과 동의/철회 명령(`なのる`/`なまえけす`,
+  `packages/contract/src/commands.ts:113`)이 추가된다**(BOARD `D-9`). CTA 영역이 늘어나면 Q3의 읽힘이 달라지므로,
+  **자극물은 T20c가 반영된 화면으로 잡는다** `제안(근거: D-9로 확정된 후속 구현이 첫 화면을 바꾼다)`.
 
 ---
 
@@ -223,7 +226,7 @@ for (const seed of ['seed_day_1', 'seed_day_2', 'seed_day_3', 'seed_day_4', 'see
 | 일일 챕터 3종 | `gathering`, `festival_prep`, `growth_choice` | `world/types.ts:97`, `world/content/chapters.ts:48` |
 | 챕터 비트 3종 | `setup`, `turn`, `resolution` | `world/types.ts:101` |
 | 승인된 사건 조합 9종 | `combo_forage_garden`, `combo_river_walk`, `combo_rest_indoors`, `combo_lantern_row`, `combo_music_practice`, `combo_night_stalls`, `combo_grow_swift`, `combo_grow_gentle`, `combo_grow_curious` | `world/content/chapters.ts:60,69,78,97,106,115,134,143,152` |
-| 디렉터 규칙 10종 | `rule_shelter_from_rain`, `rule_music_when_wet`, `rule_forage_when_hungry`, `rule_stalls_when_hungry`, `rule_river_when_playful`, `rule_lanterns_at_night`, `rule_quiet_when_in_crisis`, `rule_gentle_growth_when_tired`, `rule_swift_growth_when_clear`, `rule_curious_growth_with_visitor` | `world/content/chapters.ts:181`–`241` |
+| 디렉터 규칙 10종 | `rule_shelter_from_rain`, `rule_music_when_wet`, `rule_forage_when_hungry`, `rule_stalls_when_hungry`, `rule_river_when_playful`, `rule_lanterns_at_night`, `rule_quiet_when_in_crisis`, `rule_gentle_growth_when_tired`, `rule_swift_growth_when_clear`, `rule_curious_growth_with_visitor` | `world/content/chapters.ts:181`–`242` |
 | 미션 5종 | `share_a_meal`, `chase_the_ribbon`, `quiet_company`, `gather_ingredients`, `hang_the_lanterns` | `world/types.ts:87` |
 | 미션 연출 변형 11종 | `mission_meal_together`, `mission_meal_picnic`, `mission_ribbon_chase`, `mission_ribbon_windy`, `mission_quiet_company`, `mission_quiet_night`, `mission_gather_basket`, `mission_gather_river`, `mission_hang_lanterns`, `mission_lantern_calm`, `mission_rest_watch` | `world/content/variants.ts:398`– |
 | 장소 4종 | `home_room`, `garden`, `riverside`, `night_terrace` | `world/types.ts:69` |
@@ -232,12 +235,12 @@ for (const seed of ['seed_day_1', 'seed_day_2', 'seed_day_3', 'seed_day_4', 'see
 | 방문자 4종 | `postal_bird`, `lantern_moth`, `garden_cat`, `wandering_tinker` | `world/types.ts:79` |
 | 위기 3종(전부 회복 가능) | `sleeping`, `tired`, `needs_help` | `world/types.ts:43` |
 | 성장 단계 5종 | `egg`, `hatchling`, `fledgling`, `companion`, `guardian` | `world/types.ts:62` |
-| 자유 명령 3종 | `FEED`(`ごはん`/🍙), `PLAY`(`あそぶ`/🎾), `PET`(`なでる`/❤️) | `world/types.ts:109`, `packages/contract/src/commands.ts:36` |
+| 자유 명령 3종 | `FEED`(`ごはん`/🍙), `PLAY`(`あそぶ`/🎾), `PET`(`なでる`/❤️) | `world/types.ts:109`, `packages/contract/src/commands.ts:85` |
 | 연출 변형 총 71종 | `idle_*` 19, `feed_*` 7, `play_*` 7, `pet_*` 6, `mission_*` 11, `weather_*` 5, `visitor_*` 4, `crisis_*` 6, `recover_*` 6 | `world/content/variants.ts` (`grep -c "variantId: '"` = 71) |
 | 타이머 종류 10종 | `idle_beat`, `need_decay`, `mission_close`, `choice_close`, `world_phase`, `weather_change`, `visitor_arrival`, `chapter_beat`, `crisis_recovery`, `paid_thanks_fallback` | `world/types.ts:121` |
 
 **승인 대상은 이 목록 자체**다. 스펙 §6.2가 말하는 "승인된 사건 조합"은 위의 챕터 3종 × 조합 9종이고, 디렉터는
-규칙 10종으로 그중 하나에 가중치를 줄 뿐 **새 조합을 만들지 못한다**(`world/content/chapters.ts:174`–`180` 주석).
+규칙 10종으로 그중 하나에 가중치를 줄 뿐 **새 조합을 만들지 못한다**(`world/content/chapters.ts:168`–`172` 주석).
 
 ### 3.3 하루 챕터 타임라인 (JST)
 
@@ -247,7 +250,7 @@ for (const seed of ['seed_day_1', 'seed_day_2', 'seed_day_3', 'seed_day_4', 'see
 
 | JST | 무엇이 일어나는가 | 근거 |
 |---|---|---|
-| 06:00 | `chapter_started` — 그날 챕터의 `setup` 비트. 챕터는 직전 날과 다른 것으로 뽑는다 | `reducer.ts:447` `pickChapterId` |
+| 06:00 | `chapter_started` — 그날 챕터의 `setup` 비트. 챕터는 직전 날과 다른 것으로 뽑는다 | `reducer.ts:446` `pickChapterId` |
 | 14:24 | `chapter_beat`(`turn`) + `choice_opened` — 그날의 분기점이 열린다 | `0.35 × 24h` |
 | 14:24–14:44 | 선택 창 20분. identity gate가 닫힌 V1에서는 **투표가 아니라** 무료 명령 총량을 가중치로 쓰는 비경쟁 집계 | `choice.windowMs`(`tuning.ts:168`), 스펙 §6.4 |
 | 14:44 | `choice_resolved` → 조합 1개 확정(예: `combo_forage_garden`), 장소·미션 성향이 바뀐다 | 관측(3.5) |
