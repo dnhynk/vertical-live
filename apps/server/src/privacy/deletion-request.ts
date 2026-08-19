@@ -1,5 +1,6 @@
 import type { Clock } from '../clock.js'
 import type { PersistenceStore } from '../db/index.js'
+import type { ConsentDeleteAudit, ConsentDeleteResult } from '../db/consent.js'
 import type { ConsentSelector } from '../db/types.js'
 import { silentLogger, type Logger } from '../secrets/redaction.js'
 import { CONSENT_FIELD_KEY, type RetentionConfig } from './config.js'
@@ -27,6 +28,15 @@ import { plusDays } from './retention.js'
  * the audit row carry counts, not names. The schema audit still runs in both
  * cases, because an identity column *outside* the consent table would mean this
  * handler cannot promise it deleted everything (spec §12.4).
+ *
+ * **One deletion boundary.** A row is not the whole of what is stored about a
+ * person while the server is running: the live `ConsentDirectory` also holds
+ * display names in memory for the messages it has not attributed yet. Deleting
+ * the row alone left `takeActor` handing that name out *after* the request was
+ * answered (review round 1, B2). So a process that has a directory passes it in
+ * (`options.directory`) and the deletion goes through it; the store is used
+ * directly only where there is no directory to be out of step with — an operator
+ * script against a stopped server, and the closed configuration.
  */
 
 export class IdentityColumnsPresentError extends Error {
@@ -41,10 +51,25 @@ export class IdentityColumnsPresentError extends Error {
   }
 }
 
+/**
+ * The live consent directory's deletion boundary — `ConsentDirectory` satisfies
+ * it. The audit row stays this handler's to write, because the reason and the
+ * wording belong to the request, not to the store.
+ */
+export interface ConsentDeletionBoundary {
+  deleteWithAudit(selector: ConsentSelector, audit: ConsentDeleteAudit): ConsentDeleteResult
+}
+
 export interface UserDeletionRequestOptions {
   readonly store: PersistenceStore
   readonly clock: Clock
   readonly config: RetentionConfig
+  /**
+   * The `ConsentDirectory` this process is running, when it has one. Passing it
+   * is what makes the deletion cover the in-memory copies as well as the row
+   * (see the module comment); omit it only when no directory exists.
+   */
+  readonly directory?: ConsentDeletionBoundary
   readonly logger?: Logger
 }
 
@@ -78,12 +103,14 @@ export class UserDeletionRequestHandler {
   readonly #store: PersistenceStore
   readonly #clock: Clock
   readonly #config: RetentionConfig
+  readonly #directory: ConsentDeletionBoundary | undefined
   readonly #logger: Logger
 
   constructor(options: UserDeletionRequestOptions) {
     this.#store = options.store
     this.#clock = options.clock
     this.#config = options.config
+    this.#directory = options.directory
     this.#logger = options.logger ?? silentLogger
   }
 
@@ -114,7 +141,7 @@ export class UserDeletionRequestHandler {
     const allowedPeriodDays = this.#config.revocation.userRequestDeletionDays
     if (subject !== undefined && this.#store.hasTable(CONSENT_TABLE)) {
       const recordedAt = this.#clock.nowUtcIso()
-      const result = this.#store.deleteConsent(subject, ({ rowsDeleted }) => ({
+      const audit: ConsentDeleteAudit = ({ rowsDeleted }) => ({
         fieldKey: CONSENT_FIELD_KEY,
         source: 'youtube_api',
         purpose:
@@ -129,7 +156,13 @@ export class UserDeletionRequestHandler {
         rowsUnprocessed: 0,
         deletedAt: rowsDeleted > 0 ? recordedAt : null,
         recordedAt,
-      }))
+      })
+      // Through the directory when this process has one, so the row and every
+      // derived copy go together (review round 1, B2).
+      const result =
+        this.#directory === undefined
+          ? this.#store.deleteConsent(subject, audit)
+          : this.#directory.deleteWithAudit(subject, audit)
       // Counts only: naming the subject here is exactly what the module refuses
       // to do (spec §12.4, §12.3).
       this.#logger.info('user deletion request completed', {

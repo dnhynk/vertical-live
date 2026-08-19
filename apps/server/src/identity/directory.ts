@@ -95,6 +95,8 @@ export class ConsentDirectory {
   readonly #pendingLimit: number
   /** `messageId -> actor`, in insertion order. Memory only, never persisted. */
   readonly #pending = new Map<string, ConsentedActor>()
+  /** References deleted and not yet purged from the arbiter (`drainForgotten`). */
+  readonly #forgotten = new Set<string>()
 
   constructor(options: ConsentDirectoryOptions) {
     const field = options.retention.fields.find((entry) => entry.key === CONSENT_FIELD_KEY)
@@ -182,6 +184,53 @@ export class ConsentDirectory {
     return this.#delete(selector, reason)
   }
 
+  /**
+   * The same deletion, with an audit row the caller writes: the T13 request
+   * handler owns the wording of a request-driven deletion, and this owns what a
+   * deletion *is* (review round 1, B2).
+   *
+   * Before the fix the handler deleted the row straight through the store, which
+   * left this directory's buffered display names in place — so `takeActor` still
+   * returned the name of someone whose record had just been deleted. Anything
+   * that deletes a consent row in a process that has a live directory goes
+   * through here.
+   */
+  deleteWithAudit(selector: ConsentSelector, audit: ConsentDeleteAudit): ConsentDeleteResult {
+    // Read the reference before the row is gone: it is what identifies the
+    // buffered actors that must be dropped with it, and after the delete there
+    // is nothing left to look it up by (that is the point of the delete).
+    const channelRef =
+      'channelRef' in selector
+        ? selector.channelRef
+        : (this.#store.findConsentByChannelId(selector.channelId)?.channelRef ?? null)
+    const result = this.#store.deleteConsent(selector, audit)
+    if (channelRef !== null) {
+      this.#forgetPending(channelRef)
+      this.#forgotten.add(channelRef)
+      while (this.#forgotten.size > this.#pendingLimit) {
+        const oldest = this.#forgotten.values().next()
+        if (oldest.done === true) break
+        this.#forgotten.delete(oldest.value)
+      }
+    }
+    return result
+  }
+
+  /**
+   * References deleted since the last call, and clears them.
+   *
+   * The engine drains this on every writer pass and purges each reference from
+   * the input arbiter, which is the only other place a `channelRef` lives
+   * (review round 1, M4). It is a queue rather than a callback because every
+   * arbiter mutation belongs to the single writer, and this deletion may have
+   * happened inside the chat source's ingest transaction.
+   */
+  drainForgotten(): readonly string[] {
+    const refs = [...this.#forgotten]
+    this.#forgotten.clear()
+    return refs
+  }
+
   #join(channelId: string, displayName: string): ConsentObservation {
     const now = this.#clock.nowUtcIso()
     const existing = this.#store.findConsentByChannelId(channelId)
@@ -214,13 +263,6 @@ export class ConsentDirectory {
     selector: ConsentSelector,
     reason: 'user_request' | 'consent_revoked',
   ): ConsentDeleteResult {
-    // Read the reference before the row is gone: it is what identifies the
-    // buffered actors that must be dropped with it, and after the delete there
-    // is nothing left to look it up by (that is the point of the delete).
-    const channelRef =
-      'channelRef' in selector
-        ? selector.channelRef
-        : (this.#store.findConsentByChannelId(selector.channelId)?.channelRef ?? null)
     const days =
       reason === 'user_request'
         ? this.#retention.revocation.userRequestDeletionDays
@@ -243,8 +285,7 @@ export class ConsentDirectory {
       deletedAt: rowsDeleted > 0 ? at : null,
       recordedAt: at,
     })
-    const result = this.#store.deleteConsent(selector, audit)
-    if (channelRef !== null) this.#forgetPending(channelRef)
+    const result = this.deleteWithAudit(selector, audit)
     this.#logger.info('consent deleted', { reason, rowsDeleted: result.rowsDeleted })
     return result
   }

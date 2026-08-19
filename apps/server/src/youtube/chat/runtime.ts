@@ -14,7 +14,7 @@ import { QuotaTracker } from '../quota/tracker.js'
 import { loadQuotaConfig } from '../quota/config.js'
 import { ChatSource, type LiveChatTargetResolver } from './chat-source.js'
 import { loadChatConfig, type ChatConfig } from './config.js'
-import type { ConsentObserver } from './sink.js'
+import type { ConsentFailure, ConsentObserver } from './sink.js'
 import type { ChatAccessTokens } from './retry.js'
 
 /**
@@ -48,6 +48,8 @@ export interface ChatRuntimeDeps {
    * has nothing to hand a raw item to, which is the closed behaviour.
    */
   readonly consent?: ConsentObserver
+  /** Consent decisions the ingest path could not apply; counted on `/metrics`. */
+  readonly onConsentFailure?: (failure: ConsentFailure) => void
   readonly onIngested?: (insertedCount: number) => void
   readonly resolveTarget?: LiveChatTargetResolver
   readonly logger?: Logger
@@ -97,6 +99,7 @@ export async function createChatSource(deps: ChatRuntimeDeps): Promise<ChatSourc
     quota,
     logger,
     ...(deps.consent === undefined ? {} : { consent: deps.consent }),
+    ...(deps.onConsentFailure === undefined ? {} : { onConsentFailure: deps.onConsentFailure }),
     ...(deps.onIngested === undefined ? {} : { onIngested: deps.onIngested }),
     ...(deps.resolveTarget === undefined ? {} : { resolveTarget: deps.resolveTarget }),
   })

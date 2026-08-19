@@ -53,7 +53,9 @@ export function testChatConfig(overrides: Partial<ChatConfig> = {}): ChatConfig 
 
 /** Writes straight to the store, the way `StateEngine.ingest` does. */
 export function storeInbox(store: PersistenceStore): InboxWriter {
-  return { ingest: (envelopes, checkpoint) => store.commitIngestBatch(envelopes, checkpoint) }
+  return {
+    ingest: (envelopes, checkpoint, hooks) => store.commitIngestBatch(envelopes, checkpoint, hooks),
+  }
 }
 
 /** Accepts the one Japanese alias the fixtures use; T6 owns the real parser. */

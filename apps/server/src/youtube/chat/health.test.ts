@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import type { HealthSignal } from '../../health/types.js'
 import { FakeClock } from '../../testing/fake-clock.js'
 import {
+  CHAT_CONSENT_SIGNAL,
   CHAT_KEEPALIVE_SIGNAL,
   CHAT_RECONNECT_SIGNAL,
   CHAT_TRANSPORT_SIGNAL,
@@ -342,5 +343,87 @@ describe('ChatSourceState', () => {
     expect(state.observe(null, null).reconnect.estimatedDuplicates).toBe(0)
     state.recordCommit({ duplicates: 3, dropped: 0, userEvents: 0, userEventAt: null })
     expect(state.observe(null, null).reconnect.estimatedDuplicates).toBe(3)
+  })
+})
+
+/**
+ * The consent signal (BOARD D-9, review round 1 B3/M1): it exists only while the
+ * gate is open, and the one thing it calls a fault is a withdrawal that has not
+ * been applied yet.
+ */
+describe('consent signal', () => {
+  it('is absent entirely while the gate is closed', () => {
+    const signals = buildChatHealthSignals(observation(), new FakeClock())
+    expect(signals.map((signal) => signal.name)).not.toContain(CHAT_CONSENT_SIGNAL)
+    // The closed configuration's `/health` is the document it was before T20b.
+    expect(signals).toHaveLength(4)
+    expect(JSON.stringify(signals)).not.toContain('consent')
+  })
+
+  it('reports the counters and stays ok when nothing failed', () => {
+    const state = new ChatSourceState(new FakeClock(), KEEPALIVE, true)
+    state.recordCommit({
+      duplicates: 0,
+      dropped: 0,
+      userEvents: 1,
+      userEventAt: '2026-08-19T00:00:00.000Z',
+      consentJoined: 1,
+      consentLeft: 1,
+    })
+
+    const signal = byName(
+      buildChatHealthSignals(state.observe(null, null), new FakeClock()),
+      CHAT_CONSENT_SIGNAL,
+    )
+    expect(signal.status).toBe('ok')
+    expect(signal.detail).toMatchObject({
+      joined: 1,
+      left: 1,
+      failures: 0,
+      withdrawalRetrying: false,
+    })
+  })
+
+  it('goes degraded for a withdrawal that could not be applied, until a commit proves the retry landed', () => {
+    const clock = new FakeClock()
+    const state = new ChatSourceState(clock, KEEPALIVE, true)
+    state.recordConsentFailure({ kind: 'withdrawal' })
+
+    const failed = byName(
+      buildChatHealthSignals(state.observe(null, null), clock),
+      CHAT_CONSENT_SIGNAL,
+    )
+    expect(failed.status).toBe('degraded')
+    expect(failed.reason).toBe('consent_withdrawal_retrying')
+    expect(failed.detail).toMatchObject({ failures: 1, lastFailureKind: 'withdrawal' })
+
+    // The rolled-back batch is retried; a commit is the evidence it got through.
+    state.recordCommit({
+      duplicates: 0,
+      dropped: 0,
+      userEvents: 0,
+      userEventAt: null,
+      consentLeft: 1,
+    })
+    const recovered = byName(
+      buildChatHealthSignals(state.observe(null, null), clock),
+      CHAT_CONSENT_SIGNAL,
+    )
+    expect(recovered.status).toBe('ok')
+    // The failure itself is not erased: it happened, and the count says so.
+    expect(recovered.detail).toMatchObject({ failures: 1, left: 1 })
+  })
+
+  it('does not call a failed JOIN a fault', () => {
+    // Nothing was stored, which is the safe side of the decision, and the batch
+    // went through — the viewer can send the command again (ticket §Review round 1).
+    const state = new ChatSourceState(new FakeClock(), KEEPALIVE, true)
+    state.recordConsentFailure({ kind: 'join' })
+    const signal = byName(
+      buildChatHealthSignals(state.observe(null, null), new FakeClock()),
+      CHAT_CONSENT_SIGNAL,
+    )
+    expect(signal.status).toBe('ok')
+    expect(signal.detail).toMatchObject({ failures: 1, lastFailureKind: 'join' })
   })
 })

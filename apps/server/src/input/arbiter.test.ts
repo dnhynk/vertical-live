@@ -361,6 +361,43 @@ describe('consented viewers', () => {
     expect(arbiter.admit(command('VOTE_A'), ACTOR_ONE, scope).disposition).toBe('direct')
   })
 
+  it('keeps a voter out of the prune until their scope is retired', async () => {
+    // Review round 1 (M4): a viewer with a remembered vote is exempt from
+    // `#pruneViewers`, so their `channelRef` stays in memory across window
+    // closes — for the whole broadcast if nothing ever retires the scope. The
+    // engine retires it when the choice window changes; this is what that does.
+    const { clock, arbiter } = withPerUser(5000)
+    const scope = 'gathering:2026-01-01T00:00:00.000Z'
+    arbiter.admit(command('VOTE_A'), ACTOR_ONE, scope)
+
+    // Two windows later, with the cooldown long expired, the vote is still known.
+    await advance(clock, 11_000)
+    arbiter.drainClosedWindows()
+    expect(arbiter.admit(command('VOTE_A'), ACTOR_ONE, scope).disposition).toBe('suppressed')
+
+    arbiter.forgetVoteScope(scope)
+    await advance(clock, 11_000)
+    arbiter.drainClosedWindows()
+    expect(arbiter.admit(command('VOTE_B'), ACTOR_ONE, scope).disposition).toBe('direct')
+  })
+
+  it('purges a viewer whose identity was deleted', async () => {
+    // `LEAVE`, a deletion request or the 30-day sweep: the consent row is gone,
+    // so the arbiter must not keep the reference it was keyed by (review round
+    // 1, M4). Observable as the cooldown disappearing with it.
+    const { clock, arbiter } = withPerUser(5000)
+    arbiter.admit(command('FEED'), ACTOR_ONE)
+    await advance(clock, 100)
+    expect(arbiter.admit(command('FEED'), ACTOR_ONE).disposition).toBe('suppressed')
+
+    arbiter.forgetViewer(ACTOR_ONE.channelRef)
+    expect(arbiter.admit(command('FEED'), ACTOR_ONE).disposition).toBe('direct')
+    // And it is only that viewer: nobody else's state is touched.
+    arbiter.admit(command('FEED'), ACTOR_TWO)
+    await advance(clock, 100)
+    expect(arbiter.admit(command('FEED'), ACTOR_TWO).disposition).toBe('suppressed')
+  })
+
   it('applies no per-user rule at all when none is configured', async () => {
     // The closed configuration and any caller that does not pass `perUser`.
     const { clock, arbiter } = makeArbiter()

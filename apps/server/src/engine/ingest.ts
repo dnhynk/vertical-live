@@ -3,7 +3,7 @@ import { timingSafeEqual } from 'node:crypto'
 import { IngestEnvelopeSchema, type IngestEnvelope } from '@vl/contract'
 
 import { classifySqliteError } from '../db/errors.js'
-import type { IngestBatchResult, SourceCheckpointInput } from '../db/types.js'
+import type { IngestBatchResult, IngestCommitHooks, SourceCheckpointInput } from '../db/types.js'
 
 /**
  * `POST /ingest/simulator` (TASK_SPECS 공통 규약, §T8, §T11).
@@ -43,7 +43,12 @@ import type { IngestBatchResult, SourceCheckpointInput } from '../db/types.js'
 
 /** The inbox write path (`StateEngine.ingest`), injected so this stays testable. */
 export interface InboxWriter {
-  ingest(envelopes: readonly IngestEnvelope[], checkpoint: SourceCheckpointInput): IngestBatchResult
+  ingest(
+    envelopes: readonly IngestEnvelope[],
+    checkpoint: SourceCheckpointInput,
+    /** Side effects that belong in the write's own transaction (T20b, B1/B3). */
+    hooks?: IngestCommitHooks,
+  ): IngestBatchResult
 }
 
 export interface SimulatorIngestOptions {

@@ -9,10 +9,16 @@ import {
 } from '../engine/testing/harness.js'
 import { createCommandParserPort, loadInputConfig, parserLimits } from '../input/index.js'
 import { loadRetentionConfig } from '../privacy/config.js'
+import { UserDeletionRequestHandler } from '../privacy/deletion-request.js'
 import { RetentionSweeper } from '../privacy/retention.js'
 import type { LogFields } from '../secrets/redaction.js'
 import { FakeClock } from '../testing/fake-clock.js'
-import { ChatIngestSink } from '../youtube/chat/sink.js'
+import {
+  ChatIngestSink,
+  ConsentObserveError,
+  type ConsentFailure,
+  type ConsentObserver,
+} from '../youtube/chat/sink.js'
 import { ConsentDirectory } from './directory.js'
 
 /**
@@ -41,7 +47,14 @@ interface Fixture {
   readonly sink: ChatIngestSink
   readonly directory: ConsentDirectory | null
   readonly logs: string[]
+  /** Consent decisions the sink could not apply, in order (review round 1, B3). */
+  readonly consentFailures: ConsentFailure[]
   dispose(): void
+}
+
+interface BuildOptions {
+  /** Wraps the live directory, so a test can make one decision fail. */
+  readonly wrapConsent?: (directory: ConsentDirectory) => ConsentObserver
 }
 
 let fixture: Fixture | undefined
@@ -83,7 +96,7 @@ function chatItem(options: {
  * directory only when the gate is open, and the same directory handed to both
  * the sink (which sees the raw item) and the engine (which needs the actor).
  */
-function build(identityGateOpen: boolean): Fixture {
+function build(identityGateOpen: boolean, options: BuildOptions = {}): Fixture {
   const logs: string[] = []
   const record = (message: string, fields?: LogFields): void => {
     logs.push(`${message} ${JSON.stringify(fields ?? {})}`)
@@ -107,8 +120,13 @@ function build(identityGateOpen: boolean): Fixture {
   })
 
   const inputConfig = loadInputConfig({ env: {} })
+  const consentFailures: ConsentFailure[] = []
+  const observer =
+    directory === null ? null : (options.wrapConsent?.(directory) ?? (directory as ConsentObserver))
   const sink = new ChatIngestSink({
-    inbox: { ingest: (envelopes, checkpoint) => harness.engine.ingest(envelopes, checkpoint) },
+    inbox: {
+      ingest: (envelopes, checkpoint, hooks) => harness.engine.ingest(envelopes, checkpoint, hooks),
+    },
     clock,
     parseCommand: createCommandParserPort({
       context: () => ({ identityGateOpen, voteWindowOpen: false }),
@@ -117,7 +135,12 @@ function build(identityGateOpen: boolean): Fixture {
     sourceKey: `youtube:${LIVE_CHAT_ID}`,
     liveChatId: LIVE_CHAT_ID,
     broadcastId: BROADCAST_ID,
-    ...(directory === null ? {} : { consent: directory }),
+    ...(observer === null
+      ? {}
+      : {
+          consent: observer,
+          onConsentFailure: (failure: ConsentFailure) => consentFailures.push(failure),
+        }),
   })
   harness.engine.start()
   return {
@@ -125,6 +148,7 @@ function build(identityGateOpen: boolean): Fixture {
     sink,
     directory,
     logs,
+    consentFailures,
     dispose: () => {
       harness.dispose()
       temp.dispose()
@@ -347,6 +371,170 @@ describe('consent mode (BOARD D-9)', () => {
     expect(JSON.stringify(ledger)).not.toContain(JOINER_NAME)
   })
 
+  it('does not revive a deleted identity when a page is replayed', () => {
+    // Review round 1 (B1). A duplicate page or a reconnect re-delivers the same
+    // `messageId`s (spec §7.3(2), §11). The consent decision follows the inbox
+    // dedupe, so a replayed `JOIN` is not a second consent.
+    const active = build(true)
+    fixture = active
+
+    const join = chatItem({
+      messageId: 'msg_test_join',
+      text: 'なのる',
+      channelId: JOINER,
+      displayName: JOINER_NAME,
+    })
+    deliver(active, [join])
+    expect(active.harness.store.findConsentByChannelId(JOINER)).not.toBeNull()
+
+    active.harness.clock.advance(60_000)
+    deliver(active, [
+      chatItem({
+        messageId: 'msg_test_leave',
+        text: 'なまえけす',
+        channelId: JOINER,
+        displayName: JOINER_NAME,
+      }),
+    ])
+    expect(active.harness.store.findConsentByChannelId(JOINER)).toBeNull()
+
+    // The same page again, exactly as a reconnect would deliver it.
+    active.harness.clock.advance(60_000)
+    const replay = active.sink.commit({
+      sourceShape: 'grpc',
+      items: [join],
+      nextPageToken: 'token_test_replay',
+    })
+    active.harness.engine.pump()
+
+    expect(replay.inserted).toBe(0)
+    expect(replay.duplicates).toBe(1)
+    expect(replay.consentJoined).toBe(0)
+    // The withdrawal stands: no row, and no new reference issued for one.
+    expect(active.harness.store.findConsentByChannelId(JOINER)).toBeNull()
+    expect(active.harness.store.countRows('viewer_consent')).toBe(0)
+    expect(dumpDatabase(active.harness.temp.file)).not.toContain(JOINER_NAME)
+  })
+
+  it('rolls the batch back when a withdrawal cannot be applied, and deletes on the retry', () => {
+    // Review round 1 (B3): withdrawal is fail-closed. The failed batch must not
+    // move the checkpoint, or the `LEAVE` is skipped for good and the identity
+    // stays until the 30-day sweep (spec §12.4, [S41] III.E.4.g).
+    let failWithdrawal = true
+    const active = build(true, {
+      wrapConsent: (directory) => ({
+        observe: (rawItem, envelope) => {
+          const isLeave =
+            envelope.validationStatus === 'valid' && envelope.consentCommand?.name === 'LEAVE'
+          if (isLeave && failWithdrawal) throw new Error('consent store unavailable')
+          return directory.observe(rawItem, envelope)
+        },
+      }),
+    })
+    fixture = active
+
+    deliver(active, [
+      chatItem({
+        messageId: 'msg_test_join',
+        text: 'なのる',
+        channelId: JOINER,
+        displayName: JOINER_NAME,
+      }),
+    ])
+    const committed = active.harness.store.getSourceCheckpoint(`youtube:${LIVE_CHAT_ID}`)
+    expect(committed?.nextPageToken).toBe('token_test_0001')
+
+    active.harness.clock.advance(60_000)
+    const leave = chatItem({
+      messageId: 'msg_test_leave',
+      text: 'なまえけす',
+      channelId: JOINER,
+      displayName: JOINER_NAME,
+    })
+    expect(() =>
+      active.sink.commit({
+        sourceShape: 'grpc',
+        items: [leave],
+        nextPageToken: 'token_after_failed_leave',
+      }),
+    ).toThrow(ConsentObserveError)
+
+    // Nothing moved: not the checkpoint, not the inbox — so the source refetches
+    // these items from the same token instead of skipping the decision.
+    expect(active.consentFailures).toEqual([{ kind: 'withdrawal' }])
+    expect(active.harness.store.getSourceCheckpoint(`youtube:${LIVE_CHAT_ID}`)?.nextPageToken).toBe(
+      'token_test_0001',
+    )
+    expect(active.harness.store.findConsentByChannelId(JOINER)).not.toBeNull()
+
+    // The retry — same items, same token — deletes.
+    failWithdrawal = false
+    const retried = active.sink.commit({
+      sourceShape: 'grpc',
+      items: [leave],
+      nextPageToken: 'token_after_failed_leave',
+    })
+    active.harness.engine.pump()
+    expect(retried.consentLeft).toBe(1)
+    expect(active.harness.store.findConsentByChannelId(JOINER)).toBeNull()
+    expect(active.harness.store.getSourceCheckpoint(`youtube:${LIVE_CHAT_ID}`)?.nextPageToken).toBe(
+      'token_after_failed_leave',
+    )
+  })
+
+  it('answers a deletion request through the same boundary the chat path uses', () => {
+    // Review round 1 (B2): the T13 handler deleted the row straight through the
+    // store, which left the directory's buffered display name in place — so a
+    // message received a moment earlier could still put the name on screen after
+    // the request was answered (spec §12.4).
+    const active = build(true)
+    fixture = active
+    const directory = active.directory as ConsentDirectory
+
+    deliver(active, [
+      chatItem({
+        messageId: 'msg_test_join',
+        text: 'なのる',
+        channelId: JOINER,
+        displayName: JOINER_NAME,
+      }),
+    ])
+    // Received, not yet processed: the actor is buffered in memory right now.
+    active.harness.clock.advance(60_000)
+    active.sink.commit({
+      sourceShape: 'grpc',
+      items: [
+        chatItem({
+          messageId: 'msg_test_feed_pending',
+          text: 'ごはん',
+          channelId: JOINER,
+          displayName: JOINER_NAME,
+        }),
+      ],
+      nextPageToken: 'token_test_pending',
+    })
+    expect(directory.pendingCount).toBe(1)
+
+    const handler = new UserDeletionRequestHandler({
+      store: active.harness.store,
+      clock: active.harness.clock,
+      config: loadRetentionConfig(),
+      directory,
+    })
+    const receipt = handler.handle({ channelId: JOINER })
+
+    expect(receipt.rowsDeleted).toBe(1)
+    expect(active.harness.store.findConsentByChannelId(JOINER)).toBeNull()
+    // The derived copy went with the row: nothing left to attribute.
+    expect(directory.takeActor('msg_test_feed_pending')).toBeNull()
+    expect(directory.pendingCount).toBe(0)
+
+    // And the message that was already in the inbox is published anonymously.
+    active.harness.engine.pump()
+    for (const effect of reactions(active)) expect(effect.actor ?? null).toBeNull()
+    expect(JSON.stringify(active.harness.publisher.effects)).not.toContain(JOINER_NAME)
+  })
+
   it('is inert in the closed configuration', () => {
     // BOARD A-1: no directory is constructed, so `なのる` is refused by the
     // parser and the same items produce exactly the anonymous behaviour.
@@ -365,5 +553,35 @@ describe('consent mode (BOARD D-9)', () => {
     const dump = dumpDatabase(active.harness.temp.file)
     expect(dump).not.toContain(JOINER)
     expect(dump).toContain('msg_test_feed')
+  })
+})
+
+describe('arbiter purge (review round 1, M4)', () => {
+  it('drains the deleted references on every writer pass', () => {
+    // The deletion happens outside the writer — inside the chat source's ingest
+    // transaction, or in the T13 request handler — so the references are handed
+    // over as a queue and the writer purges the arbiter with them. Before the
+    // fix `forgetVoteScope` and the viewer table had no production caller at all.
+    const forgotten = ['ref_test_purge_0000000000000001']
+    let drains = 0
+    const harness = createEngineHarness({
+      identity: {
+        takeActor: () => null,
+        drainForgotten: () => {
+          drains += 1
+          const drained = [...forgotten]
+          forgotten.length = 0
+          return drained
+        },
+      },
+    })
+    try {
+      harness.engine.start()
+      harness.engine.pump()
+      expect(drains).toBeGreaterThan(0)
+      expect(forgotten).toEqual([])
+    } finally {
+      harness.dispose()
+    }
   })
 })

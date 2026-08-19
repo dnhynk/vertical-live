@@ -175,7 +175,9 @@ const simulatorToken = config.simulator.enabled
 const ingest = new SimulatorIngestEndpoint({
   // Through the engine, not the store: that is where the storage-boundary
   // sanitizer and the inbox notification live.
-  inbox: { ingest: (envelopes, checkpoint) => engine.ingest(envelopes, checkpoint) },
+  inbox: {
+    ingest: (envelopes, checkpoint, hooks) => engine.ingest(envelopes, checkpoint, hooks),
+  },
   enabled: config.simulator.enabled,
   token: simulatorToken,
   onIngested: () => {
@@ -644,7 +646,14 @@ chatSource = await createChatSource({
   clock: systemClock,
   inputConfig,
   identityGateOpen: config.engine.identityGateOpen,
-  ...(consentDirectory === null ? {} : { consent: consentDirectory }),
+  ...(consentDirectory === null
+    ? {}
+    : {
+        consent: consentDirectory,
+        onConsentFailure: (failure) => {
+          engine.countConsentFailure(failure.kind)
+        },
+      }),
   config: chatConfig,
   logger: stdoutLogger,
   ...(tokens === null ? {} : { auth: tokens }),

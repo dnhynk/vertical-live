@@ -2,11 +2,13 @@ import type { Clock } from '../../clock.js'
 import type { ApiErrorClassification } from '../quota/classify.js'
 import type { ChatKeepaliveConfig } from './config.js'
 import type {
+  ChatConsentObservation,
   ChatErrorObservation,
   ChatMode,
   ChatObservation,
   ChatReconnectObservation,
 } from './health.js'
+import type { ConsentFailure } from './sink.js'
 
 /**
  * The observations both source paths write and the health signals read
@@ -70,9 +72,24 @@ export class ChatSourceState {
   #userEventTotal = 0
   #droppedItems = 0
 
-  constructor(clock: Clock, keepalive: ChatKeepaliveConfig) {
+  /** Consent counters, kept only while the gate is open; see `#consentOpen`. */
+  readonly #consentOpen: boolean
+  #consentJoined = 0
+  #consentLeft = 0
+  #consentFailures = 0
+  #consentLastFailure: { kind: string; at: string } | null = null
+  #consentWithdrawalPending = false
+
+  /**
+   * `consentGateOpen` decides whether this source reports consent at all. Closed,
+   * `observe()` carries no consent field and `/health` gains no signal, so the
+   * closed configuration's output is byte-for-byte what it was before T20b
+   * (review round 1, M1 applied to the source's own surface).
+   */
+  constructor(clock: Clock, keepalive: ChatKeepaliveConfig, consentGateOpen = false) {
     this.#clock = clock
     this.#keepalive = keepalive
+    this.#consentOpen = consentGateOpen
   }
 
   get mode(): ChatMode {
@@ -145,6 +162,8 @@ export class ChatSourceState {
     dropped: number
     userEvents: number
     userEventAt: string | null
+    consentJoined?: number
+    consentLeft?: number
   }): void {
     this.#duplicatesSinceReconnect += outcome.duplicates
     this.#droppedItems += outcome.dropped
@@ -153,6 +172,25 @@ export class ChatSourceState {
       this.#userEventLastAtMonotonicMs = this.#clock.monotonicMs()
       this.#userEventTotal += outcome.userEvents
     }
+    this.#consentJoined += outcome.consentJoined ?? 0
+    this.#consentLeft += outcome.consentLeft ?? 0
+    // A batch only commits when no withdrawal failed inside it (the sink rolls
+    // back instead), so a commit is the evidence that the retry got through.
+    this.#consentWithdrawalPending = false
+  }
+
+  /**
+   * One consent decision the ingest path could not apply (review round 1, B3).
+   *
+   * Counted here rather than in a return value nobody reads, so it reaches
+   * `/health`; a withdrawal additionally marks the source as retrying, which is
+   * the only consent state that is a *fault* — the batch was rolled back and the
+   * deletion has not happened yet.
+   */
+  recordConsentFailure(failure: ConsentFailure): void {
+    this.#consentFailures += 1
+    this.#consentLastFailure = { kind: failure.kind, at: this.#clock.nowUtcIso() }
+    if (failure.kind === 'withdrawal') this.#consentWithdrawalPending = true
   }
 
   /**
@@ -216,6 +254,16 @@ export class ChatSourceState {
       estimatedDuplicates: this.#duplicatesSinceReconnect,
       estimatedLostMessages: this.#estimatedLostMessages,
     }
+    const consent: ChatConsentObservation | null = this.#consentOpen
+      ? {
+          joined: this.#consentJoined,
+          left: this.#consentLeft,
+          failures: this.#consentFailures,
+          lastFailureKind: this.#consentLastFailure?.kind ?? null,
+          lastFailureAt: this.#consentLastFailure?.at ?? null,
+          withdrawalRetrying: this.#consentWithdrawalPending,
+        }
+      : null
     return {
       mode: this.#mode,
       connected: this.#connected,
@@ -235,6 +283,7 @@ export class ChatSourceState {
         lastAtMonotonicMs: this.#userEventLastAtMonotonicMs,
         total: this.#userEventTotal,
       },
+      consent,
     }
   }
 }

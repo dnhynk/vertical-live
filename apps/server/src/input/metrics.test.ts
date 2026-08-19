@@ -86,7 +86,6 @@ describe('reset', () => {
     expect(metrics.snapshot()).toEqual({
       commandLike: 0,
       accepted: 0,
-      consentAccepted: 0,
       rejected: 0,
       rejectedByReason: {
         too_long: 0,
@@ -102,11 +101,9 @@ describe('reset', () => {
         extraneous_text: 0,
         invalid_argument: 0,
         vote_disabled: 0,
-        consent_disabled: 0,
       },
       directApplied: 0,
       aggregated: 0,
-      suppressed: 0,
       windowsClosed: 0,
       windowContributions: 0,
       commandSuccessRatio: null,

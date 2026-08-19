@@ -37,12 +37,19 @@ import type { SourceCheckpoint } from '../../db/types.js'
  * is the token a reconnect must present.
  *
  * The consent gate adds one step and no field. When it is open, each raw item is
- * shown to the `ConsentDirectory` *before* the envelope is written, because the
- * raw item is the only thing that still carries `authorDetails` — the envelope
- * never has a field for it. The directory writes or deletes the one consent row
- * and remembers a consented viewer's name in memory; nothing it saw is added to
- * the envelope, so the inbox is byte-for-byte what it was while the gate was
- * closed (BOARD D-9, spec §7.4).
+ * shown to the `ConsentDirectory` **inside the inbox transaction, and only for an
+ * envelope that transaction actually inserted** (`IngestCommitHooks`), because
+ * the raw item is the only thing that still carries `authorDetails` — the
+ * envelope never has a field for it. The directory writes or deletes the one
+ * consent row and remembers a consented viewer's name in memory; nothing it saw
+ * is added to the envelope, so the inbox is byte-for-byte what it was while the
+ * gate was closed (BOARD D-9, spec §7.4).
+ *
+ * Putting it on the inbox's own idempotency boundary is not tidiness. A
+ * duplicate page or a reconnect replays the same `messageId`s; run consent
+ * before the dedupe and a replayed `JOIN` **revives** an identity its `LEAVE`
+ * already deleted, with a fresh `channelRef` (review round 1, B1). The dedupe
+ * decides once, and the consent decision follows it.
  */
 
 /**
@@ -52,6 +59,50 @@ import type { SourceCheckpoint } from '../../db/types.js'
  */
 export interface ConsentObserver {
   observe(rawItem: unknown, envelope: IngestEnvelope): { readonly kind: string }
+}
+
+/**
+ * Which consent decision could not be applied. `withdrawal` is the one the
+ * server refuses to commit past (see `ConsentObserveError`); the other two are
+ * counted and reported.
+ */
+export type ConsentFailureKind = 'withdrawal' | 'join' | 'message'
+
+export interface ConsentFailure {
+  readonly kind: ConsentFailureKind
+}
+
+/**
+ * A `LEAVE` whose consent mutation threw, raised out of the ingest transaction
+ * so the batch — rows *and* checkpoint — rolls back (review round 1, B3).
+ *
+ * **Withdrawal and deletion are fail-closed.** The earlier version counted the
+ * failure and committed anyway, which retired the checkpoint past the withdrawal:
+ * the command was never retried, and the identity stayed until the 30-day sweep.
+ * Committing the rows without the deletion would be just as wrong now that the
+ * consent decision follows the inbox dedupe — the replayed items would be
+ * duplicates, so the decision would be skipped a second time (B1). Rolling back
+ * puts the same items back in front of the same token, and the retry applies the
+ * deletion.
+ *
+ * The cost is the deliberate one: while the consent store keeps failing this
+ * source stops advancing. That is visible — `consecutiveFailures`,
+ * `retryBudgetExhausted` and the consent signal on `/health`, the
+ * `consent_observe_failed_*` counters on `/metrics` — and it is the trade §12.4
+ * asks for, because the alternative is a viewer who asked to be deleted and was
+ * not.
+ *
+ * A `JOIN` is **not** fail-closed: nothing was stored, which is the safe side of
+ * this decision, and the viewer can send it again (ticket §Review round 1).
+ */
+export class ConsentObserveError extends Error {
+  constructor(cause: unknown) {
+    super(
+      `a LEAVE (consent withdrawal) could not be applied, so the batch and its checkpoint were rolled back rather than skipping the deletion (spec §12.4): ${cause instanceof Error ? cause.message : String(cause)}`,
+    )
+    this.name = 'ConsentObserveError'
+    this.cause = cause
+  }
 }
 
 export interface ChatIngestSinkOptions {
@@ -74,6 +125,14 @@ export interface ChatIngestSinkOptions {
    * nothing for it to read.
    */
   readonly consent?: ConsentObserver
+  /**
+   * Called for every consent decision that could not be applied, before the
+   * batch is rolled back or committed. It carries a kind and nothing else — the
+   * sink never learns whose decision it was — and it is what puts the failure on
+   * `/health` and `/metrics` instead of leaving it in a return value nobody
+   * reads (review round 1, B3).
+   */
+  readonly onConsentFailure?: (failure: ConsentFailure) => void
 }
 
 export interface ChatBatch {
@@ -102,22 +161,35 @@ export interface ChatBatchOutcome {
    */
   readonly consentJoined: number
   readonly consentLeft: number
-  /** Items whose consent decision could not be applied; see `normalizeChatItems`. */
+  /**
+   * Consent decisions this batch could not apply. A failed `LEAVE` never reaches
+   * this field — it throws `ConsentObserveError` and there is no outcome at all,
+   * which is the point of fail-closed withdrawal (review round 1, B3).
+   */
   readonly consentFailed: number
 }
 
 /** One item of an API response, as its shape's adapter reads it. */
 export type ChatItemAdapter = (item: unknown, context: IngestAdapterContext) => IngestEnvelope
 
+/**
+ * An envelope and the raw item it was made of, kept together until the write.
+ *
+ * The pair exists because the consent decision now happens inside the inbox
+ * transaction: the raw item — the only carrier of `authorDetails` — has to
+ * survive until the row it belongs to has been inserted, and no further.
+ */
+export interface NormalizedChatItem {
+  readonly item: unknown
+  readonly envelope: IngestEnvelope
+}
+
 export interface NormalizedChatItems {
-  readonly envelopes: IngestEnvelope[]
+  readonly entries: NormalizedChatItem[]
   /** Items no envelope could be made of. Reported, never silently swallowed. */
   readonly dropped: number
   /** Valid (supported) events among them. */
   readonly userEvents: number
-  readonly consentJoined: number
-  readonly consentLeft: number
-  readonly consentFailed: number
 }
 
 /**
@@ -127,19 +199,19 @@ export interface NormalizedChatItems {
  * the adapters are written to return a minimal `invalid` envelope instead — and
  * that is exactly why the failure mode has to be "drop and count", not "retry
  * this response forever" (spec §7.3(2)).
+ *
+ * No consent decision is made here any more: it belongs to the transaction that
+ * inserts the row, so this keeps the raw item next to its envelope and hands the
+ * pair to `commit` (review round 1, B1).
  */
 export function normalizeChatItems(
   items: readonly unknown[],
   adapt: ChatItemAdapter,
   context: IngestAdapterContext,
-  consent?: ConsentObserver,
 ): NormalizedChatItems {
-  const envelopes: IngestEnvelope[] = []
+  const entries: NormalizedChatItem[] = []
   let dropped = 0
   let userEvents = 0
-  let consentJoined = 0
-  let consentLeft = 0
-  let consentFailed = 0
   for (const item of items) {
     let envelope: IngestEnvelope
     try {
@@ -153,28 +225,9 @@ export function normalizeChatItems(
       continue
     }
     if (envelope.validationStatus === 'valid') userEvents += 1
-    // The raw item is still in scope here and nowhere later: this is the last
-    // moment `authorDetails` exists (BOARD D-9).
-    //
-    // A failure here is counted and does not abort the batch. Letting it throw
-    // would roll back the whole response *and* its checkpoint, so the same items
-    // would be fetched again forever (§7.3(2)) and the room would stop moving —
-    // a worse outcome than one consent decision not landing. The decision is not
-    // lost silently either: `consentFailed` reaches `/health` and `/metrics`, a
-    // viewer can send the command again, and the 30-day sweep still expires
-    // anything a failed `LEAVE` left behind (config/retention.json).
-    if (consent !== undefined) {
-      try {
-        const observation = consent.observe(item, envelope)
-        if (observation.kind === 'joined') consentJoined += 1
-        if (observation.kind === 'left') consentLeft += 1
-      } catch {
-        consentFailed += 1
-      }
-    }
-    envelopes.push(envelope)
+    entries.push({ item, envelope })
   }
-  return { envelopes, dropped, userEvents, consentJoined, consentLeft, consentFailed }
+  return { entries, dropped, userEvents }
 }
 
 export class ChatIngestSink {
@@ -215,24 +268,50 @@ export class ChatIngestSink {
       parseCommand: this.#options.parseCommand,
     }
     const adapt = batch.sourceShape === 'grpc' ? fromGrpcStreamListItem : fromRestListItem
-    const { envelopes, dropped, userEvents, consentJoined, consentLeft, consentFailed } =
-      normalizeChatItems(batch.items, adapt, context, this.#options.consent)
+    const { entries, dropped, userEvents } = normalizeChatItems(batch.items, adapt, context)
 
-    // Committed even when `envelopes` is empty: a heartbeat response with a new
+    let consentJoined = 0
+    let consentLeft = 0
+    let consentFailed = 0
+    const consent = this.#options.consent
+    // Runs inside `commitIngestBatch`'s transaction, once per envelope that
+    // transaction inserted (never for a duplicate), with the raw item that
+    // produced it still in scope — the last moment `authorDetails` exists
+    // (BOARD D-9). A throw here rolls the batch back; see `ConsentObserveError`.
+    const onInserted = (_envelope: IngestEnvelope, index: number): void => {
+      const entry = entries[index]
+      if (consent === undefined || entry === undefined) return
+      try {
+        const observation = consent.observe(entry.item, entry.envelope)
+        if (observation.kind === 'joined') consentJoined += 1
+        if (observation.kind === 'left') consentLeft += 1
+      } catch (error) {
+        consentFailed += 1
+        const kind = consentFailureKind(entry.envelope)
+        this.#options.onConsentFailure?.({ kind })
+        if (kind === 'withdrawal') throw new ConsentObserveError(error)
+      }
+    }
+
+    // Committed even when `entries` is empty: a heartbeat response with a new
     // token still has to move the checkpoint, or a reconnect would replay from
     // an older point.
     const token =
       batch.nextPageToken === null || batch.nextPageToken === '' ? null : batch.nextPageToken
-    const result = this.#options.inbox.ingest(envelopes, {
-      sourceKey: this.#options.sourceKey,
-      liveChatId: this.#options.liveChatId,
-      nextPageToken: token ?? this.#pageToken,
-    })
+    const result = this.#options.inbox.ingest(
+      entries.map((entry) => entry.envelope),
+      {
+        sourceKey: this.#options.sourceKey,
+        liveChatId: this.#options.liveChatId,
+        nextPageToken: token ?? this.#pageToken,
+      },
+      consent === undefined ? {} : { onInserted },
+    )
     this.#pageToken = result.checkpoint.nextPageToken
     if (result.insertedCount > 0) this.#options.onIngested?.(result.insertedCount)
 
     return {
-      accepted: envelopes.length,
+      accepted: entries.length,
       inserted: result.insertedCount,
       duplicates: result.duplicateCount,
       dropped,
@@ -245,4 +324,15 @@ export class ChatIngestSink {
       consentFailed,
     }
   }
+}
+
+/** Which decision the failed observation was about, read off the envelope. */
+function consentFailureKind(envelope: IngestEnvelope): ConsentFailureKind {
+  // Only a valid envelope has a `consentCommand` slot at all; an invalid one
+  // never carried a decision, so its failure is a message-path failure.
+  const name =
+    envelope.validationStatus === 'valid' ? (envelope.consentCommand?.name ?? null) : null
+  if (name === 'LEAVE') return 'withdrawal'
+  if (name === 'JOIN') return 'join'
+  return 'message'
 }

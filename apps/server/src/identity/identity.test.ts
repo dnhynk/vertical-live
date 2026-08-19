@@ -379,6 +379,42 @@ describe('ConsentDirectory', () => {
   })
 })
 
+describe('references handed to the arbiter purge (review round 1, M4)', () => {
+  it('reports every deleted reference once, whichever path deleted it', () => {
+    const { directory, active } = open()
+    directory.observe(
+      grpcItem({ messageId: 'msg_test_join', channelId: VIEWER_ONE }),
+      envelope({ messageId: 'msg_test_join', consent: 'JOIN' }),
+    )
+    const ref = active.store.findConsentByChannelId(VIEWER_ONE)?.channelRef
+    expect(directory.drainForgotten()).toEqual([])
+
+    directory.observe(
+      grpcItem({ messageId: 'msg_test_leave', channelId: VIEWER_ONE }),
+      envelope({ messageId: 'msg_test_leave', consent: 'LEAVE' }),
+    )
+
+    // The engine drains this on its next pass and purges the input arbiter, the
+    // only other place a `channelRef` lives.
+    expect(directory.drainForgotten()).toEqual([ref])
+    // Drained means gone: the next pass has nothing to repeat.
+    expect(directory.drainForgotten()).toEqual([])
+  })
+
+  it('reports a reference deleted by a request as well', () => {
+    const { directory, active } = open()
+    directory.observe(
+      grpcItem({ messageId: 'msg_test_join', channelId: VIEWER_ONE }),
+      envelope({ messageId: 'msg_test_join', consent: 'JOIN' }),
+    )
+    const ref = active.store.findConsentByChannelId(VIEWER_ONE)?.channelRef
+    directory.drainForgotten()
+
+    directory.forget({ channelId: VIEWER_ONE }, 'user_request')
+    expect(directory.drainForgotten()).toEqual([ref])
+  })
+})
+
 describe('the consent notice', () => {
   it('is versioned by the document it comes from', () => {
     // A changed notice needs a fresh consent, and `notice_version` is what makes

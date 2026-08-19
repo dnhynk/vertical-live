@@ -73,6 +73,7 @@ import type {
   InboxProcessingRecord,
   InboxRow,
   IngestBatchResult,
+  IngestCommitHooks,
   IngestInsertResult,
   PaidLedgerRecord,
   PersistedDeadline,
@@ -270,10 +271,16 @@ export class PersistenceStore {
    * A duplicate event key is not an error — the same message can arrive again
    * after a reconnect. It is reported per envelope so the adapter can publish a
    * duplicate estimate (spec §11 연결 복구) without a second query.
+   *
+   * `hooks.onInserted` is how a caller puts its own side effect on that same
+   * boundary: it is called for the envelopes this transaction inserted and not
+   * for the ones it recognized, so a replayed page cannot re-run it, and a throw
+   * takes the rows and the checkpoint down with it.
    */
   commitIngestBatch(
     inputs: readonly InboxInput[],
     checkpoint: SourceCheckpointInput,
+    hooks: IngestCommitHooks = {},
   ): IngestBatchResult {
     const validated = inputs.map((input) => {
       const submission = toSubmission(input)
@@ -303,7 +310,7 @@ export class PersistenceStore {
 
     const commit = this.#db.transaction((): IngestBatchResult => {
       const results: IngestInsertResult[] = []
-      for (const { envelope, argumentRejected } of validated) {
+      for (const [index, { envelope, argumentRejected }] of validated.entries()) {
         const giftCount = giftEffectiveCountOf(envelope)
         const inserted = insert.get(
           envelope.messageId,
@@ -323,6 +330,10 @@ export class PersistenceStore {
             messageId: envelope.messageId,
             duplicate: false,
           })
+          // Inside the transaction, and only for a row this call inserted: a
+          // caller's side effect gets the inbox's own idempotency and its own
+          // rollback (`IngestCommitHooks`).
+          hooks.onInserted?.(envelope, index)
           continue
         }
         // Only a row with a `message_id` can conflict: the unique index treats

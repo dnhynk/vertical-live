@@ -44,6 +44,21 @@ export interface IngestBatchResult {
 }
 
 /**
+ * Side effects that must happen inside the *same* transaction as the inbox
+ * write, on the same idempotency boundary (review round 1, B1/B3).
+ *
+ * `onInserted` runs once per envelope this call actually inserted, in input
+ * order, and never for an event key the inbox already had — so a replayed page
+ * repeats the row *and* the effect exactly zero times. Throwing from it rolls
+ * the whole batch back, checkpoint included, which is what lets a caller refuse
+ * to commit a response whose side effect could not be applied: the same items
+ * are fetched again from the same token and the effect is retried with them.
+ */
+export interface IngestCommitHooks {
+  readonly onInserted?: (envelope: IngestEnvelope, index: number) => void
+}
+
+/**
  * One envelope on its way into the inbox, plus what a storage-boundary filter
  * did to it.
  *

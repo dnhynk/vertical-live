@@ -328,7 +328,14 @@ export class InputArbiter {
     }
   }
 
-  /** Drops the remembered vote of a choice window that has closed. */
+  /**
+   * Drops the remembered vote of a choice window that has closed.
+   *
+   * Called by the engine every time the open choice changes (review round 1,
+   * M4): a viewer who voted is exempt from `#pruneViewers` while the vote is
+   * remembered, so without this their `channelRef` would stay in memory for the
+   * rest of the broadcast — long after the decision it belonged to.
+   */
   forgetVoteScope(voteScope: string): void {
     for (const [channelRef, viewer] of this.#viewers) {
       if (viewer.votedScope === voteScope) {
@@ -336,6 +343,19 @@ export class InputArbiter {
       }
     }
     this.#pruneViewers()
+  }
+
+  /**
+   * Drops one viewer's state outright, because the identity behind the reference
+   * has been deleted — `LEAVE`, a user deletion request, or the 30-day sweep
+   * (BOARD D-9, spec §12.4).
+   *
+   * The entry holds no name and no channel id, so what is removed is a random
+   * string and two numbers; it is removed anyway, because "deleted immediately"
+   * should not have a footnote about a cooldown table (review round 1, M4).
+   */
+  forgetViewer(channelRef: string): void {
+    this.#viewers.delete(channelRef)
   }
 
   /**

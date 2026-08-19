@@ -22,6 +22,7 @@ import type {
   InboxProcessingRecord,
   InboxRow,
   IngestBatchResult,
+  IngestCommitHooks,
   PaidLedgerRecord,
   PersistedEffect,
   SourceCheckpointInput,
@@ -118,6 +119,13 @@ export interface EnginePublisher {
  */
 export interface ActorResolver {
   takeActor(messageId: string): ConsentedActor | null
+  /**
+   * References whose identity was deleted since the last call (`LEAVE`, a user
+   * deletion request, the 30-day sweep). The engine purges each one from the
+   * input arbiter, which is the only other place a `channelRef` lives (review
+   * round 1, M4). Optional: a resolver that never deletes anything has none.
+   */
+  drainForgotten?(): readonly string[]
 }
 
 export const nullPublisher: EnginePublisher = {
@@ -238,6 +246,8 @@ export class StateEngine {
   #processedSeq = 0
   #inputMode: InputMode = 'direct'
   #arbiter: InputArbiter
+  /** Choice window the arbiter's remembered votes belong to; see `#syncVoteScope`. */
+  #lastVoteScope: string | null = null
   #ready = false
   #started = false
   #lastCommittedAt: string | null = null
@@ -389,18 +399,37 @@ export class StateEngine {
    * puts the storage-boundary sanitizer in exactly one place, so an argument
    * outside the content's choice vocabulary cannot be persisted by *any* source —
    * this endpoint today, T9's adapter tomorrow (R-T8-1 blocker 4).
+   *
+   * `hooks` is passed straight through to the store: the sanitizer keeps input
+   * order and count, so a hook's index still names the envelope the caller sent.
    */
   ingest(
     envelopes: readonly IngestEnvelope[],
     checkpoint: SourceCheckpointInput,
+    hooks: IngestCommitHooks = {},
   ): IngestBatchResult {
     const sanitized = sanitizeEnvelopeArguments(envelopes)
     if (sanitized.droppedCount > 0) {
       this.#metrics.count('ingest_argument_dropped', sanitized.droppedCount)
     }
-    const result = this.#store.commitIngestBatch(sanitized.submissions, checkpoint)
+    const result = this.#store.commitIngestBatch(sanitized.submissions, checkpoint, hooks)
     this.notifyIngest()
     return result
+  }
+
+  /**
+   * One consent decision the ingest path could not apply (T20b, review round 1
+   * B3). `/metrics` is this engine's snapshot, so the counter lives here; the
+   * name is a machine token and the value an anonymous integer, and the key
+   * exists only once a failure has happened — the closed configuration's
+   * `/metrics` output is unchanged.
+   *
+   * The union repeats `ConsentFailureKind` on purpose: the engine does not
+   * import from the YouTube adapter (the dependency runs the other way), and the
+   * one caller in `main.ts` fails to typecheck if the two ever drift.
+   */
+  countConsentFailure(kind: 'withdrawal' | 'join' | 'message'): void {
+    this.#metrics.count(`consent_observe_failed_${kind}`)
   }
 
   /**
@@ -651,6 +680,8 @@ export class StateEngine {
 
   #runPending(): number {
     let commits = 0
+    this.#purgeForgottenViewers()
+    this.#syncVoteScope()
     // Every pass re-asks the inbox: a batch committed by another path (the
     // simulator endpoint, T9's adapter) between two ticks must not wait for a
     // `notifyIngest` that a future caller might forget.
@@ -677,7 +708,39 @@ export class StateEngine {
     commits += this.#flushResolved(now)
     commits += this.#reconcileInteraction(now)
     this.#sweepEffects(now)
+    // After the pass as well as before it: the choice window this pass opened or
+    // closed is what decides whose vote the arbiter is still holding.
+    this.#syncVoteScope()
     return commits
+  }
+
+  /**
+   * Drops the arbiter state of every identity that has been deleted (review
+   * round 1, M4).
+   *
+   * The deletion itself happened elsewhere — inside the chat source's ingest
+   * transaction, or in the T13 request handler — and the arbiter belongs to the
+   * single writer, so the references are handed over as a queue and purged here.
+   */
+  #purgeForgottenViewers(): void {
+    const forgotten = this.#identity?.drainForgotten?.() ?? []
+    for (const channelRef of forgotten) this.#arbiter.forgetViewer(channelRef)
+  }
+
+  /**
+   * Retires the vote the arbiter is still remembering once the choice window it
+   * belongs to is over (review round 1, M4).
+   *
+   * A viewer who voted is exempt from the arbiter's own pruning for as long as
+   * the vote is remembered, so without this call their `channelRef` would sit in
+   * memory for the rest of the broadcast. With it, the exemption lasts exactly
+   * as long as the decision does.
+   */
+  #syncVoteScope(): void {
+    const scope = this.#voteScope()
+    if (scope === this.#lastVoteScope) return
+    if (this.#lastVoteScope !== null) this.#arbiter.forgetVoteScope(this.#lastVoteScope)
+    this.#lastVoteScope = scope
   }
 
   /**
