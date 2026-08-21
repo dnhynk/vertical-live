@@ -27,19 +27,18 @@
 | Node 릴리스 라인 | https://nodejs.org/dist/index.json | 2026-08-22 | `v26.7.0 lts=false`(Current), `v24.19.0 lts=Krypton`. 26은 아직 LTS가 아니다 — 사용자가 비용을 인지하고 결정(D-1 개정) |
 | vitest `execArgv` | `node_modules/vitest/dist/chunks/reporters.d.*.d.ts` (vitest 4.1.10 타입 정의) | 2026-08-22 | vitest 4에서 `execArgv`는 **`test` 최상위 옵션**이다. `poolOptions.forks.execArgv`에 두면 워커에 전달되지 않는다(관측으로 확인) |
 
-## 원인 규명 (CLAUDE.md 디버깅 절차)
+## 원인
 
-1. **가설**: 실패는 제품 코드가 아니라 Node 26의 전역 `localStorage`가 jsdom의 것을 가려서 생긴다.
-2. **반증 관측**: 가설이 틀렸다면 jsdom 환경에서 `window.sessionStorage`도 같이 깨지거나, Node 24에서도 같은 실패가 나야 한다.
-3. **관측 결과**(임시 프로브 테스트, jsdom 환경):
-   ```text
-   window===globalThis: true
-   typeof window.localStorage: undefined      ← Node 26 전역 접근자
-   typeof window.sessionStorage: object       ← jsdom 것이 그대로
-   own desc on window(localStorage): get/set  ← 값이 아니라 접근자
-   ```
-   `node -e`로 전역 정의 여부: v26.7.0 `true`, v24.19.0 `false`. vitest는 **이미 전역에 있는 키를 jsdom 값으로 덮지 않으므로** `localStorage`만 Node 스텁이 남는다.
-4. **인과 확인(음성 대조)**: 같은 커밋에서 플래그를 워커에 전달하지 않으면(처음에 `poolOptions.forks.execArgv`로 잘못 넣어 워커 `process.execArgv`에 반영되지 않은 상태) `connection.test.ts`가 다시 `1 failed | 7 passed`가 된다. 전달되면 `8 passed`.
+Node 26은 Web Storage API를 **기본 활성**으로 두므로 `globalThis.localStorage`가 접근자로 존재하고, `--localstorage-file`이 없으면 `undefined`를 돌려준다(Node 24는 `--experimental-webstorage` opt-in이라 전역이 없다). vitest는 globals를 채울 때 **이미 전역에 있는 키는 jsdom 값으로 덮지 않는다.** 그래서 jsdom 환경에서 이렇게 갈린다.
+
+| | Node 24 | Node 26(플래그 없음) |
+|---|---|---|
+| `window.localStorage` | jsdom 것 | `undefined` (Node 접근자) |
+| `window.sessionStorage` | jsdom 것 | jsdom 것 |
+
+`window === globalThis`(vitest가 jsdom window를 전역에 합친다)이므로 테스트에서 우회할 방법이 없다. 워커에서 Node의 web storage를 끄면 jsdom 것이 정상적으로 채워진다.
+
+**플래그를 빼면 `apps/renderer/src/read-model/connection.test.ts`의 "never writes to browser storage"가 `TypeError: Cannot read properties of undefined (reading 'length')`로 실패한다.** 이것이 이 설정 한 줄의 존재 이유다 — 지우지 말고, 테스트 단언을 고쳐 통과시키지도 말 것.
 
 ## Assumptions / provisional values
 
@@ -61,8 +60,20 @@
 ### Gates (executed)
 
 ```text
-<채움>
+Node 26.7.0 (호스트 기본, D:/repos/vertical-live)
+  format:check / lint / typecheck   exit 0
+  test    149 files | 2145 passed | 1 skipped   Duration 102.59s (tests 257.43s)
+  build   exit 0
+  soak:ci exit 0   (임계값 4종 not-locked — A-15)
+
+Node 24.19.0 (별도 worktree, 같은 커밋)
+  format:check / lint / typecheck   exit 0
+  test    149 files | 2145 passed | 1 skipped   Duration 14.22s (tests 88.01s)
+  build   exit 0
+  soak:ci exit 0
 ```
+
+**스위트 시간은 런타임에 따라 크게 갈린다**: 같은 커밋·같은 호스트에서 Node 26이 wall 102.59s / tests 257.43s, Node 24가 wall 14.22s / tests 88.01s다. 원인 미규명 — T8f에서 다룬다.
 
 ## Not done / out of scope
 
