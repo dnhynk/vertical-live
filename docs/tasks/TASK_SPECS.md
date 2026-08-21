@@ -424,3 +424,33 @@
   2. Node 24에서도 같은 게이트가 통과한다(`engines` 하한을 유지하는 근거).
   3. 플래그를 되돌리면 `connection.test.ts`가 다시 실패하는 것을 확인해 인과를 티켓에 남긴다(증상만 덮은 수정이 아님).
   4. CI 녹색.
+
+## T8f — 테스트 스위트 실행 시간: `POST /ingest/simulator` 왕복이 Node 26에서 ~250ms로 정체
+
+- slug `t8f-suite-time` · PR 접두 `fix(server):` · 의존 T23
+- **읽을 것**: `tools/simulator/src/runner/inject.ts`, `tools/simulator/src/runner/harness.ts`, `apps/server/src/server.ts`(`readJsonBody`, `/ingest/simulator` 라우트), `apps/server/src/engine/ingest.ts`
+- **관측된 사실**(2026-08-22, 호스트 `WORKSTATION`, 동일 커밋·동일 하드웨어에서 Node만 교체)
+
+  | 대상 | Node 24.19.0 | Node 26.7.0 |
+  |---|---|---|
+  | 전체 스위트 | wall 14.2s / tests 88.0s | wall 102.6s / tests 257.4s |
+  | `vl-simulator run adversarial` | wall 1,468ms | wall 25,437ms |
+  | 그 실행의 `fetch` 91회 | 합 1,009ms · p50 10.5ms · p95 17.9ms | 합 24,747ms · **p50 259.5ms** · p95 512.8ms |
+
+  느려진 테스트는 전부 시뮬레이터가 **실제 HTTP로 백엔드를 두드리는 것들**이다(`report.runLatencySuite`, `moderation-bypass` 4건, `scenarios > adversarial`). HTTP를 거의 쓰지 않는 `idle-24h`(9.6s→8.9s)와 soak·engine 계열은 차이가 없다. CPU 프로파일은 26,368ms 중 **25,779ms가 `(idle)`** — 계산이 아니라 대기다. 지연은 전부 `fetch` 호출 안에 있고, 서버의 `ingest.handle()`은 동기라 엔진을 기다리지 않는다.
+
+- **기각된 원인**(같은 두 바이너리로 계측, 모두 Node 26이 같거나 더 빠름)
+  - loopback HTTP 자체: `fetch` GET 0.24ms(26) vs 10.37ms(24), JSON POST 0.36ms vs 11.24ms, `http.request` 0.10ms vs 0.11ms.
+  - 본문 읽기 방식·크기: `req.on('data')`/`for await`, 200B/20KB 네 조합 모두 26이 빠름.
+  - WebSocket(`ws` 8.21.3) 왕복: 18.7µs vs 22.0µs.
+  - 문자열·정규식(`normalize('NFKC')`, `\p{...}`), 타이머·마이크로태스크(`setTimeout(0)`은 양쪽 다 ~12ms — Windows 타이머 해상도).
+  - 엔진 tick(`VL_ENGINE_TICK_MS`): 25·250·1000ms 모두 p50 ~250ms로 불변.
+  - DNS·happy-eyeballs: 주입 대상은 `http://127.0.0.1:<port>`(`harness.ts`)로 이름 해석이 없다.
+- **범위**
+  - 최소 재현을 만든다: 최소 서버에서는 0.4ms인데 harness 서버에서는 250ms다. harness가 최소 서버와 다른 축(WS 업그레이드 핸들러 부착, SQLite 쓰기, 소켓 옵션)을 하나씩 붙여 250ms가 나타나는 지점을 찾는다.
+  - 원인 확인 후 최소 수정. Node 쪽 회귀로 판명되면 upstream 이슈 번호와 확인일을 적고, 저장소에서는 회피 수단(소켓 옵션 등)만 근거와 함께 넣는다. **테스트 타임아웃을 늘려 덮지 않는다.**
+  - 별건으로 남은 항목: `await setTimeout(0)`이 Windows에서 ~12ms라 틱을 여러 번 도는 테스트가 비싸다. 측정만 하고 판단은 이 절 밖.
+- **합격 기준**
+  1. 250ms 정체의 원인을 반증 가능한 관측으로 제시하고, 수정 전후 `vl-simulator run adversarial`의 `fetch` p50을 함께 적는다.
+  2. Node 26에서 스위트 wall이 Node 24 수준(≤20s)으로 돌아오거나, 돌아오지 않는 이유가 근거와 함께 기록된다.
+  3. 게이트 5개 + `soak:ci` + CI 녹색.
