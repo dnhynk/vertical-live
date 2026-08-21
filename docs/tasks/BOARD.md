@@ -43,6 +43,7 @@
 | T22 | 모더레이션 사유 보고 경로(사람 트리거 admin 엔드포인트 + filter_evasion_surge 휴리스틱; D-13 토큰 4개) | T12, T19 | — | merged | t22-moderation-report | #30 | `task_43f8dd164d5a` |
 | T8e | 엔진: StateEngine.pump()가 31일 가상 시계 점프 후 미반환(184s timeout; T20b 리뷰 관측) + engine/ingest.test.ts:442 SQLite write lock flaky(T21 관측) 조사·수정 | T8 | — | merged | t8e-clock-jump-flaky | #31 | `task_364b480f6a22` |
 | T8f | 테스트 스위트 CPU 3.7배 증가(73.76s→271.98s, T20b/T22 머지 후) 원인 규명 + 얇은 타임아웃(replay.test.ts 5s) 점검 | T8e, T20b, T22 | — | pending | t8f-suite-time | | |
+| T23 | Node 26 전환(호스트 통일: 사용자 다른 저장소가 26 요구)과 vitest jsdom web storage 회귀 차단 | — | — | dispatched | t23-node26 | | (Orca 미사용, 코디네이터 직접) |
 
 디스패치 순서 원칙: `ready` 중 T-ID 낮은 것부터, 동시 2, `[contract]`는 하나만. 리뷰 Task는 `R-<T-ID>-<round>`로 별도 등록하고 아래 이력에만 남긴다.
 
@@ -50,7 +51,7 @@
 
 | # | 결정 | 근거·출처 |
 |---|---|---|
-| D-1 | 백엔드 TypeScript / Node 24 | 렌더러와 계약 타입 공유(`packages/contract`), googleapis·@grpc/grpc-js·obs-websocket-js·better-sqlite3 단일 툴체인 |
+| D-1 | 백엔드 TypeScript / Node 24 — **2026-08-22 개정: Node 26으로 올린다(사용자 결정; 같은 호스트의 다른 저장소가 26을 요구해 런타임을 하나로 통일). `.nvmrc`·CI가 26을 가리키고 `engines.node`는 하한 `>=24.0.0` 유지 — 구현 T23** | 렌더러와 계약 타입 공유(`packages/contract`), googleapis·@grpc/grpc-js·obs-websocket-js·better-sqlite3 단일 툴체인. 26 전환 근거·비용은 이력 2026-08-22 |
 | D-2 | 1차 호스트 = 이 Windows 11 PC(OBS 설치됨) — **2026-08-22 정정(하드웨어 이전): 새 호스트 `WORKSTATION`(Windows 11 Home 10.0.26100, Ryzen 9 9900X 12C, RAM 31GB, 내장 Radeon 그래픽 = 외장 GPU 없음 — 프로파일 인코더가 `obs_x264`(CPU)라 영향 없음). 구 호스트는 사용 중단, 거기 있던 비밀정보·OBS 설정·schtasks 등록은 전부 유실(HANDOFF §3)** | 스펙 §11 hosting OS 결정. 클라우드 이전은 별도 결정 |
 | D-3 | 알림 = Discord webhook(`AlertSink` 첫 구현) | 스펙 §9.1·§12.3 사람 호출 경로 |
 | D-4 | 저장소 `dnhynk/vertical-live` **public(2026-08-18 사용자 전환; 원래 private)**, `main`, squash merge만, 브랜치 자동 삭제; 구현 worker 2 + 리뷰어 1 | 오케스트레이션 안전(2026-08-16 BSOD 이력) |

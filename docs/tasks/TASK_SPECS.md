@@ -409,3 +409,18 @@
 - **합격 기준**
   1. 두 재현 테스트가 수정 전 실패·수정 후 통과(되돌려 확인), `vitest --repeat` 또는 10회 반복으로 flaky 0.
   2. 게이트 5개 + CI 녹색, 기존 T8/T15 테스트 무변경 통과.
+
+## T23 — Node 26 전환(호스트 통일)과 vitest jsdom web storage 회귀 차단
+
+- slug `t23-node26` · PR 접두 `chore(node):` · 의존 —
+- **읽을 것**: `.nvmrc`, `.github/workflows/ci.yml`, `vitest.config.ts`, `apps/renderer/src/read-model/connection.test.ts`(브라우저 저장소 불사용 검사), BOARD 이력 2026-08-22(원인 관측)과 D-1 개정
+- **배경(2026-08-22 새 호스트에서 관측된 사실)**: Node 22+ 는 `globalThis.localStorage`를 own accessor로 정의하고 `--localstorage-file`이 없으면 `undefined`를 돌려준다(Node 26은 기본 활성). vitest jsdom 환경은 **이미 전역에 있는 키를 jsdom 값으로 덮지 않으므로** `window.localStorage`만 Node 스텁이 되고 `sessionStorage`는 jsdom 것이 남는다 → renderer 테스트 "never writes to browser storage"가 `TypeError: Cannot read properties of undefined`로 실패한다. `node --no-experimental-webstorage`는 24·26 모두 받아들이며, 그 상태에서 해당 파일이 8/8 통과하는 것을 확인했다.
+- **범위**
+  - `.nvmrc` `24` → `26`(CI `setup-node`가 이 파일을 읽는다). `engines.node`는 **하한**이므로 `>=24.0.0`을 그대로 두되, 24·26 양쪽에서 게이트를 돌려 근거를 티켓에 남긴다.
+  - `vitest.config.ts`에서 테스트 워커에 `--no-experimental-webstorage`를 준다. **단언을 고쳐 통과시키지 않는다** — 잘못된 것은 환경이고, 이 플래그는 jsdom의 저장소를 원래대로 되돌린다.
+  - Node 24를 못 박은 산문 갱신: `CLAUDE.md` §2, `README.md`, `docs/runbooks/agent-orchestration.md` 스택 표, `docs/ops/runbook-operations.md` 전제 표, `docs/ops/windows-host.md` §5.6 Node 행(26+ 에서 플래그가 필요한 이유 한 줄), `HANDOFF.md`. 과거 티켓(`docs/tasks/TASK-T*.md`)은 그때의 기록이므로 고치지 않는다.
+- **합격 기준**
+  1. Node 26에서 게이트 5개 + `soak:ci` 통과, 테스트 수가 Node 24 결과와 같다(149 files / 2,145 passed / 1 skipped).
+  2. Node 24에서도 같은 게이트가 통과한다(`engines` 하한을 유지하는 근거).
+  3. 플래그를 되돌리면 `connection.test.ts`가 다시 실패하는 것을 확인해 인과를 티켓에 남긴다(증상만 덮은 수정이 아님).
+  4. CI 녹색.
