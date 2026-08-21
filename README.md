@@ -56,7 +56,7 @@ YouTube 세로 라이브를 24시간 무인으로 진행하고, 시청자 입력
 
 ## 3. 저장소 구조
 
-npm workspaces 모노레포. Node 24(`.nvmrc`, `engines`), TypeScript 5 strict, ESM, vitest, ESLint 9 flat config +
+npm workspaces 모노레포. Node 26(`.nvmrc`; `engines.node`는 하한 `>=24.0.0`), TypeScript 5 strict, ESM, vitest, ESLint 9 flat config +
 Prettier. 스택 결정 근거는 BOARD D-1·D-2·A-5·A-6.
 
 ```text

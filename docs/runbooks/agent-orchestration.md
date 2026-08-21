@@ -13,7 +13,7 @@
 
 | 항목 | 결정 |
 |---|---|
-| 스택 | TypeScript / Node 24, npm workspaces, SQLite(better-sqlite3), React + R3F 렌더러, vitest |
+| 스택 | TypeScript / Node 26, npm workspaces, SQLite(better-sqlite3), React + R3F 렌더러, vitest |
 | 1차 호스트 | 이 Windows 11 PC(OBS Studio 설치됨). 코어는 OS 무관, 운영 스크립트는 Windows 우선 |
 | 알림 | Discord webhook(`AlertSink` 인터페이스의 첫 구현) |
 | 원격 | `dnhynk/vertical-live` **public**(2026-08-18 전환, 원래 private — BOARD D-4·E-5), `main`, squash merge만, 브랜치 자동 삭제 |

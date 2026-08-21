@@ -202,7 +202,7 @@ Windows는 GPU가 응답하지 않으면 드라이버를 재시작한다(TDR). �
 |---|---|---|
 | Windows Update | 예고 없는 재부팅 | 활성 시간(Active hours)을 설정하고, 재부팅 후 5.1·5.2로 스택이 스스로 복귀하는지 확인한다. **재부팅을 막는 것보다 재부팅에서 회복하는 것이 목표다.** |
 | OBS 내장 업데이터 | 시작 시 업데이트 대화상자 | 실행기가 `--disable-updater`로 띄운다(3장). 버전은 **32.0.2 / obs-websocket 5.6.3으로 고정**(BOARD D-6, 2026-08-18 사용자 승인, `docs/ops/obs-setup.md` §1) |
-| Node.js / npm | 런타임 교체 | 자동 업데이트하지 않는다. 올릴 때는 손으로, `npm ci && npm run build` 뒤 5.1을 다시 시험한다 |
+| Node.js / npm | 런타임 교체 | 자동 업데이트하지 않는다. 올릴 때는 손으로, `npm ci && npm run build` 뒤 5.1을 다시 시험한다. 버전은 `.nvmrc`(**26**, BOARD D-1 2026-08-22 개정)가 정본이고 CI가 같은 파일을 읽는다. Node 22+ 는 전역 `localStorage` 접근자를 정의하므로 vitest 워커에 `--no-experimental-webstorage`가 필요하다(`vitest.config.ts`의 `execArgv`; 없으면 jsdom 저장소가 가려져 renderer 테스트가 실패한다) |
 | GPU 드라이버 | TDR 동작 변화 | 올린 뒤 5.4를 다시 시험한다 |
 
 시험: 업데이트를 하나 적용해 재부팅시키고, 사람 손 없이 방송이 돌아오는지 확인한다. 이것이 §11이 요구하는 "자동 업데이트 시험"이다.

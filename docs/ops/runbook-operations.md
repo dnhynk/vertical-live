@@ -26,7 +26,7 @@
 
 | # | 준비 | 문서 |
 |---|---|---|
-| 1 | Node 24 + `npm ci` | [`../../README.md`](../../README.md) 4.1 |
+| 1 | Node 26 + `npm ci` | [`../../README.md`](../../README.md) 4.1 |
 | 2 | vault 항목 등록(`server.rendererToken`, `server.adminToken`, 필요 시 `alerts.discordWebhookUrl`, `youtube.streamKey`, `server.simulatorToken`, `monitoring.deadManPushUrl`) | [`youtube-auth-setup.md`](youtube-auth-setup.md) |
 | 3 | OAuth 로그인(`npm run auth:login -w @vl/server`) | [`youtube-auth-setup.md`](youtube-auth-setup.md) |
 | 4 | OBS 프로파일·씬·WebSocket 서버 | [`obs-setup.md`](obs-setup.md) |
