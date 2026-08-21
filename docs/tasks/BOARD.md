@@ -51,8 +51,8 @@
 
 | # | 결정 | 근거·출처 |
 |---|---|---|
-| D-1 | 백엔드 TypeScript / Node 24 — **2026-08-22 개정: Node 26으로 올린다(사용자 결정; 같은 호스트의 다른 저장소가 26을 요구해 런타임을 하나로 통일). `.nvmrc`·CI가 26을 가리키고 `engines.node`는 하한 `>=24.0.0` 유지 — 구현 T23** | 렌더러와 계약 타입 공유(`packages/contract`), googleapis·@grpc/grpc-js·obs-websocket-js·better-sqlite3 단일 툴체인. 26 전환 근거·비용은 이력 2026-08-22 |
-| D-2 | 1차 호스트 = 이 Windows 11 PC(OBS 설치됨) — **2026-08-22 정정(하드웨어 이전): 새 호스트 `WORKSTATION`(Windows 11 Home 10.0.26100, Ryzen 9 9900X 12C, RAM 31GB, 내장 Radeon 그래픽 = 외장 GPU 없음 — 프로파일 인코더가 `obs_x264`(CPU)라 영향 없음). 구 호스트는 사용 중단, 거기 있던 비밀정보·OBS 설정·schtasks 등록은 전부 유실(HANDOFF §3)** | 스펙 §11 hosting OS 결정. 클라우드 이전은 별도 결정 |
+| D-1 | 백엔드 TypeScript / ~~Node 24~~ → **Node 26**(2026-08-22 개정, 사용자 결정: 같은 호스트의 다른 저장소가 26을 요구해 런타임을 하나로 통일). `.nvmrc`·CI가 정본이고 `engines.node`는 하한 `>=24.0.0` 유지 — 구현 T23 | 렌더러와 계약 타입 공유(`packages/contract`), googleapis·@grpc/grpc-js·obs-websocket-js·better-sqlite3 단일 툴체인. 26 전환 근거·비용은 이력 2026-08-22 |
+| D-2 | 1차 호스트 = ~~구 Windows 11 PC~~ → **2026-08-22 정정(하드웨어 이전): `WORKSTATION`(Windows 11 Home 10.0.26100, Ryzen 9 9900X 12C, RAM 31GB, 내장 Radeon 그래픽 = 외장 GPU 없음 — 프로파일 인코더가 `obs_x264`(CPU)라 영향 없음). 구 호스트는 사용 중단, 거기 있던 비밀정보·OBS 설정·schtasks 등록은 전부 유실(HANDOFF §3)** | 스펙 §11 hosting OS 결정. 클라우드 이전은 별도 결정 |
 | D-3 | 알림 = Discord webhook(`AlertSink` 첫 구현) | 스펙 §9.1·§12.3 사람 호출 경로 |
 | D-4 | 저장소 `dnhynk/vertical-live` **public(2026-08-18 사용자 전환; 원래 private)**, `main`, squash merge만, 브랜치 자동 삭제; 구현 worker 2 + 리뷰어 1 | 오케스트레이션 안전(2026-08-16 BSOD 이력) |
 | D-6 | OBS Studio **32.0.2** / obs-websocket **5.6.3**(RPC v1) 고정 승인(E-2, 2026-08-18) | 사용자 승인; `docs/ops/obs-setup.md` §1 |
