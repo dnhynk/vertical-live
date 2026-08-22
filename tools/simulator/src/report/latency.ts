@@ -1,5 +1,7 @@
 import type { EngineMetricsSnapshot, LatencySummary } from '@vl/server'
 
+import { requestJson } from '../runner/loopback-http.js'
+
 /**
  * The per-stage latency report of TASK_SPECS §T11 acceptance 2.
  *
@@ -74,11 +76,11 @@ export function buildLatencyReport(input: BuildReportInput): LatencyReport {
 
 /** Reads `GET /metrics` from a running server (TASK_SPECS 공통 규약). */
 export async function fetchMetrics(baseUrl: string): Promise<EngineMetricsSnapshot> {
-  const response = await fetch(`${baseUrl}/metrics`)
-  if (!response.ok) {
+  const response = await requestJson(`${baseUrl}/metrics`, { method: 'GET' })
+  if (response.status < 200 || response.status >= 300) {
     throw new Error(`GET ${baseUrl}/metrics returned ${String(response.status)}`)
   }
-  return (await response.json()) as EngineMetricsSnapshot
+  return response.body as EngineMetricsSnapshot
 }
 
 const NO_PASS_LINE =

@@ -1,5 +1,7 @@
 import type { IngestEnvelope } from '@vl/contract'
 
+import { requestJson } from './loopback-http.js'
+
 /**
  * The only way a scenario reaches the world: `POST /ingest/simulator`, over real
  * HTTP, with the bearer token (TASK_SPECS 공통 규약, §T11).
@@ -39,13 +41,12 @@ export async function postEnvelopes(
 ): Promise<InjectResponse> {
   const headers: Record<string, string> = { 'content-type': 'application/json' }
   if (target.token !== null) headers['authorization'] = `Bearer ${target.token}`
-  const response = await fetch(`${target.baseUrl}/ingest/simulator`, {
+  const response = await requestJson(`${target.baseUrl}/ingest/simulator`, {
     method: 'POST',
     headers,
     body: JSON.stringify({ envelopes }),
   })
-  const body: unknown = await response.json().catch(() => null)
-  return readResponse(response.status, body)
+  return readResponse(response.status, response.body)
 }
 
 /** Posts a batch in chunks and adds the results up. */
