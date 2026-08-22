@@ -37,6 +37,11 @@ param(
     [string] $NodeExe,
     # ISO 8601 duration between archive sweeps.
     [string] $ArchiveInterval = 'PT1H',
+    # Registers the logon task with -WithObs, so the host starts OBS as part of
+    # the sequence. Without it the stack comes up and then safe-stops: the
+    # supervisor's renderer-source recovery needs the OBS integration, and no
+    # renderer ever attaches (TASK_SPECS §T25).
+    [switch] $WithObs,
     [switch] $SkipArchiveTask
 )
 
@@ -77,6 +82,7 @@ try {
         $xml = $xml.Replace('{{REPO_ROOT}}', $RepoRoot)
         $xml = $xml.Replace('{{NODE_EXE}}', $node)
         $xml = $xml.Replace('{{INTERVAL}}', $ArchiveInterval)
+        $xml = $xml.Replace('{{START_ARGS}}', $(if ($WithObs) { ' -WithObs' } else { '' }))
 
         # schtasks reads task XML as Unicode; UTF-8 is rejected with
         # "The task XML is malformed" on some Windows builds.

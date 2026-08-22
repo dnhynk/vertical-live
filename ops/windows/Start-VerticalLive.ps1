@@ -43,6 +43,11 @@ param(
     [string] $RepoRoot,
     [string] $NodeExe,
     [switch] $SkipObs,
+    # Turns the OBS launcher and the supervisor's OBS integration on for this
+    # run. config/default.json keeps both off so CI and development machines
+    # never spawn OBS; the broadcast host is the one place they belong, and the
+    # logon task passes this switch (docs/ops/windows-host.md, TASK_SPECS §T25).
+    [switch] $WithObs,
     [int] $RendererTimeoutSec = 60,
     [int] $ServerTimeoutSec = 120,
     [int] $ObsTimeoutSec = 120
@@ -51,6 +56,16 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'VerticalLive.Common.ps1')
+
+if ($WithObs -and $SkipObs) {
+    throw '-WithObs and -SkipObs contradict each other: pick one'
+}
+# Before the configuration is read, so this script, the server it starts and the
+# OBS launcher all see the same values (the children inherit this environment).
+if ($WithObs) {
+    $env:VL_OBS_PROCESS_ENABLED = 'true'
+    $env:VL_OBS_ENABLED = 'true'
+}
 
 if (-not $RepoRoot) { $RepoRoot = Get-VerticalLiveRepoRoot -ScriptRoot $PSScriptRoot }
 $RepoRoot = (Resolve-Path $RepoRoot).Path
