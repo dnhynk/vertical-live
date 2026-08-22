@@ -36,8 +36,8 @@ npm run build
 # 2) 무엇이 등록될지 먼저 본다 — dry run, 아무것도 바꾸지 않는다
 powershell -ExecutionPolicy Bypass -File ops\windows\Register-VerticalLive.ps1 -WhatIf
 
-# 3) 등록
-powershell -ExecutionPolicy Bypass -File ops\windows\Register-VerticalLive.ps1
+# 3) 등록 — 방송 호스트는 -WithObs로 등록한다(아래 3장)
+powershell -ExecutionPolicy Bypass -File ops\windows\Register-VerticalLive.ps1 -WithObs
 
 # 4) 해제 (역시 -WhatIf로 먼저 볼 수 있다)
 powershell -ExecutionPolicy Bypass -File ops\windows\Unregister-VerticalLive.ps1
@@ -67,6 +67,8 @@ powershell -ExecutionPolicy Bypass -File ops\windows\Unregister-VerticalLive.ps1
 | 2 | 서버 | `node apps\server\dist\main.js` | `/health`가 **200 + 건강 문서**(`status` 필드) | 120s |
 | 3 | OBS | `node apps\server\dist\bin\obs-launch.js` | `127.0.0.1:4455` 포트를 **`obs64.exe`가** 점유 | 120s |
 
+- **OBS는 `-WithObs`일 때만 뜬다.** `obs.process.enabled`와 `supervisor.integrations.obs`는 config 기본값이 `false`다 — CI와 개발 머신이 OBS를 띄우지 않게 하는 값이라 그대로 둔다. 방송 호스트는 로그온 task를 `Register-VerticalLive.ps1 -WithObs`로 등록하고, 손으로 실행할 때도 `-WithObs`를 준다. 이 스위치는 설정을 읽기 전에 `VL_OBS_PROCESS_ENABLED`·`VL_OBS_ENABLED`를 켜므로 스크립트와 그 자식 프로세스가 같은 값을 본다(`-SkipObs`와 함께 주면 거부된다). **없이 실행하면** 렌더러가 붙지 않은 채 supervisor의 `renderer-source` 복구가 `obs integration is not configured`로 3회 실패해 스택이 `safe_stopped`로 떨어진다(2026-08-22 실측).
+- **YouTube 방송이 없으면 `-WithObs`로도 오래 서 있지 못한다.** OBS·렌더러는 정상적으로 뜨지만(렌더러가 30fps로 그리는 것까지 확인), `obs-stream`이 `outputActive = true`에 도달하지 못해(스트림 키 없음) 3회 시도 뒤 안전 정지한다. 그때 OBS는 "방송을 시작하지 못했습니다" **모달**을 띄우는데, 무인 운전에서 모달은 사람이 닫을 때까지 남는다. 스택을 계속 세워 두려면 YouTube 계정·OAuth·방송이 먼저다(D-10/D-16).
 - **순서의 이유**: OBS Browser Source가 열릴 때 페이지가 있어야 하고(1), 페이지가 열리자마자 `/ws/renderer`에 붙으므로 서버가 떠 있어야 하며(2), 서버가 시작 순서에서 OBS에 렌더러 토큰과 스트림 키를 주입하므로 OBS는 마지막이다(3, BOARD A-16).
 - **준비 신호를 기다리지 sleep하지 않는다.** 각 단계는 위 신호가 올 때까지 폴링하고, 시간이 지나면 그 단계를 실패로 기록하고 exit code 1로 끝난다.
 - **열린 포트는 준비가 아니다**(리뷰 round 1 M2). 포트만 열려 있고 프로토콜 응답이 없으면 준비로 치지 않는다. 그리고 **이미 응답하는 포트라도 그 프로세스가 이 저장소에서 시작된 것일 때만** 그대로 쓴다(소유 프로세스의 명령행에 이 저장소 경로가 있는지 확인). 다른 worktree나 무관한 프로세스가 같은 loopback 포트를 잡고 있으면 그 단계는 **소유 PID를 적고 실패**한다 — 남의 스택을 우리 것으로 착각해 OBS를 남의 렌더러에 붙이는 것이 이 확인이 막는 일이다.
