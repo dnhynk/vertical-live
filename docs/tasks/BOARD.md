@@ -43,6 +43,7 @@
 | T22 | 모더레이션 사유 보고 경로(사람 트리거 admin 엔드포인트 + filter_evasion_surge 휴리스틱; D-13 토큰 4개) | T12, T19 | — | merged | t22-moderation-report | #30 | `task_43f8dd164d5a` |
 | T8e | 엔진: StateEngine.pump()가 31일 가상 시계 점프 후 미반환(184s timeout; T20b 리뷰 관측) + engine/ingest.test.ts:442 SQLite write lock flaky(T21 관측) 조사·수정 | T8 | — | merged | t8e-clock-jump-flaky | #31 | `task_364b480f6a22` |
 | T8f | 스위트 실행 시간: `POST /ingest/simulator` 왕복이 Node 26에서 p50 ~250ms로 정체(원 관측이던 '머지 후 3.7배'는 새 호스트에서 재현되지 않음) | T23 | — | ready | t8f-suite-time | | |
+| T24 | 알림 채널 Slack 전환(D-3 개정): `SlackWebhookAlertSink`, `alerts.slackWebhookUrl`, `slackEnabled` 기본 on | T12 | — | dispatched | t24-slack-alerts | | (Orca 미사용, 코디네이터 직접) |
 | T23 | Node 26 전환(호스트 통일: 사용자 다른 저장소가 26 요구)과 vitest jsdom web storage 회귀 차단 | — | — | merged | t23-node26 | #32 | (Orca 미사용, 코디네이터 직접) |
 
 디스패치 순서 원칙: `ready` 중 T-ID 낮은 것부터, 동시 2, `[contract]`는 하나만. 리뷰 Task는 `R-<T-ID>-<round>`로 별도 등록하고 아래 이력에만 남긴다.
@@ -53,7 +54,7 @@
 |---|---|---|
 | D-1 | 백엔드 TypeScript / ~~Node 24~~ → **Node 26**(2026-08-22 개정, 사용자 결정: 같은 호스트의 다른 저장소가 26을 요구해 런타임을 하나로 통일). `.nvmrc`·CI가 정본이고 `engines.node`는 하한 `>=24.0.0` 유지 — 구현 T23 | 렌더러와 계약 타입 공유(`packages/contract`), googleapis·@grpc/grpc-js·obs-websocket-js·better-sqlite3 단일 툴체인. 26 전환 근거·비용은 이력 2026-08-22 |
 | D-2 | 1차 호스트 = ~~구 Windows 11 PC~~ → **2026-08-22 정정(하드웨어 이전): `WORKSTATION`(Windows 11 Home 10.0.26100, Ryzen 9 9900X 12C, RAM 31GB, 내장 Radeon 그래픽 = 외장 GPU 없음 — 프로파일 인코더가 `obs_x264`(CPU)라 영향 없음). 구 호스트는 사용 중단, 거기 있던 비밀정보·OBS 설정·schtasks 등록은 전부 유실(HANDOFF §3)** | 스펙 §11 hosting OS 결정. 클라우드 이전은 별도 결정 |
-| D-3 | 알림 = Discord webhook(`AlertSink` 첫 구현) | 스펙 §9.1·§12.3 사람 호출 경로 |
+| D-3 | 알림 = ~~Discord webhook~~ → **Slack incoming webhook**(2026-08-22 사용자 결정). 스펙은 채널을 지정하지 않는다 — §9.1·§12.3은 사람 호출 경로만 요구한다. `AlertSink` 인터페이스는 그대로이고 Discord 구현은 남되 기본 비활성 — 구현 T24 | 스펙 §9.1·§12.3 사람 호출 경로 |
 | D-4 | 저장소 `dnhynk/vertical-live` **public(2026-08-18 사용자 전환; 원래 private)**, `main`, squash merge만, 브랜치 자동 삭제; 구현 worker 2 + 리뷰어 1 | 오케스트레이션 안전(2026-08-16 BSOD 이력) |
 | D-6 | OBS Studio **32.0.2** / obs-websocket **5.6.3**(RPC v1) 고정 승인(E-2, 2026-08-18) | 사용자 승인; `docs/ops/obs-setup.md` §1 |
 | D-7 | OBS 32 safe-mode 프롬프트(E-7): **선택지 A** — 우리가 OBS를 띄우는 경로(자동시작·supervisor obs-process 재시작)에서 실행 직전 `%APPDATA%\obs-studio\.sentinel\*` 파일을 지우고 로그·health detail에 남긴다. OBS 반복 크래시는 obs-process 재시작 예산(F-18→safe_stopped)이 표면화한다. 공식 문서에 없는 방법임을 문서에 명시하고, 무력화되면 기존 동작(포트 대기 타임아웃 + 실패 기록)으로 떨어진다 | 사용자 결정 2026-08-18; `docs/ops/windows-host.md` §5.7 |

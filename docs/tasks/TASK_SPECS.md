@@ -454,3 +454,22 @@
   1. 250ms 정체의 원인을 반증 가능한 관측으로 제시하고, 수정 전후 `vl-simulator run adversarial`의 `fetch` p50을 함께 적는다.
   2. Node 26에서 스위트 wall이 Node 24 수준(≤20s)으로 돌아오거나, 돌아오지 않는 이유가 근거와 함께 기록된다.
   3. 게이트 5개 + `soak:ci` + CI 녹색.
+
+## T24 — 알림 채널 Slack 전환(D-3 개정)
+
+- slug `t24-slack-alerts` · PR 접두 `feat(supervisor):` · 의존 T12
+- **읽을 것**: `apps/server/src/supervisor/alerts.ts`(`AlertSink`, `DiscordWebhookAlertSink`, `formatAlert`), `apps/server/src/supervisor/config.ts`(`SupervisorAlertConfig`), `apps/server/src/secrets/types.ts`·`env.ts`, `apps/server/src/main.ts` 알림 배선, 스펙 §9.1 §12.3
+- **공식 규격**(https://docs.slack.dev/messaging/sending-messages-using-incoming-webhooks, https://docs.slack.dev/apis/web-api/rate-limits — 2026-08-22 확인): POST `application/json`, 본문 `{"text": "..."}`, 성공은 **HTTP 200 + 본문 `ok`**, 오류는 400/403/404(`invalid_payload`, `no_service` 등), 한도는 **초당 1건**(초과 시 429 + `Retry-After`).
+- **범위**
+  - `SlackWebhookAlertSink`를 `alerts.ts`에 추가한다. Discord 구현과 같은 계약을 지킨다: URL은 전달할 때마다 vault에서 읽고, 2xx면 delivered, 아니면 `http_<status>` 실패 토큰, 제자리 재시도 없음, 실패 로그에 URL을 넣지 않는다.
+  - Slack은 `&` `<` `>`를 mrkdwn 제어 문자로 읽으므로 **이 sink 안에서만** 세 글자를 이스케이프한다. `formatAlert`는 공용이라 바꾸지 않는다.
+  - secret `alerts.slackWebhookUrl`(env `VL_SLACK_WEBHOOK_URL`) 추가. `alerts.discordWebhookUrl`은 남긴다.
+  - config `supervisor.alerts.slackEnabled`(env `VL_ALERTS_SLACK_ENABLED`) 추가. 기본값은 **`slackEnabled: true` / `discordEnabled: false`**.
+  - Discord 구현과 그 테스트는 삭제하지 않는다 — 채널을 되돌릴 때 다시 쓰고, 꺼져 있으면 비용이 없다.
+  - 문서 갱신: `docs/ops/gate0-checklist.md`, `runbook-operations.md`, `supervisor.md`, `soak.md`, `moderation-call-table.md`, `docs/runbooks/agent-orchestration.md`, `HANDOFF.md`.
+  - 초당 1건 한도를 위한 큐·백오프는 넣지 않는다. 억제 창(info 1시간 / warning 15분 / critical 1분)이 이미 그보다 훨씬 낮은 빈도를 강제한다 — 넣는다면 근거가 되는 관측이 먼저다.
+- **합격 기준**
+  1. Slack sink 테스트: 200+`ok` → delivered · 400 → `http_400`이고 로그에 URL 없음 · URL 미설정 → `webhook_url_not_configured` · 던지는 transport에서도 예외가 새지 않음 · 본문의 `&<>`가 이스케이프됨.
+  2. `config.test.ts`가 기본값(`slackEnabled` true / `discordEnabled` false)과 env override 양쪽을 덮는다.
+  3. Discord 관련 기존 테스트가 변경 없이 통과한다.
+  4. 게이트 5개 + `soak:ci` + CI 녹색.
