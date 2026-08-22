@@ -43,6 +43,7 @@
 | T22 | 모더레이션 사유 보고 경로(사람 트리거 admin 엔드포인트 + filter_evasion_surge 휴리스틱; D-13 토큰 4개) | T12, T19 | — | merged | t22-moderation-report | #30 | `task_43f8dd164d5a` |
 | T8e | 엔진: StateEngine.pump()가 31일 가상 시계 점프 후 미반환(184s timeout; T20b 리뷰 관측) + engine/ingest.test.ts:442 SQLite write lock flaky(T21 관측) 조사·수정 | T8 | — | merged | t8e-clock-jump-flaky | #31 | `task_364b480f6a22` |
 | T8f | loopback `fetch` 정지로 인한 스위트 실행 시간(Node 26 회귀 회피) | T23 | — | merged | t8f-suite-time | #34 | (Orca 미사용, 코디네이터 직접) |
+| T25 | 자동시작에서 OBS를 함께 올리는 `-WithObs` 스위치(재부팅 실측에서 `safe_stopped` 관측) | T17 | — | dispatched | t25-autostart-obs | | (Orca 미사용, 코디네이터 직접) |
 | T24 | 알림 채널 Slack 전환(D-3 개정): `SlackWebhookAlertSink`, `alerts.slackWebhookUrl`, `slackEnabled` 기본 on | T12 | — | merged | t24-slack-alerts | #33 | (Orca 미사용, 코디네이터 직접) |
 | T23 | Node 26 전환(호스트 통일: 사용자 다른 저장소가 26 요구)과 vitest jsdom web storage 회귀 차단 | — | — | merged | t23-node26 | #32 | (Orca 미사용, 코디네이터 직접) |
 

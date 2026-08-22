@@ -515,3 +515,20 @@
   2. `config.test.ts`가 기본값(`slackEnabled` true / `discordEnabled` false)과 env override 양쪽을 덮는다.
   3. Discord 관련 기존 테스트가 변경 없이 통과한다.
   4. 게이트 5개 + `soak:ci` + CI 녹색.
+
+## T25 — 자동시작에서 OBS를 함께 올리는 스위치
+
+- slug `t25-autostart-obs` · PR 접두 `feat(ops):` · 의존 T17
+- **읽을 것**: `ops/windows/Start-VerticalLive.ps1`, `ops/windows/Register-VerticalLive.ps1`, `ops/windows/tasks/vertical-live-autostart.xml`, `docs/ops/windows-host.md` §3·§5
+- **관측된 문제**(2026-08-22 재부팅 실측, 호스트 `WORKSTATION`): 자동시작은 성공한다(작업 결과 0, 렌더러 200, `/health` 응답). 그러나 `obs.process.enabled`·`supervisor.integrations.obs`가 config 기본 `false`라 OBS가 뜨지 않고, 렌더러가 붙지 않은 상태에서 supervisor의 `renderer-source` 복구가 `obs integration is not configured`로 3회 실패해 13초 만에 `safe_stopped`가 된다. 설계대로의 동작이며, 무인 운전은 OBS가 같은 경로에서 떠야 성립한다.
+- **범위**
+  - config 기본값은 **그대로 `false`로 둔다**. CI와 개발 머신에서 OBS를 띄우지 않기 위한 값이다.
+  - `Start-VerticalLive.ps1`에 `-WithObs` 스위치를 더한다. 설정을 읽기 **전에** `VL_OBS_PROCESS_ENABLED`·`VL_OBS_ENABLED`를 `true`로 놓아 이 스크립트와 그 자식 프로세스가 같은 값을 본다. `-SkipObs`와 함께 주면 거부한다.
+  - `vertical-live-autostart.xml`의 `<Arguments>`에 `{{START_ARGS}}` 자리표시자를 두고, `Register-VerticalLive.ps1`에 `-WithObs` 스위치를 더해 치환한다(주지 않으면 빈 문자열). Task Scheduler XML에는 환경변수 요소가 없으므로 인자로 전달한다.
+  - 문서: `docs/ops/windows-host.md`에 호스트는 `-WithObs`로 등록한다는 것과, 그것 없이는 스택이 `safe_stopped`로 떨어진다는 관측을 적는다.
+- **합격 기준**
+  1. `Register-VerticalLive.ps1 -WithObs -WhatIf`가 만든 XML의 `<Arguments>`에 `-WithObs`가 들어 있고, 스위치 없이 만든 XML에는 없다.
+  2. `-WithObs`로 등록한 뒤 `Start-VerticalLive.ps1 -WithObs`를 실행하면 OBS가 뜨고 `resolved config`가 `obsProcessEnabled=True`를 찍는다.
+  3. 그 상태에서 `/health`가 `safe_stopped`가 아니고 `renderer-source`가 소진되지 않는다(렌더러가 붙어 `rendererCount>=1`).
+  4. `-WithObs -SkipObs`는 거부된다.
+  5. 게이트 5개 + CI 녹색(스크립트 변경이라 테스트 수는 그대로).
