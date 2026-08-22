@@ -425,6 +425,48 @@
   3. 플래그를 되돌리면 `connection.test.ts`가 다시 실패하는 것을 확인해 인과를 티켓에 남긴다(증상만 덮은 수정이 아님).
   4. CI 녹색.
 
+## T8f — loopback `fetch` 정지로 인한 스위트 실행 시간(Node 26 회귀 회피)
+
+- slug `t8f-suite-time` · PR 접두 `fix(simulator):` · 의존 T23
+- **읽을 것**: `tools/simulator/src/runner/inject.ts`, `tools/simulator/src/report/latency.ts`
+- **원인**(2026-08-22 계측, 호스트 `WORKSTATION`): Node 26의 `fetch`(undici)는 **loopback 평문 HTTP**에서 요청 사이에 유휴 간격이 조금이라도 있으면 수백 ms 정지한다. 프로젝트 코드 없이 재현된다.
+
+  | 요청 간 간격 | Node 26.7.0 `fetch` | Node 24.19.0 `fetch` | 두 버전 `http.request` |
+  |---|---|---|---|
+  | 0ms(연속) | p50 0.7ms | p50 6.8ms | p50 0.7ms |
+  | 20ms | p50 474.6ms | p50 10.7ms | p50 0.9ms |
+  | 100ms | p50 398.6ms | p50 15.2ms | — |
+  | 1000ms | p50 1995.2ms | p50 16.0ms | — |
+
+  범위: **loopback 평문 HTTP 전용**이다. 같은 두 바이너리에서 외부 HTTPS(`https://api.github.com`)는 10~27ms로 차이가 없고, `node:http`의 `http.request`는 간격과 무관하게 0.7~0.9ms다. 따라서 제품 경로(YouTube·Slack·dead-man = 전부 외부 호스트)는 영향이 없고, 걸리는 것은 시뮬레이터의 loopback 주입과 `GET /metrics`뿐이다. 이것이 스위트가 Node 24 wall 14.2s → Node 26 102.6s가 된 이유다.
+
+  `fetch` 옵션으로는 못 피한다: `connection: close`는 p50 2.3ms지만 최댓값 473.8ms, `keepalive` 조정도 마찬가지다. 일치하는 upstream 이슈는 2026-08-22 검색으로 찾지 못했다.
+
+- **범위**
+  - 시뮬레이터의 loopback HTTP 호출 두 곳(`postEnvelopes`의 `POST /ingest/simulator`, `fetchMetrics`의 `GET /metrics`)을 `node:http`(keep-alive agent) 기반 클라이언트로 바꾼다. **`http:` URL일 때만**이고, 그 밖의 스킴은 `fetch`를 그대로 쓴다.
+  - 계약은 그대로다: 여전히 실제 HTTP를 타고, 상태 코드·거부 경로(404/403/401/400)를 그대로 관찰한다. 엔진 직접 호출 같은 in-process 지름길은 만들지 않는다.
+  - 테스트 타임아웃을 늘려 덮지 않는다.
+- **합격 기준**
+  1. `vl-simulator run adversarial`의 wall이 Node 26에서 Node 24 수준으로 돌아온다(수정 전 25,437ms / Node 24 1,468ms — 수정 후 값을 티켓에 적는다).
+  2. 스위트 wall이 Node 26에서 20초 이하로 돌아온다.
+  3. 거부 경로 테스트(`endpoint.test.ts`의 404/403/401/400)가 무수정 통과한다.
+  4. 게이트 5개 + `soak:ci` + CI 녹색.
+
+## T23 — Node 26 전환(호스트 통일)과 vitest jsdom web storage 회귀 차단
+
+- slug `t23-node26` · PR 접두 `chore(node):` · 의존 —
+- **읽을 것**: `.nvmrc`, `.github/workflows/ci.yml`, `vitest.config.ts`, `apps/renderer/src/read-model/connection.test.ts`(브라우저 저장소 불사용 검사), BOARD 이력 2026-08-22(원인 관측)과 D-1 개정
+- **배경(2026-08-22 새 호스트에서 관측된 사실)**: Node 22+ 는 `globalThis.localStorage`를 own accessor로 정의하고 `--localstorage-file`이 없으면 `undefined`를 돌려준다(Node 26은 기본 활성). vitest jsdom 환경은 **이미 전역에 있는 키를 jsdom 값으로 덮지 않으므로** `window.localStorage`만 Node 스텁이 되고 `sessionStorage`는 jsdom 것이 남는다 → renderer 테스트 "never writes to browser storage"가 `TypeError: Cannot read properties of undefined`로 실패한다. `node --no-experimental-webstorage`는 24·26 모두 받아들이며, 그 상태에서 해당 파일이 8/8 통과하는 것을 확인했다.
+- **범위**
+  - `.nvmrc` `24` → `26`(CI `setup-node`가 이 파일을 읽는다). `engines.node`는 **하한**이므로 `>=24.0.0`을 그대로 두되, 24·26 양쪽에서 게이트를 돌려 근거를 티켓에 남긴다.
+  - `vitest.config.ts`에서 테스트 워커에 `--no-experimental-webstorage`를 준다. **단언을 고쳐 통과시키지 않는다** — 잘못된 것은 환경이고, 이 플래그는 jsdom의 저장소를 원래대로 되돌린다.
+  - Node 24를 못 박은 산문 갱신: `CLAUDE.md` §2, `README.md`, `docs/runbooks/agent-orchestration.md` 스택 표, `docs/ops/runbook-operations.md` 전제 표, `docs/ops/windows-host.md` §5.6 Node 행(26+ 에서 플래그가 필요한 이유 한 줄), `HANDOFF.md`. 과거 티켓(`docs/tasks/TASK-T*.md`)은 그때의 기록이므로 고치지 않는다.
+- **합격 기준**
+  1. Node 26에서 게이트 5개 + `soak:ci` 통과, 테스트 수가 Node 24 결과와 같다(149 files / 2,145 passed / 1 skipped).
+  2. Node 24에서도 같은 게이트가 통과한다(`engines` 하한을 유지하는 근거).
+  3. 플래그를 되돌리면 `connection.test.ts`가 다시 실패하는 것을 확인해 인과를 티켓에 남긴다(증상만 덮은 수정이 아님).
+  4. CI 녹색.
+
 ## T8f — 테스트 스위트 실행 시간: `POST /ingest/simulator` 왕복이 Node 26에서 ~250ms로 정체
 
 - slug `t8f-suite-time` · PR 접두 `fix(server):` · 의존 T23
