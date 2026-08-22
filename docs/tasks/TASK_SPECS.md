@@ -529,6 +529,6 @@
 - **합격 기준**
   1. `Register-VerticalLive.ps1 -WithObs -WhatIf`가 만든 XML의 `<Arguments>`에 `-WithObs`가 들어 있고, 스위치 없이 만든 XML에는 없다.
   2. `-WithObs`로 등록한 뒤 `Start-VerticalLive.ps1 -WithObs`를 실행하면 OBS가 뜨고 `resolved config`가 `obsProcessEnabled=True`를 찍는다.
-  3. 그 상태에서 `/health`가 `safe_stopped`가 아니고 `renderer-source`가 소진되지 않는다(렌더러가 붙어 `rendererCount>=1`).
+  3. 그 상태에서 렌더러가 실제로 붙어 그린다(`/health`의 renderer가 `fps` 30으로 frameCounter를 올리고, `renderer-source`가 소진되지 않는다). **`safe_stopped` 자체는 이 기준이 아니다**: YouTube 방송·스트림 키가 없는 호스트에서는 `obs-stream`이 `outputActive = true`에 도달하지 못해 안전 정지한다(2026-08-22 실측). 그 정지는 T25 범위 밖이며 YouTube 계정 작업(D-10/D-16)에 걸려 있다.
   4. `-WithObs -SkipObs`는 거부된다.
   5. 게이트 5개 + CI 녹색(스크립트 변경이라 테스트 수는 그대로).
