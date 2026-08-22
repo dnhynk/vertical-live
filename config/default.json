@@ -189,7 +189,8 @@
         "critical": 60000
       },
       "deliveryTimeoutMs": 10000,
-      "discordEnabled": true
+      "slackEnabled": true,
+      "discordEnabled": false
     },
     "deadMan": {
       "enabled": false,
@@ -213,7 +214,7 @@
       "approved": true,
       "onCallOwner": "owner-operator",
       "maxResponseMinutes": 60,
-      "escalationChannel": "discord-webhook",
+      "escalationChannel": "slack-webhook",
       "autoBlockScope": "youtube-default-filters",
       "safeStopConditions": [
         "targeted_harassment",

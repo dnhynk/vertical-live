@@ -14,7 +14,7 @@
 - 최초 계정 생성·인증·약관 동의 → 사람이 한 번 하는 일(§9.1). [`youtube-auth-setup.md`](youtube-auth-setup.md),
   [`../ACCOUNT_SETUP_FROM_ZERO.md`](../ACCOUNT_SETUP_FROM_ZERO.md)
 
-> **정직 표기**: 이 저장소의 테스트는 전부 fake·mock이다. 실제 OBS·YouTube·Discord·Uptime Kuma를 켠 상태의 전체
+> **정직 표기**: 이 저장소의 테스트는 전부 fake·mock이다. 실제 OBS·YouTube·Slack·Uptime Kuma를 켠 상태의 전체
 > 조립은 아직 실행 검증되지 않았다([`supervisor.md`](supervisor.md) 8장, BOARD E-2·E-3). 아래 절차는 구현된 코드와
 > 설정에서 도출한 것이며, 실계정 검증은 Gate 2 항목이다.
 
@@ -27,7 +27,7 @@
 | # | 준비 | 문서 |
 |---|---|---|
 | 1 | Node 26 + `npm ci` | [`../../README.md`](../../README.md) 4.1 |
-| 2 | vault 항목 등록(`server.rendererToken`, `server.adminToken`, 필요 시 `alerts.discordWebhookUrl`, `youtube.streamKey`, `server.simulatorToken`, `monitoring.deadManPushUrl`) | [`youtube-auth-setup.md`](youtube-auth-setup.md) |
+| 2 | vault 항목 등록(`server.rendererToken`, `server.adminToken`, 필요 시 `alerts.slackWebhookUrl`, `youtube.streamKey`, `server.simulatorToken`, `monitoring.deadManPushUrl`) | [`youtube-auth-setup.md`](youtube-auth-setup.md) |
 | 3 | OAuth 로그인(`npm run auth:login -w @vl/server`) | [`youtube-auth-setup.md`](youtube-auth-setup.md) |
 | 4 | OBS 프로파일·씬·WebSocket 서버 | [`obs-setup.md`](obs-setup.md) |
 | 5 | 외부 dead-man monitor(Uptime Kuma push) | [`supervisor.md`](supervisor.md) 4.5 |
@@ -165,7 +165,7 @@ npm run moderation -w @vl/server -- --clear
 
 **절차 — 알림 수신에서 해제까지**
 
-1. **알림을 받는다.** Discord로 `moderation.unhealthy`(warning) 또는 `supervisor.safe_stopped`(critical)가 온다.
+1. **알림을 받는다.** Slack으로 `moderation.unhealthy`(warning) 또는 `supervisor.safe_stopped`(critical)가 온다.
    D-13 승인표 2번의 **60분** 안에 응답한다. 자동 경로(`filter_evasion_surge`)가 먼저 보고했을 수도 있다 —
    `GET /health`의 `supervisor.moderation.filterEvasion`을 보면 어느 쪽인지 알 수 있다.
 2. **판단한다.** YouTube Studio에서 실제 채팅을 본다. **이 저장소에는 볼 채팅이 없다** — raw chat을 보관하지 않기
@@ -267,7 +267,7 @@ npm run start -w @vl/server
 
 ## 5. 알림 대응
 
-알림은 Discord webhook으로 간다(BOARD D-3). webhook URL 자체가 자격증명이므로 vault에만 둔다.
+알림은 Slack incoming webhook으로 간다(BOARD D-3, 2026-08-22 개정). webhook URL 자체가 자격증명이므로 vault에만 둔다.
 본문에는 기계 토큰과 숫자만 들어가고 raw chat·표시명·channel ID·비밀정보는 들어가지 않는다.
 
 중복은 심각도별 창(`supervisor.alerts.suppressWindowMs`)으로 억제되고, 억제된 건수는 다음 전달에

@@ -42,7 +42,7 @@ offline → starting → live → degraded → recovering → live
 `safe_stopped`에 들어가면:
 
 - **예약된 재시작을 전부 취소한다**(`registry.stopAll()`). backoff를 기다리던 재시작이 남아 있으면 안전 정지 처리가 끈 인코더를 다시 켜게 된다 — §9.1·§9.2가 금지하는 자동 재시작이다(리뷰 round 1 B1). 실행 직전에도 상태를 한 번 더 확인한다.
-- **차단이 보고보다 먼저다**(리뷰 round 4 B1). `stopAll()`·abort·타이머 취소 같은 **동기 차단 조치는 `requestSafeStop()`이 첫 `await`에 닿기 전에** 끝난다(`#haltOutwardWork()`, `#onEnter`에서도 멱등 재호출). 알림은 *보고*이고 보고가 안전을 게이트하지 않는다 — Discord webhook이 수 초 걸리거나 타임아웃되는 동안 실행 중이던 chat 재시작이 `stop()`을 끝내고 `start()`까지 가버린 것이 이 순서 문제였다.
+- **차단이 보고보다 먼저다**(리뷰 round 4 B1). `stopAll()`·abort·타이머 취소 같은 **동기 차단 조치는 `requestSafeStop()`이 첫 `await`에 닿기 전에** 끝난다(`#haltOutwardWork()`, `#onEnter`에서도 멱등 재호출). 알림은 *보고*이고 보고가 안전을 게이트하지 않는다 — 알림 webhook이 수 초 걸리거나 타임아웃되는 동안 실행 중이던 chat 재시작이 `stop()`을 끝내고 `start()`까지 가버린 것이 이 순서 문제였다.
 - **이미 `await` 안에 들어간 재시작 액션에는 abort 신호를 보낸다**(리뷰 round 3 B2). 타이머 취소로는 이미 시작된 액션을 되돌릴 수 없다. 그래서 `RestartAction`은 `AbortSignal`을 받고, **외부 효과 직전마다 다시 확인해야 한다** — chat 재시작이 `stop()` → `start()`의 2단계라 정확히 이 형태다. 중단된 시도는 완료로 세지 않는다(예산도 쓰지 않는다).
 - **시작 순서가 진행 중이면 즉시 중단한다**(리뷰 round 3 B1). HTTP 리스너가 `supervisor.start()`보다 먼저 뜨므로 kill switch는 시퀀스가 YouTube·OBS I/O를 기다리는 동안 도착할 수 있다. 시퀀스는 각 step **전과 후**에 중단 여부를 확인하고, 진행 중이던 step의 결과는 버리며(`status: 'cancelled'`) 그 뒤 step(streamService·startStream·goLive·chatSource·publish)은 실행하지 않는다. 중단은 *실패가 아니므로* 재시도를 쓰지 않고 실패 alert도 내지 않는다. `start()`는 시퀀스 뒤에서 dead-man·screenshot을 켜기 전에 한 번 더 확인한다.
 - dead-man push를 **멈춘다**. 외부 monitor가 사건을 올려서 사람을 부르는 것이 목적이다([S23]).
@@ -126,10 +126,10 @@ CTA를 켜려면 `chat_transport`가 **`ok`여야 한다** — "degraded가 아�
 
 ### 4.2 알림 (BOARD D-3)
 
-`AlertSink` 인터페이스의 첫 구현은 Discord webhook이다. **webhook URL은 URL 자체가 자격증명**이라 vault에만 둔다.
+`AlertSink`의 운영 구현은 Slack incoming webhook이다(BOARD D-3, 2026-08-22 개정; Discord 구현은 `discordEnabled`로 되돌릴 수 있게 남아 있다). **webhook URL은 URL 자체가 자격증명**이라 vault에만 둔다.
 
 ```bash
-npm run secrets -w @vl/server -- set alerts.discordWebhookUrl   # 값은 stdin으로
+npm run secrets -w @vl/server -- set alerts.slackWebhookUrl   # 값은 stdin으로
 ```
 
 - 심각도: `info`(복구 시도·상태 진입) · `warning`(degraded·사전 점검 실패·retention 미완) · `critical`(`safe_stopped`·철회 기한 초과)
@@ -137,7 +137,7 @@ npm run secrets -w @vl/server -- set alerts.discordWebhookUrl   # 값은 stdin�
 - 전달 실패는 **로그로 남기고 throw하지 않는다.** 알림 전송 실패가 방송을 멈추면 안 된다. 로그에도 URL은 남지 않는다.
 - 본문에는 이 프로세스가 만든 기계 토큰과 숫자만 들어간다. raw chat·표시명·channelId·비밀정보는 들어가지 않는다(§12.3, §12.4, §10.2).
 
-`supervisor.alerts.discordEnabled=false`로 끌 수 있고, 끄면 사전 점검의 `secrets`도 그 값을 요구하지 않는다.
+`supervisor.alerts.slackEnabled=false`로 끌 수 있고, 끄면 사전 점검의 `secrets`도 그 값을 요구하지 않는다.
 
 ### 4.3 모더레이션 호출표 (§12.3, Gate 0)
 
@@ -250,5 +250,5 @@ npm run secrets -w @vl/server -- set monitoring.deadManPushUrl
 ## 8. 알려진 한계
 
 - **`obs-process` 실행기는 죽은 OBS만 되살린다**(T17): OBS가 살아 있는데 obs-websocket이 응답하지 않으면 실행기가 `already_running`으로 거부한다. 두 번째 인스턴스는 "이미 실행 중" 대화상자만 띄우고 아무것도 복구하지 못하며, 이 프로세스는 운영자의 OBS를 스스로 죽이지 않는다. 그 상황은 예산이 소진되면 `safe_stopped`가 되고 사람이 처리한다(`docs/ops/windows-host.md` 7장). `obs.process.enabled=false`일 때도 같은 방식으로 정직하게 실패한다.
-- **실제 OBS·YouTube·Discord·Uptime Kuma 스모크 미실행**: 이 저장소의 테스트는 전부 fake·mock이다. 실제 자원 검증은 Gate 2와 T15 soak에서 한다(OBS만 2026-08-18에 실기 스모크를 통과했다 — BOARD E-3, `docs/ops/obs-setup.md` §6). 특히 `integrations.obs`/`integrations.broadcast`를 켠 상태의 `main.ts` 조립은 실계정·실 OBS가 있어야 확인되므로, 부품별 테스트는 있어도 **조립 자체는 아직 실행 검증되지 않았다**.
+- **실제 OBS·YouTube·Slack·Uptime Kuma 스모크 미실행**: 이 저장소의 테스트는 전부 fake·mock이다. 실제 자원 검증은 Gate 2와 T15 soak에서 한다(OBS만 2026-08-18에 실기 스모크를 통과했다 — BOARD E-3, `docs/ops/obs-setup.md` §6). 특히 `integrations.obs`/`integrations.broadcast`를 켠 상태의 `main.ts` 조립은 실계정·실 OBS가 있어야 확인되므로, 부품별 테스트는 있어도 **조립 자체는 아직 실행 검증되지 않았다**.
 - **시작 순서 재시도는 전체 재실행**: step은 각각 멱등이지만(§5), 부분 재개가 아니라 처음부터 다시 돈다.

@@ -15,7 +15,7 @@
 |---|---|
 | 스택 | TypeScript / Node 26, npm workspaces, SQLite(better-sqlite3), React + R3F 렌더러, vitest |
 | 1차 호스트 | 이 Windows 11 PC(OBS Studio 설치됨). 코어는 OS 무관, 운영 스크립트는 Windows 우선 |
-| 알림 | Discord webhook(`AlertSink` 인터페이스의 첫 구현) |
+| 알림 | Slack incoming webhook(`AlertSink` 구현; BOARD D-3, 2026-08-22 개정) |
 | 원격 | `dnhynk/vertical-live` **public**(2026-08-18 전환, 원래 private — BOARD D-4·E-5), `main`, squash merge만, 브랜치 자동 삭제 |
 | 동시성 | 구현 worker 최대 **2** + 리뷰어 1(리뷰는 순차). 근거: 2026-08-16 ToneAndMove에서 worker 4 병행 중 호스트 BSOD 2회 → 2로 하향한 이력 |
 | worker | `claude`(Orca `--agent claude` = `claude --dangerously-skip-permissions`) |
@@ -130,7 +130,7 @@ orca orchestration dispatch --task <review_task_id> --to <handle> --inject --jso
 3. 스펙·`TASK_SPECS.md`에 값이 없고 공식 문서로도 못 정하는 결정(provisional config로 둘 수 없는 것)
 4. 같은 task의 fix가 2회 연속 실패, 또는 리뷰 round 3 도달
 5. main CI가 깨졌는데 원인이 방금 머지한 PR 밖에 있음
-6. 외부 자원·비용·계정 조작이 필요한 것(YouTube 계정, Discord 서버, 유료 서비스)
+6. 외부 자원·비용·계정 조작이 필요한 것(YouTube 계정, Slack workspace, 유료 서비스)
 
 올릴 때는 **추상화한 질문 + 선택지 + 권장안 + 근거**로 묻고, 답을 기다리는 동안 의존성이 없는 다른 task를 계속 돌린다.
 

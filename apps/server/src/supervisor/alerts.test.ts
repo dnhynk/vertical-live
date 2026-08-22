@@ -5,8 +5,10 @@ import { FakeClock } from '../testing/fake-clock.js'
 import {
   CompositeAlertSink,
   DiscordWebhookAlertSink,
+  escapeSlackText,
   formatAlert,
   RecordingAlertSink,
+  SlackWebhookAlertSink,
   SuppressingAlertSink,
   type Alert,
   type AlertSink,
@@ -156,6 +158,121 @@ describe('DiscordWebhookAlertSink', () => {
     })
 
     await expect(sink.deliver(alert())).resolves.toMatchObject({ delivered: false })
+  })
+})
+
+describe('SlackWebhookAlertSink', () => {
+  const webhookUrl = 'https://hooks.slack.example/services/T1/B1/synthetic-token'
+
+  it('posts the alert as a `text` message and reports delivery on a 200 ok', async () => {
+    const fetchImpl = vi.fn(async () => new Response('ok', { status: 200 }))
+    const sink = new SlackWebhookAlertSink({
+      webhookUrl: () => Promise.resolve(webhookUrl),
+      config,
+      clock: new FakeClock(),
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    })
+
+    await expect(sink.deliver(alert())).resolves.toEqual({
+      delivered: true,
+      suppressed: false,
+      error: null,
+    })
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+    const [, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit]
+    expect(JSON.parse(String(init.body))).toEqual({ text: formatAlert(alert()) })
+  })
+
+  it('escapes the three mrkdwn control characters so a token renders as itself', async () => {
+    const fetchImpl = vi.fn(async () => new Response('ok', { status: 200 }))
+    const sink = new SlackWebhookAlertSink({
+      webhookUrl: () => Promise.resolve(webhookUrl),
+      config,
+      clock: new FakeClock(),
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    })
+
+    await sink.deliver(alert({ detail: { range: '<a&b>' } }))
+
+    const [, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit]
+    const { text } = JSON.parse(String(init.body)) as { text: string }
+    expect(text).toContain('range=&lt;a&amp;b&gt;')
+    expect(text).not.toContain('<a&b>')
+  })
+
+  it('reports a refused delivery instead of throwing, and logs it without the URL', async () => {
+    const logged: { message: string; fields?: LogFields }[] = []
+    const sink = new SlackWebhookAlertSink({
+      webhookUrl: () => Promise.resolve(webhookUrl),
+      config,
+      clock: new FakeClock(),
+      logger: {
+        debug: () => {},
+        info: () => {},
+        warn: () => {},
+        error: (message, fields) => logged.push({ message, ...(fields ? { fields } : {}) }),
+      },
+      fetchImpl: (async () =>
+        new Response('invalid_payload', { status: 400 })) as unknown as typeof fetch,
+    })
+
+    await expect(sink.deliver(alert())).resolves.toEqual({
+      delivered: false,
+      suppressed: false,
+      error: 'http_400',
+    })
+    expect(logged).toHaveLength(1)
+    expect(JSON.stringify(logged)).not.toContain('synthetic-token')
+  })
+
+  it('reports the published rate limit as a delivery failure rather than dropping it', async () => {
+    const sink = new SlackWebhookAlertSink({
+      webhookUrl: () => Promise.resolve(webhookUrl),
+      config,
+      clock: new FakeClock(),
+      fetchImpl: (async () => new Response(null, { status: 429 })) as unknown as typeof fetch,
+    })
+
+    await expect(sink.deliver(alert())).resolves.toMatchObject({
+      delivered: false,
+      error: 'http_429',
+    })
+  })
+
+  it('reports a missing webhook URL rather than pretending to have alerted', async () => {
+    const sink = new SlackWebhookAlertSink({
+      webhookUrl: () => Promise.resolve(undefined),
+      config,
+      clock: new FakeClock(),
+      fetchImpl: (() => {
+        throw new Error('must not be called')
+      }) as unknown as typeof fetch,
+    })
+
+    await expect(sink.deliver(alert())).resolves.toMatchObject({
+      delivered: false,
+      error: 'webhook_url_not_configured',
+    })
+  })
+
+  it('survives a transport that throws', async () => {
+    const sink = new SlackWebhookAlertSink({
+      webhookUrl: () => Promise.resolve(webhookUrl),
+      config,
+      clock: new FakeClock(),
+      fetchImpl: (() => Promise.reject(new Error('offline'))) as unknown as typeof fetch,
+    })
+
+    await expect(sink.deliver(alert())).resolves.toMatchObject({ delivered: false })
+  })
+})
+
+describe('escapeSlackText', () => {
+  it('converts only the three control characters', () => {
+    expect(escapeSlackText('a&b<c>d')).toBe('a&amp;b&lt;c&gt;d')
+    expect(escapeSlackText('[critical] vertical-live x: y (z)')).toBe(
+      '[critical] vertical-live x: y (z)',
+    )
   })
 })
 

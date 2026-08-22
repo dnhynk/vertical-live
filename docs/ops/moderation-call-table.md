@@ -23,13 +23,13 @@
 |---|---|---|---|
 | 1 | **호출 책임자**(24시간 커버) | **사용자 본인 1인**(JST 24시간). 부재 구간(수면 등)은 2장의 **자동 safe-stop 4개 사유**가 덮는다 — 사전 safe-stop 정책 | §12.3 "24시간 호출 책임자" |
 | 2 | **최대 응답시간** | **60분** | §12.3 "최대 응답시간" |
-| 3 | **escalation 채널** | 1차 **Discord webhook**(BOARD D-3). 2차 **본인 휴대폰 문자/전화**(번호는 이 문서에 적지 않는다). **V1에는 문자/전화 자동 발송이 구현되어 있지 않다 → Discord 모바일 알림이 사실상 유일한 자동 경로다**(아래 주석) | §12.3 "escalation 채널" |
+| 3 | **escalation 채널** | 1차 **Slack incoming webhook**(BOARD D-3, 2026-08-22 개정). 2차 **본인 휴대폰 문자/전화**(번호는 이 문서에 적지 않는다). **V1에는 문자/전화 자동 발송이 구현되어 있지 않다 → Slack 모바일 알림이 사실상 유일한 자동 경로다**(아래 주석) | §12.3 "escalation 채널" |
 | 4 | **자동 차단 범위** | **YouTube 기본 필터 전부** — blocked words · URL hold · 부적절 메시지 hold for review · slow mode([S16]). **timeout·ban은 사람**이 Studio 또는 API에서 한다 | §12.3 "자동 차단 범위" |
 | 5 | **safe-stop 조건** | 2장 사유 토큰 **4개 전부**: `targeted_harassment` · `pii_exposure` · `sexual_or_self_harm_risk` · `filter_evasion_surge` | §12.3 "safe-stop 조건", §9.2 |
 
 > **3번에 대한 경고(D-13 명시 사항)**: 2차 escalation(문자·전화)은 **사람이 수동으로 쓰는 경로**다. V1은 SMS·전화
-> 발송을 구현하지 않았고 구현할 계획도 이 게이트에 없다. 따라서 **자동으로 사람을 깨울 수 있는 경로는 Discord
-> 모바일 푸시 하나뿐**이며, 호출 책임자는 Discord 모바일 알림을 켜 둔 상태를 유지해야 한다. 이 한계 때문에 1번의
+> 발송을 구현하지 않았고 구현할 계획도 이 게이트에 없다. 따라서 **자동으로 사람을 깨울 수 있는 경로는 Slack
+> 모바일 푸시 하나뿐**이며, 호출 책임자는 Slack 모바일 알림을 켜 둔 상태를 유지해야 한다. 이 한계 때문에 1번의
 > 부재 구간을 사람이 아니라 자동 safe-stop(5번 4개 사유)으로 덮는다.
 
 각 칸의 규칙(템플릿에서 유지):
@@ -73,8 +73,8 @@
 `filter_evasion_surge`만 자동인 이유는 그것이 **의미가 아니라 빈도**의 관측이기 때문이다.
 
 **결과적으로 1번의 부재 구간을 자동으로 덮는 것은 `filter_evasion_surge` 하나뿐이다.** 나머지 셋은 호출 책임자가
-깨어 있고 Discord 알림을 볼 때 걸린다. 이 한계는 D-13이 감수하기로 한 것이며, 3번의 경고(자동으로 사람을 깨우는
-경로가 Discord 모바일 푸시뿐이라는 것)와 같은 성격이다.
+깨어 있고 Slack 알림을 볼 때 걸린다. 이 한계는 D-13이 감수하기로 한 것이며, 3번의 경고(자동으로 사람을 깨우는
+경로가 Slack 모바일 푸시뿐이라는 것)와 같은 성격이다.
 
 ### 사람 경로 — `POST /admin/moderation` (T22)
 
@@ -132,7 +132,7 @@
     "approved": true,                        // 1장 전체가 채워지고 사용자가 승인했다(D-13)
     "onCallOwner": "owner-operator",         // 1번 — 사용자 본인 1인, JST 24h(개인 식별자는 적지 않는다)
     "maxResponseMinutes": 60,                // 2번
-    "escalationChannel": "discord-webhook",  // 3번 — 2차(문자/전화)는 수동, V1에 자동 발송 없음
+    "escalationChannel": "slack-webhook",  // 3번 — 2차(문자/전화)는 수동, V1에 자동 발송 없음
     "autoBlockScope": "youtube-default-filters", // 4번 — blocked words·URL hold·hold for review·slow mode
     "safeStopConditions": [                  // 5번 — 2장의 사유 토큰 문자열, 4개 전부
       "targeted_harassment",
@@ -176,7 +176,7 @@
 | 상황이 끝났다 | `npm run moderation -w @vl/server -- --clear`. CTA만 돌아온다 — `safe_stopped`였다면 재시작이 필요하다(§9.2) |
 | 사유가 safe-stop 조건에 해당 | 서버가 이미 `safe_stopped`로 갔다. [`runbook-operations.md`](runbook-operations.md) 4장 복구 절차를 따른다 |
 | 사람이 먼저 위험을 발견 | kill switch로 즉시 정지(`runbook-operations.md` 3장). 사후에 사유 토큰을 추가할지 검토 |
-| Discord 알림이 오지 않는다 | 1차 경로가 죽은 것이다. 2차(문자/전화)는 **자동이 아니므로** 그 사이 사람이 깨지 않는다 — 1차 경로 복구를 최우선으로 처리한다(3번 경고) |
+| Slack 알림이 오지 않는다 | 1차 경로가 죽은 것이다. 2차(문자/전화)는 **자동이 아니므로** 그 사이 사람이 깨지 않는다 — 1차 경로 복구를 최우선으로 처리한다(3번 경고) |
 | 조치 후 | 사건 시각·사유·조치·재발 방지를 기록한다. §12.5의 정기 표본 검토 기록과 같은 자리에 남긴다 |
 
 ## 5. 승인 뒤에 할 일 — 2026-08-19 완료(T19)
