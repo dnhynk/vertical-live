@@ -13,7 +13,7 @@
 | PR | **31개 전부 MERGED, open 0** — T0–T17, T1b, T8b–T8e, T17b, T18, T19(Gate 0 반영), T20a/b/c(identity B), T21(일본 패널 초안), T22(모더레이션 보고 경로) |
 | 테스트 | 149 files / 2,145 passed / 1 skipped + `soak:ci` PASS (로컬·CI 동일) |
 | 남은 등록 task | **T8f**(pending, 낮은 우선순위 — 테스트 스위트 CPU 3.7배 증가 계측 + 얇은 타임아웃 점검, `TASK_SPECS` 미작성·BOARD §1 행만 있음) |
-| Node | 24 (이전 호스트 v24.11.1) · npm workspaces |
+| Node | **26**(`.nvmrc`, BOARD D-1 2026-08-22 개정) · 새 호스트는 nvm-windows로 v26.7.0 사용, v24.19.0 병행 보관 · npm workspaces |
 | 검증 게이트 | `npm run format:check && npm run lint && npm run typecheck && npm run test && npm run build` (+ `npm run soak:ci`) |
 | Orca Run | `run_1c93e897ee3e` · repo id `f5dd030a-828b-4bcc-b1b8-dc22b95053bf` (구 호스트 기준 — §4 참조) |
 
@@ -23,7 +23,7 @@
 
 > **진행(2026-08-22, 새 호스트 `WORKSTATION`)**: 1·2 완료(단 Node는 nvm-windows로 24.19.0 고정 — 호스트 기본이 26.7.0이었다), 3은 서버 토큰 3종만 완료, 4는 OBS 32.0.2 설치까지(WebSocket·프로파일·probe 미완), 5 미착수, 6 완료. 세부 근거는 BOARD 이력 2026-08-22.
 
-1. **기본 도구**: Windows 11, Git, Node 24, `gh`(GitHub CLI, `dnhynk` 로그인), Python 3(코디네이터 스크립트용), Orca(오케스트레이션을 계속할 경우).
+1. **기본 도구**: Windows 11, Git, Node 26, `gh`(GitHub CLI, `dnhynk` 로그인), Python 3(코디네이터 스크립트용), Orca(오케스트레이션을 계속할 경우).
 2. **클론·게이트**:
    ```powershell
    git clone https://github.com/dnhynk/vertical-live.git; cd vertical-live

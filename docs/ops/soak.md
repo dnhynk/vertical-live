@@ -47,7 +47,7 @@ crash). soak이 재는 것은 무인 지속성이므로 `safe_stopped` 행을 �
 
 crash 행(F-10, F-14~F-17)은 soak 스케줄이 아니라 matrix 드릴에서 돕니다. 자식 프로세스가
 프로덕션 `PersistenceStore`·`StateEngine`을 그대로 띄워 지정한 commit 경계에서 스레드를
-멈추고 부모가 `SIGKILL`합니다. 그 자식은 Node 24의 TypeScript type stripping과
+멈추고 부모가 `SIGKILL`합니다. 그 자식은 Node의 TypeScript type stripping과
 `tools/soak/src/injection/child-resolve.mjs`(workspace 이름→`src/` 진입점, `./x.js`→`./x.ts`)
 로 **빌드 없이** 소스를 불러옵니다 — CI가 `npm run test`를 `npm run build`보다 먼저 돌리기
 때문에 `dist/`에 기댈 수 없습니다.

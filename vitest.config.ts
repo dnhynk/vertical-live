@@ -65,5 +65,14 @@ export default defineConfig({
     // One run over every workspace. Renderer tests declare `@vitest-environment
     // jsdom` per file; everything else runs in the default node environment.
     include: ['{packages,apps,tools}/*/src/**/*.test.{ts,tsx}'],
+    // Node's Web Storage API defines a global `localStorage` accessor that stays
+    // `undefined` unless the process gets `--localstorage-file`, and Node 26 has
+    // it on by default. vitest leaves a global key that already exists alone, so
+    // jsdom's own storage never reaches `window.localStorage` while
+    // `sessionStorage` still gets jsdom's — a renderer test asserting that the
+    // read model writes to no browser storage would read Node's stub instead of
+    // the browser one. Turning the Node API off restores the jsdom environment.
+    // Node 24 accepts the flag too, so the `engines` floor still holds.
+    execArgv: ['--no-experimental-webstorage'],
   },
 })
