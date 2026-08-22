@@ -159,7 +159,7 @@ npm run soak:matrix
 
 - 가속 모드의 지연 수치는 시나리오 시간입니다. 실제 p95는 실시간 모드에서만 의미가 있고,
   §7.5 합격선은 Gate 2 실기기 calibration 뒤에 잠깁니다.
-- soak은 외부 서비스에 접속하지 않습니다. Discord alert sink와 dead-man push는 꺼져 있고
+- soak은 외부 서비스에 접속하지 않습니다. Slack alert sink와 dead-man push는 꺼져 있고
   alert 전달시간은 측정 대상이 아닙니다(§9.4(8)의 off-host 관측은 실제 monitor가 필요).
 - 실계정 YouTube 경로(공개 노출, YPP watch-hour, 실거래 유료 이벤트)는 mock으로 합격
   판정하지 않습니다(§11 마지막 문단).

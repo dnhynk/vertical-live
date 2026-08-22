@@ -27,6 +27,7 @@ import { createServer, DEFAULT_HOST, resolvePort } from './server.js'
 import {
   CompositeAlertSink,
   DiscordWebhookAlertSink,
+  SlackWebhookAlertSink,
   SuppressingAlertSink,
   type AlertSink,
 } from './supervisor/alerts.js'
@@ -101,6 +102,18 @@ const secrets = defaultSecretProvider()
 // exactly that class of failure.
 
 const alertSinks: AlertSink[] = []
+if (supervisorConfig.alerts.slackEnabled) {
+  alertSinks.push(
+    new SlackWebhookAlertSink({
+      // Read per delivery: the webhook URL is a credential and is never held in
+      // config, logs or `/health` (spec §10.2, BOARD D-3).
+      webhookUrl: () => secrets.get('alerts.slackWebhookUrl'),
+      config: supervisorConfig.alerts,
+      clock: systemClock,
+      logger: stdoutLogger,
+    }),
+  )
+}
 if (supervisorConfig.alerts.discordEnabled) {
   alertSinks.push(
     new DiscordWebhookAlertSink({

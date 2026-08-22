@@ -76,6 +76,22 @@ describe('loadSupervisorConfig', () => {
     expect(config.deadMan.enabled).toBe(true)
   })
 
+  it('alerts through Slack, with the Discord sink left off (BOARD D-3, amended 2026-08-22)', () => {
+    const config = loadSupervisorConfig()
+
+    expect(config.alerts.slackEnabled).toBe(true)
+    expect(config.alerts.discordEnabled).toBe(false)
+  })
+
+  it('takes env overrides for both alert sinks, so the channel can be moved back', () => {
+    const config = loadSupervisorConfig({
+      env: { VL_ALERTS_SLACK_ENABLED: 'false', VL_ALERTS_DISCORD_ENABLED: 'true' },
+    })
+
+    expect(config.alerts.slackEnabled).toBe(false)
+    expect(config.alerts.discordEnabled).toBe(true)
+  })
+
   it('refuses a component that has no attempt budget', () => {
     const config = loadSupervisorConfig()
     const withoutObsProcess = Object.fromEntries(
@@ -136,7 +152,7 @@ describe('moderation call table (spec §12.3, Gate 0)', () => {
     expect(moderation.approved).toBe(true)
     expect(moderation.onCallOwner).toBe('owner-operator')
     expect(moderation.maxResponseMinutes).toBe(60)
-    expect(moderation.escalationChannel).toBe('discord-webhook')
+    expect(moderation.escalationChannel).toBe('slack-webhook')
     expect(moderation.autoBlockScope).toBe('youtube-default-filters')
     // The four §12.3 reasons D-13 approved, all of them safe-stop conditions.
     // These strings are the contract with whoever calls reportModerationHealth,

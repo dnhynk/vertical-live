@@ -75,7 +75,12 @@ export interface SupervisorAlertConfig {
    * the Discord sink also aborts its own request at it.
    */
   readonly deliveryTimeoutMs: number
-  /** Discord webhook sink (BOARD D-3). The URL itself lives in the vault. */
+  /** Slack incoming-webhook sink (BOARD D-3). The URL itself lives in the vault. */
+  readonly slackEnabled: boolean
+  /**
+   * Discord webhook sink. Off since D-3 was amended to Slack (2026-08-22); the
+   * implementation stays so the channel can be moved back by configuration.
+   */
   readonly discordEnabled: boolean
 }
 
@@ -291,6 +296,10 @@ export function loadSupervisorConfig(options: LoadSupervisorConfigOptions = {}):
       deliveryTimeoutMs: readPositiveInt(
         alerts['deliveryTimeoutMs'],
         'supervisor.alerts.deliveryTimeoutMs',
+      ),
+      slackEnabled: readBoolean(
+        env['VL_ALERTS_SLACK_ENABLED'] ?? alerts['slackEnabled'],
+        'supervisor.alerts.slackEnabled',
       ),
       discordEnabled: readBoolean(
         env['VL_ALERTS_DISCORD_ENABLED'] ?? alerts['discordEnabled'],

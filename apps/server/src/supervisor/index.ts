@@ -5,6 +5,7 @@ export {
   formatAlert,
   nullAlertSink,
   RecordingAlertSink,
+  SlackWebhookAlertSink,
   SuppressingAlertSink,
   type Alert,
   type AlertDeliveryResult,

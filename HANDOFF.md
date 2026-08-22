@@ -35,7 +35,7 @@
    |---|---|---|
    | `server.adminToken` · `server.rendererToken` · `server.simulatorToken` | set | 새로 생성: `python -c "import secrets; print(secrets.token_urlsafe(32))" \| npm run secrets -w @vl/server -- set <이름>` ×3 |
    | `obs.websocketPassword` | set | OBS 설치 후 §2-4에서 새로 생성해 저장 |
-   | `alerts.discordWebhookUrl` | **missing** (사용자 미완료) | Discord 웹후크 URL을 stdin으로 저장 — PowerShell: `'URL' \| npm run secrets …` / bash: `echo 'URL' \| npm run secrets …` |
+   | `alerts.slackWebhookUrl` | **missing** (사용자 미완료) | Slack incoming webhook URL을 stdin으로 저장 — PowerShell: `'URL' \| npm run secrets …` / bash: `echo 'URL' \| npm run secrets …` |
    | `youtube.oauthRefreshToken` | missing | OAuth 클라이언트 준비 후 `npm run auth:login -w @vl/server` (docs/ops/youtube-auth-setup.md) |
    | `youtube.streamKey` | missing | 정상 경로는 T10이 자동 주입 — 수동 입력 불필요 |
    | `monitoring.deadManPushUrl` | missing | 선택(외부 dead-man 모니터 쓸 때만) |
@@ -61,7 +61,7 @@
 ## 5. 다음 작업 (우선순위순)
 
 **사용자(수동) — 코드보다 먼저 풀려야 하는 것:**
-1. **Discord webhook** → vault `alerts.discordWebhookUrl` (D-3; 이것 없이는 실제 방송 시작 금지, 스펙 §9.1). 저장 후 테스트 알림 1건으로 모바일 푸시 도달 확인.
+1. **Slack webhook** → vault `alerts.slackWebhookUrl` (D-3; 이것 없이는 실제 방송 시작 금지, 스펙 §9.1). 저장 후 테스트 알림 1건으로 모바일 푸시 도달 확인.
 2. **YouTube 전용 채널 + Google Cloud + OAuth**(D-10/D-16): `docs/ACCOUNT_SETUP_FROM_ZERO.md` → `docs/ops/youtube-auth-setup.md`(consent screen을 **In production**으로 — Testing이면 refresh token 7일 만료). 완료 후 `auth:login` → 첫 **private** 기술 방송(공개 전환은 사람 권한, A-18).
 3. **일본 패널 계획 승인**: `docs/ops/japan-panel-plan.md` §5 **A-1~A-8** — 승인되면 gate0-checklist §1.4를 닫는다(D-15).
 4. 계정 audit 값 기입(채널 생성 후, gate0-checklist §1.2 — D-10은 '새 채널이라 전부 없음/미달' 가정).

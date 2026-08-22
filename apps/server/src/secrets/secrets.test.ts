@@ -14,7 +14,8 @@ describe('EnvSecretProvider', () => {
       VL_ADMIN_TOKEN: 'test-admin-token',
       VL_SIMULATOR_TOKEN: 'test-simulator-token',
       VL_RENDERER_TOKEN: 'test-renderer-token',
-      // T12's operator channels: both URLs carry their token in the path.
+      // T12's operator channels: every URL carries its token in the path.
+      VL_SLACK_WEBHOOK_URL: 'test-slack-webhook-url',
       VL_DISCORD_WEBHOOK_URL: 'test-discord-webhook-url',
       VL_DEAD_MAN_PUSH_URL: 'test-dead-man-push-url',
     })

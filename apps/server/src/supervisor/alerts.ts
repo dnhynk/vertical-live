@@ -6,8 +6,9 @@ import type { SupervisorAlertConfig } from './config.js'
 /**
  * The human-callable path of spec §9.1 and §12.3 ("사람 알림", "사람 호출").
  *
- * `AlertSink` is the interface; the Discord webhook is its first implementation
- * (BOARD D-3). Three rules hold for every implementation:
+ * `AlertSink` is the interface; the Slack incoming webhook is the channel in use
+ * (BOARD D-3, amended 2026-08-22) and the Discord webhook stays available behind
+ * its own config flag. Three rules hold for every implementation:
  *
  * 1. **Delivery never throws into the supervisor.** An alert transport that
  *    failed must not also take down the run it was reporting on, so every sink
@@ -217,6 +218,106 @@ export class DiscordWebhookAlertSink implements AlertSink {
     })
     return { delivered: false, suppressed: false, error }
   }
+}
+
+export interface SlackWebhookAlertSinkOptions {
+  /**
+   * Resolves the webhook URL from the vault (`alerts.slackWebhookUrl`). A
+   * function, not a string, for the same reason as the Discord sink: the URL is
+   * the credential (spec §10.2).
+   */
+  readonly webhookUrl: () => Promise<string | undefined>
+  readonly config: SupervisorAlertConfig
+  readonly clock: Clock
+  readonly logger?: Logger
+  readonly fetchImpl?: typeof fetch
+}
+
+/**
+ * Slack incoming-webhook implementation of `AlertSink` (BOARD D-3, amended
+ * 2026-08-22).
+ *
+ * Sends one JSON `text` message per alert. Slack answers `200` with the body
+ * `ok` on success and 400/403/404 otherwise
+ * (https://docs.slack.dev/messaging/sending-messages-using-incoming-webhooks,
+ * checked 2026-08-22); like the Discord sink, anything outside 2xx is a delivery
+ * failure that is logged with its status and never retried in place.
+ *
+ * The published limit is one message per second per webhook
+ * (https://docs.slack.dev/apis/web-api/rate-limits, checked 2026-08-22). No
+ * queue guards it here: `SuppressingAlertSink` already holds repeats to one per
+ * hour (info), 15 minutes (warning) or a minute (critical), which is far below
+ * that line. A burst that crossed it would answer `429`, which reaches the
+ * operator as `http_429` rather than as a silent drop.
+ */
+export class SlackWebhookAlertSink implements AlertSink {
+  readonly name = 'slack-webhook'
+  readonly #options: SlackWebhookAlertSinkOptions
+  readonly #fetch: typeof fetch
+  readonly #logger: Logger
+
+  constructor(options: SlackWebhookAlertSinkOptions) {
+    this.#options = options
+    this.#fetch = options.fetchImpl ?? fetch
+    this.#logger = options.logger ?? silentLogger
+  }
+
+  async deliver(alert: Alert): Promise<AlertDeliveryResult> {
+    let url: string | undefined
+    try {
+      url = await this.#options.webhookUrl()
+    } catch (error) {
+      return this.#failed(alert, `vault_unavailable:${errorToken(error)}`)
+    }
+    if (url === undefined || url === '') {
+      return this.#failed(alert, 'webhook_url_not_configured')
+    }
+
+    const abort = new AbortController()
+    const timeout = this.#options.clock.setTimeout(() => {
+      abort.abort()
+    }, this.#options.config.deliveryTimeoutMs)
+
+    try {
+      const response = await this.#fetch(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text: escapeSlackText(formatAlert(alert)) }),
+        signal: abort.signal,
+      })
+      if (response.status < 200 || response.status >= 300) {
+        return this.#failed(alert, `http_${response.status}`)
+      }
+      return DELIVERED
+    } catch (error) {
+      return this.#failed(alert, errorToken(error))
+    } finally {
+      this.#options.clock.clearTimeout(timeout)
+    }
+  }
+
+  #failed(alert: Alert, error: string): AlertDeliveryResult {
+    // The URL is never logged: the token in its path is the credential.
+    this.#logger.error('alert delivery failed', {
+      sink: this.name,
+      kind: alert.kind,
+      severity: alert.severity,
+      reason: alert.reason,
+      error,
+    })
+    return { delivered: false, suppressed: false, error }
+  }
+}
+
+/**
+ * Slack reads `&`, `<` and `>` as mrkdwn control characters, so a token that
+ * happens to contain one would render as markup instead of as itself
+ * (https://docs.slack.dev/messaging/formatting-message-text, checked
+ * 2026-08-22). Escaping belongs to this sink: `formatAlert` is shared with the
+ * Discord sink and with `/health`, which must keep the raw tokens.
+ */
+export function escapeSlackText(text: string): string {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
 /**
