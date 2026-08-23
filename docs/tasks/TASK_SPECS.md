@@ -863,3 +863,34 @@
   1. 계약 검증 실패가 `/health`에서 보인다 — 코드별 건수·마지막 코드·마지막 발생 시각 — 그리고 발생마다 로그에 남는다.
   2. 명령 아닌 정상 채팅과 `unsupported` 타입은 이 신호를 올리지 않는다 — 회귀 테스트.
   3. 게이트 5개 + CI 녹색.
+
+## T44 — 하루 API 예산이 폴링 하나로 넘는다. 그리고 그것을 세는 장치가 재시작마다 잊는다
+
+- slug `t44-quota-budget` · PR 접두 `fix(youtube):` · 의존 T10, T4, T12
+- **읽을 것**: `apps/server/src/youtube/broadcast/health.ts`(`poll()`·`#scheduleNext`), `apps/server/src/youtube/broadcast/config.ts`(`statusPollIntervalMs`), `apps/server/src/youtube/quota/tracker.ts`, `apps/server/src/youtube/quota/costs.ts`, `apps/server/src/db/store.ts`
+- **관측**(2026-08-23 13:01~, 호스트): 방송이 시작 단계에서 반복 실패하고 `safe_stopped`가 된다.
+
+  ```text
+  "startup step failed" step:"broadcast"
+  error: "liveBroadcasts.list rejected: quotaExceeded — HTTP 403"
+  "supervisor safe stop" kind:"restart_budget_exhausted" reason:"startup:broadcast"
+  ```
+
+  **원인 1 — 예산 초과가 설계에 들어 있다.** `BroadcastHealthPoller.poll()`은 한 번에 `liveStreams.list` + `liveBroadcasts.list` **2 units**를 쓰고 `statusPollIntervalMs`(15초)마다 돈다. 하루 `86400/15 × 2 = 11,520 units`로 **기본 한도 10,000을 폴링 하나가 넘는다.** 채팅·방송 생성·구간 교체는 아직 더하지도 않았다. 15초는 `provisional`이다(BOARD A-15: "API가 주기를 문서화하지 않는다") — 추측값이 예산을 초과한다.
+
+  **원인 2 — 세는 장치가 하루를 못 본다.** `QuotaTracker`는 10,000을 알고 초과를 경고하고 `canSpend`로 호출을 막기까지 하는데 **카운터가 프로세스 메모리에만 있다.** 호스트가 하루에 여러 번 재기동되면 로컬 카운터는 매번 0으로 돌아가고, Google의 계정 단위 하루 카운터만 쌓인다. 실제로 로그에 quota 경고는 **0건**이고 그 상태로 한도에 도달했다. 모듈 주석이 이미 `T4 owns persistence and can restore a snapshot on start`라고 적어 놓고 연결되지 않은 자리다.
+
+  **T41과 같은 축이다** — 지키는 장치가 자기가 지켜야 할 것을 보지 못한다. 다만 이쪽은 실제로 방송을 18시간 세웠다.
+- **범위**
+  - **연속 폴링과 유한 폴링을 나눈다.** `statusPollIntervalMs`(15초)는 전이 정착·auto-start 대기에서 **호출 수가 유한한** 용도로 쓰이고 그건 T33이 7초 정착을 잡아낸 근거다 — 건드리면 T33이 깨진다. 새 `healthPollIntervalMs`는 **무한히 도는** 건강 폴러 전용이다.
+  - **주기는 예산에서 역산한다.** 추측하지 않는다: `dailyUnits - reserveUnits`에서 채팅·방송 생성·교체 몫을 뺀 나머지를 폴링에 배정하고 거기서 주기를 구한다. 근거 계산을 티켓에 남긴다.
+  - **quota 카운터를 영속시킨다.** Pacific 날짜별·method별로 저장하고 기동 시 그날 몫을 복원한다. 그래야 `canSpend`·경고가 실제 하루를 본다.
+  - **사용량을 `/health`에 낸다.** 세기만 하고 아무도 못 보면 T41이 고친 문제의 반복이다.
+  - 폴링을 늦추면 **장애 감지도 늦어진다.** 그 대가를 티켓에 명시하고, 늦어진 감지가 supervisor의 유예 창·재시작 예산과 모순되지 않는지 확인한다.
+- **합격 기준**
+  1. 기본 설정의 하루 소모 추정이 `dailyUnits - reserveUnits` 안에 들어온다 — 계산을 테스트로 고정한다.
+  2. 재시작해도 그날 spent가 복원된다 — 회귀 테스트.
+  3. 한도 접근 시 경고가 나오고 `/health`에서 사용량이 보인다 — 회귀 테스트.
+  4. 전이 정착 폴링은 주기가 그대로다(T33 회귀 유지).
+  5. 게이트 5개 + CI 녹색.
+

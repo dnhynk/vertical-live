@@ -12,6 +12,7 @@ import type { EngineMetricsSnapshot } from './engine/metrics.js'
 import type { RendererHealthReport } from './engine/publisher.js'
 import type { HealthSignal } from './health/types.js'
 import type { CommandMetricsSnapshot } from './input/metrics.js'
+import type { QuotaUsageSnapshot } from './youtube/quota/tracker.js'
 import type { AdminKillEndpoint } from './supervisor/kill-switch.js'
 import type { AdminModerationEndpoint } from './supervisor/moderation-report.js'
 import type { SupervisorHealthSummary } from './supervisor/types.js'
@@ -64,6 +65,7 @@ export interface ServerOptions {
    * server and in the unit tests of routing; present in `main.ts`.
    */
   readonly supervisorHealth?: () => SupervisorHealthSummary | null
+  readonly quotaUsage?: () => QuotaUsageSnapshot | null
   /** `POST /admin/kill` (loopback + `server.adminToken`, spec §10.2). */
   readonly adminKill?: AdminKillEndpoint
   /**
@@ -221,6 +223,10 @@ export function handleRequest(
       renderer: options.rendererHealth?.() ?? null,
       sources: options.sourceHealth?.() ?? [],
       supervisor,
+      // The day's API spend. It is on `/health` because the run that emptied
+      // the allowance reported every family `ok` while it happened, and the
+      // only local trace was a counter nothing read (T44, same lesson as T41).
+      quota: options.quotaUsage?.() ?? null,
     })
     return
   }

@@ -115,6 +115,8 @@ export class FaultyBroadcast {
         stream,
         broadcastId: this.#bound ? SYNTHETIC_BROADCAST_ID : null,
         lifeCycleStatus: this.#live ? 'live' : this.#bound ? 'ready' : null,
+        lifeCycleSource: 'api',
+        lastReconciledAt: null,
       },
       { utc: this.#clock.nowUtcIso(), monotonicMs: this.#clock.monotonicMs() },
     )

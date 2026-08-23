@@ -177,6 +177,7 @@ run `npm run data-map:generate -w @vl/server`.
 
 | table | why it has no retention schedule |
 |---|---|
+| `quota_usage` | The day's YouTube API spend per method (Pacific-Time date, method name, unit count). It exists so the quota guard survives a restart (T44); it holds no API payload, no message and no identifier, and a sweep would delete the very record that keeps the next day inside its allowance |
 | `retention_ledger` | This file's own audit trail: field key, source, purpose, allowed deadline, outcome, row count and deletion instant. It is the §12.4 evidence that deletions ran, holds no API data and no identifier, and is therefore retained rather than swept — deleting it would destroy the record the policy requires |
 | `schema_migrations` | Migration bookkeeping (version, name, checksum, applied_at). No API data and no user data |
 | `sqlite_sequence` | SQLite's own AUTOINCREMENT bookkeeping for ingest_inbox. Holds the highest sequence ever used so a deleted ingest_seq is never reused (https://sqlite.org/autoinc.html); no API data |

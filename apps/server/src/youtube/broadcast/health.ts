@@ -39,6 +39,10 @@ export interface BroadcastHealthSample {
   readonly stream: LiveStreamStatus | null
   readonly broadcastId: string | null
   readonly lifeCycleStatus: string | null
+  /** Whether `lifeCycleStatus` was read from the API this tick or held locally. */
+  readonly lifeCycleSource: 'api' | 'local' | 'none'
+  /** When `liveBroadcasts.list` last answered; null before the first reconcile. */
+  readonly lastReconciledAt: string | null
 }
 
 /** `noData` is not a fault: a stream nobody is pushing to has nothing to report. */
@@ -109,12 +113,27 @@ export function deriveBroadcastHealthSignals(
     ...(sample.lifeCycleStatus === null
       ? {
           status: 'unknown' as const,
-          reason: sample.broadcastId === null ? 'no_broadcast_yet' : 'lifecycle_unreadable',
+          reason:
+            sample.broadcastId === null
+              ? 'no_broadcast_yet'
+              : sample.lifeCycleSource === 'local'
+                ? 'awaiting_reconcile'
+                : 'lifecycle_unreadable',
         }
       : sample.lifeCycleStatus === 'live'
         ? { status: 'ok' as const }
         : { status: 'degraded' as const, reason: `lifecycle_${sample.lifeCycleStatus}` }),
-    detail: { broadcastId: sample.broadcastId, lifeCycleStatus: sample.lifeCycleStatus },
+    detail: {
+      broadcastId: sample.broadcastId,
+      lifeCycleStatus: sample.lifeCycleStatus,
+      // Where this tick's value came from. `api` is a read of
+      // `liveBroadcasts.list`; `local` is the stage this process last drove a
+      // transition to and persisted. Both are facts, but only one of them can
+      // notice YouTube ending the broadcast on its own, so the reader is told
+      // which it has and when the last reconcile was (T44).
+      lifeCycleSource: sample.lifeCycleSource,
+      lastReconciledAt: sample.lastReconciledAt,
+    },
   })
 
   return [statusSignal, healthSignal, lifeCycleSignal]
@@ -128,14 +147,26 @@ export interface BroadcastHealthMonitorOptions {
   readonly resources: () => {
     readonly streamId: string | null
     readonly broadcastId: string | null
+    /**
+     * The lifecycle stage this process last drove the broadcast to and
+     * persisted. Used on the ticks between reconciles so the family stays
+     * observable without spending a unit (T44). Omitted leaves those ticks
+     * `lifecycle_unreadable`, which is what a caller with no local record
+     * should report.
+     */
+    readonly lifeCycleStage?: string | null
   }
   readonly clock?: Clock
 }
 
 /**
- * Polls `liveStreams.list?part=status` and `liveBroadcasts.list?part=status` on
- * `youtube.broadcast.statusPollIntervalMs` (provisional, BOARD A-15: neither API
- * publishes a polling interval the way `liveChatMessages.list` does).
+ * Polls `liveStreams.list?part=status` on `youtube.broadcast.healthPollIntervalMs`
+ * and `liveBroadcasts.list?part=status` on the far slower
+ * `lifecycleReconcileIntervalMs`. Both are provisional (BOARD A-15: neither API
+ * publishes a polling interval the way `liveChatMessages.list` does), but they
+ * are no longer free choices: the first is bounded above by the supervisor's
+ * `signalStaleAfterMs` and below by the daily quota, and those two ceilings
+ * nearly meet (T44).
  */
 export class BroadcastHealthMonitor {
   readonly #api: YouTubeLiveApi
@@ -146,6 +177,9 @@ export class BroadcastHealthMonitor {
 
   #running = false
   #timer: TimerHandle | undefined
+  /** Monotonic instant of the last `liveBroadcasts.list`; null before the first. */
+  #lastReconcileMonotonicMs: number | null = null
+  #lastReconciledAtUtc: string | null = null
 
   constructor(options: BroadcastHealthMonitorOptions) {
     this.#api = options.api
@@ -184,13 +218,13 @@ export class BroadcastHealthMonitor {
       utc: this.#clock.nowUtcIso(),
       monotonicMs: this.#clock.monotonicMs(),
     }
-    const { streamId, broadcastId } = this.#resources()
+    const { streamId, broadcastId, lifeCycleStage } = this.#resources()
 
     const sample: BroadcastHealthSample = {
       streamId,
       stream: streamId === null ? null : await this.#readStream(streamId),
       broadcastId,
-      lifeCycleStatus: broadcastId === null ? null : await this.#readLifeCycle(broadcastId),
+      ...(await this.#lifeCycle(broadcastId, lifeCycleStage ?? null, observedAt)),
     }
 
     const signals = deriveBroadcastHealthSignals(sample, observedAt)
@@ -229,6 +263,61 @@ export class BroadcastHealthMonitor {
     }
   }
 
+  /**
+   * `liveBroadcasts.list` costs a unit and the answer changes only when one of
+   * our own transitions succeeds, so it is read on
+   * `lifecycleReconcileIntervalMs` rather than every tick. In between, the
+   * stage the caller persisted is reported instead — a real fact, marked
+   * `local` so nobody mistakes it for YouTube agreeing.
+   *
+   * What this gives up: a broadcast YouTube ends on its own is seen up to one
+   * reconcile interval late here. The fast signals cover that case sooner —
+   * an ended broadcast takes its stream `inactive` and its chat with it, and
+   * both of those are read every tick (T44).
+   */
+  async #lifeCycle(
+    broadcastId: string | null,
+    localStage: string | null,
+    observedAt: ObservedAt,
+  ): Promise<
+    Pick<BroadcastHealthSample, 'lifeCycleStatus' | 'lifeCycleSource' | 'lastReconciledAt'>
+  > {
+    if (broadcastId === null) {
+      this.#lastReconcileMonotonicMs = null
+      this.#lastReconciledAtUtc = null
+      return { lifeCycleStatus: null, lifeCycleSource: 'none', lastReconciledAt: null }
+    }
+    const due =
+      this.#lastReconcileMonotonicMs === null ||
+      observedAt.monotonicMs - this.#lastReconcileMonotonicMs >=
+        this.#config.lifecycleReconcileIntervalMs
+    if (due) {
+      const status = await this.#readLifeCycle(broadcastId)
+      if (status !== null) {
+        this.#lastReconcileMonotonicMs = observedAt.monotonicMs
+        this.#lastReconciledAtUtc = observedAt.utc
+        return { lifeCycleStatus: status, lifeCycleSource: 'api', lastReconciledAt: observedAt.utc }
+      }
+      // The read failed. Falling back to the local stage would hide an API that
+      // stopped answering, so the tick reports what it is: unreadable.
+      return {
+        lifeCycleStatus: null,
+        lifeCycleSource: 'api',
+        lastReconciledAt: this.#lastReconciledAtUtc,
+      }
+    }
+    // Only `live` crosses over. `BroadcastStage` is this product's vocabulary
+    // for what it has driven, not YouTube's `lifeCycleStatus`, and the two are
+    // kept apart on purpose — reconcile exists to compare them. `live` is the
+    // one value the signal actually needs to carry between reconciles; any
+    // other stage reports that nobody has asked yet, which is the truth.
+    return {
+      lifeCycleStatus: localStage === 'live' ? 'live' : null,
+      lifeCycleSource: localStage === null ? 'none' : 'local',
+      lastReconciledAt: this.#lastReconciledAtUtc,
+    }
+  }
+
   #swallow(error: unknown): void {
     if (error instanceof YouTubeApiCallError) {
       return
@@ -247,7 +336,7 @@ export class BroadcastHealthMonitor {
       void this.poll().then(() => {
         this.#scheduleNext()
       })
-    }, this.#config.statusPollIntervalMs)
+    }, this.#config.healthPollIntervalMs)
   }
 }
 

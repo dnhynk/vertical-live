@@ -782,6 +782,38 @@ export class PersistenceStore {
     return row !== undefined
   }
 
+  // ----------------------------------------------------------- api quota
+
+  /**
+   * The day's spend per method, for `QuotaTracker` to restore on start.
+   *
+   * `quotaDay` is a Pacific-Time date because that is the boundary Google
+   * resets on. The tracker owns the date arithmetic; the store only keys on
+   * what it is given (T44).
+   */
+  readQuotaUsage(quotaDay: string): Map<string, number> {
+    const rows = this.#db
+      .prepare<[string], { method: string; units: number }>(
+        'SELECT method, units FROM quota_usage WHERE quota_day = ?',
+      )
+      .all(quotaDay)
+    return new Map(rows.map((row) => [row.method, row.units]))
+  }
+
+  /**
+   * Records the running total for one method on one day. The tracker writes the
+   * total rather than a delta so a lost write costs the difference and never
+   * double-counts a retry.
+   */
+  writeQuotaUsage(quotaDay: string, method: string, units: number): void {
+    this.#db
+      .prepare(
+        'INSERT INTO quota_usage (quota_day, method, units) VALUES (?, ?, ?)' +
+          ' ON CONFLICT (quota_day, method) DO UPDATE SET units = excluded.units',
+      )
+      .run(quotaDay, method, units)
+  }
+
   // ------------------------------------------------------------ gift combo
 
   /**

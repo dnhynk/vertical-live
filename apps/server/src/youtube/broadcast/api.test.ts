@@ -468,6 +468,8 @@ function writeConfig(
           scheduledStartLeadMs: base.scheduledStartLeadMs,
           requestTimeoutMs: base.requestTimeoutMs,
           autoStartWaitMs: base.autoStartWaitMs,
+          healthPollIntervalMs: base.healthPollIntervalMs,
+          lifecycleReconcileIntervalMs: base.lifecycleReconcileIntervalMs,
           statusPollIntervalMs: base.statusPollIntervalMs,
           transitionSettleMs: base.transitionSettleMs,
           reconcileMaxPages: base.reconcileMaxPages,

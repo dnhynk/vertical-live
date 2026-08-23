@@ -15,9 +15,19 @@ import {
  * (`liveBroadcasts.list`/`transition`) that must still work at the end of a
  * heavy day.
  *
- * The counter is in memory here; T4 owns persistence and can restore a snapshot
- * on start so a restart does not forget the day's spend.
+ * The counter is restored from and written through to `QuotaUsageStore`. It
+ * used to live only in memory, and on 2026-08-23 that emptied the day's
+ * allowance with zero warnings logged: the host restarted several times, each
+ * restart set the local count back to zero, and Google's account-wide daily
+ * counter was the only one still adding up (T44). A guard that forgets what it
+ * is guarding is not a guard.
  */
+
+/** What the tracker needs from T4's store; `PersistenceStore` satisfies it. */
+export interface QuotaUsageStore {
+  readQuotaUsage(quotaDay: string): Map<string, number>
+  writeQuotaUsage(quotaDay: string, method: string, units: number): void
+}
 
 export interface QuotaUsageSnapshot {
   /** Quota day in Pacific Time (`YYYY-MM-DD`), the reset boundary Google uses. */
@@ -37,6 +47,8 @@ export interface QuotaTrackerOptions {
   readonly reserveUnits?: number
   readonly timeZone?: string
   readonly logger?: Logger
+  /** Omitted keeps the counter in memory, which only tests want. */
+  readonly store?: QuotaUsageStore
 }
 
 export class QuotaTracker {
@@ -45,6 +57,7 @@ export class QuotaTracker {
   readonly timeZone: string
   readonly #clock: Clock
   readonly #logger: Logger
+  readonly #store: QuotaUsageStore | undefined
 
   #quotaDay: string
   #spentUnits = 0
@@ -59,7 +72,31 @@ export class QuotaTracker {
     if (this.reserveUnits < 0 || this.reserveUnits >= this.dailyUnits) {
       throw new Error('reserveUnits must be between 0 and dailyUnits')
     }
+    this.#store = options.store
     this.#quotaDay = this.#today()
+    this.#restore()
+  }
+
+  /**
+   * Reads back what this quota day already cost. Called on construction and on
+   * every roll-over, because a process that runs across Pacific midnight must
+   * pick up the new day's row rather than keep its own count.
+   */
+  #restore(): void {
+    this.#byMethod = new Map()
+    this.#spentUnits = 0
+    if (this.#store === undefined) return
+    for (const [method, units] of this.#store.readQuotaUsage(this.#quotaDay)) {
+      this.#byMethod.set(method as PlannedMethod, units)
+      this.#spentUnits += units
+    }
+    if (this.#spentUnits > 0) {
+      this.#logger.info('restored the quota day', {
+        quotaDay: this.#quotaDay,
+        spentUnits: this.#spentUnits,
+        dailyUnits: this.dailyUnits,
+      })
+    }
   }
 
   /** Books `calls` invocations of `method` and returns the new usage. */
@@ -70,7 +107,9 @@ export class QuotaTracker {
     this.#rollOverIfNeeded()
     const units = quotaCostOf(method) * calls
     this.#spentUnits += units
-    this.#byMethod.set(method, (this.#byMethod.get(method) ?? 0) + units)
+    const methodTotal = (this.#byMethod.get(method) ?? 0) + units
+    this.#byMethod.set(method, methodTotal)
+    this.#store?.writeQuotaUsage(this.#quotaDay, method, methodTotal)
     if (this.#spentUnits > this.dailyUnits) {
       this.#logger.warn('daily quota budget exceeded by local accounting', {
         quotaDay: this.#quotaDay,
@@ -152,8 +191,9 @@ export class QuotaTracker {
 
   #resetTo(quotaDay: string): void {
     this.#quotaDay = quotaDay
-    this.#spentUnits = 0
-    this.#byMethod = new Map()
+    // Not a plain reset: a process that restarts after a roll-over must find
+    // whatever the new day already cost, the same way construction does.
+    this.#restore()
   }
 }
 
