@@ -784,3 +784,36 @@
   3. 조용한 채팅은 여전히 `ok`다(T28 회귀 방지) — 기존 테스트가 지켜져야 한다.
   4. **실측**: 3분 구간으로 연속 3회 교체에서, 매 교체 뒤 `source_checkpoint`에 새 채팅의 항목이 생기고 supervisor가 `live`를 유지한다.
   5. 게이트 5개 + CI 녹색.
+## T37 — 시작 순서의 `streamService`가 "이미 송출 중"으로 영구 실패한다
+
+- slug `t37-startup-streamservice` · PR 접두 `fix(supervisor):` · 의존 T12, T2, T10
+- **읽을 것**: `apps/server/src/supervisor/startup.ts`(단계 순서), `apps/server/src/main.ts`(`buildStartupSteps`의 `streamService`·`startStream`), `apps/server/src/obs/control.ts`(`setStreamServiceFromVault`·`startStream`), `apps/server/src/supervisor/transitions.ts`(`obs-stream` 복구)
+- **관측**(2026-08-23 18:34~19:05, 호스트 `WORKSTATION`): 스택이 기동하지 못하고 반복해서 `safe_stopped`가 된다.
+
+  ```text
+  startup step completed  db
+  startup step completed  engine
+  startup step completed  retention
+  startup step completed  broadcast     ← 새 attempt 생성, stage=bound
+  startup step failed     streamService
+    error: "You cannot change stream service settings while streaming."
+  → 시작 순서가 중단되어 goLive가 실행되지 않고 attempt가 bound에 갇힌다
+  → chat_transport·youtube_broadcast degraded → chat-source 재시작 3회 → safe stop
+  ```
+
+  **배제된 것**: 실행 사이에 obs-websocket으로 직접 물었을 때 OBS는 송출 중이 아니다(`GetStreamStatus` → `outputActive: false`, `duration: 0`). 열린 attempt를 전부 닫아도 재현된다. OBS 프로세스를 완전히 죽이고 새로 띄워도 재현된다. 실행 인자에 `--startstreaming`은 없다(`obs/process.ts` `plan()`, config `extraArgs`는 `--disable-updater`·`--disable-missing-files-check`뿐).
+
+  **남은 가설**:
+  1. supervisor의 `obs-stream` 복구가 시작 순서보다 먼저 스트림을 켠다. `#driveRecovery`는 매 evaluate마다 돌고 `obs_output`이 degraded면 `startStream`을 부르는데, 그것이 `streamService`보다 앞서면 이후 주입은 영구히 거부된다. 실행 사이의 관측으로는 보이지 않는다 — 그때는 이미 run이 멈춰 output도 끝나 있다.
+  2. OBS가 출력을 "활성"으로 보는 구간과 `outputActive`가 `true`인 구간이 어긋난다(시작/재접속 중).
+  3. 이전 시도의 `startStream`이 아직 in-flight인 상태에서 다음 시도의 `streamService`가 실행된다.
+- **첫 단계는 계측이다**: `streamService` 단계가 `SetStreamServiceSettings`를 부르기 직전에 `GetStreamStatus`를 읽어 로그에 남긴다. 오늘 transition 결함을 가른 것이 정확히 이 방법이었다 — 거절 순간의 상태를 아무도 관측하지 않고 있었다.
+- **범위**
+  - 계측으로 가설을 가른 뒤에 고친다. 추측으로 순서를 바꾸지 않는다.
+  - 시작 순서는 **재시도에 대해 멱등**해야 한다. 한 시도가 스트림을 켠 뒤 뒤쪽 단계가 실패하면, 다음 시도의 `streamService`가 그것 때문에 죽어서는 안 된다.
+  - 복구가 시작 순서를 앞지르지 않아야 한다면 그것은 supervisor 쪽 규칙이다 — `obs-stream` 복구가 시작 순서 완료 전에 발사되는지 확인한다.
+- **합격 기준**
+  1. 거절 순간의 `GetStreamStatus`가 로그에 남는다.
+  2. 시작 순서가 중간에 실패해도 재시도가 `streamService`에서 죽지 않는다 — 회귀 테스트.
+  3. **실측**: 연속 3회 재기동에서 3회 모두 `live` 도달.
+  4. 게이트 5개 + CI 녹색.
