@@ -532,3 +532,17 @@
   3. 그 상태에서 렌더러가 실제로 붙어 그린다(`/health`의 renderer가 `fps` 30으로 frameCounter를 올리고, `renderer-source`가 소진되지 않는다). **`safe_stopped` 자체는 이 기준이 아니다**: YouTube 방송·스트림 키가 없는 호스트에서는 `obs-stream`이 `outputActive = true`에 도달하지 못해 안전 정지한다(2026-08-22 실측). 그 정지는 T25 범위 밖이며 YouTube 계정 작업(D-10/D-16)에 걸려 있다.
   4. `-WithObs -SkipObs`는 거부된다.
   5. 게이트 5개 + CI 녹색(스크립트 변경이라 테스트 수는 그대로).
+
+## T26 — `youtube.chat.enabled`에 env override 추가
+
+- slug `t26-chat-enabled-env` · PR 접두 `feat(youtube):` · 의존 T9
+- **읽을 것**: `apps/server/src/youtube/chat/config.ts`(`loadChatConfig`), `docs/ops/runbook-operations.md` §1.2
+- **관측된 문제**(2026-08-23 첫 private 기술 방송): `integrations.obs`·`integrations.broadcast`는 `VL_OBS_ENABLED`·`VL_BROADCAST_ENABLED`로 켤 수 있는데 `youtube.chat.enabled`만 env override가 없어 config 파일에서만 켤 수 있다. `chat_transport`는 required family라 꺼둔 채로 방송하면 `chat-source`가 3회 실패하고 스택이 `safe_stopped`가 된다(실측: 방송 시작 30초 뒤 정지). config 기본값을 켜면 CI·개발 머신이 실제 YouTube 채팅을 폴링하므로 기본값은 `false`로 두어야 한다.
+- **범위**
+  - `loadChatConfig`의 `enabled`를 `env['VL_YOUTUBE_CHAT_ENABLED'] ?? section['enabled']`로 읽는다. 같은 함수가 이미 `VL_YOUTUBE_LIVE_CHAT_ID`·`VL_YOUTUBE_BROADCAST_ID`를 그렇게 읽는다.
+  - config 기본값은 `false` 유지.
+  - `docs/ops/runbook-operations.md` §1.2의 "env로도 가능" 문장에 이 변수를 더한다.
+- **합격 기준**
+  1. `loadChatConfig({ env: { VL_YOUTUBE_CHAT_ENABLED: 'true' } }).enabled === true`, env 없으면 config 기본값(`false`)을 따른다 — 두 경우 모두 테스트.
+  2. 잘못된 값은 기존 `readBoolean`의 거부 경로를 그대로 탄다.
+  3. 게이트 5개 + CI 녹색.
