@@ -78,14 +78,40 @@ body {
   inset: 0;
 }
 
+/*
+ * Safe area: the parts of the 1080x1920 frame that YouTube's own mobile UI sits
+ * on top of. Nothing of ours goes there — spec §14.2(1) requires the first-screen
+ * test to be read with the real mobile UI overlaid, so a layout that only works
+ * on a bare frame is a layout that fails the test it exists to pass.
+ *
+ * The app draws its title and channel row across the top, the live chat and its
+ * input across the bottom, and the like/share/comment column down the right.
+ *
+ * `provisional` (BOARD A-15 sense): these three numbers are read off the app's
+ * layout, not measured on a device. Gate 2's calibration (§14.2(1),
+ * gate2-experiments.md 2장) is where they get confirmed or corrected — the
+ * screenshots taken there are the evidence, and until then no number here is a
+ * pass mark.
+ */
+:root {
+  --safe-top: 150px;
+  --safe-bottom: 460px;
+  --safe-right: 120px;
+}
+
 .screen {
   position: absolute;
   inset: 0;
   display: flex;
   flex-direction: column;
-  padding: 56px 48px 64px;
-  gap: 24px;
+  padding: var(--safe-top) 48px var(--safe-bottom);
+  gap: 18px;
   pointer-events: none;
+}
+
+/* The action column only overlaps the lower half, so only that part gives way. */
+.screen-bottom {
+  padding-right: var(--safe-right);
 }
 
 /* --- shared card ---------------------------------------------------------- */
@@ -96,17 +122,20 @@ body {
   background: var(--card);
   border: 2px solid var(--card-line);
   border-radius: var(--card-radius);
-  padding: 24px 30px;
+  padding: 16px 22px;
   backdrop-filter: blur(6px);
 }
 
 .slot-label {
-  margin: 0 0 10px;
+  margin: 0 0 4px;
   display: flex;
   align-items: baseline;
-  gap: 14px;
-  font-size: 30px;
+  gap: 10px;
+  font-size: 25px;
   font-weight: 600;
+  /* A two-line label in a narrow column pushed the value out of the card. */
+  white-space: nowrap;
+  overflow: hidden;
 }
 
 .slot-label-ja {
@@ -564,16 +593,28 @@ body {
 .screen-bottom {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 14px;
+}
+
+.hud .slot {
+  padding: 12px 16px;
+}
+
+.hud .slot-label {
+  font-size: 20px;
+  gap: 8px;
 }
 
 .hud {
   display: grid;
-  grid-template-columns: 3fr 2fr;
-  grid-template-areas:
-    'action action'
-    'progress next';
-  gap: 20px;
+  /* One compact strip. These three are the secondary read (§5.2 requires them,
+     it does not require them to be large) and every pixel they give back is a
+     pixel the creature gets — measured against a host screenshot where the
+     lower body was hidden behind this row. */
+  grid-template-columns: 5fr 5fr 4fr;
+  grid-template-areas: 'action progress next';
+  gap: 12px;
+  align-items: stretch;
 }
 
 .hud-waiting {
@@ -689,10 +730,10 @@ body {
 
 .cta-commands {
   list-style: none;
-  margin: 14px 0 0;
+  margin: 10px 0 0;
   padding: 0;
   display: flex;
-  gap: 16px;
+  gap: 12px;
 }
 
 .cta-command {
@@ -701,11 +742,11 @@ body {
   align-items: center;
   justify-content: center;
   gap: 12px;
-  padding: 14px 12px;
+  padding: 10px 10px;
   border-radius: 999px;
   background: rgba(247, 243, 234, 0.1);
   border: 2px solid var(--card-line);
-  font-size: 38px;
+  font-size: 32px;
   font-weight: 800;
   white-space: nowrap;
 }
@@ -721,8 +762,8 @@ body {
 }
 
 .cta-free-note {
-  margin: 18px 0 0;
-  font-size: 30px;
+  margin: 10px 0 0;
+  font-size: 24px;
   font-weight: 700;
   color: var(--accent);
   text-align: center;
@@ -734,8 +775,8 @@ body {
  * viewer who never reads it is left exactly as anonymous as before.
  */
 .cta-identity {
-  margin: 16px 0 0;
-  padding: 14px 18px 0;
+  margin: 10px 0 0;
+  padding: 10px 14px 0;
   border-top: 2px solid var(--card-line);
 }
 
@@ -746,7 +787,7 @@ body {
   gap: 4px;
   /* Sized so the whole notice fits on one line at 1080px wide (D-9: the screen
      carries one line, the channel description carries the full text). */
-  font-size: 21px;
+  font-size: 17px;
   font-weight: 600;
   color: var(--ink-dim);
 }

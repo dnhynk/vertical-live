@@ -23,10 +23,34 @@ import type { CommandName } from '@vl/contract'
  * server's snapshot and effects.
  */
 
-const BODY_COLOR = '#f3ddb0'
-const MARK_COLOR = '#6fae9b'
-const EYE_COLOR = '#2b2118'
-const SHELL_COLOR = '#e8e2d2'
+const BODY_COLOR = '#f6e3bc'
+const MARK_COLOR = '#5fa791'
+const EYE_COLOR = '#241c15'
+const SHELL_COLOR = '#ece6d8'
+/** Warm underside, so the body reads as a volume rather than a flat sphere. */
+const BELLY_COLOR = '#fbf1da'
+const BLUSH_COLOR = '#e79a86'
+const HIGHLIGHT_COLOR = '#ffffff'
+
+/**
+ * The plush surface. `sheen` is what separates a soft creature from a plastic
+ * ball under the same light: it adds a fabric-like falloff at grazing angles,
+ * which is most of what makes the silhouette read at phone size (§14.2(1)).
+ */
+function bodyMaterial(color: string) {
+  return (
+    <meshPhysicalMaterial
+      color={color}
+      roughness={0.78}
+      metalness={0}
+      sheen={0.6}
+      sheenColor={'#ffd9a8'}
+      sheenRoughness={0.5}
+      clearcoat={0.08}
+      clearcoatRoughness={0.7}
+    />
+  )
+}
 
 interface CreatureBuild {
   readonly scale: number
@@ -37,56 +61,70 @@ interface CreatureBuild {
   readonly crest: 0 | 1 | 2
   readonly tail: boolean
   readonly fins: boolean
+  /** Ears appear once the creature can look around (spec §6.3: parts are gained). */
+  readonly ears: boolean
+  /** A fragment of shell still on the head: only the stage right after hatching. */
+  readonly shellCap: boolean
 }
 
 /** An unknown growth identifier draws the middle of the ladder, never nothing. */
 const DEFAULT_BUILD: CreatureBuild = {
-  scale: 0.86,
+  scale: 1.0,
   bodyRadius: 0.62,
-  headRadius: 0.42,
+  headRadius: 0.52,
   hatched: true,
   crest: 1,
   tail: true,
   fins: false,
+  ears: true,
+  shellCap: false,
 }
 
 const BUILDS: Readonly<Record<string, CreatureBuild>> = {
   egg: {
-    scale: 0.7,
+    scale: 0.82,
     bodyRadius: 0.58,
     headRadius: 0,
     hatched: false,
     crest: 0,
     tail: false,
     fins: false,
+    ears: false,
+    shellCap: false,
   },
   hatchling: {
-    scale: 0.72,
+    scale: 0.84,
     bodyRadius: 0.5,
-    headRadius: 0.38,
+    headRadius: 0.56,
     hatched: true,
     crest: 0,
     tail: false,
     fins: false,
+    ears: false,
+    shellCap: true,
   },
   fledgling: DEFAULT_BUILD,
   companion: {
-    scale: 0.96,
+    scale: 1.12,
     bodyRadius: 0.68,
-    headRadius: 0.44,
+    headRadius: 0.54,
     hatched: true,
     crest: 2,
     tail: true,
     fins: false,
+    ears: true,
+    shellCap: false,
   },
   guardian: {
-    scale: 1.06,
+    scale: 1.24,
     bodyRadius: 0.74,
     headRadius: 0.46,
     hatched: true,
     crest: 2,
     tail: true,
     fins: true,
+    ears: true,
+    shellCap: false,
   },
 }
 
@@ -113,8 +151,28 @@ const MOOD_MOTION: Readonly<Record<string, MoodMotion>> = {
 /**
  * Where the creature stands in the 1080x1920 frame: the free band between the
  * top slot and the lower three, so nothing it does is hidden behind a card.
+ * Measured against a host screenshot — at the old height the lower body sat
+ * behind the `LAST ACTION` card and the silhouette lost its feet.
  */
-const BASE_Y = 0.36
+const BASE_Y = 0.92
+
+/** Left and right, so paired parts are written once. */
+const EYE_SIDES = [-1, 1] as const
+
+/** Unit-sphere offsets for the egg speckles: fixed, so the egg never flickers. */
+const EGG_SPECKLES: readonly (readonly [number, number, number, number])[] = [
+  [-0.42, 0.34, 0.82, 0.05],
+  [0.5, -0.12, 0.78, 0.042],
+  [-0.16, -0.46, 0.84, 0.036],
+  [0.26, 0.58, 0.72, 0.032],
+]
+
+/** Petal lateral offset and lean; the third only grows in at `crest: 2`. */
+const CREST_PETALS: readonly (readonly [number, number])[] = [
+  [-0.62, -0.34],
+  [0.62, 0.34],
+  [0, 0],
+]
 
 export interface PetProps {
   /** Growth ladder identifier from the snapshot (spec §6.3). */
@@ -178,97 +236,177 @@ export default function Pet({
 
   return (
     <group ref={group} scale={build.scale} position={[0, BASE_Y, 0]} dispose={null}>
-      <mesh position={[0, 0, 0]} scale={build.hatched ? [1.08, 0.92, 1] : [1, 1.24, 1]}>
-        <sphereGeometry args={[build.bodyRadius, 40, 28]} />
-        <meshStandardMaterial
-          color={build.hatched ? BODY_COLOR : SHELL_COLOR}
-          roughness={0.62}
-          metalness={0.04}
-        />
+      {/* Body. Slightly wider than tall once hatched, so it sits rather than floats. */}
+      <mesh position={[0, 0, 0]} scale={build.hatched ? [1.08, 0.94, 1.02] : [1, 1.26, 1]}>
+        <sphereGeometry args={[build.bodyRadius, 48, 32]} />
+        {bodyMaterial(build.hatched ? BODY_COLOR : SHELL_COLOR)}
       </mesh>
 
       {build.hatched ? null : (
-        <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 0.02, 0]}>
-          <torusGeometry args={[build.bodyRadius * 0.98, 0.035, 12, 48]} />
-          <meshStandardMaterial color={MARK_COLOR} roughness={0.5} />
-        </mesh>
+        <>
+          <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 0.02, 0]}>
+            <torusGeometry args={[build.bodyRadius * 0.98, 0.038, 16, 64]} />
+            <meshStandardMaterial color={MARK_COLOR} roughness={0.5} />
+          </mesh>
+          {/* Speckles: an unhatched egg is still a character, not a blank ovoid. */}
+          {EGG_SPECKLES.map(([x, y, z, r], index) => (
+            <mesh
+              key={index}
+              position={[x * build.bodyRadius, y * build.bodyRadius, z * build.bodyRadius]}
+            >
+              <sphereGeometry args={[r, 12, 10]} />
+              <meshStandardMaterial color={MARK_COLOR} roughness={0.7} />
+            </mesh>
+          ))}
+        </>
       )}
 
       {build.hatched ? (
         <>
-          <mesh position={[0, headY, 0]}>
-            <sphereGeometry args={[build.headRadius, 40, 28]} />
-            <meshStandardMaterial color={BODY_COLOR} roughness={0.62} metalness={0.04} />
+          {/* Head */}
+          <mesh position={[0, headY, 0]} scale={[1.02, 1, 1]}>
+            <sphereGeometry args={[build.headRadius, 48, 32]} />
+            {bodyMaterial(BODY_COLOR)}
           </mesh>
 
+          {/* Muzzle: a little forward volume so the face has structure in profile. */}
           <mesh
-            position={[-build.headRadius * 0.36, headY + 0.04, build.headRadius * 0.86]}
-            scale={eyeScale}
+            position={[0, headY - build.headRadius * 0.18, build.headRadius * 0.74]}
+            scale={[1, 0.72, 0.7]}
           >
-            <sphereGeometry args={[0.058, 20, 16]} />
-            <meshStandardMaterial color={EYE_COLOR} roughness={0.3} />
-          </mesh>
-          <mesh
-            position={[build.headRadius * 0.36, headY + 0.04, build.headRadius * 0.86]}
-            scale={eyeScale}
-          >
-            <sphereGeometry args={[0.058, 20, 16]} />
-            <meshStandardMaterial color={EYE_COLOR} roughness={0.3} />
+            <sphereGeometry args={[build.headRadius * 0.42, 24, 18]} />
+            {bodyMaterial(BELLY_COLOR)}
           </mesh>
 
+          {EYE_SIDES.map((side) => (
+            <group key={side}>
+              <mesh
+                position={[
+                  side * build.headRadius * 0.38,
+                  headY + build.headRadius * 0.1,
+                  build.headRadius * 0.84,
+                ]}
+                scale={eyeScale}
+              >
+                <sphereGeometry args={[build.headRadius * 0.17, 24, 18]} />
+                <meshStandardMaterial color={EYE_COLOR} roughness={0.18} metalness={0.02} />
+              </mesh>
+              {/* The catchlight. One small sphere is most of what reads as "alive". */}
+              {resting ? null : (
+                <mesh
+                  position={[
+                    side * build.headRadius * 0.38 + build.headRadius * 0.06,
+                    headY + build.headRadius * 0.16,
+                    build.headRadius * 0.96,
+                  ]}
+                >
+                  <sphereGeometry args={[build.headRadius * 0.055, 12, 10]} />
+                  <meshBasicMaterial color={HIGHLIGHT_COLOR} />
+                </mesh>
+              )}
+              {/* Cheek */}
+              <mesh
+                position={[
+                  side * build.headRadius * 0.66,
+                  headY - build.headRadius * 0.2,
+                  build.headRadius * 0.66,
+                ]}
+                scale={[1, 0.62, 0.4]}
+              >
+                <sphereGeometry args={[build.headRadius * 0.2, 20, 14]} />
+                <meshStandardMaterial
+                  color={BLUSH_COLOR}
+                  roughness={0.85}
+                  transparent
+                  opacity={0.55}
+                />
+              </mesh>
+            </group>
+          ))}
+
+          {build.ears
+            ? EYE_SIDES.map((side) => (
+                <mesh
+                  key={`ear${side}`}
+                  position={[
+                    side * build.headRadius * 0.72,
+                    headY + build.headRadius * 0.66,
+                    -build.headRadius * 0.08,
+                  ]}
+                  rotation={[0, 0, side * 0.42]}
+                  scale={[0.52, 1, 0.44]}
+                >
+                  <sphereGeometry args={[build.headRadius * 0.36, 20, 16]} />
+                  {bodyMaterial(BODY_COLOR)}
+                </mesh>
+              ))
+            : null}
+
+          {build.shellCap ? (
+            <mesh position={[0, headY + build.headRadius * 0.62, 0]} rotation={[0.22, 0, 0.3]}>
+              <sphereGeometry
+                args={[build.headRadius * 0.86, 24, 16, 0, Math.PI * 2, 0, Math.PI * 0.42]}
+              />
+              <meshStandardMaterial color={SHELL_COLOR} roughness={0.7} side={THREE.DoubleSide} />
+            </mesh>
+          ) : null}
+
+          {/* Belly mark */}
           <mesh
-            position={[0, -build.bodyRadius * 0.16, build.bodyRadius * 0.86]}
-            scale={[1, 0.78, 0.32]}
+            position={[0, -build.bodyRadius * 0.18, build.bodyRadius * 0.84]}
+            scale={[1, 0.7, 0.26]}
           >
-            <sphereGeometry args={[build.bodyRadius * 0.5, 24, 18]} />
-            <meshStandardMaterial color={MARK_COLOR} roughness={0.66} />
+            <sphereGeometry args={[build.bodyRadius * 0.42, 28, 20]} />
+            <meshStandardMaterial color={BELLY_COLOR} roughness={0.85} transparent opacity={0.75} />
           </mesh>
         </>
       ) : null}
 
-      {build.crest > 0 ? (
-        <mesh position={[0, headY + build.headRadius * 0.88, -0.04]} rotation={[-0.3, 0, 0]}>
-          <coneGeometry
-            args={[
-              build.headRadius * (build.crest === 2 ? 0.62 : 0.44),
-              build.crest === 2 ? 0.56 : 0.36,
-              5,
-            ]}
-          />
-          <meshStandardMaterial color={MARK_COLOR} roughness={0.5} />
-        </mesh>
-      ) : null}
+      {/* Crest: rounded petals rather than a cone, so it reads as soft. */}
+      {build.crest > 0
+        ? CREST_PETALS.slice(0, build.crest === 2 ? 3 : 2).map(([offset, lean], index) => (
+            <mesh
+              key={index}
+              position={[
+                offset * build.headRadius * 0.5,
+                headY + build.headRadius * (build.crest === 2 ? 0.92 : 0.82),
+                -build.headRadius * 0.14,
+              ]}
+              rotation={[-0.34, 0, lean]}
+              scale={[0.42, 1, 0.42]}
+            >
+              <sphereGeometry
+                args={[build.headRadius * (build.crest === 2 ? 0.46 : 0.34), 20, 16]}
+              />
+              <meshStandardMaterial color={MARK_COLOR} roughness={0.6} />
+            </mesh>
+          ))
+        : null}
 
       {build.tail ? (
         <mesh
-          position={[0, -build.bodyRadius * 0.32, -build.bodyRadius * 0.95]}
-          rotation={[1.05, 0, 0]}
+          position={[0, -build.bodyRadius * 0.3, -build.bodyRadius * 0.98]}
+          rotation={[1.0, 0, 0]}
+          scale={[0.6, 1, 0.6]}
         >
-          <coneGeometry args={[0.15, 0.5, 6]} />
-          <meshStandardMaterial color={MARK_COLOR} roughness={0.5} />
+          <capsuleGeometry args={[0.14, 0.34, 8, 20]} />
+          <meshStandardMaterial color={MARK_COLOR} roughness={0.6} />
         </mesh>
       ) : null}
 
-      {build.fins ? (
-        <>
-          <mesh
-            position={[-build.bodyRadius * 0.92, 0, 0]}
-            rotation={[0, 0, -0.5]}
-            scale={[0.5, 1, 0.25]}
-          >
-            <sphereGeometry args={[0.3, 20, 14]} />
-            <meshStandardMaterial color={MARK_COLOR} roughness={0.5} />
-          </mesh>
-          <mesh
-            position={[build.bodyRadius * 0.92, 0, 0]}
-            rotation={[0, 0, 0.5]}
-            scale={[0.5, 1, 0.25]}
-          >
-            <sphereGeometry args={[0.3, 20, 14]} />
-            <meshStandardMaterial color={MARK_COLOR} roughness={0.5} />
-          </mesh>
-        </>
-      ) : null}
+      {build.fins
+        ? EYE_SIDES.map((side) => (
+            <mesh
+              key={`fin${side}`}
+              position={[side * build.bodyRadius * 0.94, 0.02, -0.04]}
+              rotation={[0, 0, side * 0.55]}
+              scale={[0.34, 1, 0.5]}
+            >
+              <sphereGeometry args={[build.bodyRadius * 0.5, 24, 18]} />
+              <meshStandardMaterial color={MARK_COLOR} roughness={0.6} />
+            </mesh>
+          ))
+        : null}
     </group>
   )
 }

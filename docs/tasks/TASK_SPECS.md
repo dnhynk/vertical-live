@@ -728,3 +728,28 @@
   3. 렌더러가 30fps를 유지한다(`/health` renderer `fps`).
   4. 기존 렌더러 테스트가 무수정 통과하고, read model 계약은 불변.
   5. 게이트 5개 + CI 녹색.
+## T35 — 렌더러 기동 중 fps 판정이 자기 자신을 무너뜨린다
+
+- slug `t35-renderer-startup-fps` · PR 접두 `fix(supervisor):` · 의존 T12, T5
+- **읽을 것**: `apps/server/src/supervisor/signals.ts`(`rendererSignal`), `config/default.json`(`supervisor.renderer.minFps`), `apps/server/src/supervisor/transitions.ts`(`componentsToRestart` → `renderer-source`), `apps/server/src/main.ts`(`rendererSource` 액션 = `refreshBrowserSource`)
+- **관측**(2026-08-23, 호스트 `WORKSTATION`, 재시작 6회 중 3회):
+
+  ```text
+  renderer degraded  fps_below_minimum
+  renderer-source    attempts 3/3  exhausted
+  safe_stop          restart_budget_exhausted (renderer-source:renderer)
+  ```
+
+  브라우저 소스가 페이지를 막 로드했을 때 렌더러가 보고하는 fps는 0에 가깝다. supervisor는 그것을 `fps_below_minimum`으로 읽고 `renderer-source`를 새로고침하는데, **새로고침은 페이지를 다시 로드해 fps를 0으로 되돌린다.** 3회 만에 예산이 소진되고 안전 정지한다. 정상 기동한 경우의 정상 상태 fps는 30.0이고 `minFps`는 20이므로 **정상 상태에는 여유가 있다** — 문제는 판정 시점뿐이다.
+
+  **T28·T30과 같은 모양이다: 복구 동작이 자신이 기다리던 상태를 파괴한다.** 세 번째 사례이므로 이 축을 한 번 정리할 가치가 있다.
+- **범위**
+  - 로드·새로고침 직후의 창에서는 fps로 degraded 판정을 하지 않는다. 렌더러가 프레임을 낼 기회를 갖기 전의 0은 관측이 아니라 아직 관측이 없는 상태다 — `unknown`이 맞는 표현이고, required family의 `unknown`은 이미 유예 창을 갖는다.
+  - **`minFps`를 낮추거나 재시작 예산을 키워 덮지 않는다.** 값은 정상 상태에 대해 맞다.
+  - 실제로 멈춘 렌더러(로드된 지 오래됐는데 프레임이 안 늘어남)는 여전히 degraded여야 한다 — 그것이 이 신호의 존재 이유다.
+  - 판정 기준을 시간이 아니라 **프레임 진행**으로 두는 쪽을 우선 검토한다(`frameCounter`가 늘고 있는가). 시간 창은 호스트 성능에 따라 다시 틀린다.
+- **합격 기준**
+  1. 페이지가 막 로드돼 아직 프레임이 없을 때 `renderer`가 degraded가 되지 않는다 — 회귀 테스트.
+  2. 로드된 뒤 프레임이 늘지 않는 렌더러는 여전히 degraded가 된다 — 회귀 테스트.
+  3. **실측**: 연속 5회 재시작에서 5회 모두 `live`에 도달한다(현재는 6회 중 3회 실패).
+  4. 게이트 5개 + CI 녹색.
