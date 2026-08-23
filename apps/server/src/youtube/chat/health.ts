@@ -16,8 +16,7 @@ import type { ChatKeepaliveConfig } from './config.js'
  * carries the last-event time as detail; nothing in this file lets an empty
  * chat turn any signal `degraded`. What can turn a signal `degraded` is an
  * observation about the transport itself: a call the server refuses, a channel
- * in `TRANSIENT_FAILURE`, a retry budget that ran out, or a reconnect that had
- * to give up its resume token.
+ * in `TRANSIENT_FAILURE`, or a retry budget that ran out.
  *
  * These are reports, not verdicts. T12's supervisor decides what a combination
  * means for the broadcast.
@@ -68,6 +67,9 @@ export interface ChatReconnectObservation {
   readonly resumedWithToken: boolean | null
   /** The server refused our token at least once, so a resume point was lost. */
   readonly tokenRejected: boolean
+  /** How many times, and when the last one was — history, not a verdict (T29). */
+  readonly tokenRejections: number
+  readonly lastTokenRejectedAt: string | null
   /** Recoveries that had no token to present — each one an unbounded gap. */
   readonly reconnectsWithoutToken: number
   /**
@@ -233,21 +235,39 @@ function keepalive(observation: ChatObservation, nowMonotonicMs: number): Signal
   return { status: 'ok', detail }
 }
 
+/**
+ * What has happened to this source's continuity — recorded, never judged (T29).
+ *
+ * A refused resume token used to make this `degraded`, and nothing ever cleared
+ * the flag. `chat_transport` degrades on any one of its signals, a degraded
+ * family asks for a `chat-source` restart, the restart reuses the same
+ * `ChatSourceState` so the flag survived it, and a restart budget only comes
+ * back when the family is healthy — so one refusal ended the run in
+ * `safe_stopped`, by the same route T28 took.
+ *
+ * Removing the verdict rather than adding an expiry is the point. A lost resume
+ * token means messages were skipped: a gap that has *already happened*, which a
+ * restart cannot recover and can only widen by opening yet another connection.
+ * Nothing here is a fault a component restart fixes. A transport that keeps
+ * being refused is still a fault, and it is reported where it belongs — every
+ * refusal also records a failure, so a repeating one climbs
+ * `consecutiveFailures` and shows up on `youtube.chat.transport`.
+ */
 function reconnect(observation: ChatObservation): SignalBody {
   const detail = {
     count: observation.reconnect.count,
     lastAt: observation.reconnect.lastAt,
     gapMs: observation.reconnect.gapMs,
     resumedWithToken: observation.reconnect.resumedWithToken,
+    tokenRejected: observation.reconnect.tokenRejected,
+    tokenRejections: observation.reconnect.tokenRejections,
+    lastTokenRejectedAt: observation.reconnect.lastTokenRejectedAt,
     reconnectsWithoutToken: observation.reconnect.reconnectsWithoutToken,
     estimatedDuplicates: observation.reconnect.estimatedDuplicates,
     estimatedLostMessages: observation.reconnect.estimatedLostMessages,
     // The reconnect cursor §9.4(3) asks to record. It authorizes nothing: it
     // names a position in one chat's message list, and `/health` is loopback.
     lastPageToken: observation.pageToken,
-  }
-  if (observation.reconnect.tokenRejected) {
-    return { status: 'degraded', reason: 'resumed_without_token', detail }
   }
   return { status: 'ok', detail }
 }

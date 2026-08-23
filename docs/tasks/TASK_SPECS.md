@@ -593,12 +593,13 @@
 - **읽을 것**: `apps/server/src/youtube/chat/state.ts`(`#tokenRejected`, `recordTokenRejected`), `health.ts`의 `reconnect()`, `apps/server/src/supervisor/restart.ts`(`noteHealthy`), `apps/server/src/main.ts`의 `chatSource` 재시작 액션
 - **관측**(2026-08-23 코드 독해, 실측 아님): `recordTokenRejected()`가 `#tokenRejected`를 세우면 어디서도 지우지 않는다. `reconnect()`는 그 값을 `degraded:resumed_without_token`으로 매핑하므로 신호가 영구히 degraded다. `chat_transport` family는 degraded 신호 하나로 degraded가 되고, `componentsToRestart`가 `chat-source` 재시작을 요구한다. 재시작 액션은 **같은 `ChatSource` 인스턴스**를 stop→start 하므로 `ChatSourceState`가 살아남아 플래그도 남는다. `RestartSupervisor`의 예산은 family가 건강해질 때만 돌아오므로(`noteHealthy`) 돌아오지 않고, `restart.maxAttempts['chat-source'] = 3` 소진 후 `safe_stopped`가 된다. 즉 **resume token이 한 번 거부되면 T28과 같은 모양으로 무너진다** — 다른 점은 촉발 조건뿐이다.
 - **범위**
-  - 토큰 거부는 **그 재접속에 대한 사실**이지 영구 상태가 아니다. 다음 재접속이 성공적으로 자리를 잡으면(응답 수신) 신호가 `ok`로 돌아와야 한다. 거부가 있었다는 사실 자체는 detail·카운터로 남긴다(§9.4(3)이 요구하는 기록은 유지).
-  - 재시작이 상태를 지우는 것으로 때우지 않는다: 재시작해도 남는 것이 문제의 절반이지만, 고칠 곳은 "언제 degraded인가"다.
+  - 고칠 곳은 "언제 degraded인가"다. 재시작이 상태를 지우게 만드는 것으로 때우지 않는다.
+  - 거부가 있었다는 사실은 detail·카운터로 남긴다(§9.4(3)이 요구하는 기록은 유지).
   - 임계값·재시도 횟수는 건드리지 않는다.
+- **판정**(구현이 정한 결론, 근거는 티켓): 만료 시간을 주는 대신 **`youtube.chat.reconnect`에서 판정 자체를 없앤다.** 거부된 토큰이 뜻하는 것은 **이미 일어난 유실**이고, 재시작은 그것을 되돌리지 못하며 연결을 한 번 더 끊어 유실 구간만 넓힌다 — 즉 component 재시작이 고칠 수 있는 종류의 결함이 아니다. 게다가 예약된 재시작은 family가 건강해져도 취소되지 않으므로(`restart.ts`: `noteHealthy()`는 `#inFlight`면 즉시 반환), 짧게 degraded로 두는 설계도 같은 해를 만든다.
 - **합격 기준**
-  1. 토큰 거부 후 재접속이 응답을 받으면 `youtube.chat.reconnect`가 `ok`로 돌아오고, 거부 이력은 detail에 남는다 — 회귀 테스트로 고정.
-  2. 실제로 토큰이 계속 거부되는 동안에는 여전히 문제로 보인다(어떤 신호로 보일지는 구현이 정하고 티켓에 근거를 남긴다).
+  1. 토큰이 거부돼도 `youtube.chat.reconnect`가 `degraded`가 되지 않고, 거부 횟수·시각이 detail에 남는다 — 회귀 테스트로 고정.
+  2. 실제로 토큰이 계속 거부되는 동안에는 여전히 문제로 보인다 — 거부는 매번 실패로도 기록되므로 `youtube.chat.transport`가 그것을 낸다.
   3. 게이트 5개 + CI 녹색.
 ## T30 — 끝난 방송에 묶인 attempt가 닫히지 않아 두 번째 방송을 시작할 수 없다
 

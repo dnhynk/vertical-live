@@ -40,6 +40,8 @@ function observation(overrides: Partial<ChatObservation> = {}): ChatObservation 
       gapMs: null,
       resumedWithToken: null,
       tokenRejected: false,
+      tokenRejections: 0,
+      lastTokenRejectedAt: null,
       reconnectsWithoutToken: 0,
       estimatedDuplicates: 0,
       estimatedLostMessages: 0,
@@ -237,6 +239,8 @@ describe('buildChatHealthSignals', () => {
           gapMs: 1200,
           resumedWithToken: true,
           tokenRejected: false,
+          tokenRejections: 0,
+          lastTokenRejectedAt: null,
           reconnectsWithoutToken: 0,
           estimatedDuplicates: 4,
           estimatedLostMessages: 0,
@@ -256,7 +260,7 @@ describe('buildChatHealthSignals', () => {
     })
   })
 
-  it('flags a reconnect that lost its resume token', () => {
+  it('records a reconnect that lost its resume token without calling it a fault', () => {
     const signals = buildChatHealthSignals(
       observation({
         reconnect: {
@@ -265,6 +269,8 @@ describe('buildChatHealthSignals', () => {
           gapMs: 40,
           resumedWithToken: false,
           tokenRejected: true,
+          tokenRejections: 1,
+          lastTokenRejectedAt: '2026-08-17T00:00:04.000Z',
           reconnectsWithoutToken: 1,
           estimatedDuplicates: 0,
           estimatedLostMessages: null,
@@ -274,10 +280,43 @@ describe('buildChatHealthSignals', () => {
     )
 
     const reconnect = byName(signals, CHAT_RECONNECT_SIGNAL)
-    expect(reconnect.status).toBe('degraded')
-    expect(reconnect.reason).toBe('resumed_without_token')
+    // T29: the refusal is history, and history is reported, not judged. A
+    // `degraded` here asks for a `chat-source` restart, which cannot recover the
+    // messages that were skipped and opens another gap to skip more.
+    expect(reconnect.status).toBe('ok')
+    expect(reconnect.detail).toMatchObject({
+      tokenRejected: true,
+      tokenRejections: 1,
+      lastTokenRejectedAt: '2026-08-17T00:00:04.000Z',
+      reconnectsWithoutToken: 1,
+    })
     // The gap is unknown, and the signal says so rather than guessing a number.
     expect(reconnect.detail['estimatedLostMessages']).toBeNull()
+  })
+
+  it('leaves the family free to recover after a refused token', () => {
+    // The state the old code could never leave: one refusal, then a healthy
+    // transport. Nothing in this document may hold `chat_transport` down.
+    const signals = buildChatHealthSignals(
+      observation({
+        connected: true,
+        reconnect: {
+          count: 2,
+          lastAt: '2026-08-17T00:00:09.000Z',
+          gapMs: 40,
+          resumedWithToken: false,
+          tokenRejected: true,
+          tokenRejections: 1,
+          lastTokenRejectedAt: '2026-08-17T00:00:04.000Z',
+          reconnectsWithoutToken: 1,
+          estimatedDuplicates: 0,
+          estimatedLostMessages: null,
+        },
+      }),
+      new FakeClock(),
+    )
+
+    for (const signal of signals) expect(signal.status).not.toBe('degraded')
   })
 })
 

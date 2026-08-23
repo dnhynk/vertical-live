@@ -21,6 +21,7 @@ import {
 import { AuthRevokedError } from '../auth/token-manager.js'
 import type { ChatConfig } from './config.js'
 import { GrpcChatSource } from './grpc-source.js'
+import { CHAT_RECONNECT_SIGNAL, CHAT_TRANSPORT_SIGNAL, buildChatHealthSignals } from './health.js'
 import { CancellableDelay, type ChatAccessTokens } from './retry.js'
 import { ChatIngestSink } from './sink.js'
 import { ChatSourceState } from './state.js'
@@ -309,14 +310,43 @@ describe('GrpcChatSource', () => {
     expect(h.server.requests[1]?.pageToken).toBeUndefined()
     const observation = h.state.observe(h.sink.pageToken, null)
     // The stored resume point is gone: whatever was posted between it and the
-    // fresh stream cannot be recovered, and `tokenRejected` is the sticky fact
-    // that says so (the reconnect signal reads `degraded / resumed_without_token`
-    // off it).
+    // fresh stream cannot be recovered, and the reconnect signal records that
+    // (`tokenRejected`, `tokenRejections`) without calling it a fault — T29.
     expect(observation.reconnect.tokenRejected).toBe(true)
+    expect(observation.reconnect.tokenRejections).toBe(1)
     // No reconnect is counted, and that is the point of the round-1 fix: this
     // run never received anything before the refusal, so there was no live path
     // to recover. Counting it would be an inferred number, not a measured one.
     expect(observation.reconnect.count).toBe(0)
+  })
+
+  /**
+   * T29's other half. Dropping the `degraded` verdict from the reconnect signal
+   * may not make a genuinely broken input look healthy — so this pins where a
+   * refusal that does not resolve actually surfaces.
+   */
+  it('keeps reporting a refusal that never resolves, through the transport signal', async () => {
+    const h = await harness(
+      [
+        // The stored token is refused, and the retry without one is refused too.
+        { end: { errorCode: status.INVALID_ARGUMENT } },
+        { end: { errorCode: status.INVALID_ARGUMENT } },
+      ],
+      { initialPageToken: 'token_stale' },
+    )
+
+    const result = await h.source.run()
+
+    expect(result.outcome).toBe('stopped')
+    const signals = buildChatHealthSignals(h.state.observe(h.sink.pageToken, null), systemClock)
+    const transport = signals.find((signal) => signal.name === CHAT_TRANSPORT_SIGNAL)
+    const reconnect = signals.find((signal) => signal.name === CHAT_RECONNECT_SIGNAL)
+    // The fault is the transport's, and it says so.
+    expect(transport?.status).toBe('degraded')
+    expect(transport?.reason).toBe('invalidRequest')
+    // The reconnect signal still only reports what happened to the resume point.
+    expect(reconnect?.status).toBe('ok')
+    expect(reconnect?.detail['tokenRejections']).toBe(1)
   })
 
   it('stops when it is asked to', async () => {
