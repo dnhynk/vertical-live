@@ -215,6 +215,8 @@ export class FaultyChat {
           gapMs: null,
           resumedWithToken: this.#reconnects > 0 ? true : null,
           tokenRejected: false,
+          tokenRejections: 0,
+          lastTokenRejectedAt: null,
           reconnectsWithoutToken: 0,
           estimatedDuplicates: 0,
           estimatedLostMessages: this.#reconnects > 0 ? 0 : null,

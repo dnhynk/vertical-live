@@ -63,6 +63,8 @@ export class ChatSourceState {
   #reconnectGapMs: number | null = null
   #resumedWithToken: boolean | null = null
   #tokenRejected = false
+  #tokenRejections = 0
+  #lastTokenRejectedAt: string | null = null
   #reconnectsWithoutToken = 0
   #duplicatesSinceReconnect = 0
   #estimatedLostMessages: number | null = null
@@ -231,6 +233,8 @@ export class ChatSourceState {
   /** The server refused our resume token; the resume point is gone (spec §11). */
   recordTokenRejected(): void {
     this.#tokenRejected = true
+    this.#tokenRejections += 1
+    this.#lastTokenRejectedAt = this.#clock.nowUtcIso()
     this.#estimatedLostMessages = null
   }
 
@@ -250,6 +254,8 @@ export class ChatSourceState {
       gapMs: this.#reconnectGapMs,
       resumedWithToken: this.#resumedWithToken,
       tokenRejected: this.#tokenRejected,
+      tokenRejections: this.#tokenRejections,
+      lastTokenRejectedAt: this.#lastTokenRejectedAt,
       reconnectsWithoutToken: this.#reconnectsWithoutToken,
       estimatedDuplicates: this.#duplicatesSinceReconnect,
       estimatedLostMessages: this.#estimatedLostMessages,
