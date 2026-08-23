@@ -609,19 +609,25 @@ const supervisor: Supervisor = new Supervisor({
   startup: buildStartupSteps(runtimeDeps),
   /*
    * One segment boundary (BOARD D-21, TASK_SPECS §T33). The lifecycle owns the
-   * API order; the only thing left here is the listener, which has to follow the
-   * new broadcast: the old `liveChatId` dies with the old broadcast and a source
-   * still pointing at it answers `FAILED_PRECONDITION` (T30 measured exactly
-   * that failure). Restarting it is how it re-reads the bound broadcast.
+   * API order and this owns nothing else — in particular it does **not** restart
+   * the chat listener.
+   *
+   * It did at first, and that was wrong: the supervisor is the single owner of
+   * component restarts (spec §9.2), and a second one racing it means one side's
+   * `start()` lands inside the other's `stop()`. Measured on the host on
+   * 2026-08-23 — the swap itself succeeded, then the listener was left `idle`
+   * through three restart attempts and the run safe-stopped on a component that
+   * had nothing wrong with it.
+   *
+   * What happens instead is what already worked: the old `liveChatId` dies with
+   * the old broadcast, the source answers `FAILED_PRECONDITION` and stops, the
+   * supervisor restarts `chat-source` once, and `resolveTarget` hands it the new
+   * broadcast — the same path T30 measured, now with a target that resolves.
    */
   rollSegment: async () => {
     const next = await broadcastPort?.rolloverIfDue?.()
     if (next === undefined || next === null) return
-    stdoutLogger.info('broadcast segment replaced; moving the chat listener', {
-      broadcastId: next.broadcastId,
-    })
-    await chatSource?.stop()
-    chatSource?.start()
+    stdoutLogger.info('broadcast segment replaced', { broadcastId: next.broadcastId })
   },
   preflight: buildPreflightProbes({ ...runtimeDeps, secrets }),
   actions: {
