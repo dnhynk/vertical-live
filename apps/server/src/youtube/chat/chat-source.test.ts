@@ -187,6 +187,26 @@ describe('ChatSource', () => {
     expect(chat.observe().mode).toBe('grpc')
     expect(TEST_LIVE_CHAT_ID).toBe('chat_test_0001')
   })
+
+  // T28, against a real channel: the server accepts the call and sends nothing,
+  // which is what a live chat nobody is typing in does. The transport is up, so
+  // the supervisor must be able to reach `live` — before the fix this state was
+  // `unknown`, and the restart it earned closed the very connection it was
+  // waiting on.
+  it('reports the transport as ok on a call the server has answered with nothing', async () => {
+    const servers = await fakes([{ end: 'hang' }])
+    const chat = source(servers)
+
+    chat.start()
+    await waitFor(() => servers.grpc.connectionCount > 0)
+    await waitFor(() => chat.observe().channelState === 'READY')
+
+    const transport = chat.signals().find((signal) => signal.name === CHAT_TRANSPORT_SIGNAL)
+    expect(transport?.status).toBe('ok')
+    // Nothing has been delivered: this is readiness of the path, not of a message.
+    expect(chat.observe().connected).toBe(false)
+    expect(transport?.detail['lastResponseAt']).toBeNull()
+  })
 })
 
 async function waitFor(predicate: () => boolean, timeoutMs = 5000): Promise<void> {

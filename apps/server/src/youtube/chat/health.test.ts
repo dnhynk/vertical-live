@@ -118,6 +118,76 @@ describe('buildChatHealthSignals', () => {
     expect(transport.reason).toBe('reconnecting')
   })
 
+  // T28: the first broadcast ended in `safe_stopped` because this state was
+  // reported as "not connected". A chat nobody has typed in is spec §2.1's
+  // normal case, and the channel below is up.
+  it('reports a ready gRPC channel as ok before its first message', () => {
+    const signals = buildChatHealthSignals(
+      observation({
+        connected: false,
+        channelState: 'READY',
+        consecutiveFailures: 0,
+        lastResponseAtUtc: null,
+        lastResponseAtMonotonicMs: null,
+      }),
+      new FakeClock(),
+    )
+
+    const transport = byName(signals, CHAT_TRANSPORT_SIGNAL)
+    expect(transport.status).toBe('ok')
+    // Nothing has been received yet, and `/health` says so plainly.
+    expect(transport.detail['connected']).toBe(false)
+    expect(transport.detail['channelState']).toBe('READY')
+    expect(transport.detail['lastResponseAt']).toBeNull()
+  })
+
+  it('does not call a ready channel ok while calls are failing', () => {
+    const signals = buildChatHealthSignals(
+      observation({ connected: false, channelState: 'READY', consecutiveFailures: 2 }),
+      new FakeClock(),
+    )
+
+    // The channel can stay `READY` while every `streamList` on it is refused,
+    // so silence and a failure streak are not the same observation.
+    const transport = byName(signals, CHAT_TRANSPORT_SIGNAL)
+    expect(transport.status).toBe('unknown')
+    expect(transport.reason).toBe('reconnecting')
+  })
+
+  it('keeps a ready channel out of ok once the retry budget or a stop says otherwise', () => {
+    const exhausted = buildChatHealthSignals(
+      observation({ connected: false, channelState: 'READY', retryBudgetExhausted: true }),
+      new FakeClock(),
+    )
+    const stopped = buildChatHealthSignals(
+      observation({
+        connected: false,
+        channelState: 'READY',
+        stopped: { reason: 'permission_denied', at: '2026-08-17T00:00:00.000Z' },
+      }),
+      new FakeClock(),
+    )
+
+    expect(byName(exhausted, CHAT_TRANSPORT_SIGNAL).status).toBe('degraded')
+    expect(byName(stopped, CHAT_TRANSPORT_SIGNAL).status).toBe('degraded')
+  })
+
+  it('leaves the REST path to its poll responses', () => {
+    const betweenPolls = buildChatHealthSignals(
+      observation({ mode: 'rest', connected: true, channelState: null }),
+      new FakeClock(),
+    )
+    const pollFailed = buildChatHealthSignals(
+      observation({ mode: 'rest', connected: false, channelState: null, consecutiveFailures: 1 }),
+      new FakeClock(),
+    )
+
+    // A poller that keeps answering is `connected` between polls; one that has
+    // stopped answering has no channel state to fall back on.
+    expect(byName(betweenPolls, CHAT_TRANSPORT_SIGNAL).status).toBe('ok')
+    expect(byName(pollFailed, CHAT_TRANSPORT_SIGNAL).status).toBe('unknown')
+  })
+
   it('reports an exhausted retry budget and a stop as degraded', () => {
     const exhausted = buildChatHealthSignals(
       observation({ connected: false, consecutiveFailures: 9, retryBudgetExhausted: true }),

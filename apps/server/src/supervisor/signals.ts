@@ -73,12 +73,14 @@ const PUSHED_SIGNAL_FAMILY: Readonly<Record<string, HealthFamily>> = Object.free
  * look like a healthy one, which is what round 2 found.
  *
  * So `chat_transport` may only be lifted to `ok` by the transport signal itself
- * — `youtube.chat.transport` is `ok` exactly when a path is *connected*, on gRPC
- * and on REST alike, which is the mode-aware readiness the review asked for.
- * `keepalive` stays outside this set on purpose: a gRPC channel that is still
- * dialling reports `ok` there before anything has been delivered. It can still
- * *degrade* the family (`channel_transient_failure`), because degradation is
- * decided before readiness.
+ * — `youtube.chat.transport` is `ok` exactly when a path is *up*: a gRPC channel
+ * the library reports `READY` with no failure streak on it, or a REST poller
+ * whose polls are answering (T28 — waiting for a first message is not a fault,
+ * because §2.1's world runs with zero viewers). `keepalive` stays outside this
+ * set on purpose: a gRPC channel that is still dialling reports `ok` there
+ * before there is any connection at all. It can still *degrade* the family
+ * (`channel_transient_failure`), because degradation is decided before
+ * readiness.
  *
  * Every other family lists all of its signals: each of those producers only
  * reports `ok` when it has observed the thing working.
