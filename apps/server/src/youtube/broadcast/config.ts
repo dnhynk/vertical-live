@@ -98,6 +98,13 @@ export interface BroadcastConfig {
   /** How long auto-start is given before the transition fallback runs. */
   readonly autoStartWaitMs: number
   readonly statusPollIntervalMs: number
+  /**
+   * How long a transition is given to leave its in-flight state (`testStarting`,
+   * `liveStarting`) before the caller stops waiting. The reference says such a
+   * transition "may take several seconds, or even up to a minute"
+   * (`life-of-a-broadcast` 3.4, checked 2026-08-23), so this is that minute.
+   */
+  readonly transitionSettleMs: number
   /** Bound on `list` pagination while reconciling. */
   readonly reconcileMaxPages: number
   /**
@@ -182,6 +189,10 @@ export function loadBroadcastConfig(options: LoadAuthConfigOptions = {}): Broadc
     autoStartWaitMs: readPositiveInt(
       section['autoStartWaitMs'],
       'youtube.broadcast.autoStartWaitMs',
+    ),
+    transitionSettleMs: readPositiveInt(
+      section['transitionSettleMs'],
+      'youtube.broadcast.transitionSettleMs',
     ),
     statusPollIntervalMs: readPositiveInt(
       section['statusPollIntervalMs'],

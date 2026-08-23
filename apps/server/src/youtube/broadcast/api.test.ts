@@ -455,6 +455,7 @@ function writeConfig(
           requestTimeoutMs: base.requestTimeoutMs,
           autoStartWaitMs: base.autoStartWaitMs,
           statusPollIntervalMs: base.statusPollIntervalMs,
+          transitionSettleMs: base.transitionSettleMs,
           reconcileMaxPages: base.reconcileMaxPages,
           stream: { ...base.stream, ...streamOverrides },
           provisional: base.provisional,

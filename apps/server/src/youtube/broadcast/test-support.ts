@@ -63,6 +63,7 @@ export const TEST_BROADCAST_CONFIG: BroadcastConfig = Object.freeze({
   strategy: 'single',
   // Rollover off unless a test asks for it, which is the product default too.
   segmentMs: null,
+  transitionSettleMs: 90_000,
   title: 'Autonomous Vertical Live',
   description: '',
   privacyStatus: 'private',

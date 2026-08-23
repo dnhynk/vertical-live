@@ -146,6 +146,23 @@ export class FakeYouTubeApiServer {
   #baseUrl = ''
   #streamSerial = 0
   #broadcastSerial = 0
+  /**
+   * Reads a transition must survive in its in-flight state (`testStarting`,
+   * `liveStarting`) before it settles. `0` — the default — settles immediately,
+   * which is what every test written before T33 assumes.
+   *
+   * The real API does not settle immediately: `life-of-a-broadcast` 3.4 says a
+   * transition "may take several seconds, or even up to a minute", and a
+   * transition measured against the live API on 2026-08-23 answered 200 with
+   * `testStarting` and reached `testing` seven seconds later. A fake that always
+   * settles at once cannot reproduce the one failure this endpoint actually has,
+   * which is how a rollover shipped that asked for `live` too early.
+   */
+  transitionSettleReads = 0
+
+  /** Broadcasts whose transition has not settled yet; see the field above. */
+  readonly #settling = new Map<string, { target: 'testing' | 'live'; reads: number }>()
+
   /** Set when a transition should report the bound stream as inactive. */
   streamInactiveOnTransition = false
   /**
@@ -536,6 +553,17 @@ export class FakeYouTubeApiServer {
     })
   }
 
+  /** One read of a broadcast whose transition is still in flight. */
+  #advanceSettling(broadcast: FakeBroadcast): void {
+    const pending = this.#settling.get(broadcast.id)
+    if (pending === undefined) return
+    pending.reads -= 1
+    if (pending.reads > 0) return
+    this.#settling.delete(broadcast.id)
+    broadcast.lifeCycleStatus = pending.target
+    if (pending.target === 'live') broadcast.actualStartTime = '2026-01-01T00:03:00.000Z'
+  }
+
   #listBroadcasts(
     query: Record<string, string>,
     parts: readonly string[],
@@ -548,6 +576,9 @@ export class FakeYouTubeApiServer {
       // "Specify exactly one" of broadcastStatus, id, mine.
       throw fail(400, 'incompatibleParameters', 'youtube.liveBroadcast')
     }
+    // A read is what advances an in-flight transition, the way polling is what
+    // eventually sees the real one settle.
+    for (const broadcast of this.broadcasts.values()) this.#advanceSettling(broadcast)
     const all = [...this.broadcasts.values()]
     const ids = query['id']?.split(',').filter((id) => id !== '')
     let selected = ids === undefined ? all : all.filter((broadcast) => ids.includes(broadcast.id))
@@ -595,9 +626,19 @@ export class FakeYouTubeApiServer {
     }
     switch (target) {
       case 'testing':
+        if (this.transitionSettleReads > 0) {
+          broadcast.lifeCycleStatus = 'testStarting'
+          this.#settling.set(broadcast.id, { target: 'testing', reads: this.transitionSettleReads })
+          return broadcast
+        }
         broadcast.lifeCycleStatus = 'testing'
         return broadcast
       case 'live':
+        if (this.transitionSettleReads > 0) {
+          broadcast.lifeCycleStatus = 'liveStarting'
+          this.#settling.set(broadcast.id, { target: 'live', reads: this.transitionSettleReads })
+          return broadcast
+        }
         broadcast.lifeCycleStatus = 'live'
         broadcast.actualStartTime = '2026-01-01T00:03:00.000Z'
         return broadcast
