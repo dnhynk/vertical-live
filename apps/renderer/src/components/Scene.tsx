@@ -66,11 +66,23 @@ export default function Scene({ runtime }: SceneProps) {
         intensity={palette.rimIntensity * 2}
         distance={14}
       />
+      {/*
+        Back rim. The creature and the ridges behind it are both mid-value, so
+        without a light from behind the silhouette dissolves into the scene at
+        phone size — this is the one light that keeps the shape readable
+        (spec §5.2 five seconds, §14.2(1) real mobile UI).
+      */}
+      <pointLight
+        position={[0, 2.4, -3.2]}
+        color={palette.rimColor}
+        intensity={palette.rimIntensity * 3.2}
+        distance={11}
+      />
 
       <Background palette={palette} />
 
       {/* Contact shadow: without it the creature floats in the gradient. */}
-      <mesh position={[0, -0.14, -0.3]} rotation={[-1.24, 0, 0]} scale={[1.5, 1.1, 1]}>
+      <mesh position={[0, 0.28, -0.3]} rotation={[-1.24, 0, 0]} scale={[1.7, 1.2, 1]}>
         <planeGeometry args={[1.6, 1.6]} />
         <meshBasicMaterial map={shadow} transparent depthWrite={false} />
       </mesh>
