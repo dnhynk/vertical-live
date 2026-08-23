@@ -7,7 +7,7 @@
 
 상태: `pending`(의존 대기) · `ready` · `dispatched` · `in_review` · `changes_requested` · `merged` · `blocked` · `failed`
 
-> **현재(2026-08-23 UTC): 등록 task 41개 머지, T31은 리뷰 중(PR #41), main CI 녹색.** 첫 방송에서 나온 결함 T26·T27·T28 머지 완료. **T30 수정 후 스택이 다시 `live`에 도달했다**(실측 2026-08-23 14:40: stale row를 둔 채 기동해 새 방송 `z6yv6yNbcPw`가 required family 6개 전부 `ok`로 live, 3분+ 유지) — **T28 합격 기준 1도 같은 스냅샷으로 충족**됐다. main CI 녹색.
+> **현재(2026-08-23 UTC): 등록 task 42개 머지, T32 `ready`, main CI 녹색. Gate 0은 §1.7 하나만 남았고 그것은 Gate 2 뒤에 잠긴다.** 첫 방송에서 나온 결함 T26·T27·T28 머지 완료. **T30 수정 후 스택이 다시 `live`에 도달했다**(실측 2026-08-23 14:40: stale row를 둔 채 기동해 새 방송 `z6yv6yNbcPw`가 required family 6개 전부 `ok`로 live, 3분+ 유지) — **T28 합격 기준 1도 같은 스냅샷으로 충족**됐다. main CI 녹색.
 > **Gate 0은 §1.7(운영 합격선) 하나만 남았고 그것은 Gate 2 72h baseline 뒤에 잠긴다**(A-15, D-14). 다음은 Gate 2: 실시간 72h soak, 모바일 calibration.
 
 | T-ID | 제목 | 의존 | [contract] | 상태 | 브랜치 slug | PR | Orca task |
@@ -48,7 +48,8 @@
 | T26 | `youtube.chat.enabled` env override(`VL_YOUTUBE_CHAT_ENABLED`) — 없어서 첫 기술 방송이 30초 뒤 `safe_stopped` | T9 | — | merged | t26-chat-enabled-env | #37 | (Orca 미사용, 코디네이터 직접) |
 | T27 | `obs/control.test.ts`가 호스트 vault 상태에 의존(첫 방송이 stream key를 주입하면 방송 호스트에서만 실패) | T2, T10 | — | merged | t27-obs-control-vault-test | #36 | (Orca 미사용, 코디네이터 직접) |
 | T28 | 조용한 채팅에서 `chat_transport`가 `ok`에 도달하지 못해 `live`가 될 수 없다(첫 방송 실측) | T9, T12, T26 | — | merged | t28-chat-transport-quiet | #38 | (Orca 미사용, 코디네이터 직접) |
-| T31 | 명령 지표가 `GET /metrics`에 없다 — D-18의 행동 지표 검증에 필요한 계측(실측) | T6, T12 | — | in_review | t31-command-metrics | #41 | (Orca 미사용, 코디네이터 직접) |
+| T31 | 명령 지표가 `GET /metrics`에 없다 — D-18의 행동 지표 검증에 필요한 계측(실측) | T6, T12 | — | merged | t31-command-metrics | #41 | (Orca 미사용, 코디네이터 직접) |
+| T32 | 방송 구성(`VL_BROADCAST_ENABLED`·`VL_YOUTUBE_CHAT_ENABLED`)이 자동시작 경로에 없어 무인 운전이 성립하지 않는다(실측) | T17, T25, T26 | — | ready | t32-autostart-broadcast | | |
 | T29 | 거부된 resume token 하나가 `youtube.chat.reconnect`를 영구 degraded로 만들어 재시작 예산을 소진시킨다(코드 독해) | T9, T12 | — | merged | t29-token-rejected-sticky | #40 | (Orca 미사용, 코디네이터 직접) |
 | T30 | 끝난 방송에 묶인 attempt가 닫히지 않아 두 번째 방송을 시작할 수 없다(실측; `stopBroadcast()` 호출부 부재) | T10, T12 | — | merged | t30-stale-attempt-resume | #39 | (Orca 미사용, 코디네이터 직접) |
 | T24 | 알림 채널 Slack 전환(D-3 개정): `SlackWebhookAlertSink`, `alerts.slackWebhookUrl`, `slackEnabled` 기본 on | T12 | — | merged | t24-slack-alerts | #33 | (Orca 미사용, 코디네이터 직접) |

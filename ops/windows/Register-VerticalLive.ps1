@@ -42,6 +42,9 @@ param(
     # supervisor's renderer-source recovery needs the OBS integration, and no
     # renderer ever attaches (TASK_SPECS §T25).
     [switch] $WithObs,
+    # Registers the logon task with -Broadcast: OBS, the broadcast lifecycle and
+    # the chat listener, which is what unattended operation needs (TASK_SPECS §T32).
+    [switch] $Broadcast,
     [switch] $SkipArchiveTask
 )
 
@@ -82,7 +85,10 @@ try {
         $xml = $xml.Replace('{{REPO_ROOT}}', $RepoRoot)
         $xml = $xml.Replace('{{NODE_EXE}}', $node)
         $xml = $xml.Replace('{{INTERVAL}}', $ArchiveInterval)
-        $xml = $xml.Replace('{{START_ARGS}}', $(if ($WithObs) { ' -WithObs' } else { '' }))
+        # -Broadcast implies -WithObs, so it is passed alone rather than with a
+        # redundant second switch the launcher would have to reconcile.
+        $startArgs = if ($Broadcast) { ' -Broadcast' } elseif ($WithObs) { ' -WithObs' } else { '' }
+        $xml = $xml.Replace('{{START_ARGS}}', $startArgs)
 
         # schtasks reads task XML as Unicode; UTF-8 is rejected with
         # "The task XML is malformed" on some Windows builds.
