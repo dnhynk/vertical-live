@@ -710,6 +710,16 @@ export class Supervisor {
     await this.#runPreflight()
   }
 
+  /**
+   * Whether component recovery may act. A run with no start-up sequence — the
+   * bare health server, and most tests — has nothing to wait for; one that has a
+   * sequence waits until it has finished walking it, successfully or not.
+   */
+  #startupSettled(): boolean {
+    if (this.#options.startup === undefined) return true
+    return this.#startupResult !== null
+  }
+
   async #evaluate(cause: string): Promise<HealthAggregate> {
     this.#observeModerationHeuristics()
     await this.#maybeRetryPreflight()
@@ -758,7 +768,21 @@ export class Supervisor {
       this.#lastTransitionReason = transition.reason
     }
 
-    if (this.#state !== 'safe_stopped') this.#driveRecovery(aggregate)
+    // Recovery is for a running system. While the start-up sequence is still
+    // walking its fixed order, that order is what owns the components — and a
+    // restart fired underneath it undoes the step it is standing on.
+    //
+    // Measured on the host on 2026-08-23: `obs-stream` recovery started the
+    // encoder before the sequence reached its `streamService` step, and OBS
+    // refuses to accept a stream service while streaming. The sequence then
+    // failed on that step every time, five attempts running, and the host could
+    // not broadcast at all (TASK_SPECS §T37).
+    //
+    // Fourth defect of the same shape today, after T28, T30 and T35: a recovery
+    // action firing before the thing it depends on exists.
+    if (this.#state !== 'safe_stopped' && this.#startupSettled()) {
+      this.#driveRecovery(aggregate)
+    }
     // Only a run that is actually live has a segment to end (T33). Deliberately
     // *not* awaited: a swap is several API calls, and an evaluation loop that
     // waits for them is an evaluation loop that stops answering — the

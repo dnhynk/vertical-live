@@ -120,6 +120,23 @@ export class ObsControl {
     )
     const server = this.#config.streamIngestUrl
 
+    // OBS refuses this call outright while the output is running — "You cannot
+    // change stream service settings while streaming." — and that refusal says
+    // nothing about the output, so it reads like any other failure. The
+    // start-up sequence died here five times running on the host on 2026-08-23
+    // with nothing in the record about whether OBS was actually streaming.
+    //
+    // So the output is checked first, the way the rest of this module works: the
+    // refusal names what it saw, and a failure that reaches a log now carries
+    // the reason instead of OBS's generic sentence.
+    const before = await this.#source.call('GetStreamStatus')
+    if (readBoolean(before, 'outputActive') === true) {
+      throw new ObsCommandError(
+        'output_active',
+        'OBS is streaming, so the stream service cannot be set. The output has to be stopped first — a start-up sequence that reaches this has already started the stream in an earlier step or an earlier attempt (TASK_SPECS §T37).',
+      )
+    }
+
     await this.#source.call('SetStreamServiceSettings', {
       streamServiceType: CUSTOM_STREAM_SERVICE_TYPE,
       streamServiceSettings: { server, key },
@@ -383,6 +400,14 @@ export class ObsControl {
 }
 
 /** OBS request payloads are free-form JSON; read the fields we need defensively. */
+function readBoolean(value: unknown, key: string): boolean | undefined {
+  if (typeof value !== 'object' || value === null) {
+    return undefined
+  }
+  const field = (value as Record<string, unknown>)[key]
+  return typeof field === 'boolean' ? field : undefined
+}
+
 function readString(value: unknown, key: string): string | undefined {
   if (typeof value !== 'object' || value === null) {
     return undefined
