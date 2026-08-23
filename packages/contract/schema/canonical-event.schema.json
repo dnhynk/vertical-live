@@ -11,7 +11,7 @@
     },
     "eventKey": {
       "type": "string",
-      "pattern": "^(youtube|simulator):([A-Za-z0-9_-]{1,128}):([A-Za-z0-9_-]{1,128})(?::gift:([1-9][0-9]{0,15}))?$"
+      "pattern": "^(youtube|simulator):([A-Za-z0-9_.-]{1,128}):([A-Za-z0-9_.-]{1,128})(?::gift:([1-9][0-9]{0,15}))?$"
     },
     "ingestSeq": {
       "type": "integer",
@@ -27,11 +27,11 @@
     },
     "broadcastId": {
       "type": "string",
-      "pattern": "^[A-Za-z0-9_-]{1,128}$"
+      "pattern": "^[A-Za-z0-9_.-]{1,128}$"
     },
     "liveChatId": {
       "type": "string",
-      "pattern": "^[A-Za-z0-9_-]{1,128}$"
+      "pattern": "^[A-Za-z0-9_.-]{1,128}$"
     },
     "kind": {
       "type": "string",

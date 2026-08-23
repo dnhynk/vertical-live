@@ -28,11 +28,11 @@
         },
         "broadcastId": {
           "type": "string",
-          "pattern": "^[A-Za-z0-9_-]{1,128}$"
+          "pattern": "^[A-Za-z0-9_.-]{1,128}$"
         },
         "liveChatId": {
           "type": "string",
-          "pattern": "^[A-Za-z0-9_-]{1,128}$"
+          "pattern": "^[A-Za-z0-9_.-]{1,128}$"
         },
         "receivedAt": {
           "type": "string",
@@ -41,7 +41,7 @@
         },
         "messageId": {
           "type": "string",
-          "pattern": "^[A-Za-z0-9_-]{1,128}$"
+          "pattern": "^[A-Za-z0-9_.-]{1,128}$"
         },
         "validationStatus": {
           "type": "string",
@@ -261,11 +261,11 @@
         },
         "broadcastId": {
           "type": "string",
-          "pattern": "^[A-Za-z0-9_-]{1,128}$"
+          "pattern": "^[A-Za-z0-9_.-]{1,128}$"
         },
         "liveChatId": {
           "type": "string",
-          "pattern": "^[A-Za-z0-9_-]{1,128}$"
+          "pattern": "^[A-Za-z0-9_.-]{1,128}$"
         },
         "receivedAt": {
           "type": "string",
@@ -276,7 +276,7 @@
           "anyOf": [
             {
               "type": "string",
-              "pattern": "^[A-Za-z0-9_-]{1,128}$"
+              "pattern": "^[A-Za-z0-9_.-]{1,128}$"
             },
             {
               "type": "null"

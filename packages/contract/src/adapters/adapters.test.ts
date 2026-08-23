@@ -141,6 +141,17 @@ const EXPECTED: Readonly<Record<string, Expectation>> = {
     command: 'FEED',
     payment: null,
   },
+  // A real YouTube message id is `LCC.` followed by base64url. The charset that
+  // rejects an `eventKey` separator has to admit the `.`, or every live message
+  // is dropped (T40); the fixture value itself is synthetic.
+  'text-message-event-platform-id': {
+    status: 'valid',
+    messageId: 'LCC.TEST_SYNTHETIC_PLATFORM_MESSAGE_ID_0001',
+    kind: 'CHAT_COMMAND',
+    occurredAt: '2026-08-16T00:10:00.000Z',
+    command: 'FEED',
+    payment: null,
+  },
   // Full-width letters, a zero-width space, a URL and a banned-word marker. The
   // stub parser matches exact aliases only, so this is the "no command" path;
   // normalizing it into FEED is T6's job.

@@ -124,6 +124,23 @@ describe('eventKey rules (spec §7.4)', () => {
   it('rejects a key whose ids contain the separator', () => {
     expect(EventKeySchema.safeParse('youtube:b:1:m:1').success).toBe(false)
   })
+
+  // `EVENT_KEY_PATTERN` used to spell the id charset out again instead of
+  // composing it, so an id could validate while its key did not. A platform id
+  // carries a `.` (T40), which is exactly where the two would drift apart.
+  it('accepts a platform-shaped message id and returns it unchanged', () => {
+    const messageId = 'LCC.TEST_SYNTHETIC_PLATFORM_MESSAGE_ID_0001'
+    const key = `youtube:${BROADCAST_ID}:${messageId}`
+    expect(EventKeySchema.safeParse(key).success).toBe(true)
+    expect(key.slice(`youtube:${BROADCAST_ID}:`.length)).toBe(messageId)
+    expect(EventKeySchema.safeParse(`${key}:gift:3`).success).toBe(true)
+  })
+
+  it.each(SHAPES)('%s builds the key from a platform-shaped id', (shape) => {
+    expect(eventKeyForEnvelope(validEnvelope(shape, 'text-message-event-platform-id'))).toBe(
+      `youtube:${BROADCAST_ID}:LCC.TEST_SYNTHETIC_PLATFORM_MESSAGE_ID_0001`,
+    )
+  })
 })
 
 describe('sourceDataExpiresAt', () => {
