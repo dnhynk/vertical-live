@@ -687,14 +687,24 @@
 - **왜**: D-21. 12시간을 넘으면 archive가 없을 수 있고 VOD가 없으면 YPP 유효 시청시간에서 빠진다(스펙 §9.3). 구간을 11시간으로 끊어 매 구간이 롱폼 VOD로 남게 한다.
 - **범위**
   - config `youtube.broadcast.segmentMs`(기본값은 **끔**: `null`). 켜져 있을 때만 교체가 일어난다 — CI·개발 머신이 방송을 교체하지 않는다.
-  - 교체 절차: 새 attempt 시작 → **기존 ingestion stream을 재사용해** bind → go live → **이전 방송을 `stopBroadcast()`로 끝낸다**(D-21이 D-17을 개정한 지점). 새 방송이 live가 된 뒤에 이전 것을 끝낸다 — 순서가 반대면 송출이 끊긴다.
-  - **`확인 필요`**: 하나의 `liveStream`을 새 broadcast에 bind할 때 이전 bind가 어떻게 되는지. 공식 문서(`liveBroadcasts.bind`)로 확정하고 URL·확인일을 티켓에 남긴다. **추측으로 구현하지 않는다** — 여기서 틀리면 교체 순간 송출이 끊긴다.
+  - **교체 순서는 공식 문서로 확정했다**(아래 두 인용). 순서는 이것이고 바꿀 수 없다:
+
+    ```text
+    1. 새 broadcast 생성 → 기존 ingestion stream을 그대로 bind      (OBS는 계속 송출 중)
+    2. 이전 broadcast를 complete로 끝낸다                          ← 이것이 먼저다
+    3. 새 broadcast를 live로 transition                            (stream이 active여야 한다)
+    ```
+
+    - `liveBroadcasts.bind`(확인 2026-08-23): *"A broadcast can only be bound to one video stream, **though a video stream may be bound to more than one broadcast**."* → 같은 stream을 두 방송에 동시에 붙일 수 있다. **OBS는 교체 내내 멈추지 않는다.**
+    - `liveBroadcasts.transition`(확인 2026-08-23): `concurrentBroadcastsExceedLimit` — *"The channel already has the maximum number of concurrent live broadcasts. **One or more broadcasts that are already live must be stopped before another broadcast can start on the channel.**"* → **새 방송을 이전 방송보다 먼저 live로 올릴 수 없다.** 겹치는 구간을 만들려는 설계는 403으로 실패한다.
+  - 따라서 **2와 3 사이에 live인 방송이 없는 구간이 생긴다.** 그 구간을 없앨 수는 없고 짧게만 만들 수 있다 — 인코더는 계속 돌고 있으므로 3의 `errorStreamInactive`는 걸리지 않아야 한다(`status.streamStatus === 'active'`를 확인한 뒤 transition한다. 기존 `BroadcastStreamInactiveError` 경로가 이미 그것을 다룬다). 구간 길이를 측정해 티켓에 남긴다.
+  - 시청자는 이전 URL에서 끊긴다. 세로 feed에서 Live Redirect가 지원되지 않는다는 것은 스펙 §9.3이 이미 적었다 — rolling을 고른 대가이고, D-21이 그것을 알고 고른 것이다.
   - 채팅 소스는 새 `liveChatId`로 옮겨간다. `resolveTarget`이 DB의 열린 attempt를 보므로, 교체 뒤 chat-source를 다시 시작하는 것으로 충분한지 확인하고 아니면 최소 변경으로 잇는다.
   - 세계 상태는 교체와 무관하다(스펙 §9.3: "세계 상태와 broadcast ID는 처음부터 분리한다"). 교체가 snapshot·inbox·checkpoint를 건드리면 안 된다.
   - `safe_stopped`에서는 끝내지 않는다(D-21).
   - archive가 실제로 남는지는 실측으로 확인한다 — 그것이 이 전략을 고른 이유 전부다.
 - **합격 기준**
-  1. 구간이 끝나면 새 방송이 live가 된 **뒤에** 이전 방송이 `complete`가 되고, 그 사이 OBS 송출이 끊기지 않는다 — 가짜 API로 회귀 테스트.
+  1. 교체가 위 1→2→3 순서로 일어나고, **OBS 송출이 한 번도 멈추지 않는다** — 가짜 API로 회귀 테스트. 새 방송을 이전 방송보다 먼저 live로 올리려는 구현은 이 테스트에서 실패해야 한다.
   2. 교체가 세계 상태를 건드리지 않는다(snapshot revision·inbox·checkpoint 연속) — 회귀 테스트.
   3. 채팅이 새 `liveChatId`로 붙는다 — 회귀 테스트.
   4. `segmentMs`가 꺼져 있으면 교체가 일어나지 않는다.
