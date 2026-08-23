@@ -11,6 +11,7 @@ import { isLoopbackAddress } from './engine/ingest.js'
 import type { EngineMetricsSnapshot } from './engine/metrics.js'
 import type { RendererHealthReport } from './engine/publisher.js'
 import type { HealthSignal } from './health/types.js'
+import type { CommandMetricsSnapshot } from './input/metrics.js'
 import type { AdminKillEndpoint } from './supervisor/kill-switch.js'
 import type { AdminModerationEndpoint } from './supervisor/moderation-report.js'
 import type { SupervisorHealthSummary } from './supervisor/types.js'
@@ -71,6 +72,14 @@ export interface ServerOptions {
    * switch.
    */
   readonly adminModeration?: AdminModerationEndpoint
+  /**
+   * Command counters for `GET /metrics` (spec §14.1: 무식별 유효 명령 수, 명령
+   * 성공률). The same accessor the supervisor reads, so the two never disagree.
+   *
+   * Absent in the bare health server, and absent from the response as `null` —
+   * `/metrics` answers before anything is parsing commands (T31).
+   */
+  readonly commandMetrics?: () => CommandMetricsSnapshot
 }
 
 /**
@@ -225,7 +234,13 @@ export function handleRequest(
       sendJson(res, 405, { error: 'method_not_allowed' })
       return
     }
-    sendJson(res, 200, options.engine.metrics())
+    // Anonymous integers only: the snapshot carries no author breakdown, and
+    // its consent fields exist only while that gate is open, so a closed
+    // configuration's document is what it was before D-9 (`input/metrics.ts`).
+    sendJson(res, 200, {
+      ...options.engine.metrics(),
+      command: options.commandMetrics?.() ?? null,
+    })
     return
   }
 
