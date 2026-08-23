@@ -56,7 +56,7 @@
 | T38 | auto-start가 안 걸리고 그 방송은 수동 전이도 거부한다 · 전이 대상 미기록 · `streamService`가 재시도를 못 견딘다(실측) | T10 | — | merged | t38-golive-autostart | #52 | (Orca 미사용, 코디네이터 직접) |
 | T39 | 시작 중에 쌓인 `unknown`이 유예 창을 태워 방금 시작된 component를 재시작한다(실측) | T12 | — | merged | t39-grace-after-startup | #53 | (Orca 미사용, 코디네이터 직접) |
 | T40 | `[contract]` 실제 YouTube 메시지 id(`LCC.`+base64url)가 계약 문자 클래스를 통과하지 못해 실물 채팅이 전량 폐기된다(실측) | T1 | — | merged | t40-external-id-charset | #54 | (Orca 미사용, 코디네이터 직접) |
-| T41 | 모든 입력을 버리면서 required family 6개가 전부 `ok`였다 — 계약 검증 실패가 어디에도 보이지 않는다(실측) | T12, T40 | — | in review | t41-ingest-drop-signal | #56 | (Orca 미사용, 코디네이터 직접) |
+| T41 | 모든 입력을 버리면서 required family 6개가 전부 `ok`였다 — 계약 검증 실패가 어디에도 보이지 않는다(실측) | T12, T40 | — | merged | t41-ingest-drop-signal | #56 | (Orca 미사용, 코디네이터 직접) |
 | T42 | 방송 privacy를 환경으로 덮는다(D-24) — Gate 2 calibration이 열 수 있는 링크를 요구한다 | T10 | — | merged | t42-unlisted-privacy | #55 | (Orca 미사용, 코디네이터 직접) |
 | T34 | 크리처 시각 고도화(D-22) — 자산은 그대로 코드 생성 오리지널 | T14 | — | merged | t34-creature-visual | #43 | (Orca 미사용, 코디네이터 직접) |
 | T35 | 렌더러 기동 중 fps 판정이 새로고침을 부르고 그 새로고침이 판정 대상을 되돌린다(실측: 재시작 6회 중 3회 safe stop) | T12, T5 | — | merged | t35-renderer-startup-fps | #44 | (Orca 미사용, 코디네이터 직접) |
