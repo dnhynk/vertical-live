@@ -167,6 +167,12 @@ const EGG_SPECKLES: readonly (readonly [number, number, number, number])[] = [
   [0.26, 0.58, 0.72, 0.032],
 ]
 
+/** Shell shards: spin around the head, lean, and size against the head radius. */
+const SHELL_SHARDS: readonly (readonly [number, number, number])[] = [
+  [0.4, 0.3, 0.92],
+  [3.5, -0.24, 0.78],
+]
+
 /** Petal lateral offset and lean; the third only grows in at `crest: 2`. */
 const CREST_PETALS: readonly (readonly [number, number])[] = [
   [-0.62, -0.34],
@@ -342,14 +348,31 @@ export default function Pet({
               ))
             : null}
 
-          {build.shellCap ? (
-            <mesh position={[0, headY + build.headRadius * 0.62, 0]} rotation={[0.22, 0, 0.3]}>
-              <sphereGeometry
-                args={[build.headRadius * 0.86, 24, 16, 0, Math.PI * 2, 0, Math.PI * 0.42]}
-              />
-              <meshStandardMaterial color={SHELL_COLOR} roughness={0.7} side={THREE.DoubleSide} />
-            </mesh>
-          ) : null}
+          {/*
+            What is left of the egg, right after hatching. Two shards, not a cap:
+            a full dome read as a helmet on the host screenshot — a grey plate
+            across the head that looked like the head had been cut off. A piece
+            that covers part of the circumference and sits at an angle reads as
+            broken, which is the whole point of the stage.
+          */}
+          {build.shellCap
+            ? SHELL_SHARDS.map(([spin, lean, size], index) => (
+                <mesh
+                  key={index}
+                  position={[0, headY + build.headRadius * 0.52, 0]}
+                  rotation={[lean, spin, 0.34]}
+                >
+                  <sphereGeometry
+                    args={[build.headRadius * size, 20, 12, 0, Math.PI * 0.72, 0, Math.PI * 0.34]}
+                  />
+                  <meshStandardMaterial
+                    color={SHELL_COLOR}
+                    roughness={0.62}
+                    side={THREE.DoubleSide}
+                  />
+                </mesh>
+              ))
+            : null}
 
           {/* Belly mark */}
           <mesh
