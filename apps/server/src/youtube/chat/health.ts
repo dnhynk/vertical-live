@@ -158,10 +158,30 @@ export function buildChatHealthSignals(observation: ChatObservation, clock: Cloc
 
 type SignalBody = Pick<HealthSignal, 'status' | 'detail'> & { reason?: string }
 
+/**
+ * Is the input path up? — which is **not** the same question as "has it been
+ * sent anything?" (T28).
+ *
+ * The first broadcast found the difference the hard way: a live chat nobody was
+ * typing in sent no message page for over twenty seconds, `connected` never
+ * stood, the family escalated to `unobservable`, and the restart that followed
+ * closed the transport and started the wait over — so the run could not
+ * converge and ended in `safe_stopped` with five of six required families `ok`.
+ * Spec §2.1 says a world with zero viewers is the normal case, so a quiet chat
+ * is a state, not a fault; the keepalive note below has said as much all along.
+ *
+ * So a gRPC channel that reports `READY` is a connected transport even before
+ * its first response: the HTTP/2 connection to the endpoint is up, and a call
+ * the server refuses shows up as a failure streak rather than as silence — which
+ * is why the streak is still disqualifying here. On REST the question never
+ * arises: every poll that answers is a response, so the poller keeping its
+ * cadence is already `connected`.
+ */
 function transport(observation: ChatObservation): SignalBody {
   const detail = {
     mode: observation.mode,
     connected: observation.connected,
+    channelState: observation.channelState,
     consecutiveFailures: observation.consecutiveFailures,
     retryBudgetExhausted: observation.retryBudgetExhausted,
     lastErrorKind: observation.lastError?.kind ?? null,
@@ -179,6 +199,12 @@ function transport(observation: ChatObservation): SignalBody {
   }
   if (observation.connected) return { status: 'ok', detail }
   if (observation.mode === 'idle') return { status: 'unknown', reason: 'not_started', detail }
+  // Connected, waiting for a first message that a quiet chat may never send.
+  // `channelState` is non-null only on the gRPC path, so this cannot fire while
+  // the poller is between attempts.
+  if (observation.channelState === 'READY' && observation.consecutiveFailures === 0) {
+    return { status: 'ok', detail }
+  }
   return { status: 'unknown', reason: 'reconnecting', detail }
 }
 
