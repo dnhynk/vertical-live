@@ -176,6 +176,10 @@ powercfg /query SCHEME_CURRENT            # 확인
 
 ([powercfg 명령줄 옵션, Microsoft Learn](https://learn.microsoft.com/en-us/windows-hardware/design/device-experiences/powercfg-command-line-options), 2026-08-17 확인.)
 
+> **호스트 `WORKSTATION` 상태(2026-08-23)**: 네 값 전부 `0x0`으로 확인 — standby(AC)·hibernate·monitor off·disk off.
+> **잠금 시험은 아직 하지 않았다**(사용자가 자리를 비울 때 직접 수행). 그전까지 "이 호스트에서 잠근 채 프레임이
+> 유지된다"고 쓰지 않는다.
+
 - 확인: 30분 이상 조작 없이 두고 `/health`의 renderer frame counter와 OBS 출력 바이트가 계속 증가하는가.
 - **모니터 절전·화면 잠금은 세션을 끝내지 않지만**, 이 호스트에서 실제로 프레임이 유지되는지는 GPU·드라이버에 달렸다. 잠근 채 최소 10분 두고 frame counter를 확인한다. **확인 전에는 "괜찮다"고 쓰지 않는다.**
 - 절전에서 깨어난 뒤 OBS·인코더가 정상인지도 같은 방법으로 본다(권장: 절전을 아예 끈다).
@@ -189,6 +193,12 @@ Windows는 GPU가 응답하지 않으면 드라이버를 재시작한다(TDR). �
 - 필요하면 TDR 지연을 늘리는 선택지가 있다: `HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers`의 `TdrDelay`([TDR registry keys, Microsoft Learn](https://learn.microsoft.com/en-us/windows-hardware/drivers/display/tdr-registry-keys), 2026-08-17 확인). **기본값을 바꾸는 것은 진단을 미루는 선택**이므로, 재현되는 TDR을 먼저 기록하고 Gate 2에서 판단한다.
 - 시험: 드라이버를 강제로 재시작(`Ctrl+Shift+Win+B`)하고 60초 안에 프레임이 돌아오는지, 돌아오지 않으면 supervisor가 어떤 상태로 가는지 기록한다.
 
+> **호스트 `WORKSTATION` 상태(2026-08-23)**: 시스템 로그의 `Display` 원본 이벤트 **0건** — 이 호스트에서 TDR이
+> 일어난 이력이 없다. `TdrDelay`는 **미설정**이고 그것이 §5.4의 방침이다(기본값을 바꾸는 것은 진단을 미루는 선택).
+> **강제 재시작 시험은 사용자 판단으로 돌리지 않았다**(2026-08-23) — 이력이 없는 호스트에서 화면을 점유하며
+> 재현하는 대신, 실제 TDR이 나면 그때 관측하기로 했다. 따라서 "TDR에서 복구된다"는 **검증되지 않았다.**
+> 72h soak 동안 `Display` 이벤트와 renderer family를 함께 본다.
+
 ### 5.5 remote-session 종료
 
 원격으로 붙었다 끊는 것이 방송을 끊으면 무인 운영이 아니다.
@@ -197,6 +207,10 @@ Windows는 GPU가 응답하지 않으면 드라이버를 재시작한다(TDR). �
 - 그래서 원격 접속은 **콘솔 세션에 그대로 붙는 도구**(VNC 계열 등)를 쓰는 것을 기본으로 한다. RDP를 써야 한다면 끊은 뒤 세션을 콘솔로 되돌린다: `query session` → `tscon <세션ID> /dest:console`([tscon, Microsoft Learn](https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/tscon), 2026-08-17 확인).
 - 시험: 원격 접속 → 5분 방송 관찰 → 연결 종료 → 10분 뒤 `/health` frame counter와 OBS 출력이 계속 증가하는가. 멈춘다면 그 원격 도구는 이 호스트에서 쓰지 않는다.
 - **로그오프·사용자 전환·`shutdown /l`은 스택을 죽인다.** 잠금(`Win+L`)만 쓴다.
+
+> **호스트 `WORKSTATION` 상태(2026-08-23)**: RDP는 비활성이다(`fDenyTSConnections = 1`), 즉 §5.5가 경고한
+> 콘솔 세션 탈취는 현재 일어날 수 없다. 원격 도구는 아직 **아무것도 정하지 않았다** — 그러므로 이 항목의 시험은
+> 대상이 없다. 원격 접속을 쓰기로 하면 그 도구로 위 시험을 먼저 돌리고, 통과하지 못하면 이 호스트에서 쓰지 않는다.
 
 ### 5.6 자동 업데이트
 
