@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { EnvSecretProvider, MissingSecretError } from '../secrets/index.js'
+import { defaultSecretProvider, EnvSecretProvider, MissingSecretError } from '../secrets/index.js'
 import { FakeClock } from '../testing/fake-clock.js'
 import { FakeObsServer } from '../testing/fake-obs-server.js'
 import { TEST_OBS_PASSWORD, testObsConfig } from '../testing/obs-test-support.js'
@@ -198,12 +198,17 @@ describe('ObsControl stream service injection', () => {
     expect(requestTypes()).not.toContain('SetStreamServiceSettings')
   })
 
-  it('does not read the environment when no provider is injected', async () => {
+  it('does not read the environment, whatever the host vault happens to hold', async () => {
     // Review round 1, B1: T2's env provider was still the operational default
     // after T3, so `VL_YOUTUBE_STREAM_KEY` could stand in for the vault. The
-    // default is `defaultSecretProvider()` (Windows Credential Manager) now, so
-    // this call must fail — with the vault missing the key on Windows, or with
-    // the vault being unavailable elsewhere — and never return the env value.
+    // default is the credential-manager provider now, and this pins that the env
+    // is never a fallback for it.
+    //
+    // The provider is pointed at a service no one stores anything under, so the
+    // key is missing on every host. Reading the real service made this test pass
+    // only until a broadcast ran: T10 injects `youtube.streamKey` into the vault
+    // (BOARD A-16), after which the real service resolves and the assertion
+    // below could no longer hold (TASK_SPECS §T27).
     const envKey = 'synthetic-env-stream-key-must-not-be-used'
     process.env['VL_YOUTUBE_STREAM_KEY'] = envKey
     try {
@@ -211,6 +216,7 @@ describe('ObsControl stream service injection', () => {
         source: client,
         config: testObsConfig(server.url, { streamIngestUrl: TEST_INGEST_URL }),
         clock: new FakeClock({ autoAdvance: true }),
+        secrets: defaultSecretProvider({ service: 'vertical-live-absent-service' }),
       })
 
       const error = await commands.setStreamServiceFromVault().catch((caught: unknown) => caught)
