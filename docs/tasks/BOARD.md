@@ -45,6 +45,7 @@
 | T8f | loopback `fetch` 정지로 인한 스위트 실행 시간(Node 26 회귀 회피) | T23 | — | merged | t8f-suite-time | #34 | (Orca 미사용, 코디네이터 직접) |
 | T25 | 자동시작에서 OBS를 함께 올리는 `-WithObs` 스위치(재부팅 실측에서 `safe_stopped` 관측) | T17 | — | merged | t25-autostart-obs | #35 | (Orca 미사용, 코디네이터 직접) |
 | T26 | `youtube.chat.enabled` env override(`VL_YOUTUBE_CHAT_ENABLED`) — 없어서 첫 기술 방송이 30초 뒤 `safe_stopped` | T9 | — | dispatched | t26-chat-enabled-env | | (Orca 미사용, 코디네이터 직접) |
+| T27 | `obs/control.test.ts`가 호스트 vault 상태에 의존(첫 방송이 stream key를 주입하면 방송 호스트에서만 실패) | T2, T10 | — | dispatched | t27-obs-control-vault-test | | (Orca 미사용, 코디네이터 직접) |
 | T24 | 알림 채널 Slack 전환(D-3 개정): `SlackWebhookAlertSink`, `alerts.slackWebhookUrl`, `slackEnabled` 기본 on | T12 | — | merged | t24-slack-alerts | #33 | (Orca 미사용, 코디네이터 직접) |
 | T23 | Node 26 전환(호스트 통일: 사용자 다른 저장소가 26 요구)과 vitest jsdom web storage 회귀 차단 | — | — | merged | t23-node26 | #32 | (Orca 미사용, 코디네이터 직접) |
 

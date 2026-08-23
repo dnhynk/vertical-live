@@ -546,3 +546,14 @@
   1. `loadChatConfig({ env: { VL_YOUTUBE_CHAT_ENABLED: 'true' } }).enabled === true`, env 없으면 config 기본값(`false`)을 따른다 — 두 경우 모두 테스트.
   2. 잘못된 값은 기존 `readBoolean`의 거부 경로를 그대로 탄다.
   3. 게이트 5개 + CI 녹색.
+
+## T27 — `control.test.ts`가 호스트 vault 상태에 의존한다
+
+- slug `t27-obs-control-vault-test` · PR 접두 `fix(obs):` · 의존 T2, T10
+- **읽을 것**: `apps/server/src/obs/control.test.ts`("does not read the environment…"), `apps/server/src/obs/control.ts`(`#secrets`)
+- **관측된 문제**(2026-08-23): 이 테스트는 기본 secret provider가 `VL_YOUTUBE_STREAM_KEY`로 떨어지지 않는다는 것을 pin한다. 그런데 그것을 **실제 credential service에 `youtube.streamKey`가 없다**는 전제로 검사했다. 첫 방송이 돌면 T10이 그 키를 vault에 주입하므로(BOARD A-16) 그 뒤로는 호출이 성공하고 테스트가 깨진다 — 즉 **방송 호스트에서만 실패**한다. CI는 vault가 비어 있어 통과한다.
+- **범위**: 기본 provider를 아무것도 저장하지 않은 service 이름으로 겨눠 어느 호스트에서도 키가 없게 만든다. 검사 대상(“env는 fallback이 아니다”)은 그대로 두고, 전제만 호스트 독립으로 바꾼다. 테스트 타임아웃·단언 완화로 덮지 않는다.
+- **합격 기준**
+  1. vault에 `youtube.streamKey`가 **있는 호스트**와 **없는 호스트** 양쪽에서 통과한다.
+  2. 나머지 `control.test.ts` 케이스는 무수정 통과.
+  3. 게이트 5개 + CI 녹색.
