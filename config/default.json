@@ -353,6 +353,7 @@
       "autoStartWaitMs": 120000,
       "statusPollIntervalMs": 15000,
       "reconcileMaxPages": 4,
+      "segmentMs": null,
       "stream": {
         "title": "vertical-live ingest",
         "resolution": "variable",

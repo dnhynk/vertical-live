@@ -97,6 +97,17 @@ export interface SupervisorOptions {
   readonly screenshots?: DiagnosticScreenshotRecorder
   readonly preflight?: PreflightProbes
   readonly startup?: StartupSteps
+  /**
+   * Ends the current broadcast segment and starts the next one if the segment
+   * is over (BOARD D-21, TASK_SPECS §T33). Absent when nothing rolls over.
+   *
+   * The supervisor owns only *when* this may run — the run is live, no swap is
+   * already in flight, and outward actions are still allowed. The API order and
+   * the chat's move to the new `liveChatId` belong to the caller that has the
+   * lifecycle and the listener; putting them here would give the state machine a
+   * second job it does not need.
+   */
+  readonly rollSegment?: () => Promise<void>
   readonly logger?: Logger
   /**
    * Runs once when the machine enters `safe_stopped`: stopping the encoder
@@ -135,6 +146,8 @@ export class Supervisor {
   #startRequested = false
   #safeStop: SafeStopTrigger | null = null
   #preflight: PreflightResult | null = null
+  /** One swap at a time: the API refuses two live broadcasts (T33). */
+  #rollingOver = false
   #startupResult: StartupResult | null = null
   #startupAttempts = 0
   #moderation: ModerationHealth = MODERATION_HEALTHY
@@ -746,7 +759,46 @@ export class Supervisor {
     }
 
     if (this.#state !== 'safe_stopped') this.#driveRecovery(aggregate)
+    // Only a run that is actually live has a segment to end (T33). Deliberately
+    // *not* awaited: a swap is several API calls, and an evaluation loop that
+    // waits for them is an evaluation loop that stops answering — the
+    // coordinator heartbeat would degrade and take the run down for a reason
+    // that has nothing to do with the swap. `#rollingOver` is what keeps two
+    // swaps from overlapping, which is the thing the API actually refuses.
+    if (this.#state === 'live') void this.#rolloverIfDue()
     return aggregate
+  }
+
+  /**
+   * One segment boundary (BOARD D-21). The lifecycle owns the API order — new
+   * broadcast on the same stream, old one completed, new one live — and this
+   * only decides *when* to ask and what to do afterwards.
+   *
+   * The caller also moves the chat: the old `liveChatId` dies with the old
+   * broadcast, and a source left pointing at one answers `FAILED_PRECONDITION`
+   * (measured in T30).
+   */
+  async #rolloverIfDue(): Promise<void> {
+    const roll = this.#options.rollSegment
+    if (roll === undefined || this.#rollingOver) return
+    if (!this.#outwardActionsAllowed()) return
+
+    this.#rollingOver = true
+    try {
+      await roll()
+    } catch (error) {
+      // A failed swap is not a reason to stop: the previous broadcast is either
+      // still live or already ended by YouTube, and the next tick asks again.
+      // Reported, never silent (spec §9.1).
+      const message = error instanceof Error ? error.message : String(error)
+      this.#logger.error('broadcast segment rollover failed', { error: message })
+      await this.#alert('warning', 'supervisor.rollover_failed', {
+        reason: 'rollover_failed',
+        detail: { error: message },
+      })
+    } finally {
+      this.#rollingOver = false
+    }
   }
 
   /**

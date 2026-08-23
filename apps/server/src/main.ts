@@ -491,6 +491,12 @@ if (needsGrant) {
       // Spec §9.1 keeps 최초 공개 with the operator: while the configured privacy
       // is `private` there is nothing to publish (BOARD A-18).
       publishable: () => broadcastConfig.privacyStatus !== 'private',
+      rolloverIfDue: async () => {
+        const next = await lifecycle.rolloverIfDue()
+        if (next === null) return null
+        binding = next
+        return { broadcastId: next.broadcastId, liveChatId: next.liveChatId }
+      },
     }
   }
 }
@@ -601,6 +607,22 @@ const supervisor: Supervisor = new Supervisor({
   logger: stdoutLogger,
   commandMetrics: () => commandMetrics.snapshot(),
   startup: buildStartupSteps(runtimeDeps),
+  /*
+   * One segment boundary (BOARD D-21, TASK_SPECS §T33). The lifecycle owns the
+   * API order; the only thing left here is the listener, which has to follow the
+   * new broadcast: the old `liveChatId` dies with the old broadcast and a source
+   * still pointing at it answers `FAILED_PRECONDITION` (T30 measured exactly
+   * that failure). Restarting it is how it re-reads the bound broadcast.
+   */
+  rollSegment: async () => {
+    const next = await broadcastPort?.rolloverIfDue?.()
+    if (next === undefined || next === null) return
+    stdoutLogger.info('broadcast segment replaced; moving the chat listener', {
+      broadcastId: next.broadcastId,
+    })
+    await chatSource?.stop()
+    chatSource?.start()
+  },
   preflight: buildPreflightProbes({ ...runtimeDeps, secrets }),
   actions: {
     engine: () => {

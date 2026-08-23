@@ -27,6 +27,8 @@ export type BroadcastAlertKind =
   | 'broadcast_published'
   /** An open attempt could not be resumed and was closed so a new one can start. */
   | 'attempt_discarded'
+  /** One segment ended and its replacement went live (BOARD D-21). */
+  | 'broadcast_rolled_over'
 
 export interface BroadcastAlert {
   readonly kind: BroadcastAlertKind
