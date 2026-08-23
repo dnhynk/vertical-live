@@ -50,7 +50,7 @@ safeStop.reason = chat-source:chat_transport+youtube_broadcast
 |---|---|---|---|
 | 1 | `complete` 방송에 묶인 열린 attempt를 재사용하지 않고 새 방송을 만든다. 닫힌 attempt에 사유가 남는다 | met | `lifecycle.test.ts` "discards an open attempt whose broadcast has completed and starts a new one" — `stage=abandoned`, `lastErrorReason=broadcast_complete`, 새 `broadcastId`. 삭제된 방송은 "…no longer exists"(`broadcast_missing`) |
 | 2 | 재개 가능한 attempt는 여전히 재개된다 | met | "still resumes an attempt whose broadcast is live" — 같은 attemptId·broadcastId, `closedAt` null. 기존 62건 무수정 통과 |
-| 3 | 실측: stale row를 둔 채 기동해 `live`에 도달하고, 같은 기동으로 T28 합격 기준 1을 확인한다 | | |
+| 3 | 실측: stale row를 둔 채 기동해 `live`에 도달하고, 같은 기동으로 T28 합격 기준 1을 확인한다 | met | 아래 실측 — stale attempt가 `broadcast_complete`로 닫히고 새 방송 `z6yv6yNbcPw`가 `live`에 도달했다. 같은 스냅샷이 T28 기준 1을 만족한다 |
 | 4 | 게이트 5개 + CI 녹색 | met (CI는 PR에서) | 아래 Gates |
 
 부수: "decides nothing when the lifecycle cannot be read"가 §9.1의 불확정 규칙을 고정하고, "asks YouTube once per process, not once per resume"가 quota 비용을 고정한다.
@@ -68,6 +68,29 @@ npm run test         -> 150 files | 2171 passed | 1 skipped
 npm run build        -> exit 0
 npm run soak:ci      -> exit 0 (임계값 not-locked 유지, A-15)
 ```
+
+## 실측 (2026-08-23 05:23–05:33 UTC, 호스트 `WORKSTATION`)
+
+`Start-VerticalLive.ps1 -WithObs` + `VL_BROADCAST_ENABLED=true`·`VL_YOUTUBE_CHAT_ENABLED=true`로 기동. 시작 시점의 DB에는 실패한 앞선 기동이 남긴 stale row가 그대로 있었다(attempt `22d0ba05…`, stage `live`, `closed_at` NULL, broadcast `1c8WAFCmAQI`).
+
+```text
+05:23:48  attempt 22d0ba05… → stage=abandoned  last_error_reason=broadcast_complete  closed_at 기록
+          새 attempt 9bb6d5b4…  broadcast z6yv6yNbcPw  (private)
+05:29:32  supervisor=live      lastTransitionReason=signals:all_families_ok
+05:33     여전히 live, safeStop=null, 재시작 예산 소진 0건(모든 component attempts=0)
+
+families:  coordinator=ok state_commit=ok chat_transport=ok renderer=ok
+           obs_output=ok youtube_broadcast=ok frame_loss=ok dead_man=unknown(비활성)
+
+youtube.chat.transport = ok
+{"mode":"grpc","connected":false,"channelState":"READY","consecutiveFailures":0,
+ "retryBudgetExhausted":false,"lastErrorKind":null,"lastResponseAt":"2026-08-23T05:32:12.671Z",
+ "streamOfflineAt":null}
+
+renderer: {"frameCounter":15291,"fps":30,"webglContextLost":false,"lastAppliedStateRevision":2223}
+```
+
+`connected:false` + `channelState:READY` + `ok` — 시청자가 아무도 입력하지 않는 채팅에서 transport가 서 있다고 보고하는 상태이며, 수정 전에는 이것이 `unknown:reconnecting`이었다. 3분 넘게 유지됐고 `chat-source` 재시작은 한 번도 요구되지 않았다. 같은 상태가 시작 직후뿐 아니라 운영 중에도 반복해서 나타난다(서버가 장수 호출을 정상 종료할 때마다 `connected`가 내려가고 채널은 `READY`로 남는다).
 
 ## Not done / out of scope
 
