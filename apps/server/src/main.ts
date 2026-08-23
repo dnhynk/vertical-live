@@ -216,6 +216,8 @@ const httpServer = createServer({
   rendererHealth: () => hub.lastHealth,
   sourceHealth: () => chatSource?.signals() ?? [],
   supervisorHealth: () => supervisor.health(),
+  // The one collector, read by both surfaces (spec §14.1, T31).
+  commandMetrics: () => commandMetrics.snapshot(),
   adminKill: new AdminKillEndpoint({
     token: adminToken,
     clock: systemClock,

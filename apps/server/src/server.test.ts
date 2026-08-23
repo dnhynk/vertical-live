@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createServer, DEFAULT_PORT, resolvePort, type ServerOptions } from './server.js'
 import type { EngineHealth } from './engine/engine.js'
 import type { EngineMetricsSnapshot } from './engine/metrics.js'
+import { CommandMetrics, type CommandMetricsSnapshot } from './input/metrics.js'
+import { parseMessage } from './input/parse.js'
 import type { HealthSignal } from './health/types.js'
 import { AdminKillEndpoint, type KillSwitchRequest } from './supervisor/kill-switch.js'
 import { AdminModerationEndpoint, type ModerationReport } from './supervisor/moderation-report.js'
@@ -183,7 +185,53 @@ describe('engine-backed routes', () => {
     const response = await fetch(`${baseUrl}/metrics`)
 
     expect(response.status).toBe(200)
-    await expect(response.json()).resolves.toEqual(metrics)
+    // A process that is not parsing commands still answers, and says so with
+    // `null` rather than an empty snapshot that would read as "zero commands"
+    // (T31).
+    await expect(response.json()).resolves.toEqual({ ...metrics, command: null })
+  })
+
+  it('serves the command counters under /metrics when a collector is wired', async () => {
+    // The real collector, not a literal: `/metrics` has to show what the
+    // supervisor is reading, and a hand-written snapshot could agree with the
+    // endpoint while disagreeing with the thing that counts (T31).
+    const collector = new CommandMetrics()
+    for (const text of ['feed', 'ごはん', 'feed https://example.invalid', 'a']) {
+      collector.recordParse(
+        parseMessage(
+          text,
+          { identityGateOpen: false, voteWindowOpen: false },
+          { maxRawLength: 500 },
+        ),
+      )
+    }
+    const withCommands = createServer({ ...options, commandMetrics: () => collector.snapshot() })
+    await new Promise<void>((resolve) => {
+      withCommands.listen(0, '127.0.0.1', resolve)
+    })
+    const url = `http://127.0.0.1:${(withCommands.address() as AddressInfo).port}`
+
+    try {
+      const body = (await (await fetch(`${url}/metrics`)).json()) as {
+        command: CommandMetricsSnapshot
+      }
+
+      expect(body.command).toEqual(collector.snapshot())
+      // Spec §14.1's two values reach an operator: the anonymous command count
+      // and the success ratio.
+      expect(body.command.commandLike).toBe(4)
+      expect(body.command.commandSuccessRatio).toBe(0.5)
+      // Anonymous integers only, and the consent fields stay absent while that
+      // gate is closed — the document is what it was before D-9.
+      expect(Object.keys(body.command)).not.toContain('consentAccepted')
+      expect(Object.keys(body.command)).not.toContain('suppressed')
+    } finally {
+      await new Promise<void>((resolve) => {
+        withCommands.close(() => {
+          resolve()
+        })
+      })
+    }
   })
 
   it('rejects a non-GET method on /metrics', async () => {
