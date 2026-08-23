@@ -154,6 +154,23 @@ export class HealthAggregator {
     this.#signals.set(signal.name, signal)
   }
 
+  /**
+   * Restarts the unobservable clocks (T39).
+   *
+   * The grace window asks "how long has this family been unobservable", and
+   * during start-up the answer is meaningless: the components have not been
+   * started yet, so of course nobody has heard from them. Carrying that time
+   * forward means a family is already out of grace the moment the sequence
+   * finishes, and the first evaluation after it restarts a component that was
+   * started seconds ago and has not had a chance to report.
+   *
+   * Measured on the host on 2026-08-23: the `chatSource` step started the
+   * listener at 10:16:45.3 and a `chat-source` restart stopped it at 10:16:47.2.
+   */
+  resetUnobservable(): void {
+    this.#unknownSince.clear()
+  }
+
   /** Newest signal per name, for `/health` and diagnostics. */
   signals(): readonly HealthSignal[] {
     return [...this.#signals.values()]
