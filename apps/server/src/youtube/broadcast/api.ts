@@ -736,14 +736,41 @@ export class YouTubeLiveApi {
     // A 4xx is YouTube's decision: the resource was not created or changed. A 5xx
     // is the server's own failure and says nothing about whether it applied.
     const outcome: ApiCallOutcome = response.status >= 500 ? 'uncertain' : 'rejected'
-    // Only the status and the machine reason travel; response bodies can quote the
-    // request, which for `liveStreams` would mean the stream key.
+    // The status, the machine reason, and YouTube's own sentence.
+    //
+    // The body used to be dropped whole, because a `liveStreams` error can quote
+    // the request back and that would mean the stream key. But the machine reason
+    // alone is not enough to act on: a `403 invalidTransition` says a transition
+    // was refused and nothing about *why*, and an operator staring at that has no
+    // next step. Measured on 2026-08-23, twice, while debugging a broadcast
+    // rollover — the reason code was identical for two different causes.
+    //
+    // So only the `error.message` field travels, and it goes through the
+    // redactor first: every stream key this process has seen is registered there
+    // (`#absorbStreamKeys`), so a key quoted back to us is masked before it can
+    // reach a log. A body that is not YouTube's structured error shape
+    // contributes nothing.
+    const message = this.#errorMessage(text)
     return new YouTubeApiCallError(
       method,
       outcome,
       classification,
-      `HTTP ${String(response.status)}`,
+      message === null
+        ? `HTTP ${String(response.status)}`
+        : `HTTP ${String(response.status)}: ${message}`,
     )
+  }
+
+  /** `error.message` from Google's structured error body, redacted, or `null`. */
+  #errorMessage(text: string): string | null {
+    if (text === '') return null
+    const parsed = safeParse(text)
+    if (typeof parsed !== 'object' || parsed === null) return null
+    const error = (parsed as Record<string, unknown>)['error']
+    if (typeof error !== 'object' || error === null) return null
+    const message = (error as Record<string, unknown>)['message']
+    if (typeof message !== 'string' || message === '') return null
+    return this.#redactor.redact(message)
   }
 
   /**

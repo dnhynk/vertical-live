@@ -47,12 +47,14 @@ async function harness(
     readonly dailyUnits?: number
     readonly fetchFn?: typeof fetch
     readonly baseUrl?: string
+    /** Shared so a test can register a secret before the call that echoes it. */
+    readonly redactor?: SecretRedactor
   } = {},
 ): Promise<Harness> {
   server = await FakeYouTubeApiServer.start()
   const clock = options.clock ?? systemClock
   const logger = new RecordingLogger()
-  const redactor = new SecretRedactor()
+  const redactor = options.redactor ?? new SecretRedactor()
   const quota = new QuotaTracker({
     clock,
     dailyUnits: options.dailyUnits ?? 10_000,
@@ -248,6 +250,57 @@ describe('failure outcomes', () => {
 
     expect(error).toBeInstanceOf(YouTubeApiShapeError)
     expect((error as Error).message).not.toContain('html')
+  })
+
+  it("carries YouTube's own explanation of a refusal, redacted", async () => {
+    // A machine reason alone is not actionable: `403 invalidTransition` says a
+    // transition was refused and nothing about why. Measured twice on 2026-08-23
+    // while debugging a rollover, with the same reason code for two different
+    // causes.
+    const h = await harness({
+      fetchFn: () =>
+        Promise.resolve(
+          Response.json(
+            {
+              error: {
+                code: 403,
+                message: 'Invalid transition: the broadcast is not in a state that allows it.',
+                errors: [{ reason: 'invalidTransition' }],
+              },
+            },
+            { status: 403 },
+          ),
+        ),
+    })
+
+    await expect(h.api.listBroadcasts({ broadcastStatus: 'active' })).rejects.toThrow(
+      /the broadcast is not in a state that allows it/,
+    )
+  })
+
+  it('masks a secret that an error body quotes back at us', async () => {
+    // The reason the body used to be dropped whole: a `liveStreams` failure can
+    // echo the request, and that would be the stream key.
+    const h = await harness()
+    h.redactor.register('synthetic-stream-key-abcdef')
+    const withKey = await harness({
+      fetchFn: () =>
+        Promise.resolve(
+          Response.json(
+            { error: { code: 400, message: 'bad streamName synthetic-stream-key-abcdef' } },
+            { status: 400 },
+          ),
+        ),
+      redactor: h.redactor,
+    })
+
+    const error = await withKey.api
+      .listBroadcasts({ broadcastStatus: 'active' })
+      .then(() => null)
+      .catch((caught: unknown) => caught as Error)
+
+    expect(error?.message).not.toContain('synthetic-stream-key-abcdef')
+    expect(error?.message).toContain('bad streamName')
   })
 
   it('rejects an item with no id rather than inventing one', async () => {
