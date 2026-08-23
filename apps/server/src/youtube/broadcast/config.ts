@@ -88,6 +88,24 @@ export interface BroadcastConfig {
   readonly privacyStatus: BroadcastPrivacyStatus
   readonly selfDeclaredMadeForKids: boolean
   readonly latencyPreference: BroadcastLatencyPreference
+  /**
+   * `contentDetails.enableAutoStart`. **Off**, and the default is off for a
+   * measured reason (2026-08-23, TASK_SPECS §T38).
+   *
+   * Auto-start fires "when you start streaming video on the bound live stream"
+   * — an *event*. On a host that restarts, the encoder is often already pushing
+   * when the broadcast is bound, so that edge never happens and the flag does
+   * nothing: the start-up sequence waited out `autoStartWaitMs` and gave up.
+   *
+   * Worse, a broadcast created with it on **refuses a manual transition**:
+   * `liveBroadcasts.transition` to `testing` answered `invalidTransition` 403,
+   * which is what left the run stuck at `bound` and the host unable to
+   * broadcast. So the fallback path the code has for "auto-start did not fire"
+   * could not work either.
+   *
+   * With it off there is one path to `live` and it is the one measured to work:
+   * `ready → testing → live`, waiting for each transition to settle.
+   */
   readonly enableAutoStart: boolean
   readonly enableAutoStop: boolean
   readonly enableDvr: boolean

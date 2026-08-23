@@ -344,7 +344,7 @@
       "privacyStatus": "private",
       "selfDeclaredMadeForKids": false,
       "latencyPreference": "ultraLow",
-      "enableAutoStart": true,
+      "enableAutoStart": false,
       "enableAutoStop": false,
       "enableDvr": false,
       "enableMonitorStream": true,

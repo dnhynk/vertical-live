@@ -908,8 +908,17 @@ export class BroadcastLifecycle {
     } catch (error) {
       if (error instanceof YouTubeApiCallError && !error.needsReconcile) {
         // `not_attempted` and `rejected` both mean nothing changed at YouTube.
+        //
+        // The target travels with the reason. `invalidTransition` on its own
+        // does not say *which* transition was refused, and `#goLive` asks for
+        // two of them in a row — so a failure that reaches a log or a row was
+        // ambiguous exactly where it needed not to be (measured 2026-08-23,
+        // twice, on two different causes).
         this.#store.recordBroadcastCallResult(attempt.attemptId, {
-          lastErrorReason: error.reason ?? error.classification.kind,
+          lastErrorReason:
+            transitionTarget === undefined
+              ? (error.reason ?? error.classification.kind)
+              : `${error.reason ?? error.classification.kind}:${transitionTarget}`,
         })
       }
       throw error

@@ -717,7 +717,16 @@ export class Supervisor {
    */
   #startupSettled(): boolean {
     if (this.#options.startup === undefined) return true
-    return this.#startupResult !== null
+    // Completed, not merely attempted. A failed attempt is followed by another
+    // one, and the sequence still owns its components in between: measured on
+    // 2026-08-23, an attempt whose `goLive` waited 34s for YouTube to see the
+    // ingest had `chat-source` restarted three times underneath it — a component
+    // the sequence had not started yet — and the run safe-stopped on an
+    // exhausted budget while the `chatSource` step was still in flight.
+    //
+    // A sequence that never completes ends in `safe_stopped` through its own
+    // `startup.maxAttempts`, so nothing is stranded by waiting.
+    return this.#startupResult?.completed === true
   }
 
   async #evaluate(cause: string): Promise<HealthAggregate> {

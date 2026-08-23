@@ -129,11 +129,30 @@ export class ObsControl {
     // So the output is checked first, the way the rest of this module works: the
     // refusal names what it saw, and a failure that reaches a log now carries
     // the reason instead of OBS's generic sentence.
+    // Already set? Then there is nothing to do, and saying so is what makes this
+    // step survive a retry.
+    //
+    // The start-up sequence retries from the top when a later step fails, and a
+    // later step failing is ordinary — `goLive` waits on YouTube seeing the
+    // ingest as active. But by then this step's own effect is in place *and* the
+    // encoder is running, and OBS refuses to set a stream service while
+    // streaming. So a recoverable failure downstream turned into five
+    // unrecoverable ones here, and the host could not broadcast (measured
+    // 2026-08-23, TASK_SPECS §T38).
+    const current = await this.#source.call('GetStreamServiceSettings')
+    if (
+      current.streamServiceType === CUSTOM_STREAM_SERVICE_TYPE &&
+      readString(current.streamServiceSettings, 'server') === server &&
+      readString(current.streamServiceSettings, 'key') === key
+    ) {
+      return { streamServiceType: CUSTOM_STREAM_SERVICE_TYPE, server, keyConfigured: true }
+    }
+
     const before = await this.#source.call('GetStreamStatus')
     if (readBoolean(before, 'outputActive') === true) {
       throw new ObsCommandError(
         'output_active',
-        'OBS is streaming, so the stream service cannot be set. The output has to be stopped first — a start-up sequence that reaches this has already started the stream in an earlier step or an earlier attempt (TASK_SPECS §T37).',
+        'OBS is streaming and the stream service it has is not the one we want, so it cannot be changed. The output has to be stopped first (TASK_SPECS §T37).',
       )
     }
 
