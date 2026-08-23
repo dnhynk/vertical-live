@@ -817,3 +817,48 @@
   2. 시작 순서가 중간에 실패해도 재시도가 `streamService`에서 죽지 않는다 — 회귀 테스트.
   3. **실측**: 연속 3회 재기동에서 3회 모두 `live` 도달.
   4. 게이트 5개 + CI 녹색.
+
+## T40 — `[contract]` 실제 YouTube 메시지 id가 계약 검증에서 전부 거부된다
+
+- slug `t40-external-id-charset` · PR 접두 `fix(contract):` · 의존 T1
+- **읽을 것**: `packages/contract/src/primitives.ts`(`EXTERNAL_ID_PATTERN`), `packages/contract/src/event.ts`(`EVENT_KEY_PATTERN`), `packages/contract/src/adapters/grpc.ts`·`rest.ts`(`MALFORMED_MESSAGE_ID`)
+- **관측**(2026-08-23, unlisted 방송 `8qbT42YfAc4`에서 실제 채팅 최초 투입): 사용자가 `ごはん`을 10회 이상 보냈고 화면은 `LAST ACTION: なし` 그대로였다. transport는 건강했고 바인딩도 맞았다(`liveChatId`가 그 방송으로 디코드, `channelState: READY`). 메시지는 **도착했다** — `ingest_inbox` 10행이 전부 동일하게 거부돼 있었다.
+
+  ```json
+  {"messageId": null, "validationStatus": "invalid",
+   "validationError": {"code": "MALFORMED_MESSAGE_ID", "field": "id"}}
+  ```
+
+  `liveChatMessages.list`로 같은 방송의 실제 id를 받아 대조했다.
+
+  ```text
+  id = LCC.EhwKGkNObXR1ZnZZdHBZREZhTjFUQWdkZFpZSzBR   (len 44, type textMessageEvent)
+  EXTERNAL_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/  →  false
+  ```
+
+  **원인**: YouTube 메시지 id는 `LCC.` 접두 뒤에 base64url이 붙은 형태라 `.`을 포함한다. 문자 클래스가 `.`을 빼고 있다. `primitives.ts`의 주석이 배제 이유를 `:`(eventKey 구분자 위조 방지) 하나로 적어 놓았으므로 **`.` 배제는 의도가 아니라 과도하게 좁은 문자 클래스다.** fixture가 전부 점 없는 합성 id였기 때문에 테스트 전부가 통과하면서 실물 입력은 100% 버려졌다.
+- **범위**
+  - `EXTERNAL_ID_PATTERN`에 `.`을 넣는다. 불변조건은 `:`을 막는 것 하나이고 그것은 유지된다. "`:`만 아니면 뭐든"으로 넓히지 않는다 — 계약이 자유 텍스트를 받지 않는다는 구조적 보장(§12.3)이 문자 클래스에서 나온다.
+  - `EVENT_KEY_PATTERN`이 같은 문자 클래스를 **문자열로 복제**하고 있다. 한쪽만 넓히면 id는 통과하고 eventKey가 죽는다 — 공용 상수에서 파생시켜 다시 갈라지지 못하게 한다.
+  - fixture에 **실물 모양의** 메시지 id를 넣는다. 공개 저장소이므로 실제 id를 그대로 쓰지 않고 `LCC.` + 명백한 합성 base64url로 만든다(§3 가짜 참여 금지 — 모양만 실물, 값은 합성).
+- **합격 기준**
+  1. `LCC.`을 포함한 실제 모양 id가 gRPC·REST 두 어댑터에서 `valid`가 된다 — 회귀 테스트.
+  2. `:`을 포함한 id는 여전히 `MALFORMED_MESSAGE_ID`다 — 회귀 테스트.
+  3. 그 id로 만든 eventKey가 `EventKeySchema`를 통과하고 `parseEventKey`가 messageId를 원본 그대로 되돌린다 — 회귀 테스트.
+  4. **실측**: 호스트에서 실제 채팅 명령 1건이 `accepted`가 되고 화면의 `LAST ACTION`이 바뀐다.
+  5. 게이트 5개 + CI 녹색.
+
+## T41 — 모든 입력을 버리면서 6개 family 전부 `ok`였다
+
+- slug `t41-ingest-drop-signal` · PR 접두 `feat(supervisor):` · 의존 T12, T40
+- **읽을 것**: `apps/server/src/engine/engine.ts`(`#prepareEvent`의 invalid 경로), `apps/server/src/supervisor/signals.ts`, `apps/server/src/health/*`
+- **관측**(2026-08-23): T40의 결함이 켜져 있는 동안 서버는 도착한 메시지를 **한 건도 빠짐없이** 버렸는데, `/health`의 required family 6개가 전부 `ok`였고 로그에도 아무 것도 없었다. 유일한 흔적은 `/metrics`의 `envelope_invalid` 카운터였고 **아무 것도 그것을 읽지 않는다**(`grep envelope_invalid` → 테스트 2곳뿐).
+- **이것은 6개 결함(T28·T30·T35·T37·T38·T39)과 다른 축이다.** 그쪽은 "행동이 대상보다 먼저 발사된다"였고, 이쪽은 **"판정이 자기가 판정해야 할 것을 아예 보지 않는다"**이다. 입력 경로의 건강은 "전송이 살아 있는가"로만 정의돼 있고 "도착한 것이 쓰이는가"는 정의돼 있지 않다.
+- **범위**
+  - 도착 대비 거부 비율을 신호로 만든다. 임계값은 **추측하지 않는다** — 정상 운영의 거부 비율을 관측한 적이 없으므로 첫 판은 `provisional: true` config로 두고 티켓에 적는다.
+  - 거부는 정상이기도 하다(§7.3(3)이 명령 아닌 채팅을 버리도록 지시한다). **명령 아님으로 인한 정상 거부**와 **계약 검증 실패**를 구분하지 않으면 신호가 무의미하다.
+  - 신호를 required family로 올릴지는 별개 결정이다. 무인 운전에서 오탐이 safe stop을 부르면 T40보다 나쁘다 — 우선 관측 가능하게만 만들고 승격은 실측 뒤에 정한다.
+- **합격 기준**
+  1. 계약 검증 실패가 `/health`에서 보인다 — 코드·건수·마지막 발생 시각.
+  2. 명령 아닌 정상 채팅만 흐를 때는 그 신호가 뜨지 않는다 — 회귀 테스트.
+  3. 게이트 5개 + CI 녹색.

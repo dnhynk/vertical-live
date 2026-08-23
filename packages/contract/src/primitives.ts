@@ -16,14 +16,23 @@ export const IsoUtcInstantSchema = z.iso.datetime()
 export type IsoUtcInstant = z.infer<typeof IsoUtcInstantSchema>
 
 /**
- * Identifier issued by an external platform (message, broadcast and chat ids).
- * The character class excludes `:` so it cannot forge an `eventKey` separator.
+ * Character class of an identifier issued by an external platform (message,
+ * broadcast and chat ids). `:` is excluded so an id cannot forge an `eventKey`
+ * separator (spec §7.4); `.` is in the class because a YouTube live chat message
+ * id is `LCC.` followed by base64url. The class stays closed rather than
+ * "anything but `:`" so the contract still cannot carry free-form text (§12.3).
+ *
+ * `EVENT_KEY_PATTERN` composes its id segments from this string; the two must
+ * not be widened independently or an id would validate while its event key does
+ * not.
  */
-export const EXTERNAL_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/
+export const EXTERNAL_ID_CHARS = 'A-Za-z0-9_.-'
+
+export const EXTERNAL_ID_PATTERN = new RegExp(`^[${EXTERNAL_ID_CHARS}]{1,128}$`)
 
 export const ExternalIdSchema = z
   .string()
-  .regex(EXTERNAL_ID_PATTERN, 'external id must be 1-128 chars of [A-Za-z0-9_-]')
+  .regex(EXTERNAL_ID_PATTERN, 'external id must be 1-128 chars of [A-Za-z0-9_.-]')
 export type ExternalId = z.infer<typeof ExternalIdSchema>
 
 /**

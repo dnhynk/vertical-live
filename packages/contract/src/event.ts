@@ -4,7 +4,12 @@ import { CommandRefSchema } from './commands.js'
 import { EventKindSchema, EventSourceSchema } from './enums.js'
 import { ActorSchema } from './identity.js'
 import { PaymentDetailsSchema, type ValidIngestEnvelope } from './ingest.js'
-import { ExternalIdSchema, IsoUtcInstantSchema, type IsoUtcInstant } from './primitives.js'
+import {
+  EXTERNAL_ID_CHARS,
+  ExternalIdSchema,
+  IsoUtcInstantSchema,
+  type IsoUtcInstant,
+} from './primitives.js'
 import { CONTRACT_VERSION } from './version.js'
 
 /**
@@ -35,7 +40,7 @@ export const MAX_GIFT_EFFECTIVE_COUNT = Number.MAX_SAFE_INTEGER
  * for gift events (spec §7.4).
  */
 const EVENT_KEY_PATTERN = new RegExp(
-  '^(youtube|simulator):([A-Za-z0-9_-]{1,128}):([A-Za-z0-9_-]{1,128})' +
+  `^(youtube|simulator):([${EXTERNAL_ID_CHARS}]{1,128}):([${EXTERNAL_ID_CHARS}]{1,128})` +
     `(?::gift:([1-9][0-9]{0,${String(MAX_GIFT_EFFECTIVE_COUNT).length - 1}}))?$`,
 )
 

@@ -1,0 +1,16 @@
+{
+  "kind": "youtube#liveChatMessage",
+  "etag": "etag_test_0018",
+  "id": "LCC.TEST_SYNTHETIC_PLATFORM_MESSAGE_ID_0001",
+  "snippet": {
+    "type": "TEXT_MESSAGE_EVENT",
+    "live_chat_id": "chat_test_0001",
+    "author_channel_id": "UC_TEST_SYNTHETIC_0001",
+    "published_at": "2026-08-16T00:10:00.000Z",
+    "has_display_content": true,
+    "display_message": "ごはん",
+    "text_message_details": {
+      "message_text": "ごはん"
+    }
+  }
+}
