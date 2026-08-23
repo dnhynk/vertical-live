@@ -7,7 +7,8 @@
 
 상태: `pending`(의존 대기) · `ready` · `dispatched` · `in_review` · `changes_requested` · `merged` · `blocked` · `failed`
 
-> **현재(2026-08-20 UTC): PR 31개 전부 머지, open PR 0, main CI 녹색.** Gate 0 반영(T19)·identity (B) 3종(T20a/b/c)·일본 패널 초안(T21)·모더레이션 보고 경로(T22)·엔진 후속(T8e) 완료. 남은 코드 작업: T8f(스위트 CPU 계측, 낮은 우선순위). **사용자 대기: japan-panel-plan §5 A-1~A-8 승인, Discord webhook 저장(vault `missing`), YouTube 채널·Cloud·OAuth 설정.** 이전: 스펙 v1 구현 task 전부 머지 + T17b·T18 머지. T0–T17 + T1b·T8b·T8c·T8d·T17b·T18 = PR 24개, open PR 0, main `34a8f0d`. **main CI 녹색**(run 32121339258: npm ci/format/lint/typecheck/test/build/soak:ci 전부 success — E-5 해제 후 소급 확인 완료). 사용자 결정 반영: D-4 public·D-6 OBS 고정·D-7 sentinel 정책; E-1·E-2·E-3·E-5·E-7 해결. 남은 것: Gate 0(`docs/ops/gate0-checklist.md`) 사용자 승인 항목과 실 YouTube 계정·OAuth·첫 private 기술 방송(사용자 계정 작업) — 사용자 지시 없이는 진행하지 않는다.
+> **현재(2026-08-23 UTC): 등록 task 39개 중 37개 머지, T28은 리뷰 중(PR #38), T29는 `ready`.** 첫 private 기술 방송이 실제 송출까지 성공했고(이력 2026-08-23), 거기서 나온 결함 3건 중 T26·T27은 머지, T28은 PR #38에 있다. T29는 같은 모양의 잠복 결함으로 코드 독해에서 나왔다. main CI 녹색.
+> **사용자 대기**: japan-panel-plan §5 A-1~A-8 승인, Gate 0 §1.2 audit 값 기입, 노출된 Slack webhook URL 교체와 DND critical 도달 시험(D-13이 전제한 유일한 자동 호출 경로가 미검증), T28 합격 기준 1의 방송 실측.
 
 | T-ID | 제목 | 의존 | [contract] | 상태 | 브랜치 slug | PR | Orca task |
 |---|---|---|---|---|---|---|---|
@@ -44,9 +45,10 @@
 | T8e | 엔진: StateEngine.pump()가 31일 가상 시계 점프 후 미반환(184s timeout; T20b 리뷰 관측) + engine/ingest.test.ts:442 SQLite write lock flaky(T21 관측) 조사·수정 | T8 | — | merged | t8e-clock-jump-flaky | #31 | `task_364b480f6a22` |
 | T8f | loopback `fetch` 정지로 인한 스위트 실행 시간(Node 26 회귀 회피) | T23 | — | merged | t8f-suite-time | #34 | (Orca 미사용, 코디네이터 직접) |
 | T25 | 자동시작에서 OBS를 함께 올리는 `-WithObs` 스위치(재부팅 실측에서 `safe_stopped` 관측) | T17 | — | merged | t25-autostart-obs | #35 | (Orca 미사용, 코디네이터 직접) |
-| T26 | `youtube.chat.enabled` env override(`VL_YOUTUBE_CHAT_ENABLED`) — 없어서 첫 기술 방송이 30초 뒤 `safe_stopped` | T9 | — | dispatched | t26-chat-enabled-env | | (Orca 미사용, 코디네이터 직접) |
-| T27 | `obs/control.test.ts`가 호스트 vault 상태에 의존(첫 방송이 stream key를 주입하면 방송 호스트에서만 실패) | T2, T10 | — | dispatched | t27-obs-control-vault-test | | (Orca 미사용, 코디네이터 직접) |
-| T28 | 조용한 채팅에서 `chat_transport`가 `ok`에 도달하지 못해 `live`가 될 수 없다(첫 방송 실측) | T9, T12, T26 | — | ready | t28-chat-transport-quiet | | |
+| T26 | `youtube.chat.enabled` env override(`VL_YOUTUBE_CHAT_ENABLED`) — 없어서 첫 기술 방송이 30초 뒤 `safe_stopped` | T9 | — | merged | t26-chat-enabled-env | #37 | (Orca 미사용, 코디네이터 직접) |
+| T27 | `obs/control.test.ts`가 호스트 vault 상태에 의존(첫 방송이 stream key를 주입하면 방송 호스트에서만 실패) | T2, T10 | — | merged | t27-obs-control-vault-test | #36 | (Orca 미사용, 코디네이터 직접) |
+| T28 | 조용한 채팅에서 `chat_transport`가 `ok`에 도달하지 못해 `live`가 될 수 없다(첫 방송 실측) | T9, T12, T26 | — | in_review | t28-chat-transport-quiet | #38 | (Orca 미사용, 코디네이터 직접) |
+| T29 | 거부된 resume token 하나가 `youtube.chat.reconnect`를 영구 degraded로 만들어 재시작 예산을 소진시킨다(코드 독해) | T9, T12 | — | ready | t29-token-rejected-sticky | | |
 | T24 | 알림 채널 Slack 전환(D-3 개정): `SlackWebhookAlertSink`, `alerts.slackWebhookUrl`, `slackEnabled` 기본 on | T12 | — | merged | t24-slack-alerts | #33 | (Orca 미사용, 코디네이터 직접) |
 | T23 | Node 26 전환(호스트 통일: 사용자 다른 저장소가 26 요구)과 vitest jsdom web storage 회귀 차단 | — | — | merged | t23-node26 | #32 | (Orca 미사용, 코디네이터 직접) |
 

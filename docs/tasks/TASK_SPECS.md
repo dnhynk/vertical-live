@@ -586,3 +586,17 @@
   1. 메시지가 **한 건도 없는** 라이브 채팅에 붙었을 때 `chat_transport`가 `ok`가 되고, supervisor가 `live`에 도달한다(실측: 방송 하나로 확인하고 `/health` 스냅샷을 티켓에 남긴다).
   2. 실제로 끊겼을 때(채널 실패·연속 오류·retry budget 소진)는 여전히 `degraded`로 내려간다 — 회귀 테스트로 고정한다.
   3. 게이트 5개 + CI 녹색.
+
+## T29 — 거부된 resume token 하나가 `chat_transport`를 영구 degraded로 만든다
+
+- slug `t29-token-rejected-sticky` · PR 접두 `fix(youtube):` · 의존 T9, T12
+- **읽을 것**: `apps/server/src/youtube/chat/state.ts`(`#tokenRejected`, `recordTokenRejected`), `health.ts`의 `reconnect()`, `apps/server/src/supervisor/restart.ts`(`noteHealthy`), `apps/server/src/main.ts`의 `chatSource` 재시작 액션
+- **관측**(2026-08-23 코드 독해, 실측 아님): `recordTokenRejected()`가 `#tokenRejected`를 세우면 어디서도 지우지 않는다. `reconnect()`는 그 값을 `degraded:resumed_without_token`으로 매핑하므로 신호가 영구히 degraded다. `chat_transport` family는 degraded 신호 하나로 degraded가 되고, `componentsToRestart`가 `chat-source` 재시작을 요구한다. 재시작 액션은 **같은 `ChatSource` 인스턴스**를 stop→start 하므로 `ChatSourceState`가 살아남아 플래그도 남는다. `RestartSupervisor`의 예산은 family가 건강해질 때만 돌아오므로(`noteHealthy`) 돌아오지 않고, `restart.maxAttempts['chat-source'] = 3` 소진 후 `safe_stopped`가 된다. 즉 **resume token이 한 번 거부되면 T28과 같은 모양으로 무너진다** — 다른 점은 촉발 조건뿐이다.
+- **범위**
+  - 토큰 거부는 **그 재접속에 대한 사실**이지 영구 상태가 아니다. 다음 재접속이 성공적으로 자리를 잡으면(응답 수신) 신호가 `ok`로 돌아와야 한다. 거부가 있었다는 사실 자체는 detail·카운터로 남긴다(§9.4(3)이 요구하는 기록은 유지).
+  - 재시작이 상태를 지우는 것으로 때우지 않는다: 재시작해도 남는 것이 문제의 절반이지만, 고칠 곳은 "언제 degraded인가"다.
+  - 임계값·재시도 횟수는 건드리지 않는다.
+- **합격 기준**
+  1. 토큰 거부 후 재접속이 응답을 받으면 `youtube.chat.reconnect`가 `ok`로 돌아오고, 거부 이력은 detail에 남는다 — 회귀 테스트로 고정.
+  2. 실제로 토큰이 계속 거부되는 동안에는 여전히 문제로 보인다(어떤 신호로 보일지는 구현이 정하고 티켓에 근거를 남긴다).
+  3. 게이트 5개 + CI 녹색.
