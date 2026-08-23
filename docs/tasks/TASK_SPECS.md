@@ -600,3 +600,30 @@
   1. 토큰 거부 후 재접속이 응답을 받으면 `youtube.chat.reconnect`가 `ok`로 돌아오고, 거부 이력은 detail에 남는다 — 회귀 테스트로 고정.
   2. 실제로 토큰이 계속 거부되는 동안에는 여전히 문제로 보인다(어떤 신호로 보일지는 구현이 정하고 티켓에 근거를 남긴다).
   3. 게이트 5개 + CI 녹색.
+## T30 — 끝난 방송에 묶인 attempt가 닫히지 않아 두 번째 방송을 시작할 수 없다
+
+- slug `t30-stale-attempt-resume` · PR 접두 `fix(youtube):` · 의존 T10, T12
+- **읽을 것**: `apps/server/src/youtube/broadcast/lifecycle.ts`(`resume`, `ensureBound`, `stopBroadcast`), `apps/server/src/db/store.ts`(`findOpenBroadcastAttempt`, `closeBroadcastAttempt`), `apps/server/src/youtube/broadcast/health.ts`(`lifecycle_*`)
+- **관측**(2026-08-23 05:04 UTC, 호스트 `WORKSTATION`, T28 실측을 시도하다가): 스택이 기동 20초 만에 `safe_stop: restart_budget_exhausted`, 사유 `chat-source:chat_transport+youtube_broadcast`. 두 family가 동시에 무너진다.
+
+  ```text
+  broadcast_resources: attempt 22d0ba05… stage=live closed_at=NULL
+                       broadcast_id=1c8WAFCmAQI  (03:50 생성, 그날 아침 방송)
+  youtube_broadcast    degraded  lifecycle_complete      ← YouTube가 이미 complete로 옮김
+  youtube.chat.transport degraded failedPrecondition     ← gRPC status 9, 시작 1초 뒤
+                       lastPageToken=GNrJr8… (아침 세션의 재개 토큰)
+  chat-source restarts 3/3 (05:04:47 → 05:04:58) → safe stop 05:05:06
+  ```
+
+  인과: `resume()`가 `findOpenBroadcastAttempt()`로 **열린 attempt를 무조건 채택**한다. 그 attempt가 가리키는 방송을 YouTube는 이미 `complete`로 옮겼고, 끝난 방송의 live chat은 사라졌으므로 `streamList`가 `FAILED_PRECONDITION`으로 즉시 거부된다 → 소스가 `stopped`로 멈추고 `chat_transport`가 **유예 없이** degraded → 재시작 3회 → 예산 소진.
+
+  attempt가 열린 채 남는 이유: **`stopBroadcast()`(방송을 `complete`로 옮기고 attempt를 닫는 유일한 경로)를 호출하는 곳이 코드베이스에 없다.** `lifecycle.ts`와 그 테스트 밖에서 참조가 0건이다. 즉 정상 종료든 safe stop이든 attempt는 닫히지 않고, **첫 방송이 끝난 뒤로는 어떤 기동도 같은 방식으로 죽는다.** 무인 운전이 성립하지 않는다.
+- **범위**
+  - 재개는 **검증 뒤에** 채택한다: 열린 attempt가 가리키는 방송의 lifecycle을 YouTube에 물어 재개 가능한 상태(`ready`·`testing`·`live`)가 아니면 그 attempt를 사유와 함께 닫고 새 attempt를 시작한다. §9.1의 크래시 복구(정말 재개 가능한 attempt를 잇는 것)는 잃지 않는다.
+  - 닫는 경로가 실제로 돌게 한다: `stopBroadcast()`가 도달 불가능한 public 메서드로 남아 있는 것 자체가 함정이다 — 종료 경로에 연결하거나, 연결하지 않기로 했다면 지운다. 어느 쪽인지 티켓에 근거를 남긴다.
+  - 재시작 예산·유예 시간을 키워 덮지 않는다. 재사용 대상이 되살아나지 않으므로 시간은 해법이 아니다.
+- **합격 기준**
+  1. YouTube가 `complete`라고 답하는 방송에 묶인 열린 attempt가 있을 때 `ensureBound()`가 그것을 재사용하지 않고 새 방송을 만든다. 닫힌 attempt에는 사유가 남는다 — 회귀 테스트로 고정.
+  2. 재개 가능한 attempt(`ready`/`live`)는 여전히 재개된다 — 기존 테스트가 지켜져야 한다.
+  3. 실측: 이 호스트의 현재 stale row(`22d0ba05…`)를 그대로 둔 채 기동해 `live`에 도달한다. 같은 기동으로 **T28 합격 기준 1**(조용한 채팅에서 `chat_transport=ok`)도 함께 확인하고 `/health` 스냅샷을 두 티켓에 남긴다.
+  4. 게이트 5개 + CI 녹색.
