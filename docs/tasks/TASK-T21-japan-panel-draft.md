@@ -25,7 +25,7 @@ Gate 0 §1.4의 네 항목(일본 패널 모집 조건 · 5초 무음 이해 테
 3. 외부 주장 확인: (a) 표본 크기·5초 테스트 관련 UX 리서치 관행, (b) YouTube Analytics geography aggregate와
    개인정보 threshold, (c) traffic source. 각각 출처 URL과 확인 날짜를 남기고, 확정하지 못한 값은
    "확인 필요(출처 없음)"으로 표기한다.
-4. `docs/ops/japan-panel-plan.md` 신규 작성 — 4개 장, 숫자마다 `제안` 라벨 + 근거/무근거, 승인 요청 표.
+4. `docs/ops/content-and-market-criteria.md` 신규 작성 — 4개 장, 숫자마다 `제안` 라벨 + 근거/무근거, 승인 요청 표.
 5. `docs/ops/gate0-checklist.md` §1.4만 "초안 제출(T21 PR #27), 승인 대기"로 갱신.
 6. 게이트 5종 실행 → PR(`docs(gate0):`) → CI 확인 → worker_done.
 
@@ -131,7 +131,7 @@ npm run build         -> pass (전 워크스페이스 tsc --build, data-map up t
 
 ```text
 docs/ops/gate0-checklist.md
-docs/ops/japan-panel-plan.md
+docs/ops/content-and-market-criteria.md
 docs/tasks/TASK-T21-japan-panel-draft.md
 ```
 
@@ -164,7 +164,7 @@ docs/tasks/TASK-T21-japan-panel-draft.md
 
 | # | 지적 | 확인한 사실 | 고친 내용 | SHA |
 |---|---|---|---|---|
-| M1 | `japan-panel-plan.md:398`(·`:431`)의 명령 성공률 절대 하한 `≥ 70%`와 `:390`의 가동률 `≥ 90%`가 스펙 §14.1(기준선 수집 뒤 결과 보기 전 고정) 및 문서 자신의 §4.4 서두·티켓 서술과 모순 | 지적이 맞다. §4.4 서두가 "이 문서는 절대 숫자를 정할 수 없다"고 써 놓고 표에서 두 개를 제안하고 있었다 | 두 숫자를 삭제했다. 남긴 것은 **지표·계산식·freeze 절차**뿐이다: 가동률 = 실제 방송 시간 ÷ 구간 총 시간, 명령 성공률 = `accepted ÷ commandLike`(`apps/server/src/input/metrics.ts:15`–`25`), 절차는 baseline 14일 → freeze → 겹치지 않는 validation 14일. §4.4 서두에 "판정 숫자는 ② freeze에서 처음 정해진다"는 인용 블록을 넣고, ①③의 "14일"은 구간 길이 제안이지 합격선이 아님을 명시했다. §5 A-7 행과 티켓 Assumptions 표의 같은 숫자도 함께 제거했다 | `45d0319` |
+| M1 | `content-and-market-criteria.md:398`(·`:431`)의 명령 성공률 절대 하한 `≥ 70%`와 `:390`의 가동률 `≥ 90%`가 스펙 §14.1(기준선 수집 뒤 결과 보기 전 고정) 및 문서 자신의 §4.4 서두·티켓 서술과 모순 | 지적이 맞다. §4.4 서두가 "이 문서는 절대 숫자를 정할 수 없다"고 써 놓고 표에서 두 개를 제안하고 있었다 | 두 숫자를 삭제했다. 남긴 것은 **지표·계산식·freeze 절차**뿐이다: 가동률 = 실제 방송 시간 ÷ 구간 총 시간, 명령 성공률 = `accepted ÷ commandLike`(`apps/server/src/input/metrics.ts:15`–`25`), 절차는 baseline 14일 → freeze → 겹치지 않는 validation 14일. §4.4 서두에 "판정 숫자는 ② freeze에서 처음 정해진다"는 인용 블록을 넣고, ①③의 "14일"은 구간 길이 제안이지 합격선이 아님을 명시했다. §5 A-7 행과 티켓 Assumptions 표의 같은 숫자도 함께 제거했다 | `45d0319` |
 | m1 | `:360-362` P7 enum 귀속 오류 | 공식 문서 확인(2026-08-19): `BROWSE`는 `insightPlaybackLocationType`("views that took place on the YouTube home page or home screen, in the user's subscription feed, or in another YouTube browsing feature"), `SHORTS`·`LIVE_REDIRECT`는 `insightTrafficSourceType` 값 | §4.2를 두 차원으로 분리하고 "두 차원을 한 표에 섞어 읽지 않는다"를 추가. 재생 위치 차원 출처 `[P9]`(`#Playback_Location_Dimensions`, 앵커 존재 확인)를 6장에 추가하고 `[P7]` 설명을 traffic source로 한정. §4.5 항목 2도 "어느 차원의 어떤 값인가"로 고쳤다 | `45d0319` |
 | m2 | `:273` `crisis_sleeping`이 `apps/server/src/world`에 없음 | `grep -rn crisis_sleeping` 결과는 renderer 2곳(`preview-states.ts:302`, `palette.test.ts:189`)의 textKey·iconId뿐이고 world에는 0건. 실제 식별자는 crisis id `sleeping`(`world/types.ts:43`), 전이 `crisis_entered`(`world/reducer.ts:215`), 연출 변형 `crisis_sleep_curl`(`world/content/variants.ts:492`) | night 행을 `crisis_entered -> sleeping`(임계 판정 `world/creature.ts:102`, 연출 변형 `crisis_sleep_curl`)로 바꾸고 file:line을 붙였다 | `45d0319` |
 | m3 | `:58` `cost 0 (no source)`에 §0 라벨이 없음 | 지적이 맞다. §0은 "라벨 없는 숫자는 이 문서에 없다"고 선언해 놓았다 | `경로 자체의 비용 **0원** \`제안(근거 없음)\` — 견적을 받아본 적이 없다`로 고쳤다 | `45d0319` |
@@ -184,7 +184,7 @@ docs/tasks/TASK-T21-japan-panel-draft.md
 
 | # | 지적 | 확인한 사실 (직접 재확인) | 고친 내용 | SHA |
 |---|---|---|---|---|
-| m1 | `japan-panel-plan.md:365`(·`:419-420`)와 티켓 `:42,44`의 "세로 Live 피드 유입이 어느 차원의 어떤 값인지 공식 문서에서 확정 못 했다"·"engaged views 제공 여부 불확실"이 불완전·구식 | 지적이 맞다. 공식 문서를 직접 다시 열어 확인(2026-08-19): (a) **Reporting API** 채널 리포트 차원 `traffic_source_type` 값 **`31` = `Vertical live feed`**("Views originated from the vertical live feed.") [P10]; (b) `channel_traffic_source_a3` 차원 = `date, channel_id, video_id, live_or_on_demand, subscribed_status, country_code, traffic_source_type, traffic_source_detail`, 지표에 `engaged_views` 포함 [P11]; (c) `engaged_views` = "The number of times the channel's videos have been viewed past the initial seconds" [P12]. 반대로 **Query API** `insightTrafficSourceType`의 값 목록에는 확인일 기준 세로 Live 피드 대응 값이 **없다**(`SHORTS`·`LIVE_REDIRECT`는 다른 유입) [P7] | **경로를 둘로 분리해 다시 썼다.** §4.2에 "API가 둘이라는 것부터 구분한다" 항목을 넣고, bulk Reporting API 경로(값 `31`, `channel_traffic_source_a3`, `engaged_views`)를 **문서로 확인된 사실**로 URL·확인일과 함께 적었다. §4.1 "쓸 수 있다" 표에 Reporting API 채널 리포트 행을 추가하고, §5 A-6 제안에 같은 경로를 명시했다. **Gate 2 "확인 필요" 범위는 Query API·Studio 쪽으로 좁혔다**: §4.5 항목 1은 "Studio 화면 표기"만, 항목 2는 "Query API로 분리 가능한가"만 남기고, 문서상 경로를 실계정에서 실행해 본 적 없다는 사실을 항목 2-1로 분리했다. 6장에 [P10]·[P11]·[P12]를 추가했다. 티켓 "Sources consulted" 표의 두 행(`:42`·`:44`)도 같은 기준으로 고치고 새 출처 3행을 넣었다 | `c961f32` |
+| m1 | `content-and-market-criteria.md:365`(·`:419-420`)와 티켓 `:42,44`의 "세로 Live 피드 유입이 어느 차원의 어떤 값인지 공식 문서에서 확정 못 했다"·"engaged views 제공 여부 불확실"이 불완전·구식 | 지적이 맞다. 공식 문서를 직접 다시 열어 확인(2026-08-19): (a) **Reporting API** 채널 리포트 차원 `traffic_source_type` 값 **`31` = `Vertical live feed`**("Views originated from the vertical live feed.") [P10]; (b) `channel_traffic_source_a3` 차원 = `date, channel_id, video_id, live_or_on_demand, subscribed_status, country_code, traffic_source_type, traffic_source_detail`, 지표에 `engaged_views` 포함 [P11]; (c) `engaged_views` = "The number of times the channel's videos have been viewed past the initial seconds" [P12]. 반대로 **Query API** `insightTrafficSourceType`의 값 목록에는 확인일 기준 세로 Live 피드 대응 값이 **없다**(`SHORTS`·`LIVE_REDIRECT`는 다른 유입) [P7] | **경로를 둘로 분리해 다시 썼다.** §4.2에 "API가 둘이라는 것부터 구분한다" 항목을 넣고, bulk Reporting API 경로(값 `31`, `channel_traffic_source_a3`, `engaged_views`)를 **문서로 확인된 사실**로 URL·확인일과 함께 적었다. §4.1 "쓸 수 있다" 표에 Reporting API 채널 리포트 행을 추가하고, §5 A-6 제안에 같은 경로를 명시했다. **Gate 2 "확인 필요" 범위는 Query API·Studio 쪽으로 좁혔다**: §4.5 항목 1은 "Studio 화면 표기"만, 항목 2는 "Query API로 분리 가능한가"만 남기고, 문서상 경로를 실계정에서 실행해 본 적 없다는 사실을 항목 2-1로 분리했다. 6장에 [P10]·[P11]·[P12]를 추가했다. 티켓 "Sources consulted" 표의 두 행(`:42`·`:44`)도 같은 기준으로 고치고 새 출처 3행을 넣었다 | `c961f32` |
 
 ### Round 2 이후 재확인
 
@@ -227,14 +227,14 @@ write lock")가 1건 실패했고, **이어서 돌린 2회는 모두 통과**했
 
 | # | 지적 | 확인한 사실 (직접 재확인) | 고친 내용 | SHA |
 |---|---|---|---|---|
-| m1 | `japan-panel-plan.md:439`와 티켓 `:150`이 명령 성공률 배선 후속을 "§5 A-6"이라 가리키지만, A-6은 일본 시장 증빙 결정이고 실제 항목은 A-8 | 지적이 맞다. §5 표를 직접 확인: `A-6`(`japan-panel-plan.md:455`) = "일본 시장 증빙 방식", `A-8`(`:457`) = "후속 코드 작업 착수 여부 — (a) 명령 성공률을 `GET /metrics`에 노출, (b) `choice.previewLeadMs`를 실제 예고에 쓰기". `GET /metrics` 노출을 덮는 항목은 A-8이다 | 후속 참조 **2곳만** `A-8`로 고쳤다(`japan-panel-plan.md:439`, 티켓 `:150`). 나머지 `A-6` 언급 2곳은 **정당하므로 그대로 뒀다**: §5의 A-6 행 자체(`:455`)와, round 2에서 Reporting API 경로를 실제로 A-6에 추가했다는 기록(티켓 `:187`) | `ae86325` |
-| m2 | `previewLeadMs` 참조가 `config/default.json:279`인데 이 PR head 기준 정의는 `:278` | 지적이 맞다(`grep -n previewLeadMs config/default.json` → `278`). 추가로 **줄 밀림이 아님을 확인했다**: 이 브랜치의 모든 커밋과 `origin/main`에서 전부 278이었다(`for c in ...; do git show $c:config/default.json \| grep -n previewLeadMs; done`). 즉 round 1 리뷰 텍스트의 `:279`가 처음부터 off-by-one이었고, 내가 검증 없이 옮겨 적어 전파한 것이다 | 3곳 전부 `:278`로 고쳤다(`japan-panel-plan.md:173`, 티켓 `:152`, 티켓 round 1 표 `:171`의 2회). round 1 표 "지적" 칸의 숫자도 함께 고쳤다 — 그 칸은 영문 리뷰의 한국어 요약이지 인용문이 아니고, 틀린 줄 번호를 남기면 그 표를 따라간 독자가 똑같이 잘못된 줄로 가기 때문이다. 줄 밀림이 아니라 원래 틀린 값이었으므로 `file:line` 표기 방식 자체는 문서 관례대로 유지했다 | `ae86325` |
+| m1 | `content-and-market-criteria.md:439`와 티켓 `:150`이 명령 성공률 배선 후속을 "§5 A-6"이라 가리키지만, A-6은 일본 시장 증빙 결정이고 실제 항목은 A-8 | 지적이 맞다. §5 표를 직접 확인: `A-6`(`content-and-market-criteria.md:455`) = "일본 시장 증빙 방식", `A-8`(`:457`) = "후속 코드 작업 착수 여부 — (a) 명령 성공률을 `GET /metrics`에 노출, (b) `choice.previewLeadMs`를 실제 예고에 쓰기". `GET /metrics` 노출을 덮는 항목은 A-8이다 | 후속 참조 **2곳만** `A-8`로 고쳤다(`content-and-market-criteria.md:439`, 티켓 `:150`). 나머지 `A-6` 언급 2곳은 **정당하므로 그대로 뒀다**: §5의 A-6 행 자체(`:455`)와, round 2에서 Reporting API 경로를 실제로 A-6에 추가했다는 기록(티켓 `:187`) | `ae86325` |
+| m2 | `previewLeadMs` 참조가 `config/default.json:279`인데 이 PR head 기준 정의는 `:278` | 지적이 맞다(`grep -n previewLeadMs config/default.json` → `278`). 추가로 **줄 밀림이 아님을 확인했다**: 이 브랜치의 모든 커밋과 `origin/main`에서 전부 278이었다(`for c in ...; do git show $c:config/default.json \| grep -n previewLeadMs; done`). 즉 round 1 리뷰 텍스트의 `:279`가 처음부터 off-by-one이었고, 내가 검증 없이 옮겨 적어 전파한 것이다 | 3곳 전부 `:278`로 고쳤다(`content-and-market-criteria.md:173`, 티켓 `:152`, 티켓 round 1 표 `:171`의 2회). round 1 표 "지적" 칸의 숫자도 함께 고쳤다 — 그 칸은 영문 리뷰의 한국어 요약이지 인용문이 아니고, 틀린 줄 번호를 남기면 그 표를 따라간 독자가 똑같이 잘못된 줄로 가기 때문이다. 줄 밀림이 아니라 원래 틀린 값이었으므로 `file:line` 표기 방식 자체는 문서 관례대로 유지했다 | `ae86325` |
 
 ### Round 3 이후 재확인
 
 - rebase: `origin/main`이 `fc402f3` → `00ebc42`로 움직여 그 위로 rebase했다. **충돌 없음**(round 2와 달리
   checklist 충돌도 없었다). main이 움직였으므로 **인용 위치를 전부 다시 확인**했다: `previewLeadMs`는 새 base에서도
-  `config/default.json:278`, `A-8` 행은 여전히 `japan-panel-plan.md:457`, 변경 파일은 여전히 3개
+  `config/default.json:278`, `A-8` 행은 여전히 `content-and-market-criteria.md:457`, 변경 파일은 여전히 3개
   (`git diff --name-only origin/main...HEAD` → checklist·plan·ticket), `gate0-checklist.md` 변경은 여전히
   **§1.4 3줄 추가뿐**(`git diff --stat origin/main...HEAD -- docs/ops/gate0-checklist.md` → `3 +++`).
 - 이번 라운드 diff는 **문서 5줄**이 전부다(plan 2줄, 티켓 3줄). 코드·config·의존성 0.

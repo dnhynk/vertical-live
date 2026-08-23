@@ -156,7 +156,6 @@ broadcast ID의 영속성이 아니다.
 | API quota 실측 | §15 Gate 2 | 하루 소비 단위와 남은 예산을 실측해 `youtube.quota` 값을 조정 |
 | 활성화된 paid 기능의 실거래 | §11, §15 Gate 5 | **Gate 5 전에** 실거래로 검증. Gate 2에서는 계약·멱등만 replay로 본다. 비활성 기능은 해당 게이트의 합격 대상에서 제외한다 |
 | OBS 실기동 스모크 | BOARD E-3 | `npm run obs:probe`로 실제 OBS에 접속해 버전·RPC·1080x1920·스트림 상태 확인 |
-| Slack 알림 실전달 | BOARD D-3 | 실제 webhook으로 info/warning/critical 1건씩 도달 확인 |
 | dead-man monitor | §9.4(8) [S23] | 외부 Uptime Kuma push monitor가 프로세스 정지 시 실제로 사건을 올리는지 확인 |
 
 **하지 않는 것**: 실계정 검증은 관측이지 연출이 아니다. 검증을 위해 가짜 시청자·가짜 결제·가짜 채팅을 만들지

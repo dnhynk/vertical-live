@@ -380,7 +380,7 @@
 - slug `t21-japan-panel-draft` · PR 접두 `docs(gate0):` · 의존 T14, T16
 - **읽을 것**: BOARD D-15, D-8; 스펙 §5.2, §5.3, §6.2, §12.5, §14.2(1), §15(Gate 0·Gate 3·Gate 4), §17; `docs/ops/gate0-checklist.md` §1.4, `docs/ops/gate2-experiments.md`; 콘텐츠 디렉터 구현(`apps/server/src/world`, T7)의 실제 사건·챕터 목록
 - **범위**
-  - 신규 `docs/ops/japan-panel-plan.md`: (1) 패널 모집 조건 **제안**(인원·연령대·기기(모바일 YouTube 앱)·언어·모집 경로 후보) — 숫자는 '제안'으로 표기하고 근거(스펙 문장 또는 일반적 UX 리서치 관행의 출처 URL)를 붙인다, 출처가 없으면 "제안(근거 없음)"으로 정직 표기; (2) 5초 무음 이해 테스트 절차와 **통과 기준 제안**(무엇을 묻고 몇 %를 통과로 볼지, 측정 방법); (3) 24시간 콘텐츠 목록 — T7 디렉터가 실제로 낼 수 있는 사건·챕터 조합을 코드에서 도출해 시간대별 표로, 반복 장면 표본 검토 기준(§12.5) 제안; (4) 일본 시장 증빙 방식 — 정책상 허용되는 YouTube Analytics geography aggregate(공식 문서 URL)와 패널 결과의 결합, Gate 4에서 쓸 발견·시청·참여 합격 기준 **제안**.
+  - 신규 `docs/ops/content-and-market-criteria.md`: (1) 패널 모집 조건 **제안**(인원·연령대·기기(모바일 YouTube 앱)·언어·모집 경로 후보) — 숫자는 '제안'으로 표기하고 근거(스펙 문장 또는 일반적 UX 리서치 관행의 출처 URL)를 붙인다, 출처가 없으면 "제안(근거 없음)"으로 정직 표기; (2) 5초 무음 이해 테스트 절차와 **통과 기준 제안**(무엇을 묻고 몇 %를 통과로 볼지, 측정 방법); (3) 24시간 콘텐츠 목록 — T7 디렉터가 실제로 낼 수 있는 사건·챕터 조합을 코드에서 도출해 시간대별 표로, 반복 장면 표본 검토 기준(§12.5) 제안; (4) 일본 시장 증빙 방식 — 정책상 허용되는 YouTube Analytics geography aggregate(공식 문서 URL)와 패널 결과의 결합, Gate 4에서 쓸 발견·시청·참여 합격 기준 **제안**.
   - 패널 실행·모집은 사용자 작업. 코드 변경 없음. `gate0-checklist.md` §1.4는 "초안 제출(T21 PR #n), 승인 대기"로만 갱신.
 - **합격 기준**
   1. 모든 숫자에 '제안' 라벨과 근거/무근거 표기; 외부 주장에 URL·확인 날짜.
@@ -627,4 +627,28 @@
   1. YouTube가 `complete`라고 답하는 방송에 묶인 열린 attempt가 있을 때 `ensureBound()`가 그것을 재사용하지 않고 새 방송을 만든다. 닫힌 attempt에는 사유가 남는다 — 회귀 테스트로 고정.
   2. 재개 가능한 attempt(`ready`/`live`)는 여전히 재개된다 — 기존 테스트가 지켜져야 한다.
   3. 실측: 이 호스트의 현재 stale row(`22d0ba05…`)를 그대로 둔 채 기동해 `live`에 도달한다. 같은 기동으로 **T28 합격 기준 1**(조용한 채팅에서 `chat_transport=ok`)도 함께 확인하고 `/health` 스냅샷을 두 티켓에 남긴다.
+  4. 게이트 5개 + CI 녹색.
+## T31 — 명령 지표가 `GET /metrics`에 없다
+
+- slug `t31-command-metrics` · PR 접두 `feat(metrics):` · 의존 T6, T12
+- **읽을 것**: `apps/server/src/input/metrics.ts`(`CommandMetrics`·`CommandMetricsSnapshot`), `apps/server/src/server.ts`(`/metrics` 핸들러, `ServerOptions`), `apps/server/src/main.ts`(`commandMetrics` 배선)
+- **관측**(2026-08-23, 첫 방송 중 실제 `GET /metrics` 응답): 본문은 `latencyMs`와 엔진 카운터 9종뿐이다.
+
+  ```text
+  keys      latencyMs, counters
+  counters  ack_effect, ack_state, commit, deadline_expired, deadline_recovery_commit,
+            effect_expired, effect_published, effect_republished, interaction_enabled
+  ```
+
+  `CommandMetrics`는 이미 구현돼 있고 스펙 §14.1이 요구하는 값(`commandLike`·`accepted`·`rejected`·`rejectedByReason`·`commandSuccessRatio`·창 집계 4종)을 전부 계산한다. 다만 그 snapshot이 supervisor(T22 evasion 휴리스틱)로만 가고 **`/metrics`로는 나가지 않는다**. `metrics.ts` 머리말이 "T12 owns exposing it on `GET /metrics`"라고 적어둔 일이 실제로는 되지 않았다.
+- **왜 지금인가**: `D-18`이 §5.2 첫 화면 이해를 설문 대신 **행동 지표**로 검증하기로 정했다. 무료 명령 입력률이 그 지표의 절반인데 지금은 밖에서 읽을 방법이 없다.
+- **범위**
+  - `ServerOptions`에 `commandMetrics?: () => CommandMetricsSnapshot`을 더하고 `/metrics` 응답에 **최상위 `command` 블록**으로 낸다. 없으면 `null` — `/metrics`는 T0의 맨몸 서버에서도 응답해야 한다.
+  - `main.ts`가 이미 만들어 둔 접근자를 그대로 넘긴다(새 인스턴스를 만들지 않는다 — 두 개면 supervisor가 보는 수와 `/metrics`의 수가 갈린다).
+  - **무식별을 깨지 않는다**: snapshot은 익명 정수뿐이고 작성자별 분해는 없다. 동의 게이트가 닫혀 있으면 consent 필드는 애초에 없다(`CommandMetricsSnapshot`이 게이트를 따라간다) — 그 성질을 그대로 통과시킨다.
+  - 새 지표를 만들지 않는다. `commandSuccessRatio`의 정의도 바꾸지 않는다.
+- **합격 기준**
+  1. `GET /metrics`가 `command` 블록을 내고 그 값이 supervisor가 보는 snapshot과 같다 — 회귀 테스트로 고정.
+  2. 접근자가 없는 구성(T0 맨몸 서버)에서 `/metrics`가 그대로 동작하고 `command`는 `null`이다.
+  3. 동의 게이트가 닫힌 구성의 응답에 consent 필드가 없다.
   4. 게이트 5개 + CI 녹색.
