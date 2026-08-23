@@ -46,7 +46,9 @@
 - 셋 다 꺼진 상태에서도 **세계는 돈다**(§2.1). 다만 supervisor는 `starting`에 머물고 `live`라고 말하지 않는다 —
   점검하지 않은 것을 통과로 적지 않기 때문이다.
 - 방송 운영에서는 `integrations.obs`·`integrations.broadcast`·`youtube.chat.enabled`를 켠다
-  (`VL_OBS_ENABLED` / `VL_BROADCAST_ENABLED` env로도 가능).
+  (`VL_OBS_ENABLED` / `VL_BROADCAST_ENABLED` / `VL_YOUTUBE_CHAT_ENABLED` env로도 가능).
+  **셋 다 켜야 한다**: `chat_transport`는 required family라 채팅을 끈 채로 방송하면 `chat-source`가 재시작 예산을
+  소진하고 스택이 `safe_stopped`로 떨어진다(2026-08-23 실측, 방송 시작 30초 뒤).
 - `simulator.enabled`는 **공개 방송에서 끈다.** 켜져 있어야만 `POST /ingest/simulator`가 존재한다(§T11).
 
 ### 1.3 기동

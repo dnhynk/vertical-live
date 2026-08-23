@@ -156,7 +156,13 @@ export function loadChatConfig(options: LoadChatConfigOptions = {}): ChatConfig 
   }
 
   return Object.freeze({
-    enabled: readBoolean(section['enabled'], 'youtube.chat.enabled'),
+    // Off in config so CI and development machines never poll a real live chat;
+    // the broadcast host turns it on with the env override, the same way it
+    // turns on the OBS and broadcast integrations (TASK_SPECS §T26).
+    enabled: readBoolean(
+      env['VL_YOUTUBE_CHAT_ENABLED'] ?? section['enabled'],
+      'youtube.chat.enabled',
+    ),
     identityGateOpen,
     liveChatId: readNullableString(
       env['VL_YOUTUBE_LIVE_CHAT_ID'] ?? section['liveChatId'],
@@ -246,10 +252,12 @@ function readParts(value: unknown): string[] {
 }
 
 function readBoolean(value: unknown, label: string): boolean {
-  if (typeof value !== 'boolean') {
-    throw new AuthConfigError(`${label} must be a boolean`)
-  }
-  return value
+  if (typeof value === 'boolean') return value
+  // An env override arrives as a string, the same way the engine and supervisor
+  // loaders take theirs (§T26).
+  if (value === 'true') return true
+  if (value === 'false') return false
+  throw new AuthConfigError(`${label} must be a boolean`)
 }
 
 function readNullableString(value: unknown, label: string): string | null {

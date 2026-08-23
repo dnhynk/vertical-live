@@ -33,6 +33,17 @@ describe('loadChatConfig', () => {
     expect(config.provisional).toContain('grpc.keepalive')
   })
 
+  it('turns the chat source on from the environment, so the host needs no config edit', () => {
+    // config keeps it off for CI and development; the broadcast host sets the
+    // env like it does for the OBS and broadcast integrations (§T26).
+    expect(loadChatConfig({ env: { VL_YOUTUBE_CHAT_ENABLED: 'true' } }).enabled).toBe(true)
+    expect(loadChatConfig({ env: {} }).enabled).toBe(false)
+  })
+
+  it('refuses a chat switch that is not a boolean', () => {
+    expect(() => loadChatConfig({ env: { VL_YOUTUBE_CHAT_ENABLED: 'yes' } })).toThrow()
+  })
+
   it('takes the live chat id from the environment when one is set', () => {
     const config = loadChatConfig({ env: { VL_YOUTUBE_LIVE_CHAT_ID: 'chat_test_env' } })
     expect(config.liveChatId).toBe('chat_test_env')
