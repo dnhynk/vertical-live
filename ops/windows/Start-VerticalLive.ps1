@@ -48,6 +48,17 @@ param(
     # never spawn OBS; the broadcast host is the one place they belong, and the
     # logon task passes this switch (docs/ops/windows-host.md, TASK_SPECS §T25).
     [switch] $WithObs,
+    # Turns this run into a broadcasting one: the YouTube broadcast lifecycle and
+    # the chat listener as well as OBS. It implies -WithObs, because there is no
+    # configuration that broadcasts without an encoder. config/default.json keeps
+    # all four switches off so CI and development machines neither spawn OBS nor
+    # poll YouTube; the broadcast host is the one place they belong, and the logon
+    # task passes this switch (TASK_SPECS §T32).
+    #
+    # Unattended operation needs all of them at once: with only -WithObs the
+    # supervisor comes up with the broadcast and the chat source disabled, and
+    # `chat_transport` is a required family, so the run cannot reach `live`.
+    [switch] $Broadcast,
     [int] $RendererTimeoutSec = 60,
     [int] $ServerTimeoutSec = 120,
     [int] $ObsTimeoutSec = 120
@@ -57,14 +68,21 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'VerticalLive.Common.ps1')
 
+if ($Broadcast -and $SkipObs) {
+    throw '-Broadcast and -SkipObs contradict each other: a broadcast needs an encoder'
+}
 if ($WithObs -and $SkipObs) {
     throw '-WithObs and -SkipObs contradict each other: pick one'
 }
 # Before the configuration is read, so this script, the server it starts and the
 # OBS launcher all see the same values (the children inherit this environment).
-if ($WithObs) {
+if ($WithObs -or $Broadcast) {
     $env:VL_OBS_PROCESS_ENABLED = 'true'
     $env:VL_OBS_ENABLED = 'true'
+}
+if ($Broadcast) {
+    $env:VL_BROADCAST_ENABLED = 'true'
+    $env:VL_YOUTUBE_CHAT_ENABLED = 'true'
 }
 
 if (-not $RepoRoot) { $RepoRoot = Get-VerticalLiveRepoRoot -ScriptRoot $PSScriptRoot }
@@ -105,6 +123,14 @@ if ((Resolve-Path $ops.repoRoot).Path -ne $RepoRoot) {
     exit 1
 }
 Write-VLLog -Message ("resolved config: renderer=$($ops.renderer.url) server=$($ops.server.healthUrl) obs=$($ops.obs.websocketUrl) obsProcessEnabled=$($ops.obs.processEnabled)") -LogFile $logFile
+# What this run will actually do, in one line an operator can read out of an
+# unattended log: without these three the supervisor comes up with a required
+# family disabled and never reaches `live` (TASK_SPECS §T32).
+$obsEnabled = if ($env:VL_OBS_ENABLED) { $env:VL_OBS_ENABLED } else { 'unset' }
+$broadcastEnabled = if ($env:VL_BROADCAST_ENABLED) { $env:VL_BROADCAST_ENABLED } else { 'unset' }
+$chatEnabled = if ($env:VL_YOUTUBE_CHAT_ENABLED) { $env:VL_YOUTUBE_CHAT_ENABLED } else { 'unset' }
+$oauthClient = if ($env:VL_GOOGLE_CLIENT_SECRETS_FILE -or $env:VL_GOOGLE_CLIENT_ID) { 'present' } else { 'absent' }
+Write-VLLog -Message ("broadcast config: obsEnabled=$obsEnabled broadcastEnabled=$broadcastEnabled chatEnabled=$chatEnabled oauthClient=$oauthClient") -LogFile $logFile
 
 function Start-VLProcess {
     param(

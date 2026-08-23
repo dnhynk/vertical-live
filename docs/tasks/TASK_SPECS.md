@@ -652,3 +652,31 @@
   2. 접근자가 없는 구성(T0 맨몸 서버)에서 `/metrics`가 그대로 동작하고 `command`는 `null`이다.
   3. 동의 게이트가 닫힌 구성의 응답에 consent 필드가 없다.
   4. 게이트 5개 + CI 녹색.
+## T32 — 방송 구성이 자동시작 경로에 없어 무인 운전이 성립하지 않는다
+
+- slug `t32-autostart-broadcast` · PR 접두 `feat(ops):` · 의존 T17, T25, T26
+- **읽을 것**: `ops/windows/Start-VerticalLive.ps1`(`-WithObs` 분기), `ops/windows/Register-VerticalLive.ps1`(`{{START_ARGS}}` 치환), `ops/windows/tasks/vertical-live-autostart.xml`, `apps/server/src/youtube/chat/config.ts`(`VL_YOUTUBE_CHAT_ENABLED`), `docs/ops/runbook-operations.md` §1.2
+- **관측**(2026-08-23, 호스트 `WORKSTATION`):
+
+  ```text
+  vl-autostart [Ready] :: powershell.exe … -File "…\Start-VerticalLive.ps1"
+                          ^ -WithObs 없음
+
+  Start-VerticalLive.ps1  -WithObs → VL_OBS_PROCESS_ENABLED, VL_OBS_ENABLED 만 설정
+                          VL_BROADCAST_ENABLED · VL_YOUTUBE_CHAT_ENABLED → 설정 경로 없음
+  ```
+
+  즉 지금 재부팅하면 서버와 렌더러만 올라오고 **OBS·방송·채팅이 전부 꺼진 채** 뜬다. 방송을 켜려면 사람이 셸에서 환경변수 셋을 직접 넣고 `-WithObs`로 실행해야 하는데, 그것은 무인이 아니다. **Gate 2의 72시간 무인 soak은 이 상태로 시작할 수 없다.**
+
+  `-WithObs`(T25)와 `VL_YOUTUBE_CHAT_ENABLED`(T26)는 각각 자기 문제만 풀었고, 셋을 함께 켜는 경로는 아무도 만들지 않았다. T26 티켓의 Follow-up이 이것을 예고했다.
+- **범위**
+  - `Start-VerticalLive.ps1`에 `-Broadcast` 스위치를 더한다. `-WithObs`와 같은 모양으로, **설정을 읽기 전에** `VL_BROADCAST_ENABLED`·`VL_YOUTUBE_CHAT_ENABLED`를 켠다. `-Broadcast`는 `-WithObs`를 함의한다 — OBS 없이 방송하는 구성은 없다.
+  - `Register-VerticalLive.ps1`에도 같은 스위치를 더해 `{{START_ARGS}}`에 넣는다.
+  - **config 기본값은 `false` 유지**. CI와 개발 머신이 실제 YouTube를 폴링하거나 OBS를 띄우면 안 된다(T25·T26이 같은 이유로 그렇게 했다).
+  - 자동시작 작업은 사용자 로그온 세션에서 도므로 `VL_GOOGLE_CLIENT_SECRETS_FILE`(User 환경변수)을 상속한다 — **상속되는지 실측으로 확인한다.** 상속되지 않으면 서버가 `AuthConfigError`로 즉시 죽는다(2026-08-23에 상속하지 않은 셸에서 실제로 관측).
+  - 스위치를 더하는 것이지 기본 동작을 바꾸는 것이 아니다. 인자 없는 `Start-VerticalLive.ps1`은 지금과 같이 동작한다.
+- **합격 기준**
+  1. `-Broadcast`가 네 환경변수를 전부 켜고 `-WithObs`를 함의한다. `-WhatIf`의 `resolved config` 출력으로 확인한다(PowerShell 스크립트에는 자동 테스트 하네스가 없다 — T25가 같은 방식으로 확인했다). `-Broadcast -SkipObs`는 거부된다.
+  2. `Register-VerticalLive.ps1 -Broadcast`가 등록한 작업의 `<Arguments>`에 그 스위치가 들어간다 — `-WhatIf` XML로 확인.
+  3. **실측**: `-Broadcast`로 재등록하고 재부팅해, 사람 입력 없이 `supervisor.state = live`에 도달하는 것을 `/health`로 확인한다. 이것이 72h soak의 전제다.
+  4. 게이트 5개 + CI 녹색.
