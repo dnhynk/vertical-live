@@ -184,6 +184,8 @@ export class BroadcastLifecycle {
   readonly #newAttemptId: () => string
 
   #adopted = false
+  /** The attempt this process owns; see `#stillResumable` (T30). */
+  #pickedUpAttemptId: string | null = null
 
   constructor(options: BroadcastLifecycleOptions) {
     this.#api = options.api
@@ -209,14 +211,81 @@ export class BroadcastLifecycle {
       return null
     }
     if (open.pendingCall === null) {
-      return open
+      return this.#stillResumable(open)
     }
     this.#logger.warn('resuming an attempt with a call of unknown outcome', {
       attemptId: open.attemptId,
       pendingCall: open.pendingCall,
       stage: open.stage,
     })
-    return this.#reconcile(open, open.pendingCall, open.pendingTransition)
+    return this.#stillResumable(
+      await this.#reconcile(open, open.pendingCall, open.pendingTransition),
+    )
+  }
+
+  /**
+   * An open row is a *claim* that this host can pick the broadcast up again;
+   * YouTube is what makes it true (T30).
+   *
+   * Nothing in this process closes an attempt on its way out — a safe stop kills
+   * the run, and the row stays open with `stage = live`. YouTube meanwhile moves
+   * the abandoned broadcast to `complete`, and a complete broadcast has no live
+   * chat: `streamList` answers `FAILED_PRECONDITION` at once, the chat source
+   * stops, `chat_transport` degrades without even reaching its grace window, and
+   * the run safe-stops on the restart budget. Measured on the host on
+   * 2026-08-23: every start after the first broadcast died this way, twenty
+   * seconds in, which is unattended operation not working at all.
+   *
+   * So a resumable stage is asked about before it is trusted. A broadcast that
+   * is over — or that no longer exists — closes its attempt as `abandoned` with
+   * the reason, and `ensureBound()` starts a fresh one. An answer that does not
+   * settle the question decides nothing and is raised (spec §9.1: "결론이 나지
+   * 않으면 재시도하지 않는다"); the start-up sequence retries it with backoff.
+   */
+  async #stillResumable(attempt: BroadcastAttemptRecord): Promise<BroadcastAttemptRecord | null> {
+    if (attempt.closedAt !== null) return null
+    if (attempt.broadcastId === null) return attempt
+    // Asked once, when this process takes the attempt over. `resume()` also runs
+    // on the way into `goLive()`, and an attempt this process began or has
+    // already checked needs no second `liveBroadcasts.list` — that would spend a
+    // quota unit per call to re-read what this process itself did.
+    if (attempt.attemptId === this.#pickedUpAttemptId) return attempt
+
+    const broadcastId = attempt.broadcastId
+    const found = await this.#api.listBroadcasts({ ids: [broadcastId] })
+    const summary = found.items.find((item) => item.id === broadcastId) ?? null
+
+    if (summary === null) {
+      // An id lookup that comes back empty is conclusive in a way a marker search
+      // is not: this exact resource is gone, so there is nothing to resume.
+      return this.#discard(attempt, 'broadcast_missing', { broadcastId, lifeCycleStatus: null })
+    }
+    const lifeCycleStatus = summary.lifeCycleStatus
+    if (lifeCycleStatus === null) {
+      throw new Error(
+        `liveBroadcasts.list returned broadcast ${broadcastId} without a lifeCycleStatus; cannot decide whether the attempt is resumable`,
+      )
+    }
+    if (RESUMABLE_LIFE_CYCLE_STATUSES.includes(lifeCycleStatus)) {
+      this.#pickedUpAttemptId = attempt.attemptId
+      return attempt
+    }
+    return this.#discard(attempt, `broadcast_${lifeCycleStatus}`, { broadcastId, lifeCycleStatus })
+  }
+
+  #discard(
+    attempt: BroadcastAttemptRecord,
+    reason: string,
+    detail: Readonly<Record<string, HealthDetailValue>>,
+  ): null {
+    this.#store.closeBroadcastAttempt(attempt.attemptId, 'abandoned', reason)
+    this.#logger.warn('the open broadcast attempt cannot be resumed; starting a new one', {
+      attemptId: attempt.attemptId,
+      stage: attempt.stage,
+      reason,
+    })
+    this.#alert('attempt_discarded', reason, { ...detail, attemptId: attempt.attemptId })
+    return null
   }
 
   /** Creates or reuses the stream, creates or adopts the broadcast, binds them. */
@@ -434,6 +503,9 @@ export class BroadcastLifecycle {
   #beginAttempt(): BroadcastAttemptRecord {
     this.#adopted = false
     const attemptId = this.#newAttemptId()
+    // This process made it, so it is already picked up: `#stillResumable` has
+    // nothing to ask YouTube about a row it just wrote.
+    this.#pickedUpAttemptId = attemptId
     return this.#store.beginBroadcastAttempt({
       attemptId,
       strategy: this.#config.strategy,
@@ -1391,6 +1463,21 @@ export class BroadcastLifecycle {
     })
   }
 }
+
+/**
+ * `lifeCycleStatus` values a stored attempt can still be carried forward on
+ * (`LiveBroadcastSummary.lifeCycleStatus`, from the `liveBroadcasts` reference).
+ * The two that are missing are the point: `complete` and `revoked` are ends, and
+ * an attempt pointing at one of them can only fail (T30).
+ */
+const RESUMABLE_LIFE_CYCLE_STATUSES: readonly string[] = [
+  'created',
+  'ready',
+  'testStarting',
+  'testing',
+  'liveStarting',
+  'live',
+]
 
 const STAGE_RANK: Readonly<Record<BroadcastStage, number>> = {
   planned: 0,
