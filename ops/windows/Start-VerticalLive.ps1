@@ -59,6 +59,12 @@ param(
     # supervisor comes up with the broadcast and the chat source disabled, and
     # `chat_transport` is a required family, so the run cannot reach `live`.
     [switch] $Broadcast,
+    # Publishes the broadcast as `unlisted` instead of `private`, for Gate 2's
+    # calibration: a private broadcast cannot be opened on a phone, and unlisted
+    # is visible to a link without entering search, recommendations or the
+    # vertical feed (BOARD D-24). Implies -Broadcast. The config default stays
+    # `private` — first publication is the operator's (spec §9.1, BOARD A-18).
+    [switch] $Unlisted,
     [int] $RendererTimeoutSec = 60,
     [int] $ServerTimeoutSec = 120,
     [int] $ObsTimeoutSec = 120
@@ -68,6 +74,9 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'VerticalLive.Common.ps1')
 
+if ($Unlisted -and $SkipObs) {
+    throw '-Unlisted and -SkipObs contradict each other: a broadcast needs an encoder'
+}
 if ($Broadcast -and $SkipObs) {
     throw '-Broadcast and -SkipObs contradict each other: a broadcast needs an encoder'
 }
@@ -76,13 +85,16 @@ if ($WithObs -and $SkipObs) {
 }
 # Before the configuration is read, so this script, the server it starts and the
 # OBS launcher all see the same values (the children inherit this environment).
-if ($WithObs -or $Broadcast) {
+if ($WithObs -or $Broadcast -or $Unlisted) {
     $env:VL_OBS_PROCESS_ENABLED = 'true'
     $env:VL_OBS_ENABLED = 'true'
 }
-if ($Broadcast) {
+if ($Broadcast -or $Unlisted) {
     $env:VL_BROADCAST_ENABLED = 'true'
     $env:VL_YOUTUBE_CHAT_ENABLED = 'true'
+}
+if ($Unlisted) {
+    $env:VL_YOUTUBE_PRIVACY_STATUS = 'unlisted'
 }
 
 if (-not $RepoRoot) { $RepoRoot = Get-VerticalLiveRepoRoot -ScriptRoot $PSScriptRoot }
@@ -130,7 +142,8 @@ $obsEnabled = if ($env:VL_OBS_ENABLED) { $env:VL_OBS_ENABLED } else { 'unset' }
 $broadcastEnabled = if ($env:VL_BROADCAST_ENABLED) { $env:VL_BROADCAST_ENABLED } else { 'unset' }
 $chatEnabled = if ($env:VL_YOUTUBE_CHAT_ENABLED) { $env:VL_YOUTUBE_CHAT_ENABLED } else { 'unset' }
 $oauthClient = if ($env:VL_GOOGLE_CLIENT_SECRETS_FILE -or $env:VL_GOOGLE_CLIENT_ID) { 'present' } else { 'absent' }
-Write-VLLog -Message ("broadcast config: obsEnabled=$obsEnabled broadcastEnabled=$broadcastEnabled chatEnabled=$chatEnabled oauthClient=$oauthClient") -LogFile $logFile
+$privacy = if ($env:VL_YOUTUBE_PRIVACY_STATUS) { $env:VL_YOUTUBE_PRIVACY_STATUS } else { 'config default' }
+Write-VLLog -Message ("broadcast config: obsEnabled=$obsEnabled broadcastEnabled=$broadcastEnabled chatEnabled=$chatEnabled oauthClient=$oauthClient privacy=$privacy") -LogFile $logFile
 
 function Start-VLProcess {
     param(

@@ -45,6 +45,8 @@ param(
     # Registers the logon task with -Broadcast: OBS, the broadcast lifecycle and
     # the chat listener, which is what unattended operation needs (TASK_SPECS §T32).
     [switch] $Broadcast,
+    # Registers the logon task with -Unlisted (BOARD D-24, Gate 2 calibration).
+    [switch] $Unlisted,
     [switch] $SkipArchiveTask
 )
 
@@ -87,7 +89,11 @@ try {
         $xml = $xml.Replace('{{INTERVAL}}', $ArchiveInterval)
         # -Broadcast implies -WithObs, so it is passed alone rather than with a
         # redundant second switch the launcher would have to reconcile.
-        $startArgs = if ($Broadcast) { ' -Broadcast' } elseif ($WithObs) { ' -WithObs' } else { '' }
+        $startArgs =
+            if ($Unlisted) { ' -Unlisted' }
+            elseif ($Broadcast) { ' -Broadcast' }
+            elseif ($WithObs) { ' -WithObs' }
+            else { '' }
         $xml = $xml.Replace('{{START_ARGS}}', $startArgs)
 
         # schtasks reads task XML as Unicode; UTF-8 is rejected with

@@ -143,6 +143,7 @@ export interface BroadcastConfig {
 export function loadBroadcastConfig(options: LoadAuthConfigOptions = {}): BroadcastConfig {
   const section = readYouTubeSection('broadcast', options)
   const stream = asObject(section['stream'], 'youtube.broadcast.stream')
+  const env = options.env ?? process.env
 
   const strategy = readEnum(section['strategy'], 'youtube.broadcast.strategy', [
     'single',
@@ -175,8 +176,15 @@ export function loadBroadcastConfig(options: LoadAuthConfigOptions = {}): Broadc
     strategy,
     title: readString(section['title'], 'youtube.broadcast.title'),
     description: readOptionalString(section['description'], 'youtube.broadcast.description'),
+    // `VL_YOUTUBE_PRIVACY_STATUS` overrides it for one host, the way every other
+    // broadcast switch works. The default stays `private` — spec §9.1 keeps first
+    // publication with the operator (BOARD A-18), and a default that exposes a
+    // broadcast is a default nobody chose. Gate 2's calibration is what needs
+    // `unlisted`: a private broadcast cannot be opened on a phone, and unlisted
+    // is visible to a link without entering search, recommendations or the
+    // vertical feed (BOARD D-24).
     privacyStatus: readEnum(
-      section['privacyStatus'],
+      env['VL_YOUTUBE_PRIVACY_STATUS'] ?? section['privacyStatus'],
       'youtube.broadcast.privacyStatus',
       BROADCAST_PRIVACY_STATUSES,
     ),
