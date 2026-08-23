@@ -618,7 +618,14 @@ export class Supervisor {
       logger: this.#logger,
       canContinue: () => this.#outwardActionsAllowed(),
     })
-    if (this.#startupResult.completed) return
+    if (this.#startupResult.completed) {
+      // The components exist now. Anything the aggregator counted as
+      // unobservable before this moment was counted against a thing that had not
+      // been started (T39), and letting that stand spends the grace window
+      // before the first report can arrive.
+      this.#aggregator.resetUnobservable()
+      return
+    }
     if (this.#startupResult.aborted) {
       // The run stopped mid-sequence. That is not a start-up failure: it spends
       // no retry, raises no failure alert, and above all starts nothing.
