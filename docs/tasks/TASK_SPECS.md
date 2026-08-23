@@ -680,3 +680,41 @@
   2. `Register-VerticalLive.ps1 -Broadcast`가 등록한 작업의 `<Arguments>`에 그 스위치가 들어간다 — `-WhatIf` XML로 확인.
   3. **실측**: `-Broadcast`로 재등록하고 재부팅해, 사람 입력 없이 `supervisor.state = live`에 도달하는 것을 `/health`로 확인한다. 이것이 72h soak의 전제다.
   4. 게이트 5개 + CI 녹색.
+## T33 — 11시간 rolling 방송 교체 (D-21)
+
+- slug `t33-rolling-broadcast` · PR 접두 `feat(youtube):` · 의존 T10, T9, T12, T30
+- **읽을 것**: `apps/server/src/youtube/broadcast/lifecycle.ts`(`ensureBound`·`goLive`·`stopBroadcast`·`#ensureStream`), `apps/server/src/youtube/broadcast/config.ts`, `apps/server/src/youtube/chat/chat-source.ts`(`resolveTarget`), `apps/server/src/main.ts`(broadcast port·chat 배선), `docs/ops/broadcast-lifecycle.md`
+- **왜**: D-21. 12시간을 넘으면 archive가 없을 수 있고 VOD가 없으면 YPP 유효 시청시간에서 빠진다(스펙 §9.3). 구간을 11시간으로 끊어 매 구간이 롱폼 VOD로 남게 한다.
+- **범위**
+  - config `youtube.broadcast.segmentMs`(기본값은 **끔**: `null`). 켜져 있을 때만 교체가 일어난다 — CI·개발 머신이 방송을 교체하지 않는다.
+  - 교체 절차: 새 attempt 시작 → **기존 ingestion stream을 재사용해** bind → go live → **이전 방송을 `stopBroadcast()`로 끝낸다**(D-21이 D-17을 개정한 지점). 새 방송이 live가 된 뒤에 이전 것을 끝낸다 — 순서가 반대면 송출이 끊긴다.
+  - **`확인 필요`**: 하나의 `liveStream`을 새 broadcast에 bind할 때 이전 bind가 어떻게 되는지. 공식 문서(`liveBroadcasts.bind`)로 확정하고 URL·확인일을 티켓에 남긴다. **추측으로 구현하지 않는다** — 여기서 틀리면 교체 순간 송출이 끊긴다.
+  - 채팅 소스는 새 `liveChatId`로 옮겨간다. `resolveTarget`이 DB의 열린 attempt를 보므로, 교체 뒤 chat-source를 다시 시작하는 것으로 충분한지 확인하고 아니면 최소 변경으로 잇는다.
+  - 세계 상태는 교체와 무관하다(스펙 §9.3: "세계 상태와 broadcast ID는 처음부터 분리한다"). 교체가 snapshot·inbox·checkpoint를 건드리면 안 된다.
+  - `safe_stopped`에서는 끝내지 않는다(D-21).
+  - archive가 실제로 남는지는 실측으로 확인한다 — 그것이 이 전략을 고른 이유 전부다.
+- **합격 기준**
+  1. 구간이 끝나면 새 방송이 live가 된 **뒤에** 이전 방송이 `complete`가 되고, 그 사이 OBS 송출이 끊기지 않는다 — 가짜 API로 회귀 테스트.
+  2. 교체가 세계 상태를 건드리지 않는다(snapshot revision·inbox·checkpoint 연속) — 회귀 테스트.
+  3. 채팅이 새 `liveChatId`로 붙는다 — 회귀 테스트.
+  4. `segmentMs`가 꺼져 있으면 교체가 일어나지 않는다.
+  5. **실측**: 한 번의 교체를 실제 방송에서 관측하고, 끝난 구간의 archive(VOD)가 채널에 남는지 확인한다.
+  6. 게이트 5개 + CI 녹색.
+
+## T34 — 크리처 시각 고도화 (D-22)
+
+- slug `t34-creature-visual` · PR 접두 `feat(renderer):` · 의존 T14
+- **읽을 것**: `apps/renderer/src/components/Pet.tsx`, `apps/renderer/src/visual/palette.ts`, `apps/renderer/src/components/Scene.tsx`(조명), `apps/renderer/src/components/Background.tsx`, `ASSETS.md`
+- **왜**: D-22. 자산은 그대로 코드 생성 오리지널을 쓰되 화면 품질을 올린다.
+- **범위**
+  - 재질·조명·실루엣·모션의 품질을 올린다. **성장 5단계가 형태로 구분되는 성질을 잃지 않는다** — 오히려 단계 간 차이를 더 읽히게 한다(스펙 §5.2 고정 슬롯).
+  - 9:16 세로 화면에서 **모바일 크기로 축소했을 때** 읽히는지를 기준으로 삼는다(§14.2(1)). 데스크톱 전체화면에서만 예쁜 것은 목적이 아니다.
+  - 외부 자산을 들이지 않는다(D-22). 새 파일이 생기면 `ASSETS.md`에 한 줄을 먼저 쓴다.
+  - 30fps를 유지한다. 렌더 비용이 오르면 계측해서 티켓에 적는다.
+  - i18n 문구·슬롯 구성·read model 계약은 건드리지 않는다.
+- **합격 기준**
+  1. 5단계가 정지 화면에서 서로 구분된다 — 단계별 스크린샷을 티켓에 남긴다.
+  2. 세로 화면 축소 상태에서 크리처·현재 상태가 읽힌다 — 축소 스크린샷.
+  3. 렌더러가 30fps를 유지한다(`/health` renderer `fps`).
+  4. 기존 렌더러 테스트가 무수정 통과하고, read model 계약은 불변.
+  5. 게이트 5개 + CI 녹색.
