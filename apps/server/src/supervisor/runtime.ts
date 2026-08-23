@@ -41,6 +41,15 @@ export interface BroadcastPort {
   bound(): boolean
   /** False while `youtube.broadcast.privacyStatus` is `private` (spec §9.1). */
   publishable(): boolean
+  /**
+   * Replaces the running broadcast when its segment is over, and answers with
+   * the new binding (BOARD D-21, TASK_SPECS §T33). `null` means nothing was due,
+   * which is every tick while `youtube.broadcast.segmentMs` is off.
+   */
+  rolloverIfDue?(): Promise<{
+    readonly broadcastId: string
+    readonly liveChatId: string | null
+  } | null>
 }
 
 export interface ObsPort {

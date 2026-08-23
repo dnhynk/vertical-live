@@ -127,6 +127,8 @@ export interface HarnessOptions {
   readonly alerts?: AlertSink
   /** Replaces individual component actions, e.g. with one that can be gated. */
   readonly actions?: Partial<ComponentActions>
+  /** The segment swap of BOARD D-21; absent means nothing rolls over. */
+  readonly rollSegment?: () => Promise<void>
   /**
    * Input counters for the `filter_evasion_surge` heuristic (§12.3, §T22).
    * Absent by default, which is how every pre-T22 test keeps its behaviour: no
@@ -218,6 +220,7 @@ export function createSupervisorHarness(options: HarnessOptions = {}): Superviso
     ...(options.deadMan === undefined ? {} : { deadMan: options.deadMan }),
     ...(options.screenshots === undefined ? {} : { screenshots: options.screenshots }),
     ...(options.commandMetrics === undefined ? {} : { commandMetrics: options.commandMetrics }),
+    ...(options.rollSegment === undefined ? {} : { rollSegment: options.rollSegment }),
   })
 
   return {

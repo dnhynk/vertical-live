@@ -100,6 +100,17 @@ export interface BroadcastConfig {
   readonly statusPollIntervalMs: number
   /** Bound on `list` pagination while reconciling. */
   readonly reconcileMaxPages: number
+  /**
+   * How long one broadcast segment runs before it is replaced (BOARD `D-21`).
+   * `null` turns rollover off, which is the default: CI and development hosts
+   * must not replace broadcasts, and a run that never rolls over is the shape
+   * every test before T33 assumed.
+   *
+   * Spec §9.3 is why the number matters: past twelve hours a broadcast may leave
+   * **no archive at all**, and without a VOD its watch time is excluded from YPP.
+   * D-21 chose 11h — under the limit, with an hour of room for the swap.
+   */
+  readonly segmentMs: number | null
   readonly stream: IngestionStreamConfig
   readonly provisional: readonly string[]
 }
@@ -156,6 +167,10 @@ export function loadBroadcastConfig(options: LoadAuthConfigOptions = {}): Broadc
       section['enableMonitorStream'],
       'youtube.broadcast.enableMonitorStream',
     ),
+    segmentMs:
+      section['segmentMs'] === null || section['segmentMs'] === undefined
+        ? null
+        : readPositiveInt(section['segmentMs'], 'youtube.broadcast.segmentMs'),
     scheduledStartLeadMs: readPositiveInt(
       section['scheduledStartLeadMs'],
       'youtube.broadcast.scheduledStartLeadMs',

@@ -61,6 +61,8 @@ export function testBackoff(maxAttempts = 2): BackoffPolicy {
 
 export const TEST_BROADCAST_CONFIG: BroadcastConfig = Object.freeze({
   strategy: 'single',
+  // Rollover off unless a test asks for it, which is the product default too.
+  segmentMs: null,
   title: 'Autonomous Vertical Live',
   description: '',
   privacyStatus: 'private',

@@ -1056,3 +1056,72 @@ describe('supervisor state machine', () => {
     })
   })
 })
+
+/**
+ * The supervisor's half of the 11-hour segment (BOARD D-21, TASK_SPECS §T33):
+ * *when* a swap may run. The API order inside it belongs to the lifecycle.
+ */
+describe('segment rollover timing (T33)', () => {
+  it('asks only while the run is live', async () => {
+    let asked = 0
+    const h = createSupervisorHarness({
+      preflight: passingPreflight(),
+      rollSegment: async () => {
+        asked += 1
+      },
+    })
+
+    // `offline`: nothing has started, so there is no segment to end.
+    await h.supervisor.evaluate()
+    expect(asked).toBe(0)
+
+    await goLive(h)
+    await h.supervisor.evaluate()
+    expect(h.supervisor.state).toBe('live')
+    expect(asked).toBeGreaterThan(0)
+  })
+
+  it('never runs two swaps at once', async () => {
+    let inFlight = 0
+    let overlaps = 0
+    let release: () => void = () => {}
+    const h = createSupervisorHarness({
+      preflight: passingPreflight(),
+      rollSegment: async () => {
+        inFlight += 1
+        if (inFlight > 1) overlaps += 1
+        await new Promise<void>((resolve) => {
+          release = resolve
+        })
+        inFlight -= 1
+      },
+    })
+
+    // `start()` already ticks once, which starts a swap that then blocks on the
+    // API. A second and third tick land while it is still in flight.
+    await goLive(h)
+    await h.supervisor.evaluate()
+    await h.supervisor.evaluate()
+    release()
+    await Promise.resolve()
+
+    // Two live broadcasts is the one thing `transition` refuses outright.
+    expect(overlaps).toBe(0)
+    expect(inFlight).toBeLessThanOrEqual(1)
+  })
+
+  it('does not stop the run when a swap fails', async () => {
+    const h = createSupervisorHarness({
+      preflight: passingPreflight(),
+      rollSegment: () => Promise.reject(new Error('liveBroadcasts.transition failed')),
+    })
+
+    await goLive(h)
+    await h.supervisor.evaluate()
+
+    // The previous broadcast is either still live or already ended by YouTube,
+    // and the next tick asks again — a failed swap is reported, not fatal.
+    expect(h.supervisor.state).toBe('live')
+    expect(h.alerts.alerts.some((alert) => alert.reason === 'rollover_failed')).toBe(true)
+  })
+})

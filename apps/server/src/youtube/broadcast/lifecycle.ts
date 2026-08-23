@@ -325,6 +325,98 @@ export class BroadcastLifecycle {
   }
 
   /**
+   * Replaces the running broadcast when its segment is over (BOARD `D-21`,
+   * spec §9.3). Returns the new binding, or `null` when nothing was due.
+   *
+   * **The order below is fixed by the API, not by preference.** Both quotes are
+   * from the reference, checked 2026-08-23:
+   *
+   * - `liveBroadcasts.bind`: "A broadcast can only be bound to one video stream,
+   *   though *a video stream may be bound to more than one broadcast*." So the
+   *   new broadcast binds the **same ingestion stream** the encoder is already
+   *   pushing to, and OBS never stops.
+   * - `liveBroadcasts.transition`: `concurrentBroadcastsExceedLimit` — "One or
+   *   more broadcasts that are already live must be stopped before another
+   *   broadcast can start on the channel." So the old one is completed **before**
+   *   the new one goes live. A design that overlaps them fails with a 403.
+   *
+   * Which leaves a window, between the stop and the go-live, with no live
+   * broadcast on the channel. It cannot be removed, only kept short. The encoder
+   * runs through it, so the stream is still `active` when the transition asks.
+   * Viewers on the old URL are dropped — vertical feed has no Live Redirect
+   * (spec §9.3), and that is the price D-21 accepted for having archives.
+   *
+   * The world is untouched: §9.3 separates world state from broadcast id, and
+   * nothing here reads or writes a snapshot, an inbox row or a checkpoint.
+   */
+  async rolloverIfDue(): Promise<BroadcastBinding | null> {
+    const segmentMs = this.#config.segmentMs
+    if (segmentMs === null) return null
+
+    const current = this.#store.findOpenBroadcastAttempt()
+    if (current === null) return null
+
+    // A swap that stopped between the two halves — the old broadcast ended and
+    // the replacement never went live — leaves the channel with nothing live and
+    // the open attempt at `bound`. Finish it rather than wait: measured on the
+    // host, that state does not recover on its own, because the rollover check
+    // below only fires for an attempt that is already `live`.
+    if (current.stage === 'bound') {
+      this.#logger.warn('finishing a segment swap that did not reach live', {
+        attemptId: current.attemptId,
+      })
+      return this.#toBinding(await this.#goLive(current))
+    }
+
+    // Only a segment that actually reached `live` has run; anything earlier is
+    // still starting up and replacing it would just restart the start-up.
+    if (current.stage !== 'live') return null
+
+    const startedAtMs = Date.parse(current.createdAt)
+    if (Number.isNaN(startedAtMs)) return null
+    const ageMs = Date.parse(this.#clock.nowUtcIso()) - startedAtMs
+    if (ageMs < segmentMs) return null
+
+    this.#logger.info('broadcast segment is over; rolling over', {
+      attemptId: current.attemptId,
+      ageMs,
+      segmentMs,
+    })
+
+    // 1. A new broadcast on the stream the encoder is already feeding.
+    //
+    // Auto-start is switched off for it, whatever the configuration says.
+    // `enableAutoStart` fires "when you start streaming video on the bound live
+    // stream" (`liveBroadcasts` reference, checked 2026-08-23) — an *event*, and
+    // a rollover never produces it: the encoder has been streaming all along and
+    // is deliberately never stopped. Measured on the host on 2026-08-23: the
+    // replacement waited out `autoStartWaitMs`, auto-start never fired, and the
+    // fallback transition came back `invalidTransition` HTTP 403, leaving the
+    // old broadcast complete and the new one stuck at `bound`. Off, it goes live
+    // by explicit transition — and the stream is already `active`, which is the
+    // precondition that transition actually needs.
+    let next = this.#beginAttempt()
+    next = this.#store.updateBroadcastAttempt(next.attemptId, { autoStart: false })
+    next = await this.#ensureStream(next)
+    next = await this.#ensureBroadcast(next)
+    next = await this.#clearAttemptMarker(next)
+    next = await this.#ensureBound(next)
+
+    // 2. The old one ends first — the API refuses two live broadcasts.
+    await this.stopBroadcast(current)
+
+    // 3. And only now the new one starts.
+    next = await this.#goLive(next)
+
+    this.#alert('broadcast_rolled_over', 'segment_elapsed', {
+      previousBroadcastId: current.broadcastId,
+      broadcastId: next.broadcastId,
+      ageMs,
+    })
+    return this.#toBinding(next)
+  }
+
+  /**
    * Applies `youtube.broadcast.privacyStatus` to the broadcast — the only path from
    * `private` to anything visible (BOARD A-18).
    *

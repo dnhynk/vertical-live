@@ -1454,3 +1454,107 @@ describe('an attempt is only resumed while YouTube can still carry it (T30)', ()
     expect(untouched?.stage).toBe('live')
   })
 })
+
+/**
+ * T33 / BOARD D-21. Segments exist so each one leaves an archive: spec §9.3
+ * records that past twelve hours a broadcast may leave none at all, and without
+ * a VOD its watch time is excluded from YPP.
+ *
+ * The order these tests pin is not a preference — it is what the API allows.
+ * `bind` says a stream may be bound to more than one broadcast, so the encoder
+ * never stops; `transition` answers `concurrentBroadcastsExceedLimit` unless the
+ * live one is stopped first, so the old broadcast ends before the new one
+ * starts. Both quoted in `rolloverIfDue`.
+ */
+describe('rolling segments (T33, D-21)', () => {
+  it('does nothing while rollover is switched off', async () => {
+    const h = await setUp()
+    await h.lifecycle().ensureLive()
+    const before = h.server.requests.length
+
+    expect(await h.lifecycle().rolloverIfDue()).toBeNull()
+    expect(h.server.requests.length).toBe(before)
+  })
+
+  it('does nothing before the segment is over', async () => {
+    const h = await setUp({ config: { segmentMs: 60 * 60 * 1000 } })
+    await h.lifecycle().ensureLive()
+
+    expect(await h.lifecycle().rolloverIfDue()).toBeNull()
+    expect(h.temp.store.listBroadcastAttempts().length).toBe(1)
+  })
+
+  it('ends the old broadcast before the new one goes live, on the same stream', async () => {
+    // `segmentMs: 1` is over the moment the first segment exists, which is the
+    // boundary this test is about; the length itself is not.
+    const h = await setUp({ config: { segmentMs: 1 } })
+    const first = await h.lifecycle().ensureLive()
+    const beforeIndex = h.server.requests.length
+
+    const next = await h.lifecycle().rolloverIfDue()
+
+    expect(next).not.toBeNull()
+    expect(next?.broadcastId).not.toBe(first.broadcastId)
+    // The same ingestion stream carries both, so OBS is never asked to stop.
+    expect(next?.streamId).toBe(first.streamId)
+    expect(h.server.requests.filter((r) => r.method === 'liveStreams.insert').length).toBe(1)
+
+    const during = h.server.requests.slice(beforeIndex).map((request) => request.method)
+    const bind = during.indexOf('liveBroadcasts.bind')
+    const lastTransition = during.lastIndexOf('liveBroadcasts.transition')
+    expect(bind).toBeGreaterThanOrEqual(0)
+    // Bind first, and the final transition — the new broadcast going live — last.
+    expect(lastTransition).toBeGreaterThan(bind)
+
+    // The old attempt is closed as `complete`, the new one is the open one.
+    const attempts = h.temp.store.listBroadcastAttempts()
+    expect(attempts.length).toBe(2)
+    const previous = h.temp.store.getBroadcastAttempt(first.attemptId)
+    expect(previous?.stage).toBe('complete')
+    expect(previous?.closedAt).not.toBeNull()
+    expect(h.temp.store.findOpenBroadcastAttempt()?.attemptId).toBe(next?.attemptId)
+  })
+
+  it('creates the replacement with auto-start off', async () => {
+    // `enableAutoStart` fires when streaming *starts* on the bound stream, and a
+    // rollover never restarts the encoder — so the replacement would wait out
+    // its window and then be refused `invalidTransition`. Measured on the host
+    // on 2026-08-23 before this was fixed.
+    const h = await setUp({ config: { segmentMs: 1, enableAutoStart: true } })
+    await h.lifecycle().ensureLive()
+
+    const next = await h.lifecycle().rolloverIfDue()
+
+    expect(next?.autoStart).toBe(false)
+    expect(h.temp.store.getBroadcastAttempt(next?.attemptId ?? '')?.autoStart).toBe(false)
+  })
+
+  it('finishes an attempt that is bound but never went live', async () => {
+    // The state the host was left in when a swap failed halfway: the old
+    // broadcast completed, its replacement bound, and nothing live on the
+    // channel. `ensureBound()` stops at exactly that stage, and the store
+    // refuses to fake it by moving a stage backwards — rightly.
+    const h = await setUp({ config: { segmentMs: 1 } })
+    const bound = await h.lifecycle().ensureBound()
+    expect(bound.stage).toBe('bound')
+
+    const finished = await h.lifecycle().rolloverIfDue()
+
+    // Without this the run strands: the rollover check only fires for an attempt
+    // that is already `live`, so a half-finished swap would wait forever.
+    expect(finished?.attemptId).toBe(bound.attemptId)
+    expect(h.temp.store.getBroadcastAttempt(bound.attemptId)?.stage).toBe('live')
+  })
+
+  it('gives the chat a new liveChatId to move to', async () => {
+    const h = await setUp({ config: { segmentMs: 1 } })
+    const first = await h.lifecycle().ensureLive()
+
+    const next = await h.lifecycle().rolloverIfDue()
+
+    // A completed broadcast's chat is gone (T30 measured what happens when a
+    // source stays pointed at one), so the swap has to hand over a new id.
+    expect(next?.liveChatId).not.toBeNull()
+    expect(next?.liveChatId).not.toBe(first.liveChatId)
+  })
+})
