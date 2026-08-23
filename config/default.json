@@ -155,7 +155,8 @@
     ],
     "renderer": {
       "minFps": 20,
-      "reportStaleAfterMs": 15000
+      "reportStaleAfterMs": 15000,
+      "warmupFrames": 90
     },
     "startup": {
       "maxAttempts": 5

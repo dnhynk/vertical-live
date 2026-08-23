@@ -39,6 +39,61 @@ function readings(overrides: Partial<AggregatorReadings> = {}): AggregatorReadin
   }
 }
 
+/**
+ * T35. Measured on the host on 2026-08-23: three of six restarts ended in
+ * `safe_stop: restart_budget_exhausted (renderer-source:renderer)` because the
+ * fps verdict was made while the page was still loading — and the refresh it
+ * asked for reloaded the page and reset the counter it was waiting on.
+ */
+describe('the fps verdict waits for frames to exist (T35)', () => {
+  const config = loadSupervisorConfig()
+
+  it('does not degrade a page that has not drawn enough frames to average', () => {
+    const aggregator = new HealthAggregator(config)
+
+    const verdict = aggregator.evaluate(
+      readings({ renderer: { ...HEALTHY_RENDERER, fps: 0, frameCounter: 0 } }),
+    ).families.renderer
+
+    // `unknown`, not `ok`: a page that has drawn nothing is not evidence of
+    // health either — it just is not evidence of a fault.
+    expect(verdict.status).toBe('unknown')
+    expect(verdict.reason).toBe('renderer_warming_up')
+  })
+
+  it('still degrades a renderer that is slow once it has frames behind it', () => {
+    const aggregator = new HealthAggregator(config)
+
+    const verdict = aggregator.evaluate(
+      readings({
+        renderer: { ...HEALTHY_RENDERER, fps: 2, frameCounter: config.renderer.warmupFrames },
+      }),
+    ).families.renderer
+
+    expect(verdict.status).toBe('degraded')
+    expect(verdict.reason).toBe('fps_below_minimum')
+  })
+
+  it('still catches a renderer that never starts drawing', () => {
+    const aggregator = new HealthAggregator(config)
+    const stalled = { ...HEALTHY_RENDERER, fps: 0, frameCounter: 0 }
+
+    aggregator.evaluate(readings({ renderer: stalled, nowMonotonicMs: 0 }))
+    const later = aggregator.evaluate(
+      readings({
+        renderer: stalled,
+        nowMonotonicMs: config.unobservableGraceMs + 1,
+        lastEvaluationMonotonicMs: 0,
+      }),
+    ).families.renderer
+
+    // The grace window is what makes waiting safe: a page that never draws runs
+    // it out and is reported, just not by a verdict that would have reset it.
+    expect(later.status).toBe('degraded')
+    expect(later.reason).toBe('unobservable:renderer_warming_up')
+  })
+})
+
 describe('health aggregator (spec §9.4)', () => {
   const config = loadSupervisorConfig()
 
@@ -367,6 +422,14 @@ describe('health aggregator (spec §9.4)', () => {
         aggregator.evaluate(readings({ renderer: { ...HEALTHY_RENDERER, fps: 3 } })).families
           .renderer.reason,
       ).toBe('fps_below_minimum')
+
+      // T35: the same low fps on a page that has only just started drawing is
+      // not the same observation, and the two must not share a verdict.
+      expect(
+        aggregator.evaluate(
+          readings({ renderer: { ...HEALTHY_RENDERER, fps: 2, frameCounter: 30 } }),
+        ).families.renderer.reason,
+      ).toBe('renderer_warming_up')
 
       expect(
         aggregator.evaluate(

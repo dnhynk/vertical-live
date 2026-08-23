@@ -415,6 +415,31 @@ function rendererSignal(readings: AggregatorReadings, config: SupervisorConfig):
       detail,
     })
   }
+  /*
+   * The fps verdict needs enough frames behind it to be a measurement (T35).
+   *
+   * `frameCounter` restarts at 0 on every page load, so a page that has just
+   * been served reports an average near zero for reasons that have nothing to do
+   * with how fast it can draw. Calling that `degraded` asked for a
+   * `renderer-source` refresh — which reloads the page and sets the counter back
+   * to 0. Three refreshes later the run safe-stopped. Measured on the host on
+   * 2026-08-23: three of six restarts ended that way, at frame counts of 30, 61
+   * and 91, while a run that survived held a steady 30fps against a minimum of
+   * 20. Nothing was too slow; the question was asked too early.
+   *
+   * `unknown` rather than `ok`: a page that has drawn nothing is not evidence of
+   * health either. A required family's `unknown` already has the aggregator's
+   * grace window, and a renderer that never starts drawing runs it out and
+   * degrades — so a genuinely dead renderer is still caught, just not by a
+   * verdict that would have reset it.
+   */
+  if (report.frameCounter < config.renderer.warmupFrames) {
+    return signal(RENDERER_HEALTH_SIGNAL, 'renderer', readings, {
+      status: 'unknown',
+      reason: 'renderer_warming_up',
+      detail,
+    })
+  }
   if (report.fps < config.renderer.minFps) {
     return signal(RENDERER_HEALTH_SIGNAL, 'renderer', readings, {
       status: 'degraded',
