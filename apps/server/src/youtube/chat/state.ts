@@ -247,7 +247,11 @@ export class ChatSourceState {
     this.#stopped = null
   }
 
-  observe(pageToken: string | null, channelState: string | null): ChatObservation {
+  observe(
+    pageToken: string | null,
+    channelState: string | null,
+    liveChatId: string | null = null,
+  ): ChatObservation {
     const reconnect: ChatReconnectObservation = {
       count: this.#reconnectCount,
       lastAt: this.#reconnectLastAt,
@@ -272,6 +276,7 @@ export class ChatSourceState {
       : null
     return {
       mode: this.#mode,
+      liveChatId,
       connected: this.#connected,
       channelState,
       keepalive: this.#keepalive,

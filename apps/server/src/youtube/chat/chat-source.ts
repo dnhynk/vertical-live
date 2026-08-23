@@ -95,7 +95,12 @@ export class ChatSource {
   readonly #state: ChatSourceState
   readonly #logger: Logger
   readonly #readyDelay: CancellableDelay
+  /** Wakes the binding watcher; separate so stopping one does not stop the other. */
+  readonly #targetWatch: CancellableDelay
+  #retarget = false
 
+  /** The chat this source is currently reading; `null` before it has one. */
+  #target: LiveChatTarget | null = null
   #transport: StreamListTransport | undefined
   #sink: ChatIngestSink | undefined
   #grpc: GrpcChatSource | undefined
@@ -113,6 +118,7 @@ export class ChatSource {
     )
     this.#logger = options.logger ?? silentLogger
     this.#readyDelay = new CancellableDelay(options.clock)
+    this.#targetWatch = new CancellableDelay(options.clock)
   }
 
   /** Why the source stopped, once it has. */
@@ -128,7 +134,11 @@ export class ChatSource {
   observe(): ChatObservation {
     const channelState =
       this.#state.mode === 'grpc' && this.#grpc !== undefined ? this.#grpc.channelState() : null
-    return this.#state.observe(this.#sink?.pageToken ?? null, channelState)
+    return this.#state.observe(
+      this.#sink?.pageToken ?? null,
+      channelState,
+      this.#target?.liveChatId ?? null,
+    )
   }
 
   /** Starts the source in the background. Idempotent. */
@@ -146,6 +156,7 @@ export class ChatSource {
   async stop(): Promise<void> {
     this.#cancelled = true
     this.#readyDelay.cancel()
+    this.#targetWatch.cancel()
     this.#grpc?.stop()
     this.#rest?.stop()
     await this.#running
@@ -162,15 +173,33 @@ export class ChatSource {
       return
     }
 
-    const target = await this.#resolveTarget()
-    if (target === null) {
-      this.#state.recordStop('no_live_chat_id')
-      this.#emit()
-      return
-    }
-
     await this.#waitForEngine()
     if (this.#cancelled) return
+
+    // One session per bound chat. A segment rollover replaces the broadcast and
+    // with it the `liveChatId` (BOARD D-21, T33), and the listener has to follow
+    // it — measured on 2026-08-23, where the source stayed on a broadcast two
+    // swaps old, reconnecting to it 28 times, while `transport` reported `ok`
+    // because the channel to that dead chat was `READY`.
+    //
+    // It follows the binding itself rather than being restarted into it: a
+    // restart belongs to the supervisor (spec §9.2), and using one as the
+    // re-target mechanism is what made two owners of the same component in T33.
+    while (!this.#cancelled) {
+      const target = await this.#resolveTarget()
+      if (target === null) {
+        this.#state.recordStop('no_live_chat_id')
+        this.#emit()
+        return
+      }
+      const outcome = await this.#runSession(target)
+      if (outcome === 'stop') return
+    }
+  }
+
+  /** Reads one chat until it ends, the paths give up, or the binding moves. */
+  async #runSession(target: LiveChatTarget): Promise<'stop' | 'retarget'> {
+    const { config } = this.#options
 
     const sourceKey = chatSourceKey(target.liveChatId)
     const stored = this.#options.checkpoints.getSourceCheckpoint(sourceKey)
@@ -241,14 +270,30 @@ export class ChatSource {
 
     this.#rest = rest
 
+    this.#target = target
+    // The gRPC loop reconnects on its own and does not return between
+    // connections, so a check placed after it would never run while the path is
+    // healthy. A watcher polls the binding instead and cancels the running path
+    // the moment it moves; the loop below then sees the change and re-targets.
+    const watching = this.#watchTarget(target)
     let usePrimary = true
     while (!this.#cancelled) {
       const result: ChatRunResult = usePrimary ? await grpc.run() : await rest.run()
       this.#lastResult = result
       this.#emit()
+      // The binding may have moved while that path was running. Checked here
+      // rather than on a timer: this is the moment the source is between
+      // connections and can change target without dropping one.
+      if (this.#retarget) {
+        this.#retarget = false
+        this.#state.clearStop()
+        this.#targetWatch.cancel()
+        await watching
+        return 'retarget'
+      }
       if (result.outcome === 'stopped' || result.outcome === 'cancelled') {
         this.#logger.warn('youtube chat: source stopped', { reason: result.reason })
-        return
+        return 'stop'
       }
       // `fallback` (gRPC gave up) and `switch_back` (REST's turn is over) are
       // the two halves of the same switch.
@@ -257,6 +302,31 @@ export class ChatSource {
         to: usePrimary ? 'grpc' : 'rest',
         reason: result.reason,
       })
+    }
+    this.#targetWatch.cancel()
+    await watching
+    return 'stop'
+  }
+
+  /**
+   * Follows the binding while one chat is being read. It only ever *cancels* the
+   * running path — the session loop decides what to do next, so there is one
+   * place where a target change turns into a new session.
+   */
+  async #watchTarget(current: LiveChatTarget): Promise<void> {
+    while (!this.#cancelled && !this.#retarget) {
+      await this.#targetWatch.wait(this.#options.config.readyPollIntervalMs)
+      if (this.#cancelled) return
+      const bound = await this.#resolveTarget()
+      if (bound === null || bound.liveChatId === current.liveChatId) continue
+      this.#logger.info('youtube chat: the bound chat changed; following it', {
+        from: current.broadcastId,
+        to: bound.broadcastId,
+      })
+      this.#retarget = true
+      this.#grpc?.stop()
+      this.#rest?.stop()
+      return
     }
   }
 

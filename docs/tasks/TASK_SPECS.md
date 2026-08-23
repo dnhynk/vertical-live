@@ -753,22 +753,34 @@
   2. 로드된 뒤 프레임이 늘지 않는 렌더러는 여전히 degraded가 된다 — 회귀 테스트.
   3. **실측**: 연속 5회 재시작에서 5회 모두 `live`에 도달한다(현재는 6회 중 3회 실패).
   4. 게이트 5개 + CI 녹색.
-## T36 — 교체 직후 새 채팅이 응답하기 전에 재시작이 발사된다
+## T36 — 구간 교체 뒤 채팅이 옛 방송에 남고, 건강 신호가 그것을 가린다
 
-- slug `t36-chat-ready-after-swap` · PR 접두 `fix(youtube):` · 의존 T33, T28, T12
-- **읽을 것**: `apps/server/src/youtube/chat/chat-source.ts`(`#run`·`#resolveTarget`), `apps/server/src/youtube/chat/grpc-source.ts`(`failedPrecondition` 처리), `apps/server/src/supervisor/transitions.ts`(`chat-source` 재시작), `apps/server/src/main.ts`(`resolveTarget`)
-- **관측**(2026-08-23, 3분 구간으로 실측): 구간 교체 자체는 두 번 연속 성공했고 매번 `live`로 복귀했다. 세 번째 사이클에서 `safe_stop: restart_budget_exhausted (chat-source:chat_transport)`. chat 신호는 `degraded / failedPrecondition`(gRPC status 9)였다.
+- slug `t36-chat-follows-broadcast` · PR 접두 `fix(youtube):` · 의존 T33, T28, T9
+- **읽을 것**: `apps/server/src/youtube/chat/chat-source.ts`(`#run`·`#resolveTarget`·`start`/`stop`), `apps/server/src/youtube/chat/health.ts`(`transport()`), `apps/server/src/main.ts`(`resolveTarget`), `apps/server/src/youtube/chat/sink.ts`(`sourceKey`)
+- **관측**(2026-08-23, 3분 구간 실측):
 
-  즉 **새 방송이 `live`가 된 직후에도 그 방송의 live chat은 아직 `streamList`에 응답하지 않는다.** 그 창 안에서 `chat-source` 재시작이 연달아 들어가 예산 3을 태운다.
-- **이것은 T28·T30·T35와 같은 축의 네 번째 사례다**: 복구 동작이 자신이 기다리는 대상이 존재하기 전에 발사된다.
+  ```text
+  bound broadcast      9fP-7hTvMok   liveChatId …OWZQLTdoVHZNb2s
+  source_checkpoint    마지막 항목이 HrjuZ7mdXAQ — 두 번 전 방송
+                       현재 방송의 chat에는 체크포인트가 없다(한 번도 붙은 적 없음)
+  youtube.chat.transport  교체 두 번 내내 ok, 한참 뒤에야 failedPrecondition
+  reconnect count      28
+  ```
+
+  **채팅 소스는 자기가 시작할 때 한 번 target을 정하고 그 뒤로 바꾸지 않는다**(`#run`이 `#resolveTarget()`을 루프 밖에서 한 번 부른다). 구간이 교체돼도 소스는 옛 `liveChatId`에 남아 재접속을 반복한다(위 28회).
+
+  그리고 **그 상태가 건강해 보인다**: T28 이후 transport는 gRPC 채널이 `READY`이고 연속 실패가 없으면 `ok`다. 채널은 옛 채팅을 향해서도 `READY`이므로, 소스가 아무 상관없는 방송을 읽는 동안 신호는 `ok`를 낸다. 옛 채팅이 완전히 죽은 뒤에야 `failedPrecondition`이 나온다.
+
+  즉 T33의 교체는 방송을 바꾸지만 **입력 경로는 옮기지 않는다.** 이전에 관측한 `restart_budget_exhausted`는 이 결함의 증상 중 하나였다(supervisor가 뒤늦게 재시작을 걸고, 재시작만이 유일하게 target을 다시 읽는 경로였다).
 - **범위**
-  - 새 `liveChatId`가 응답할 때까지 기다린다. 기다림은 재시작이 아니다 — 재시작 예산은 "복구를 시도했고 실패했다"를 세는 것이지 "아직 준비되지 않았다"를 세는 것이 아니다.
-  - `failedPrecondition`이 **교체 직후의 새 채팅**인지 **끝난 방송의 죽은 채팅**(T30이 다룬 경우)인지 구분한다. 후자는 여전히 즉시 문제다.
-  - 예산·임계값을 키워 덮지 않는다. 11시간 구간에서는 예산이 회복되므로 값만 보면 문제가 없어 보이지만, 그것은 문제가 사라진 것이 아니라 드물어진 것이다.
+  - **소스가 바인딩된 방송을 따라간다.** target `liveChatId`가 바뀌면 소스가 스스로 새 채팅으로 옮긴다. 재시작에 의존하지 않는다 — 재시작은 supervisor의 것이고(§9.2), 그것을 target 변경 수단으로 쓰면 T33에서 겪은 소유자 중복이 다시 생긴다.
+  - 체크포인트는 `liveChatId`별이므로(`chatSourceKey`) 옮겨갈 때 새 채팅은 토큰 없이 시작하고 옛 채팅의 체크포인트는 그대로 남는다 — 그것이 맞다(§11의 재개 지점은 채팅마다 다르다).
+  - **건강 신호가 대상을 포함한다.** transport가 `ok`를 낼 때 그것이 *지금 바인딩된* 채팅에 대한 것임이 드러나야 한다. 소스가 바인딩되지 않은 채팅을 읽고 있으면 `ok`가 아니다.
+  - T28을 되돌리지 않는다: 조용한 채팅은 여전히 `ok`다. 바뀌는 것은 "어느 채팅이냐"이지 "메시지가 있느냐"가 아니다.
+  - 임계값·재시도 예산은 건드리지 않는다.
 - **합격 기준**
-  1. 새 방송이 `live`가 된 직후 채팅이 아직 응답하지 않는 동안 `chat-source` 재시작이 발사되지 않는다 — 회귀 테스트.
-  2. 끝난 방송의 죽은 채팅은 여전히 즉시 degraded가 된다 — 회귀 테스트.
-  3. **실측**: 3분 구간으로 연속 5회 교체에서 safe stop 없이 매번 `live`로 복귀한다.
-  4. 게이트 5개 + CI 녹색.
-
-> `youtube.broadcast.segmentMs`는 이 task가 끝날 때까지 `null`로 둔다. 11시간 구간이면 예산이 회복될 여유가 있어 실제로 무너질 확률은 낮지만, 확인되지 않은 채로 무인 운전을 켜지 않는다.
+  1. 바인딩된 `liveChatId`가 바뀌면 소스가 재시작 없이 새 채팅으로 옮기고, 새 채팅의 체크포인트가 생긴다 — 회귀 테스트.
+  2. 소스가 바인딩되지 않은 채팅을 읽는 동안 `youtube.chat.transport`가 `ok`가 아니다 — 회귀 테스트.
+  3. 조용한 채팅은 여전히 `ok`다(T28 회귀 방지) — 기존 테스트가 지켜져야 한다.
+  4. **실측**: 3분 구간으로 연속 3회 교체에서, 매 교체 뒤 `source_checkpoint`에 새 채팅의 항목이 생기고 supervisor가 `live`를 유지한다.
+  5. 게이트 5개 + CI 녹색.

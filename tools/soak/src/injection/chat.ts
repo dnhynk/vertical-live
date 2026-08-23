@@ -190,6 +190,7 @@ export class FaultyChat {
     return buildChatHealthSignals(
       {
         mode: this.#started ? 'grpc' : 'idle',
+        liveChatId: this.#started ? 'chat_soak_0001' : null,
         connected: this.#connected,
         channelState: this.#connected ? 'READY' : this.#started ? 'TRANSIENT_FAILURE' : null,
         keepalive: this.#keepalive,
