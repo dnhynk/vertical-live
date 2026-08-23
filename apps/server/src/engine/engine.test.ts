@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
   at,
@@ -79,6 +79,58 @@ describe('StateEngine', () => {
     expect(counters['envelope_invalid']).toBe(1)
     expect(counters['envelope_unsupported']).toBe(1)
     expect(counters['command_direct']).toBe(1)
+  })
+
+  // T41. The engine used to drop these into a `/metrics` counter nothing read,
+  // which is how T40 discarded every arriving message for hours while all six
+  // required families reported `ok`.
+  it('reports a contract validation failure on /health and in the log', async () => {
+    const warn = vi.fn()
+    const logged = createEngineHarness({
+      clock: harness.clock,
+      temp: harness.temp,
+      logger: { debug: vi.fn(), info: vi.fn(), warn, error: vi.fn() },
+    })
+    logged.engine.start()
+    ingest(logged.engine, [
+      invalidEnvelope({ receivedAt: at(1_000) }),
+      invalidEnvelope({ receivedAt: at(1_100) }),
+    ])
+    await harness.clock.advance(2_000)
+    logged.engine.runPending()
+
+    const rejected = logged.engine.health().ingestRejected
+    expect(rejected.invalid.count).toBe(2)
+    expect(rejected.invalid.byCode).toEqual({ MALFORMED_ITEM: 2 })
+    expect(rejected.invalid.lastCode).toBe('MALFORMED_ITEM')
+    expect(rejected.invalid.lastAt).not.toBeNull()
+    expect(warn).toHaveBeenCalledTimes(2)
+    expect(warn).toHaveBeenLastCalledWith(
+      'engine.envelope_invalid',
+      expect.objectContaining({ code: 'MALFORMED_ITEM', totalInvalid: 2 }),
+    )
+    logged.engine.stop()
+  })
+
+  // The signal has to mean "our contract could not read the platform". Chat that
+  // carries no command is the normal case (spec §7.3(3)) and a message type the
+  // contract does not model is expected traffic; neither is a defect, so neither
+  // may raise it or the signal is noise from the first hour of any run.
+  it('does not raise it for ordinary chat or an unsupported message type', async () => {
+    harness.engine.start()
+    const noCommand = {
+      ...commandEnvelope({ command: 'FEED', receivedAt: at(1_000) }),
+      command: null,
+    }
+    ingest(harness.engine, [noCommand, unsupportedEnvelope({ receivedAt: at(1_100) })])
+    await harness.clock.advance(2_000)
+    harness.engine.runPending()
+
+    const rejected = harness.engine.health().ingestRejected
+    expect(rejected.invalid.count).toBe(0)
+    expect(rejected.invalid.lastCode).toBeNull()
+    expect(rejected.unsupported.count).toBe(1)
+    expect(rejected.unsupported.lastAt).not.toBeNull()
   })
 
   it('records a chat message that carries no command as not a world input', async () => {

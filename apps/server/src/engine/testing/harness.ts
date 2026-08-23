@@ -9,6 +9,7 @@ import {
 import type { Clock } from '../../clock.js'
 import type { PersistenceStore } from '../../db/store.js'
 import { createTempStore, type TempStore } from '../../db/testing/temp-store.js'
+import type { Logger } from '../../secrets/redaction.js'
 import { loadInputConfig, type InputConfig } from '../../input/config.js'
 import { FakeClock } from '../../testing/fake-clock.js'
 import { loadEngineConfig, type EngineRuntimeConfig } from '../config.js'
@@ -71,6 +72,8 @@ export interface HarnessOptions {
   readonly temp?: TempStore
   /** Consented actor lookup (BOARD D-9); omitted leaves every `actor` null. */
   readonly identity?: ActorResolver
+  /** Omitted leaves the engine silent, as every other test expects. */
+  readonly logger?: Logger
 }
 
 export interface EngineHarness {
@@ -116,6 +119,7 @@ export function createEngineHarness(options: HarnessOptions = {}): EngineHarness
     publisher,
     autoTick: false,
     ...(options.identity === undefined ? {} : { identity: options.identity }),
+    ...(options.logger === undefined ? {} : { logger: options.logger }),
   })
   return {
     engine,

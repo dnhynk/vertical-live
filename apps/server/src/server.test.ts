@@ -96,6 +96,10 @@ describe('engine-backed routes', () => {
     broadcastLifecycle: 'live',
     lastFailure: null,
     consecutiveFailures: 0,
+    ingestRejected: {
+      invalid: { count: 0, byCode: {}, lastCode: null, lastAt: null },
+      unsupported: { count: 0, lastAt: null },
+    },
   }
   const metrics: EngineMetricsSnapshot = {
     latencyMs: {
@@ -269,6 +273,10 @@ describe('supervisor routes', () => {
     broadcastLifecycle: 'live',
     lastFailure: null,
     consecutiveFailures: 0,
+    ingestRejected: {
+      invalid: { count: 0, byCode: {}, lastCode: null, lastAt: null },
+      unsupported: { count: 0, lastAt: null },
+    },
   }
 
   const summary: SupervisorHealthSummary = {

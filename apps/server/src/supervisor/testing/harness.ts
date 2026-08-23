@@ -32,6 +32,10 @@ export const BASE_ENGINE_HEALTH: EngineHealth = Object.freeze({
   broadcastLifecycle: 'live',
   lastFailure: null,
   consecutiveFailures: 0,
+  ingestRejected: {
+    invalid: { count: 0, byCode: {}, lastCode: null, lastAt: null },
+    unsupported: { count: 0, lastAt: null },
+  },
 })
 
 export const HEALTHY_RENDERER: RendererHealthReport = Object.freeze({
