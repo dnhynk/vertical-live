@@ -352,6 +352,7 @@
       "requestTimeoutMs": 15000,
       "autoStartWaitMs": 120000,
       "statusPollIntervalMs": 15000,
+      "transitionSettleMs": 90000,
       "reconcileMaxPages": 4,
       "segmentMs": null,
       "stream": {

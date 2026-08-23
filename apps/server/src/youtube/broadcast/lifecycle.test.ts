@@ -1558,3 +1558,44 @@ describe('rolling segments (T33, D-21)', () => {
     expect(next?.liveChatId).not.toBe(first.liveChatId)
   })
 })
+
+/**
+ * A transition is not finished when its call returns. Measured against the live
+ * API on 2026-08-23: `transition(testing)` answered 200 with `testStarting`, and
+ * the broadcast reached `testing` seven seconds later. Asking for `live` inside
+ * that window is refused `invalidTransition` — which is what a segment rollover
+ * did, twice, on the host.
+ *
+ * The reference says the same thing (`life-of-a-broadcast` 3.4): "it may take
+ * several seconds, or even up to a minute ... you should poll the API to check
+ * the broadcast's status."
+ */
+describe('a transition is waited out before the next one (T33)', () => {
+  it('does not ask for live until testing has settled', async () => {
+    const h = await setUp()
+    // Two reads of in-flight state before each transition settles.
+    h.server.transitionSettleReads = 2
+
+    const target = await h.lifecycle().ensureLive()
+
+    expect(target.stage).toBe('live')
+    const methods = h.server.requests.map((request) => request.method)
+    const testing = methods.indexOf('liveBroadcasts.transition')
+    const live = methods.lastIndexOf('liveBroadcasts.transition')
+    expect(live).toBeGreaterThan(testing)
+    // The polls between them are the point: without them the second transition
+    // lands while the first is still in flight.
+    const between = methods.slice(testing + 1, live).filter((m) => m === 'liveBroadcasts.list')
+    expect(between.length).toBeGreaterThan(0)
+  })
+
+  it('records the broadcast as live only once YouTube says so', async () => {
+    const h = await setUp()
+    h.server.transitionSettleReads = 2
+
+    const target = await h.lifecycle().ensureLive()
+
+    expect(h.server.broadcasts.get(target.broadcastId)?.lifeCycleStatus).toBe('live')
+    expect(h.temp.store.getBroadcastAttempt(target.attemptId)?.stage).toBe('live')
+  })
+})

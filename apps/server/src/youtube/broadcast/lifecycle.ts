@@ -797,13 +797,62 @@ export class BroadcastLifecycle {
           }
           throw error
         }
+        // A transition is not finished when the call returns. The reference is
+        // explicit about it (`life-of-a-broadcast` step 3.4, checked
+        // 2026-08-23): "it may take several seconds, or even up to a minute, for
+        // that transition to complete. During that time, you should poll the API
+        // to check the broadcast's status. Until the transition is complete, the
+        // broadcast's status will be `testStarting`."
+        //
+        // Asking for the next transition inside that window is refused with
+        // `invalidTransition` — measured on the host on 2026-08-23, where
+        // `testing` was recorded off the response and `live` was requested a
+        // moment later. `redundantTransition` does not cover it: that one is
+        // about the *requested* status, and this is a different transition still
+        // in flight.
+        //
+        // Production never hit this before because it went live by auto-start;
+        // the explicit path is what a segment rollover uses (T33).
+        const settled = await this.#awaitTransition(broadcastId, broadcastStatus, result)
         return stage === 'live'
-          ? this.#markLive(current, result)
+          ? this.#markLive(current, settled)
           : this.#store.recordBroadcastCallResult(current.attemptId, { stage })
       },
       (current) =>
         stage === 'live' ? current.stage === 'live' : stageAtLeast(current.stage, 'testing'),
     )
+  }
+
+  /**
+   * Waits for a transition to actually land, and answers with what YouTube last
+   * said. `testStarting` and `liveStarting` are the documented in-flight states.
+   *
+   * It gives up quietly rather than failing: the caller's own retry and
+   * reconcile rules already cover a transition that never settles, and a read
+   * that times out is not evidence that the transition failed. A broadcast that
+   * stays `testStarting` or `liveStarting` is a documented dead end — the
+   * reference says such a broadcast has to be deleted, not transitioned — and
+   * that is a recovery decision, not something to make inside one call.
+   */
+  async #awaitTransition(
+    broadcastId: string,
+    broadcastStatus: 'testing' | 'live',
+    fallback: LiveBroadcastSummary,
+  ): Promise<LiveBroadcastSummary> {
+    const inFlight = broadcastStatus === 'testing' ? 'testStarting' : 'liveStarting'
+    const attempts = Math.max(
+      1,
+      Math.ceil(this.#config.transitionSettleMs / this.#config.statusPollIntervalMs),
+    )
+    let last = fallback
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      if (last.lifeCycleStatus !== inFlight) return last
+      await this.#sleep(this.#config.statusPollIntervalMs)
+      const observed = await this.#readBroadcast(broadcastId)
+      if (observed === null) return last
+      last = observed
+    }
+    return last
   }
 
   #markLive(
