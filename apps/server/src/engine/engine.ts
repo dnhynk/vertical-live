@@ -11,6 +11,7 @@ import {
   type InputMode,
   type PaidEventKind,
   type IngestEnvelope,
+  type RejectedIngestEnvelope,
   type ValidIngestEnvelope,
   type WorldSnapshot,
 } from '@vl/contract'
@@ -189,6 +190,35 @@ export interface EngineHealth {
    * supervisor (R-T8c-1 blocker 1).
    */
   readonly consecutiveFailures: number
+  /**
+   * Envelopes the inbox accepted and the engine then refused (spec §7.3(3)).
+   *
+   * `invalid` and `unsupported` are separated because only one of them is a
+   * defect. `unsupported` is routine — the contract deliberately does not model
+   * every YouTube message type — while `invalid` means **the contract could not
+   * read what the platform sent**, which is never a normal outcome and is not
+   * something the world can recover from on its own. A run that reads every
+   * message as invalid still reports every health family `ok`, because the
+   * families describe whether the transport is up, not whether what arrives is
+   * usable (T41; T40 ran for hours in exactly that state).
+   *
+   * Counted since process start, like everything else on this document.
+   */
+  readonly ingestRejected: IngestRejectionHealth
+}
+
+export interface IngestRejectionHealth {
+  readonly invalid: {
+    readonly count: number
+    /** Per validation code, so a single broken field is visible as such. */
+    readonly byCode: Readonly<Record<string, number>>
+    readonly lastCode: string | null
+    readonly lastAt: string | null
+  }
+  readonly unsupported: {
+    readonly count: number
+    readonly lastAt: string | null
+  }
 }
 
 interface PreparedStep {
@@ -237,6 +267,13 @@ export class StateEngine {
   readonly #inputConfig: InputConfig
   readonly #publisher: EnginePublisher
   readonly #logger: Logger
+  /** T41: what the engine refused, by validation status. */
+  readonly #invalidByCode = new Map<string, number>()
+  #invalidCount = 0
+  #invalidLastCode: string | null = null
+  #invalidLastAt: string | null = null
+  #unsupportedCount = 0
+  #unsupportedLastAt: string | null = null
   /** Consented actor lookup (BOARD D-9); absent while the gate is closed. */
   readonly #identity: ActorResolver | undefined
   readonly #metrics: EngineMetrics
@@ -671,6 +708,18 @@ export class StateEngine {
       broadcastLifecycle: this.#lifecycle(now),
       lastFailure: this.#lastFailure,
       consecutiveFailures: this.#writeFailures(),
+      ingestRejected: {
+        invalid: {
+          count: this.#invalidCount,
+          byCode: Object.fromEntries(this.#invalidByCode),
+          lastCode: this.#invalidLastCode,
+          lastAt: this.#invalidLastAt,
+        },
+        unsupported: {
+          count: this.#unsupportedCount,
+          lastAt: this.#unsupportedLastAt,
+        },
+      },
     }
   }
 
@@ -903,6 +952,38 @@ export class StateEngine {
     return this.#degradedReasons(this.#clock.nowUtcIso()).length > 0
   }
 
+  /**
+   * `unsupported` is expected traffic and is only counted. `invalid` is logged
+   * on every occurrence: it means the contract could not read the platform, and
+   * the whole cost of T40 was that this produced no output anywhere — the one
+   * trace was a `/metrics` counter nothing read.
+   *
+   * The engine does not act on it. A restart cannot repair a contract mismatch,
+   * and stopping the stream would trade a partial outage (no chat commands) for
+   * a total one, which §2.1 rejects: the world advances with no viewers and no
+   * input at all. This is a signal for a human, so it goes where a human looks.
+   */
+  #recordRejection(envelope: RejectedIngestEnvelope, ingestSeq: number, now: string): void {
+    if (envelope.validationStatus === 'unsupported') {
+      this.#unsupportedCount += 1
+      this.#unsupportedLastAt = now
+      return
+    }
+    const code = envelope.validationError.code
+    this.#invalidCount += 1
+    this.#invalidByCode.set(code, (this.#invalidByCode.get(code) ?? 0) + 1)
+    this.#invalidLastCode = code
+    this.#invalidLastAt = now
+    this.#logger.warn('engine.envelope_invalid', {
+      code,
+      field: envelope.validationError.field,
+      ingestSeq,
+      sourceShape: envelope.sourceShape,
+      // Since process start, so a flood reads as a flood in a single line.
+      totalInvalid: this.#invalidCount,
+    })
+  }
+
   // -------------------------------------------------------------- one event
 
   #prepareEvent(row: InboxRow, now: string): PreparedStep | null {
@@ -915,6 +996,7 @@ export class StateEngine {
         `${row.envelope.validationStatus}:${row.envelope.validationError.code}`,
       )
       this.#metrics.count(`envelope_${row.envelope.validationStatus}`)
+      this.#recordRejection(row.envelope, row.ingestSeq, now)
       return null
     }
 
