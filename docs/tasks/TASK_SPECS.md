@@ -557,3 +557,32 @@
   1. vault에 `youtube.streamKey`가 **있는 호스트**와 **없는 호스트** 양쪽에서 통과한다.
   2. 나머지 `control.test.ts` 케이스는 무수정 통과.
   3. 게이트 5개 + CI 녹색.
+
+## T28 — 조용한 채팅에서 `chat_transport`가 `ok`에 도달하지 못한다
+
+- slug `t28-chat-transport-quiet` · PR 접두 `fix(youtube):` · 의존 T9, T12, T26
+- **읽을 것**: `apps/server/src/youtube/chat/health.ts`(transport 신호 매핑), `apps/server/src/youtube/chat/state.ts`(`recordResponse`·`connected`), `apps/server/src/youtube/chat/grpc-source.ts`, supervisor의 `chat-source` 재시작 경로
+- **관측**(2026-08-23 첫 private 기술 방송, 호스트 `WORKSTATION`): 시작 순서 9단계가 모두 완료되고 required family 6개 중 5개(`coordinator`·`state_commit`·`renderer`·`obs_output`·`youtube_broadcast`)가 `ok`인데 `chat_transport`만 `ok`가 되지 않아 스택이 `safe_stopped`로 끝난다.
+
+  1초 해상도 추적:
+
+  ```text
+  +0s   mode=idle  grpcState=null   connected=false
+  +2s   mode=grpc  grpcState=IDLE   connected=false
+  +3s   mode=grpc  grpcState=READY  connected=false   ← 채널은 준비됨
+  +22s  첫 응답 도착(recordResponse → connected=true)
+  +28s  supervisor가 chat-source 재시작(stop_requested) → 시계 리셋
+  +40s  safe stop: restart_budget_exhausted (chat-source:chat_transport)
+  ```
+
+  원인: `health.ts`의 transport 매핑이 `observation.connected`(= **서버가 메시지 페이지를 보냈다**)일 때만 `ok`를 준다. 시청자 0명이면 gRPC `streamList`는 20초 넘게 아무것도 보내지 않으므로 `connected`가 서지 않고, supervisor의 재시작 예산이 먼저 소진된다. 재시작은 상태를 처음으로 되돌리므로 수렴하지 않는다.
+
+  **스펙 §2.1이 "시청자 0명이어도 콘텐츠·상태·서사가 진행된다"를 요구하므로 조용한 채팅은 정상 상태이지 장애가 아니다.** 같은 파일의 keepalive 주석도 이미 그렇게 적어 두었다("a quiet chat legitimately sends nothing for a long time") — 그 판단이 transport 신호에는 적용되지 않았다.
+- **범위**
+  - transport가 **연결되어 있다는 사실**과 **메시지를 받았다는 사실**을 구분한다. gRPC 채널이 `READY`이거나 REST 폴러가 정상 응답 주기를 지키고 있으면 transport는 `ok`다. 첫 메시지를 기다리는 것은 장애가 아니다.
+  - 재시작이 회복을 방해하지 않게 한다: 연결 자체가 서 있는 동안에는 `chat-source`를 재시작하지 않는다.
+  - 임계값·재시도 횟수를 키워 덮지 않는다. 조용한 채팅은 무한히 조용할 수 있으므로 시간을 늘리는 것은 해법이 아니다.
+- **합격 기준**
+  1. 메시지가 **한 건도 없는** 라이브 채팅에 붙었을 때 `chat_transport`가 `ok`가 되고, supervisor가 `live`에 도달한다(실측: 방송 하나로 확인하고 `/health` 스냅샷을 티켓에 남긴다).
+  2. 실제로 끊겼을 때(채널 실패·연속 오류·retry budget 소진)는 여전히 `degraded`로 내려간다 — 회귀 테스트로 고정한다.
+  3. 게이트 5개 + CI 녹색.
