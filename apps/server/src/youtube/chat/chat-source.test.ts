@@ -64,6 +64,7 @@ describe('ChatSource', () => {
     overrides: Partial<ChatConfig> = {},
     engine: { ready: boolean } = { ready: true },
     signals: HealthSignal[] = [],
+    resolveTarget?: () => { liveChatId: string; broadcastId: string } | null,
   ): ChatSource {
     const base = testChatConfig(overrides)
     const config: ChatConfig = {
@@ -86,6 +87,7 @@ describe('ChatSource', () => {
       engine,
       transport,
       healthSink: (signal) => signals.push(signal),
+      ...(resolveTarget === undefined ? {} : { resolveTarget }),
       random: () => 0,
     })
     cleanups.push(async () => {
@@ -206,6 +208,50 @@ describe('ChatSource', () => {
     // Nothing has been delivered: this is readiness of the path, not of a message.
     expect(chat.observe().connected).toBe(false)
     expect(transport?.detail['lastResponseAt']).toBeNull()
+  })
+
+  /**
+   * T36. A segment rollover replaces the broadcast and with it the `liveChatId`
+   * (BOARD D-21), and the listener has to follow. Measured on 2026-08-23: it did
+   * not — the source stayed on a broadcast two swaps old, reconnected to it 28
+   * times, and `transport` reported `ok` the whole time because the channel to
+   * that dead chat was `READY`.
+   */
+  describe('ChatSource follows the bound chat', () => {
+    it('moves to the new liveChatId when the binding changes', async () => {
+      const servers = await fakes([
+        // First chat: one response, then the stream ends and the loop looks again.
+        { responses: [{ items: [], next_page_token: 'token_first' }] },
+        { end: 'complete' },
+        { end: 'complete' },
+      ])
+      let target = { liveChatId: 'chat_test_0001', broadcastId: 'broadcast_first' }
+      const chat = source(servers, {}, { ready: true }, [], () => target)
+
+      chat.start()
+      await waitFor(() => chat.observe().liveChatId === 'chat_test_0001')
+
+      // The rollover: a new broadcast, a new chat.
+      target = { liveChatId: 'chat_test_0002', broadcastId: 'broadcast_second' }
+
+      await waitFor(() => chat.observe().liveChatId === 'chat_test_0002')
+      // Nothing restarted it — it followed the binding on its own, which is what
+      // keeps the supervisor the only owner of component restarts (spec §9.2).
+      expect(chat.observe().liveChatId).toBe('chat_test_0002')
+    })
+
+    it('reports which chat it is reading', async () => {
+      const servers = await fakes([{ end: 'hang' }])
+      const chat = source(servers)
+
+      chat.start()
+      await waitFor(() => chat.observe().liveChatId !== null)
+
+      const transport = chat.signals().find((signal) => signal.name === CHAT_TRANSPORT_SIGNAL)
+      // Without this on `/health`, a swap can leave the input path on the wrong
+      // broadcast while the signal still says `ok`.
+      expect(transport?.detail['liveChatId']).toBe(TEST_LIVE_CHAT_ID)
+    })
   })
 })
 

@@ -24,6 +24,7 @@ const KEEPALIVE = { timeMs: 300_000, timeoutMs: 20_000, permitWithoutCalls: fals
 function observation(overrides: Partial<ChatObservation> = {}): ChatObservation {
   return {
     mode: 'grpc',
+    liveChatId: 'chat_test_0001',
     connected: true,
     channelState: 'READY',
     keepalive: KEEPALIVE,

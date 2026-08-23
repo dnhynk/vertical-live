@@ -112,6 +112,13 @@ export interface ChatConsentObservation {
 /** Everything the source knows about itself at one instant. */
 export interface ChatObservation {
   readonly mode: ChatMode
+  /**
+   * The chat this source is reading. A segment rollover moves the binding
+   * (BOARD D-21), and a listener left on the previous broadcast still reports a
+   * `READY` channel — so which chat it is on has to be visible, or a swap can
+   * break the input path while the signal says `ok` (measured 2026-08-23).
+   */
+  readonly liveChatId: string | null
   readonly connected: boolean
   /** gRPC channel connectivity; `null` on the REST path. */
   readonly channelState: string | null
@@ -182,6 +189,7 @@ type SignalBody = Pick<HealthSignal, 'status' | 'detail'> & { reason?: string }
 function transport(observation: ChatObservation): SignalBody {
   const detail = {
     mode: observation.mode,
+    liveChatId: observation.liveChatId,
     connected: observation.connected,
     channelState: observation.channelState,
     consecutiveFailures: observation.consecutiveFailures,
