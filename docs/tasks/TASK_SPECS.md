@@ -753,3 +753,22 @@
   2. 로드된 뒤 프레임이 늘지 않는 렌더러는 여전히 degraded가 된다 — 회귀 테스트.
   3. **실측**: 연속 5회 재시작에서 5회 모두 `live`에 도달한다(현재는 6회 중 3회 실패).
   4. 게이트 5개 + CI 녹색.
+## T36 — 교체 직후 새 채팅이 응답하기 전에 재시작이 발사된다
+
+- slug `t36-chat-ready-after-swap` · PR 접두 `fix(youtube):` · 의존 T33, T28, T12
+- **읽을 것**: `apps/server/src/youtube/chat/chat-source.ts`(`#run`·`#resolveTarget`), `apps/server/src/youtube/chat/grpc-source.ts`(`failedPrecondition` 처리), `apps/server/src/supervisor/transitions.ts`(`chat-source` 재시작), `apps/server/src/main.ts`(`resolveTarget`)
+- **관측**(2026-08-23, 3분 구간으로 실측): 구간 교체 자체는 두 번 연속 성공했고 매번 `live`로 복귀했다. 세 번째 사이클에서 `safe_stop: restart_budget_exhausted (chat-source:chat_transport)`. chat 신호는 `degraded / failedPrecondition`(gRPC status 9)였다.
+
+  즉 **새 방송이 `live`가 된 직후에도 그 방송의 live chat은 아직 `streamList`에 응답하지 않는다.** 그 창 안에서 `chat-source` 재시작이 연달아 들어가 예산 3을 태운다.
+- **이것은 T28·T30·T35와 같은 축의 네 번째 사례다**: 복구 동작이 자신이 기다리는 대상이 존재하기 전에 발사된다.
+- **범위**
+  - 새 `liveChatId`가 응답할 때까지 기다린다. 기다림은 재시작이 아니다 — 재시작 예산은 "복구를 시도했고 실패했다"를 세는 것이지 "아직 준비되지 않았다"를 세는 것이 아니다.
+  - `failedPrecondition`이 **교체 직후의 새 채팅**인지 **끝난 방송의 죽은 채팅**(T30이 다룬 경우)인지 구분한다. 후자는 여전히 즉시 문제다.
+  - 예산·임계값을 키워 덮지 않는다. 11시간 구간에서는 예산이 회복되므로 값만 보면 문제가 없어 보이지만, 그것은 문제가 사라진 것이 아니라 드물어진 것이다.
+- **합격 기준**
+  1. 새 방송이 `live`가 된 직후 채팅이 아직 응답하지 않는 동안 `chat-source` 재시작이 발사되지 않는다 — 회귀 테스트.
+  2. 끝난 방송의 죽은 채팅은 여전히 즉시 degraded가 된다 — 회귀 테스트.
+  3. **실측**: 3분 구간으로 연속 5회 교체에서 safe stop 없이 매번 `live`로 복귀한다.
+  4. 게이트 5개 + CI 녹색.
+
+> `youtube.broadcast.segmentMs`는 이 task가 끝날 때까지 `null`로 둔다. 11시간 구간이면 예산이 회복될 여유가 있어 실제로 무너질 확률은 낮지만, 확인되지 않은 채로 무인 운전을 켜지 않는다.

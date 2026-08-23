@@ -47,38 +47,37 @@
 |---|---|---|---|
 | 1 | 1→2→3 순서로 교체되고 OBS 송출이 멈추지 않는다 | met(테스트) | `lifecycle.test.ts` "ends the old broadcast before the new one goes live, on the same stream" — 같은 `streamId`, `liveStreams.insert` 1회뿐, bind가 마지막 transition보다 앞 |
 | 2 | 교체가 세계 상태를 건드리지 않는다 | 구조적으로 met, 테스트 없음 | `BroadcastLifecycle`의 의존은 api·store·config·clock·backoff·streamKeys·alerts·safeStop·logger뿐이고 engine·snapshot 접근이 **없다**. 이 하네스에서 "세계가 안 변했다"를 검사하면 빈 값 두 개를 비교하는 공허한 단언이 되므로 쓰지 않았다 |
-| 3 | 채팅이 새 `liveChatId`로 붙는다 | 부분 met | lifecycle이 새 id를 돌려주는 것은 테스트로 고정("gives the chat a new liveChatId to move to"). `main.ts`의 재시작 배선은 실측으로 확인하지 못했다 — 교체가 완료된 적이 없어서다 |
+| 3 | 채팅이 새 `liveChatId`로 붙는다 | met(단서 있음) | 실측에서 교체 2회 동안 `youtube.chat.transport`가 내내 `ok`였다. 다만 교체 직후 새 채팅이 응답하기까지의 창이 별개 문제로 남는다 — §T36 |
 | 4 | `segmentMs`가 꺼져 있으면 교체가 일어나지 않는다 | met | "does nothing while rollover is switched off", "does nothing before the segment is over" |
-| 5 | **실측: 교체 1회와 끝난 구간의 archive 확인** | **unmet** | 아래 |
+| 5 | **실측: 교체 1회와 끝난 구간의 archive 확인** | met | 아래 실측 — 교체 2회 연속 성공, 종료된 방송 전부 `recorded`/`uploaded` |
 | 6 | 게이트 5개 + CI 녹색 | met (CI는 PR에서) | 아래 Gates |
 
-### 실측에서 확정된 것과 확정되지 않은 것
+### 실측 (2026-08-23, 3분 구간으로 실제 채널에서)
 
-`segmentMs`를 3분으로 임시 설정해 실제 채널에서 두 번 돌렸다.
-
-**확정된 것**
-- 새 방송 생성과 **같은 stream에 bind**가 동작한다. 인코더는 멈추지 않았다.
-- 이전 방송의 `complete` 전환이 동작한다.
-- auto-start는 교체에서 걸리지 않는다(위).
-- `bound`에 갇힌 상태를 **실제 채널에서 회복시켰다** — 재기동 후 그 attempt가 `live`가 됐다.
-
-**확정되지 않은 것 — 교체가 끝까지 가지 못한다.** auto-start를 끈 뒤 실패 지점이 한 칸 뒤로 옮겨갔다:
+**교체가 끝까지 동작한다.** 두 번 연속:
 
 ```text
-1차: ready 에서 못 나감      → transition(live) 403 invalidTransition
-2차: testing 까지 감          → transition(testing→live) 403 invalidTransition
+Eh8R6i:live → complete,  _7V5f6  bound → testing → live   → supervisor live
+_7V5f6:live → complete,  HrjuZ7  bound → testing → live   → supervisor live
 ```
 
-두 번 연속 수정이 실패했으므로 `CLAUDE.md` 디버깅 규칙에 따라 세 번째 추측을 하지 않고 멈췄다.
+여기까지 오는 데 두 가지가 필요했다:
 
-**배제된 가설**: bind 제약(문서로 확정, 동작 확인) · 순서(문서로 확정) · auto-start(문서 + 실측으로 확정) · `bound` 고착(수정·실측 확인).
+- **근본원인**: `transition`은 호출이 돌아올 때 끝난 것이 아니다. 통제 실험이 `transition(testing)` 200 응답에 `testStarting`이 담겨 있고 7초 뒤 `testing`으로 정착하며 그 뒤 `live`가 수락되는 것을 보였다. 우리는 그 7초 안에 `live`를 쏘고 있었다. 수정은 PR #48.
+- **소유자 중복**: `rollSegment`가 채팅을 직접 재시작해 supervisor와 재시작 소유자가 둘이 됐다. 한쪽 `start()`가 다른 쪽 `stop()` 안에 떨어졌다. 수정은 PR #49.
 
-**남은 가설**(다음 착수자가 하나씩 반증할 것):
-1. `enableMonitorStream: true`가 `testing` 단계를 강제하는데, 공유 stream을 쓰는 두 번째 방송의 monitor가 수신 상태가 아니다 → 교체본을 `enableMonitorStream: false`로 만들어 `ready → live`로 직행시킨다. **가장 싸고 가장 유력하다.**
-2. transition이 비동기여서 우리 쪽이 `testing`으로 기록한 시점에 YouTube는 아직 `testStarting`이다 → `live`를 요청하기 전에 `lifeCycleStatus`가 `testing`으로 안정될 때까지 폴링한다.
-3. 하나의 ingestion stream으로 두 방송을 끊김 없이 넘기는 것이 애초에 불가능하고, 송출에 실제 공백이 필요하다 → 그렇다면 D-21의 "OBS는 멈추지 않는다"는 전제가 깨지고, 교체 비용을 다시 산정해야 한다.
+**archive가 남는다 — D-21의 전제가 검증됐다.** 교체로 종료된 방송 전부:
 
-archive(VOD) 생성 여부는 **아직 아무것도 확인하지 못했다.** 그것이 D-21이 rolling을 고른 이유 전부이므로, 교체가 완료되기 전에는 이 task의 목적이 달성됐다고 말할 수 없다.
+```text
+z6yv6yNbcPw  recordingStatus=recorded  uploadStatus=uploaded  PT2H23M49S
+dOk7NDxxZBg  recordingStatus=recorded  uploadStatus=uploaded  PT31M44S
+Eh8R6i_KJUg  recordingStatus=recorded  uploadStatus=uploaded  PT9M17S
+_7V5f65t5S0  recordingStatus=recorded  uploadStatus=uploaded  PT2M39S
+```
+
+**교체 공백은 22초다**(실측): `dOk7ND` 종료 08:39:00 → `Eh8R6i` 시작 08:39:22, 다음 구간도 08:48:40 → 08:49:02. 문서가 요구하는 순서상 없앨 수 없는 창이고(§9.3, `concurrentBroadcastsExceedLimit`), 이제 크기를 안다.
+
+**남은 문제 하나**: 세 번째 사이클이 `safe_stop: restart_budget_exhausted (chat-source:chat_transport)`로 끝났다. 새 방송이 `live`가 된 직후에도 그 방송의 live chat은 아직 `streamList`에 응답하지 않고, 그 창에서 재시작이 연달아 들어가 예산을 태운다. 3분 구간에서는 예산이 회복될 틈이 없고 11시간이면 있다 — 그래도 확인되지 않은 것은 확인되지 않은 것이다. 명세는 `TASK_SPECS` §T36.
 
 ### Gates (executed)
 
@@ -94,11 +93,11 @@ npm run soak:ci      -> exit 0 (임계값 not-locked 유지, A-15)
 
 ## Not done / out of scope
 
-- **교체가 완료되지 않는다**(위). `segmentMs` 기본값이 `null`이므로 이 코드는 켜기 전까지 아무 일도 하지 않는다 — 머지해도 운영 동작은 바뀌지 않는다.
-- archive/VOD 확인.
+- **`segmentMs`는 `null`로 남긴다.** 교체는 동작하지만 §T36이 닫히기 전에는 무인 운전에서 켜지 않는다.
+- 교체 직후 채팅 준비 창(§T36).
 - 호스트 정리 기록: 실측이 남긴 `testing` 고착 attempt(`EAtDmonWj1A`)를 `abandoned`로 닫아 다음 기동이 새 방송을 만들게 했다. 그 뒤 `dOk7NDxxZBg`로 `live` 복귀를 확인했다.
 
 ## Follow-ups
 
-- 남은 가설 1번부터 반증한다.
-- 교체가 완료되면 끝난 구간의 archive가 채널에 남는지 확인한다 — D-21의 전부다.
+- §T36을 닫은 뒤 `segmentMs`를 11시간으로 켠다. 켜는 방법(env override 여부)은 그때 정한다.
+- 22초 공백을 운영 문서에 적는다 — 시청자가 이전 URL에서 끊기는 시간이다.
