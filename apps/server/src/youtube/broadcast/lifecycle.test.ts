@@ -1004,10 +1004,15 @@ describe('stopping a broadcast (review round 1, B4)', () => {
     const resumed = await h.restart().resume()
 
     // A `complete` observation answers a stop, and would have been misread as
-    // "not applied" without the persisted target.
-    expect(resumed?.stage).toBe('complete')
-    expect(resumed?.closedAt).not.toBeNull()
-    expect(resumed?.pendingCall).toBeNull()
+    // "not applied" without the persisted target. The row records that.
+    const stored = h.temp.store.getBroadcastAttempt(attempt?.attemptId ?? '')
+    expect(stored?.stage).toBe('complete')
+    expect(stored?.closedAt).not.toBeNull()
+    expect(stored?.pendingCall).toBeNull()
+    // And the attempt is over, so there is nothing to hand back: carrying a
+    // closed attempt into `ensureBound()` would go on to bind and go live on a
+    // broadcast that has already ended (T30).
+    expect(resumed).toBeNull()
   })
 })
 
@@ -1358,5 +1363,94 @@ describe('guard rails', () => {
     const lifecycle: BroadcastLifecycle = h.lifecycle()
 
     await expect(lifecycle.goLive()).rejects.toThrow(/no open broadcast attempt/)
+  })
+})
+
+/**
+ * T30, measured on the host on 2026-08-23: nothing closes an attempt on the way
+ * out, so the row stays open with `stage = live` while YouTube moves the
+ * abandoned broadcast to `complete`. Every later start then bound itself to a
+ * broadcast that was over — and a complete broadcast has no live chat, so the
+ * run safe-stopped twenty seconds in, over and over.
+ */
+describe('an attempt is only resumed while YouTube can still carry it (T30)', () => {
+  it('discards an open attempt whose broadcast has completed and starts a new one', async () => {
+    const h = await setUp()
+    await h.lifecycle().ensureLive()
+    const stale = h.temp.store.findOpenBroadcastAttempt()
+    const staleBroadcastId = stale?.broadcastId ?? ''
+    // What YouTube does to a broadcast whose encoder went away.
+    const broadcast = h.server.broadcasts.get(staleBroadcastId)
+    if (broadcast !== undefined) broadcast.lifeCycleStatus = 'complete'
+
+    const restarted = h.restart()
+    expect(await restarted.resume()).toBeNull()
+
+    const closed = h.temp.store.getBroadcastAttempt(stale?.attemptId ?? '')
+    expect(closed?.stage).toBe('abandoned')
+    expect(closed?.closedAt).not.toBeNull()
+    expect(closed?.lastErrorReason).toBe('broadcast_complete')
+    expect(h.alerts.ofKind('attempt_discarded')[0]?.reason).toBe('broadcast_complete')
+
+    // And the run gets a broadcast it can actually use.
+    const binding = await restarted.ensureBound()
+    expect(binding.broadcastId).not.toBe(staleBroadcastId)
+    expect(h.temp.store.findOpenBroadcastAttempt()?.attemptId).toBe(binding.attemptId)
+  })
+
+  it('discards an open attempt whose broadcast no longer exists', async () => {
+    const h = await setUp()
+    await h.lifecycle().ensureLive()
+    const stale = h.temp.store.findOpenBroadcastAttempt()
+    h.server.broadcasts.delete(stale?.broadcastId ?? '')
+
+    expect(await h.restart().resume()).toBeNull()
+
+    const closed = h.temp.store.getBroadcastAttempt(stale?.attemptId ?? '')
+    expect(closed?.stage).toBe('abandoned')
+    expect(closed?.lastErrorReason).toBe('broadcast_missing')
+  })
+
+  it('still resumes an attempt whose broadcast is live', async () => {
+    const h = await setUp()
+    const target = await h.lifecycle().ensureLive()
+
+    const resumed = await h.restart().resume()
+
+    // §9.1's crash recovery is the reason `resume()` exists; the check may not
+    // cost it. The same attempt, the same broadcast, still open.
+    expect(resumed?.attemptId).toBe(target.attemptId)
+    expect(resumed?.broadcastId).toBe(target.broadcastId)
+    expect(resumed?.closedAt).toBeNull()
+  })
+
+  it('asks YouTube once per process, not once per resume', async () => {
+    const h = await setUp()
+    await h.lifecycle().ensureLive()
+    const restarted = h.restart()
+    await restarted.resume()
+    const listsAfterPickup = h.server.requestsFor('liveBroadcasts.list').length
+
+    await restarted.resume()
+    await restarted.resume()
+
+    // `goLive()` resumes on its way in too, and a quota unit per call to re-read
+    // what this process already established would be a real cost.
+    expect(h.server.requestsFor('liveBroadcasts.list').length).toBe(listsAfterPickup)
+  })
+
+  it('decides nothing when the lifecycle cannot be read', async () => {
+    const h = await setUp({ maxAttempts: 1 })
+    await h.lifecycle().ensureLive()
+    const stale = h.temp.store.findOpenBroadcastAttempt()
+    h.server.queueFailure('liveBroadcasts.list', { status: 503, reason: 'serviceUnavailable' })
+
+    await expect(h.restart().resume()).rejects.toThrow()
+
+    // Spec §9.1: an answer that does not settle the question adopts nothing and
+    // discards nothing. The attempt is still there for the next try.
+    const untouched = h.temp.store.getBroadcastAttempt(stale?.attemptId ?? '')
+    expect(untouched?.closedAt).toBeNull()
+    expect(untouched?.stage).toBe('live')
   })
 })

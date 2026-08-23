@@ -53,7 +53,7 @@
 
 | # | 기준 | 상태(met/unmet/unverifiable) | 근거(테스트 파일·명령·출력) |
 |---|---|---|---|
-| 1 | 메시지가 한 건도 없는 라이브 채팅에서 `chat_transport`가 `ok`가 되고 supervisor가 `live`에 도달한다 | 코드에서 met · 실측 미완 | `chat-source.test.ts` "reports the transport as ok on a call the server has answered with nothing" — 실제 gRPC 서버가 호출을 받고 아무것도 보내지 않는다(`{ end: 'hang' }`). 채널이 `READY`에 도달하고 `connected`는 `false`인데 신호는 `ok`. `health.test.ts`가 신호 자체를 직접 덮는다. 방송 실측은 아래 Follow-ups |
+| 1 | 메시지가 한 건도 없는 라이브 채팅에서 `chat_transport`가 `ok`가 되고 supervisor가 `live`에 도달한다 | met | `chat-source.test.ts` "reports the transport as ok on a call the server has answered with nothing" — 실제 gRPC 서버가 호출을 받고 아무것도 보내지 않는다(`{ end: 'hang' }`). 채널이 `READY`에 도달하고 `connected`는 `false`인데 신호는 `ok`. `health.test.ts`가 신호 자체를 직접 덮는다. 방송 실측은 아래 실측 절 |
 | 2 | 실제로 끊겼을 때는 여전히 degraded로 내려간다 | met | `health.test.ts`: `READY` + `consecutiveFailures: 2` → `unknown:reconnecting`(기존 유예 승격 경로), `retryBudgetExhausted`·`stopped`는 `READY` 채널에서도 `degraded`, `TRANSIENT_FAILURE` keepalive 경로 불변 |
 | 3 | 게이트 5개 + CI 녹색 | met (CI는 PR #38) | 아래 Gates |
 
@@ -71,6 +71,29 @@ npm run build        -> exit 0
 npm run soak:ci      -> exit 0 (임계값 not-locked 유지, A-15)
 ```
 
+## 실측 (2026-08-23 05:23–05:33 UTC, 호스트 `WORKSTATION`)
+
+`Start-VerticalLive.ps1 -WithObs` + `VL_BROADCAST_ENABLED=true`·`VL_YOUTUBE_CHAT_ENABLED=true`로 기동. 시작 시점의 DB에는 실패한 앞선 기동이 남긴 stale row가 그대로 있었다(attempt `22d0ba05…`, stage `live`, `closed_at` NULL, broadcast `1c8WAFCmAQI`).
+
+```text
+05:23:48  attempt 22d0ba05… → stage=abandoned  last_error_reason=broadcast_complete  closed_at 기록
+          새 attempt 9bb6d5b4…  broadcast z6yv6yNbcPw  (private)
+05:29:32  supervisor=live      lastTransitionReason=signals:all_families_ok
+05:33     여전히 live, safeStop=null, 재시작 예산 소진 0건(모든 component attempts=0)
+
+families:  coordinator=ok state_commit=ok chat_transport=ok renderer=ok
+           obs_output=ok youtube_broadcast=ok frame_loss=ok dead_man=unknown(비활성)
+
+youtube.chat.transport = ok
+{"mode":"grpc","connected":false,"channelState":"READY","consecutiveFailures":0,
+ "retryBudgetExhausted":false,"lastErrorKind":null,"lastResponseAt":"2026-08-23T05:32:12.671Z",
+ "streamOfflineAt":null}
+
+renderer: {"frameCounter":15291,"fps":30,"webglContextLost":false,"lastAppliedStateRevision":2223}
+```
+
+`connected:false` + `channelState:READY` + `ok` — 시청자가 아무도 입력하지 않는 채팅에서 transport가 서 있다고 보고하는 상태이며, 수정 전에는 이것이 `unknown:reconnecting`이었다. 3분 넘게 유지됐고 `chat-source` 재시작은 한 번도 요구되지 않았다. 같은 상태가 시작 직후뿐 아니라 운영 중에도 반복해서 나타난다(서버가 장수 호출을 정상 종료할 때마다 `connected`가 내려가고 채널은 `READY`로 남는다).
+
 ## Not done / out of scope
 
 - 임계값·재시도 횟수 조정(스펙 §T28이 명시적으로 금지).
@@ -78,6 +101,5 @@ npm run soak:ci      -> exit 0 (임계값 not-locked 유지, A-15)
 
 ## Follow-ups
 
-- 합격 기준 1의 실측: 채팅을 켠 private 방송 1건을 띄워 `/health` 스냅샷을 이 티켓에 붙인다. 호스트의 OBS·OAuth가 필요하므로 사용자가 일정을 정하는 단계다.
 - 범위 밖 잠복 결함: `ChatSourceState.#tokenRejected`가 한 번 서면 지워지지 않아 `youtube.chat.reconnect`가 영구 `degraded`가 된다. 재시작 경로(`main.ts:613`)는 같은 인스턴스를 재사용하므로 상태가 살아남아 `chat_transport`가 재시작을 계속 요구하고 예산이 소진된다 — resume token이 한 번 거부되면 T28과 같은 모양으로 무너진다. 별도 등록.
 

@@ -25,6 +25,8 @@ export type BroadcastAlertKind =
   | 'attempt_marker_cleared'
   /** The configured privacy was applied; the broadcast is no longer private. */
   | 'broadcast_published'
+  /** An open attempt could not be resumed and was closed so a new one can start. */
+  | 'attempt_discarded'
 
 export interface BroadcastAlert {
   readonly kind: BroadcastAlertKind
