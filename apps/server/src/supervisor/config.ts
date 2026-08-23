@@ -21,6 +21,12 @@ export interface SupervisorRendererConfig {
   readonly minFps: number
   /** A renderer report older than this makes the family unobservable. */
   readonly reportStaleAfterMs: number
+  /**
+   * Frames a freshly loaded page must have drawn before its `fps` average is
+   * treated as a measurement (T35). `frameCounter` restarts at 0 on every page
+   * load, so below this the average says "just started", not "too slow".
+   */
+  readonly warmupFrames: number
 }
 
 export interface SupervisorRestartConfig {
@@ -251,6 +257,7 @@ export function loadSupervisorConfig(options: LoadSupervisorConfigOptions = {}):
         renderer['reportStaleAfterMs'],
         'supervisor.renderer.reportStaleAfterMs',
       ),
+      warmupFrames: readPositiveInt(renderer['warmupFrames'], 'supervisor.renderer.warmupFrames'),
     }),
     startup: Object.freeze({
       maxAttempts: readPositiveInt(startup['maxAttempts'], 'supervisor.startup.maxAttempts'),
