@@ -58,8 +58,13 @@ YouTube Studio에서 **실제 값**을 읽어 증빙과 함께 기록한다. 이
 - [ ] Membership 활성 여부
 - [ ] Shopping(자체/Affiliate) 활성 여부
 - [ ] 구독자 수 / 최근 12개월 공개 시청시간 / 최근 90일 공개 업로드 수 / 최근 90일 Shorts 조회수
+      — **전환 시점 기준선(D-10 개정, Data API `channels.list` 실측 2026-08-22)**: 구독자 16, 업로드 영상 2,
+      누적 조회수 2,281, 채널 개설 2025-10-27. 시청시간·90일 통계는 Analytics scope가 필요해 Studio에서 채운다.
+      (채널 이름·핸들·channelId는 여기 적지 않는다 — 정체성은 §17에서 미정이고 이 저장소는 공개다.)
 - [ ] 라이브 스트리밍 제한·strike 상태, 2단계 인증, advanced features, AdSense 연결 상태
-- [ ] 채널·AdSense 국가/지역
+      — **라이브 스트리밍은 사용 가능**(2026-08-22 실측: `liveStreams.list?mine=true`가 200으로 응답).
+      `longUploadsStatus=allowed`, `isLinked=true`. strike·2단계 인증·advanced features·AdSense는 Studio에서 확인한다.
+- [ ] 채널·AdSense 국가/지역 — **채널 국가가 미설정이다**(2026-08-22 실측: `snippet.country` 없음). Studio에서 설정하고 기입한다.
 
 > **상태(D-10 개정, 2026-08-22)**: 채널은 **이미 존재한다** — 사용자가 쓰던 채널을 비워 이 프로젝트로 전환한다.
 > 그래서 "새 채널이라 전 항목 없음/미달"이라는 예상은 **쓰지 않는다**: 영상을 지워도 strike·YPP·정책 이력은
