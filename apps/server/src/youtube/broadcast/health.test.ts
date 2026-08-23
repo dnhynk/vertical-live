@@ -43,6 +43,8 @@ describe('derived signals', () => {
         stream: statusOf(),
         broadcastId: 'synthetic-broadcast-1',
         lifeCycleStatus: 'live',
+        lifeCycleSource: 'api',
+        lastReconciledAt: null,
       },
       OBSERVED_AT,
     )
@@ -60,6 +62,8 @@ describe('derived signals', () => {
         stream: statusOf({ streamStatus: 'inactive', healthStatus: 'noData' }),
         broadcastId: 'synthetic-broadcast-1',
         lifeCycleStatus: 'ready',
+        lifeCycleSource: 'api',
+        lastReconciledAt: null,
       },
       OBSERVED_AT,
     )
@@ -86,6 +90,8 @@ describe('derived signals', () => {
         stream: statusOf({ healthStatus: 'bad' }),
         broadcastId: null,
         lifeCycleStatus: null,
+        lifeCycleSource: 'api',
+        lastReconciledAt: null,
       },
       OBSERVED_AT,
     )
@@ -106,6 +112,8 @@ describe('derived signals', () => {
         }),
         broadcastId: null,
         lifeCycleStatus: null,
+        lifeCycleSource: 'api',
+        lastReconciledAt: null,
       },
       OBSERVED_AT,
     )
@@ -118,7 +126,14 @@ describe('derived signals', () => {
 
   it('reports unknown, with a reason, when there is nothing to observe yet', () => {
     const signals = deriveBroadcastHealthSignals(
-      { streamId: null, stream: null, broadcastId: null, lifeCycleStatus: null },
+      {
+        streamId: null,
+        stream: null,
+        broadcastId: null,
+        lifeCycleStatus: null,
+        lifeCycleSource: 'none',
+        lastReconciledAt: null,
+      },
       OBSERVED_AT,
     )
 
@@ -186,6 +201,83 @@ describe('monitor', () => {
     expect(byName(signals, YOUTUBE_BROADCAST_LIFECYCLE_SIGNAL).reason).toBe('lifecycle_unreadable')
   })
 
+  /**
+   * The whole point of T44: `liveBroadcasts.list` is read on the reconcile
+   * interval, not every poll. At 20s ticks and a 300s reconcile that is one
+   * call in fifteen rather than fifteen.
+   */
+  it('reads the lifecycle on the reconcile interval, not every poll', async () => {
+    const clock = new FakeClock()
+    harness = await createBroadcastHarness({ clock })
+    const h = harness
+    const target = await h.lifecycle().ensureLive()
+    const stream = h.server.streams.get(target.streamId)
+    if (stream !== undefined) {
+      stream.streamStatus = 'active'
+      stream.healthStatus = 'good'
+    }
+    const monitor = new BroadcastHealthMonitor({
+      api: h.api,
+      config: h.config,
+      onSignal: () => {},
+      resources: () => ({
+        streamId: target.streamId,
+        broadcastId: target.broadcastId,
+        lifeCycleStage: 'live',
+      }),
+      clock,
+    })
+
+    const first = await monitor.poll()
+    expect(byName(first, YOUTUBE_BROADCAST_LIFECYCLE_SIGNAL).detail['lifeCycleSource']).toBe('api')
+
+    // A tick inside the reconcile window answers from the stage this process
+    // drove the broadcast to, spending nothing.
+    await clock.advance(h.config.healthPollIntervalMs)
+    const second = await monitor.poll()
+    const lifeCycle = byName(second, YOUTUBE_BROADCAST_LIFECYCLE_SIGNAL)
+    expect(lifeCycle.detail['lifeCycleSource']).toBe('local')
+    expect(lifeCycle.status).toBe('ok')
+    expect(lifeCycle.detail['lastReconciledAt']).not.toBeNull()
+    // The volatile half is still read every tick.
+    expect(byName(second, YOUTUBE_STREAM_STATUS_SIGNAL).status).toBe('ok')
+
+    await clock.advance(h.config.lifecycleReconcileIntervalMs)
+    const third = await monitor.poll()
+    expect(byName(third, YOUTUBE_BROADCAST_LIFECYCLE_SIGNAL).detail['lifeCycleSource']).toBe('api')
+  })
+
+  /**
+   * `BroadcastStage` is this product's vocabulary for what it drove; YouTube's
+   * `lifeCycleStatus` is a different thing and reconcile exists to compare them.
+   * Only `live` crosses over; any other stage says nobody has asked yet.
+   */
+  it('does not pass a local stage off as a lifecycle YouTube confirmed', async () => {
+    const clock = new FakeClock()
+    harness = await createBroadcastHarness({ clock })
+    const h = harness
+    const target = await h.lifecycle().ensureLive()
+    const monitor = new BroadcastHealthMonitor({
+      api: h.api,
+      config: h.config,
+      onSignal: () => {},
+      resources: () => ({
+        streamId: target.streamId,
+        broadcastId: target.broadcastId,
+        lifeCycleStage: 'bound',
+      }),
+      clock,
+    })
+
+    await monitor.poll()
+    await clock.advance(h.config.healthPollIntervalMs)
+    const lifeCycle = byName(await monitor.poll(), YOUTUBE_BROADCAST_LIFECYCLE_SIGNAL)
+
+    expect(lifeCycle.status).toBe('unknown')
+    expect(lifeCycle.reason).toBe('awaiting_reconcile')
+    expect(lifeCycle.detail['lifeCycleStatus']).toBeNull()
+  })
+
   it('starts and stops on the injected clock', async () => {
     const clock = new FakeClock()
     harness = await createBroadcastHarness({ clock })
@@ -201,7 +293,9 @@ describe('monitor', () => {
 
     monitor.start()
     expect(monitor.running).toBe(true)
-    await clock.advance(h.config.statusPollIntervalMs)
+    // The continuous poll runs on its own interval; statusPollIntervalMs is now
+    // only for the bounded waits a transition makes (T44).
+    await clock.advance(h.config.healthPollIntervalMs)
     monitor.stop()
 
     expect(signals.length).toBeGreaterThanOrEqual(3)

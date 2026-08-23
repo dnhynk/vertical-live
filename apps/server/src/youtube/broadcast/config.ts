@@ -117,6 +117,25 @@ export interface BroadcastConfig {
   readonly autoStartWaitMs: number
   readonly statusPollIntervalMs: number
   /**
+   * How often the continuous health poll reads `liveStreams.list`.
+   *
+   * Two ceilings bound this and they nearly meet. The supervisor drops a signal
+   * nobody refreshed within `supervisor.signalStaleAfterMs` (30s), so a longer
+   * interval would make the family unobservable between polls. The daily quota
+   * is the other: at 1 unit a call this is 4,320 units a day, and the whole
+   * allowance is 10,000 shared with the chat listener and every rollover write
+   * (T44 — the previous 15s interval spent 11,520 units a day on this poll
+   * alone and emptied the allowance).
+   */
+  readonly healthPollIntervalMs: number
+  /**
+   * How often the same poll also reads `liveBroadcasts.list`. Far slower,
+   * because between reads the lifecycle stage is known locally: it advances
+   * only when one of our own transition calls succeeds. This read is the
+   * reconcile of spec §9.1, not the observation.
+   */
+  readonly lifecycleReconcileIntervalMs: number
+  /**
    * How long a transition is given to leave its in-flight state (`testStarting`,
    * `liveStarting`) before the caller stops waiting. The reference says such a
    * transition "may take several seconds, or even up to a minute"
@@ -219,6 +238,14 @@ export function loadBroadcastConfig(options: LoadAuthConfigOptions = {}): Broadc
     transitionSettleMs: readPositiveInt(
       section['transitionSettleMs'],
       'youtube.broadcast.transitionSettleMs',
+    ),
+    healthPollIntervalMs: readPositiveInt(
+      section['healthPollIntervalMs'],
+      'youtube.broadcast.healthPollIntervalMs',
+    ),
+    lifecycleReconcileIntervalMs: readPositiveInt(
+      section['lifecycleReconcileIntervalMs'],
+      'youtube.broadcast.lifecycleReconcileIntervalMs',
     ),
     statusPollIntervalMs: readPositiveInt(
       section['statusPollIntervalMs'],

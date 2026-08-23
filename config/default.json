@@ -352,6 +352,8 @@
       "requestTimeoutMs": 15000,
       "autoStartWaitMs": 120000,
       "statusPollIntervalMs": 15000,
+      "healthPollIntervalMs": 20000,
+      "lifecycleReconcileIntervalMs": 300000,
       "transitionSettleMs": 90000,
       "reconcileMaxPages": 4,
       "segmentMs": null,
@@ -368,6 +370,8 @@
         "requestTimeoutMs",
         "autoStartWaitMs",
         "statusPollIntervalMs",
+        "healthPollIntervalMs",
+        "lifecycleReconcileIntervalMs",
         "reconcileMaxPages"
       ]
     },

@@ -77,6 +77,8 @@ export const TEST_BROADCAST_CONFIG: BroadcastConfig = Object.freeze({
   requestTimeoutMs: 2_000,
   autoStartWaitMs: 40,
   statusPollIntervalMs: 20,
+  healthPollIntervalMs: 20_000,
+  lifecycleReconcileIntervalMs: 300_000,
   reconcileMaxPages: 4,
   stream: Object.freeze({
     title: 'vertical-live ingest',

@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { createTempStore, type TempStore } from '../../db/testing/temp-store.js'
 import { FakeClock } from '../../testing/fake-clock.js'
 import {
   METHOD_SCOPES,
@@ -211,6 +212,66 @@ describe('QuotaTracker', () => {
     expect(new Date(nextMidnightMs(Date.UTC(2026, 10, 2, 6))).toISOString()).toBe(
       '2026-11-02T08:00:00.000Z',
     )
+  })
+})
+
+/**
+ * The counter used to live only in process memory. On 2026-08-23 the host
+ * restarted several times, each restart set it back to zero, and the day's
+ * allowance went with no warning logged while Google's account-wide counter
+ * kept climbing (T44).
+ */
+describe('QuotaTracker persistence', () => {
+  const noonUtc = Date.UTC(2026, 7, 17, 12)
+  let temp: TempStore
+
+  beforeEach(() => {
+    temp = createTempStore({ clock: new FakeClock({ epochMs: noonUtc }) })
+  })
+  afterEach(() => {
+    temp.dispose()
+  })
+
+  function tracker(store = temp.store): QuotaTracker {
+    return new QuotaTracker({
+      clock: new FakeClock({ epochMs: noonUtc }),
+      dailyUnits: 10_000,
+      reserveUnits: 500,
+      store,
+    })
+  }
+
+  it('restores the day it already spent when the process restarts', () => {
+    const before = tracker()
+    before.record('liveBroadcasts.insert') // 50
+    before.record('liveStreams.list', 30) // 30
+    expect(before.snapshot().spentUnits).toBe(80)
+
+    const after = tracker(temp.reopen())
+
+    expect(after.snapshot().spentUnits).toBe(80)
+    expect(after.snapshot().byMethod['liveBroadcasts.insert']).toBe(50)
+    expect(after.snapshot().byMethod['liveStreams.list']).toBe(30)
+  })
+
+  it('still refuses a call the restored day cannot afford', () => {
+    const before = tracker()
+    before.record('liveStreams.list', 9_600)
+    expect(before.canSpend('liveStreams.list')).toBe(false)
+
+    // The point of the fix: the restart used to answer `true` here.
+    expect(tracker(temp.reopen()).canSpend('liveStreams.list')).toBe(false)
+  })
+
+  it('does not carry one quota day into the next', () => {
+    tracker().record('liveStreams.list', 100)
+    const nextDay = new QuotaTracker({
+      clock: new FakeClock({ epochMs: noonUtc + 24 * 60 * 60 * 1000 }),
+      dailyUnits: 10_000,
+      store: temp.reopen(),
+    })
+
+    expect(nextDay.snapshot().spentUnits).toBe(0)
   })
 })
 

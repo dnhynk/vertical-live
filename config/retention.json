@@ -278,6 +278,10 @@
   ],
   "schemaOnlyTables": [
     {
+      "table": "quota_usage",
+      "reason": "The day's YouTube API spend per method (Pacific-Time date, method name, unit count). It exists so the quota guard survives a restart (T44); it holds no API payload, no message and no identifier, and a sweep would delete the very record that keeps the next day inside its allowance"
+    },
+    {
       "table": "retention_ledger",
       "reason": "This file's own audit trail: field key, source, purpose, allowed deadline, outcome, row count and deletion instant. It is the §12.4 evidence that deletions ran, holds no API data and no identifier, and is therefore retained rather than swept — deleting it would destroy the record the policy requires"
     },

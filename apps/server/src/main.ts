@@ -216,6 +216,7 @@ const httpServer = createServer({
   rendererHealth: () => hub.lastHealth,
   sourceHealth: () => chatSource?.signals() ?? [],
   supervisorHealth: () => supervisor.health(),
+  quotaUsage: () => quotaTracker?.snapshot() ?? null,
   // The one collector, read by both surfaces (spec §14.1, T31).
   commandMetrics: () => commandMetrics.snapshot(),
   adminKill: new AdminKillEndpoint({
@@ -370,6 +371,8 @@ const needsGrant = chatConfig.enabled || supervisorConfig.integrations.broadcast
 let tokens: TokenManager | null = null
 let broadcastPort: BroadcastPort | null = null
 let broadcastLifecycle: BroadcastLifecycle | null = null
+/** Set when the broadcast integration is on; `/health` reads the day's spend. */
+let quotaTracker: QuotaTracker | null = null
 
 if (needsGrant) {
   const authConfig = loadYouTubeAuthConfig()
@@ -423,6 +426,18 @@ if (needsGrant) {
   if (supervisorConfig.integrations.broadcast) {
     const broadcastConfig = loadBroadcastConfig()
     const quotaConfig = loadQuotaConfig()
+    // Backed by the store, so the day's spend survives a restart. Without that
+    // the guard reset to zero on every restart while Google's account-wide
+    // counter kept climbing, which is how a whole day's allowance went with no
+    // warning logged (T44).
+    quotaTracker = new QuotaTracker({
+      clock: systemClock,
+      dailyUnits: quotaConfig.dailyUnits,
+      reserveUnits: quotaConfig.reserveUnits,
+      timeZone: quotaConfig.resetTimeZone,
+      store,
+      logger: stdoutLogger,
+    })
     const custodian = new StreamKeyCustodian({ vault, redactor, logger: stdoutLogger })
     const api = new YouTubeLiveApi({
       tokens,
@@ -431,12 +446,7 @@ if (needsGrant) {
       // The custodian owns the key between the API response and the vault write;
       // the API client keeps no copy (BOARD A-16).
       streamKeySink: custodian.sink,
-      quota: new QuotaTracker({
-        clock: systemClock,
-        dailyUnits: quotaConfig.dailyUnits,
-        reserveUnits: quotaConfig.reserveUnits,
-        timeZone: quotaConfig.resetTimeZone,
-      }),
+      quota: quotaTracker,
       logger: stdoutLogger,
       redactor,
     })
@@ -472,6 +482,10 @@ if (needsGrant) {
       resources: () => ({
         streamId: binding?.streamId ?? null,
         broadcastId: binding?.broadcastId ?? null,
+        // The stage this process last drove the broadcast to. The poller uses
+        // it between reconciles so `liveBroadcasts.list` is not spent every
+        // tick (T44).
+        lifeCycleStage: binding?.stage ?? null,
       }),
       onSignal: (signal) => {
         supervisor.report(signal)
