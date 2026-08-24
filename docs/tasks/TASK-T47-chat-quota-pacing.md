@@ -49,7 +49,7 @@ Cap successful gRPC `liveChatMessages.streamList` reconnect starts at a quota-sa
 | 3 | Rapid successful normal closes cannot exceed the configured start rate and resume the durable response token. | met | `grpc-pacing.test.ts`: virtual starts `[0, 25000, 50000, 75000]`; requests resume `token_1`→`token_3`; 4 actual opens produce exactly 4 quota units. A separate 10,000ms-open case waits only the remaining 15,000ms. |
 | 4 | Stop/cancel interrupts a pacing wait without waiting the full interval. | met | `grpc-pacing.test.ts`: stop during a 25,000ms pace resolves `cancelled` at monotonic 0 with zero pending timers and cleared health wait. Existing target-watcher and source stop suites remain green. |
 | 5 | Health distinguishes successful pacing from failure backoff; no fake events, duplicate quota records, or contract changes. | met | `health.test.ts`: `waitReason=successful_close_pacing` vs `failure_backoff`; reconnect remains observational `ok`. Diff has no contract/fake-event/dependency changes. |
-| 6 | Rebase, five local gates, PR latest-head CI. | partially met | Rebased onto `origin/main` `76399d5`; `npm ci` and all five local gates passed. PR #60 opened; latest-head CI pending at ticket update time and must be verified before worker completion. |
+| 6 | Rebase, five local gates, PR latest-head CI. | met | Rebased onto `origin/main` `76399d5`; `npm ci` and all five local gates passed. PR #60 CI run `32707789506` passed all steps on implementation/evidence head `8b7adc9`; the final documentation-only result commit is verified by its own latest-head CI before worker completion. |
 
 ### Gates (executed)
 
