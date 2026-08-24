@@ -1,7 +1,7 @@
 # TASK-T46-unified-quota
 
 - Task: T46 chat·broadcast 통합 quota 회계 (`docs/tasks/TASK_SPECS.md` §T46)
-- Branch: `dnhynk/t46-unified-quota` · PR: 미생성
+- Branch: `dnhynk/t46-unified-quota` · PR: #59
 - Orca: task `task_7b961e0d39f5` · dispatch `ctx_e476c3181931`
 - Spec sections read: §9.1, §11
 - BOARD decisions/assumptions relied on: D-1, D-4, A-5, A-15, T44·T46 실측 기록
