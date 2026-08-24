@@ -68,7 +68,11 @@ PR #58 CI            -> passed; run 32699875783 (all gates + soak:ci)
 
 - 없음.
 
-## Review round <n>
+## Review round 1
 
 | finding | 처리(고침 SHA / 반박 근거) |
 |---|---|
+| [major] `docs/ops/gate2-experiments.md`가 D-21 단일 rolling 선택 직후 두 전략 구간 스케줄을 지시함 | 고침(`0d18dd7`): 선택된 11시간 rolling 구간의 순차 운영·시간대 기록으로 정합화 |
+| [minor] lifecycle runtime warning과 migration 주석이 rolling을 non-production experiment, `single`을 production으로 설명함 | 고침(`0d18dd7`): retained enum label인 production rolling 선택으로 수정하고 operator-visible warning 회귀 테스트 추가 |
+
+재검증: `npm run format:check`, `npm run lint`, `npm run typecheck`, `npm run test`(151 files, 2,213 passed, 1 skipped), `npm run build` 모두 통과.
