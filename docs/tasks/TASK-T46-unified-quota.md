@@ -45,7 +45,7 @@ YouTube broadcast와 chat의 모든 quota 사용을 기존 `quota_usage`에 영�
 | 2 | combined/chat-only health | met | `server.test.ts` chat-only `/health.quota`가 gRPC+REST 합산 5 units와 `byMethod` 노출 |
 | 3 | store 영속·복원·합산 guard | met | `quota.test.ts` mixed-method restart 복원, `broadcast/api.test.ts` chat spend 포함 reserve 차단, `quota/runtime.test.ts` 기존 store write-through |
 | 4 | aggregate·restart·chat-only·no-double-count 회귀 | met | gRPC·REST 테스트가 실제 요청 1회당 정확히 1 unit, 전체 2,220 passed·1 skipped |
-| 5 | fetch/rebase, 5 gates, latest-head CI | pending | fetch/rebase와 로컬 5개 gate 통과; PR latest-head CI 대기 |
+| 5 | fetch/rebase, 5 gates, latest-head CI | met | fetch/rebase와 로컬 5개 gate 통과; PR #59 exact-head CI run `32703728337` green |
 
 ### Gates (executed)
 
@@ -62,6 +62,8 @@ npm run test
   PASS — 152 files, 2,220 passed, 1 skipped
 npm run build
   PASS — contract schema current; renderer/server/simulator/soak built
+GitHub CI
+  PASS — PR #59 run 32703728337, commit be8c303 (이 Result 기록 전 head)
 ```
 
 ## Not done / out of scope
