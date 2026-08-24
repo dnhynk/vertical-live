@@ -17,6 +17,7 @@ import {
   testParseCommand,
 } from '../../testing/chat-test-support.js'
 import { FakeClock } from '../../testing/fake-clock.js'
+import { QuotaTracker } from '../quota/tracker.js'
 import type { ChatConfig } from './config.js'
 import { CancellableDelay, type ChatAccessTokens } from './retry.js'
 import { RestChatSource } from './rest-source.js'
@@ -57,6 +58,7 @@ describe('RestChatSource', () => {
       config?: Partial<ChatConfig>
       auth?: ChatAccessTokens
       initialPageToken?: string | null
+      quota?: QuotaTracker
     } = {},
   ): Promise<Harness> {
     const server = await FakeLiveChatRestServer.start(script)
@@ -83,6 +85,7 @@ describe('RestChatSource', () => {
       auth: options.auth ?? fixedTokens(),
       liveChatId: TEST_LIVE_CHAT_ID,
       random: () => 0,
+      ...(options.quota === undefined ? {} : { quota: options.quota }),
     })
     cleanups.push(async () => {
       source.stop()
@@ -105,6 +108,22 @@ describe('RestChatSource', () => {
       'rest',
     ])
     expect(temp.store.getSourceCheckpoint(TEST_SOURCE_KEY)?.nextPageToken).toBe('rest_token_1')
+  })
+
+  it('books each REST fallback request exactly once on the shared tracker', async () => {
+    const quota = new QuotaTracker({ clock: systemClock, store: temp.store })
+    const h = await harness(
+      [{ status: 404, body: { error: { code: 404, errors: [{ reason: 'liveChatNotFound' }] } } }],
+      { quota },
+    )
+
+    await h.source.run()
+
+    expect(h.server.requests).toHaveLength(1)
+    expect(quota.snapshot()).toMatchObject({
+      spentUnits: 1,
+      byMethod: { 'liveChatMessages.list': 1 },
+    })
   })
 
   it('requests id,snippet only while the consent gate is closed, and resumes', async () => {

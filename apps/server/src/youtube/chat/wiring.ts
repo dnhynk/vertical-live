@@ -5,6 +5,7 @@ import type { PersistenceStore } from '../../db/store.js'
 import type { InboxWriter } from '../../engine/ingest.js'
 import type { CommandMetrics, InputConfig } from '../../input/index.js'
 import type { Logger } from '../../secrets/redaction.js'
+import type { QuotaTracker } from '../quota/tracker.js'
 import type { LiveChatTargetResolver } from './chat-source.js'
 import type { ChatConfig } from './config.js'
 import type { ChatAccessTokens } from './retry.js'
@@ -56,6 +57,8 @@ export interface ChatWiring {
   readonly logger: Logger
   /** The process's shared `TokenManager`, or `null` when there is no grant yet. */
   readonly auth: ChatAccessTokens | null
+  /** The process's shared quota tracker, or `null` when YouTube is disabled. */
+  readonly quota: QuotaTracker | null
   /** T10's bound broadcast, or `null` when the lifecycle is not wired. */
   readonly resolveTarget: LiveChatTargetResolver | null
 }
@@ -88,6 +91,7 @@ export function chatRuntimeDeps(wiring: ChatWiring): ChatRuntimeDeps {
     config: wiring.config,
     logger: wiring.logger,
     ...(wiring.auth === null ? {} : { auth: wiring.auth }),
+    ...(wiring.quota === null ? {} : { quota: wiring.quota }),
     ...(wiring.resolveTarget === null ? {} : { resolveTarget: wiring.resolveTarget }),
     onIngested: () => {
       engine.pump()

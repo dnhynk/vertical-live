@@ -58,7 +58,8 @@ import { createChatSource } from './youtube/chat/runtime.js'
 import { chatRuntimeDeps } from './youtube/chat/wiring.js'
 import { createExponentialBackoff } from './youtube/quota/backoff.js'
 import { loadQuotaConfig } from './youtube/quota/config.js'
-import { QuotaTracker } from './youtube/quota/tracker.js'
+import { createProcessQuotaTracker } from './youtube/quota/runtime.js'
+import type { QuotaTracker } from './youtube/quota/tracker.js'
 
 /**
  * Process entry point: one store, one engine, one renderer hub, one HTTP
@@ -371,7 +372,7 @@ const needsGrant = chatConfig.enabled || supervisorConfig.integrations.broadcast
 let tokens: TokenManager | null = null
 let broadcastPort: BroadcastPort | null = null
 let broadcastLifecycle: BroadcastLifecycle | null = null
-/** Set when the broadcast integration is on; `/health` reads the day's spend. */
+/** Set when either YouTube integration is on; `/health` reads their combined spend. */
 let quotaTracker: QuotaTracker | null = null
 
 if (needsGrant) {
@@ -423,21 +424,21 @@ if (needsGrant) {
     },
   })
 
+  const quotaConfig = loadQuotaConfig()
+  quotaTracker = createProcessQuotaTracker({
+    chatEnabled: chatConfig.enabled,
+    broadcastEnabled: supervisorConfig.integrations.broadcast,
+    clock: systemClock,
+    config: quotaConfig,
+    store,
+    logger: stdoutLogger,
+  })
+  if (quotaTracker === null) {
+    throw new Error('YouTube quota tracker missing for an enabled integration')
+  }
+
   if (supervisorConfig.integrations.broadcast) {
     const broadcastConfig = loadBroadcastConfig()
-    const quotaConfig = loadQuotaConfig()
-    // Backed by the store, so the day's spend survives a restart. Without that
-    // the guard reset to zero on every restart while Google's account-wide
-    // counter kept climbing, which is how a whole day's allowance went with no
-    // warning logged (T44).
-    quotaTracker = new QuotaTracker({
-      clock: systemClock,
-      dailyUnits: quotaConfig.dailyUnits,
-      reserveUnits: quotaConfig.reserveUnits,
-      timeZone: quotaConfig.resetTimeZone,
-      store,
-      logger: stdoutLogger,
-    })
     const custodian = new StreamKeyCustodian({ vault, redactor, logger: stdoutLogger })
     const api = new YouTubeLiveApi({
       tokens,
@@ -737,6 +738,7 @@ chatSource = await createChatSource(
     config: chatConfig,
     logger: stdoutLogger,
     auth: tokens,
+    quota: quotaTracker,
     resolveTarget:
       broadcastLifecycle === null
         ? null

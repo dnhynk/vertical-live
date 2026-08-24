@@ -5,6 +5,7 @@ import { loadInputConfig } from '../../input/config.js'
 import { createTempStore } from '../../db/testing/temp-store.js'
 import { storeInbox, testChatConfig } from '../../testing/chat-test-support.js'
 import { FakeClock } from '../../testing/fake-clock.js'
+import { QuotaTracker } from '../quota/tracker.js'
 import { chatParserPort, createChatSource } from './runtime.js'
 
 /**
@@ -54,6 +55,7 @@ describe('createChatSource', () => {
         inputConfig,
         identityGateOpen: false,
         config: testChatConfig({ enabled: true }),
+        quota: new QuotaTracker({ clock: temp.clock, store: temp.store }),
         auth: {
           getAccessToken: () => Promise.resolve('synthetic-access-token'),
           forceRefresh: () => Promise.resolve(undefined),
@@ -62,6 +64,29 @@ describe('createChatSource', () => {
 
       expect(source).not.toBeNull()
       expect(source?.observe().mode).toBe('idle')
+    } finally {
+      temp.dispose()
+    }
+  })
+
+  it('refuses enabled chat without the process-wide quota tracker', async () => {
+    const temp = createTempStore({ clock: new FakeClock() })
+    try {
+      await expect(
+        createChatSource({
+          store: temp.store,
+          inbox: storeInbox(temp.store),
+          engine: { ready: true, snapshot: () => snapshotWith(null) },
+          clock: temp.clock,
+          inputConfig,
+          identityGateOpen: false,
+          config: testChatConfig({ enabled: true }),
+          auth: {
+            getAccessToken: () => Promise.resolve('synthetic-access-token'),
+            forceRefresh: () => Promise.resolve(undefined),
+          },
+        }),
+      ).rejects.toThrow(/process-wide quota tracker/)
     } finally {
       temp.dispose()
     }

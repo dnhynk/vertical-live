@@ -11,6 +11,8 @@ import type { HealthSignal } from './health/types.js'
 import { AdminKillEndpoint, type KillSwitchRequest } from './supervisor/kill-switch.js'
 import { AdminModerationEndpoint, type ModerationReport } from './supervisor/moderation-report.js'
 import type { SupervisorHealthSummary } from './supervisor/types.js'
+import { FakeClock } from './testing/fake-clock.js'
+import { QuotaTracker } from './youtube/quota/tracker.js'
 
 describe('resolvePort', () => {
   it('falls back to the shared default', () => {
@@ -176,6 +178,30 @@ describe('engine-backed routes', () => {
 
     expect(body.status).toBe('ok')
     expect(body.sources).toEqual(sourceSignals)
+  })
+
+  it('reports combined quota usage in a chat-only posture', async () => {
+    const quota = new QuotaTracker({ clock: new FakeClock() })
+    quota.record('liveChatMessages.streamList', 2)
+    quota.record('liveChatMessages.list', 3)
+    const chatOnly = createServer({ ...options, quotaUsage: () => quota.snapshot() })
+    await new Promise<void>((resolve) => {
+      chatOnly.listen(0, '127.0.0.1', resolve)
+    })
+    const url = `http://127.0.0.1:${String((chatOnly.address() as AddressInfo).port)}`
+
+    try {
+      const body = (await (await fetch(`${url}/health`)).json()) as {
+        quota: ReturnType<QuotaTracker['snapshot']>
+      }
+      expect(body.quota.spentUnits).toBe(5)
+      expect(body.quota.byMethod).toEqual({
+        'liveChatMessages.streamList': 2,
+        'liveChatMessages.list': 3,
+      })
+    } finally {
+      await new Promise<void>((resolve) => chatOnly.close(() => resolve()))
+    }
   })
 
   it('reports degraded in the status line, not only in the detail', async () => {

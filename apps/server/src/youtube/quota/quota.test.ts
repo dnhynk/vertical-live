@@ -245,13 +245,17 @@ describe('QuotaTracker persistence', () => {
     const before = tracker()
     before.record('liveBroadcasts.insert') // 50
     before.record('liveStreams.list', 30) // 30
-    expect(before.snapshot().spentUnits).toBe(80)
+    before.record('liveChatMessages.streamList', 2) // 2
+    before.record('liveChatMessages.list', 3) // 3
+    expect(before.snapshot().spentUnits).toBe(85)
 
     const after = tracker(temp.reopen())
 
-    expect(after.snapshot().spentUnits).toBe(80)
+    expect(after.snapshot().spentUnits).toBe(85)
     expect(after.snapshot().byMethod['liveBroadcasts.insert']).toBe(50)
     expect(after.snapshot().byMethod['liveStreams.list']).toBe(30)
+    expect(after.snapshot().byMethod['liveChatMessages.streamList']).toBe(2)
+    expect(after.snapshot().byMethod['liveChatMessages.list']).toBe(3)
   })
 
   it('still refuses a call the restored day cannot afford', () => {
