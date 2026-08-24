@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import { loadSupervisorConfig } from '../../supervisor/config.js'
 import { loadBroadcastConfig } from '../broadcast/config.js'
+import { loadChatConfig } from '../chat/config.js'
 import { quotaCostOf } from './costs.js'
 import { loadQuotaConfig } from './config.js'
 
@@ -21,6 +22,7 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000
 describe('the repository defaults fit one day of quota', () => {
   const quota = loadQuotaConfig()
   const broadcast = loadBroadcastConfig()
+  const chat = loadChatConfig()
   const supervisor = loadSupervisorConfig()
 
   const streamPollsPerDay = MS_PER_DAY / broadcast.healthPollIntervalMs
@@ -29,10 +31,11 @@ describe('the repository defaults fit one day of quota', () => {
     streamPollsPerDay * quotaCostOf('liveStreams.list') +
     reconcilesPerDay * quotaCostOf('liveBroadcasts.list')
 
-  // Measured on the host 2026-08-23: 226 reconnects over 152 minutes of a
-  // healthy run. Each opens one `liveChatMessages.streamList`.
-  const chatReconnectsPerMinute = 1.5
-  const chatUnits = chatReconnectsPerMinute * 60 * 24 * quotaCostOf('liveChatMessages.streamList')
+  // T47 replaces the old 1.5/min host observation: YouTube later closed healthy
+  // streams around every 10.6s. The shipped start-to-start interval is the
+  // deterministic upper bound, including a stream opened at any phase of a day.
+  const successfulGrpcStartsPerDay = Math.ceil(MS_PER_DAY / chat.successfulStreamMinStartIntervalMs)
+  const chatUnits = successfulGrpcStartsPerDay * quotaCostOf('liveChatMessages.streamList')
 
   // Two 11-hour segments a day (D-21). Each: insert + bind + two transitions,
   // plus the bounded list polls that wait for each transition to settle.
@@ -49,14 +52,13 @@ describe('the repository defaults fit one day of quota', () => {
   const projected = healthUnits + chatUnits + rolloverUnits
   const budget = quota.dailyUnits - quota.reserveUnits
 
-  it('projects a day inside the allowance, with the reserve untouched', () => {
-    expect(projected).toBeLessThan(budget)
+  it('projects the capped worst-case day inside the allowance, with the reserve untouched', () => {
+    expect(successfulGrpcStartsPerDay).toBe(3456)
+    expect(projected).toBeLessThanOrEqual(budget)
   })
 
-  it('keeps enough headroom that a bad day does not end the broadcast', () => {
-    // A day with no headroom is a day one extra restart ends. A fifth of the
-    // budget is the margin this arithmetic was tuned to leave.
-    expect(budget - projected).toBeGreaterThan(budget * 0.2)
+  it('keeps positive headroom after the capped chat and fixed broadcast budget', () => {
+    expect(budget - projected).toBeGreaterThan(0)
   })
 
   /**

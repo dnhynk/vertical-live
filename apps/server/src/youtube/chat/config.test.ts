@@ -26,11 +26,13 @@ describe('loadChatConfig', () => {
     expect(config.enabled).toBe(false)
     expect(config.parts).toEqual(['id', 'snippet'])
     expect(config.grpc.endpoint).toBe('youtube.googleapis.com:443')
+    expect(config.successfulStreamMinStartIntervalMs).toBe(25_000)
     expect(config.liveChatId).toBeNull()
     // Every number the official documentation does not fix must say so.
     expect(config.provisional).toContain('reconnect')
     expect(config.provisional).toContain('fallback')
     expect(config.provisional).toContain('grpc.keepalive')
+    expect(config.provisional).toContain('successfulStreamMinStartIntervalMs')
   })
 
   it('turns the chat source on from the environment, so the host needs no config edit', () => {
@@ -47,6 +49,23 @@ describe('loadChatConfig', () => {
   it('takes the live chat id from the environment when one is set', () => {
     const config = loadChatConfig({ env: { VL_YOUTUBE_LIVE_CHAT_ID: 'chat_test_env' } })
     expect(config.liveChatId).toBe('chat_test_env')
+  })
+
+  it('overrides the successful stream start interval from the environment', () => {
+    const config = loadChatConfig({
+      env: { VL_YOUTUBE_CHAT_SUCCESSFUL_STREAM_MIN_START_INTERVAL_MS: '30000' },
+    })
+    expect(config.successfulStreamMinStartIntervalMs).toBe(30_000)
+  })
+
+  it('refuses a non-positive or non-integer successful stream start interval', () => {
+    for (const value of ['0', '-1', '1.5', 'not-a-number']) {
+      expect(() =>
+        loadChatConfig({
+          env: { VL_YOUTUBE_CHAT_SUCCESSFUL_STREAM_MIN_START_INTERVAL_MS: value },
+        }),
+      ).toThrow(/successfulStreamMinStartIntervalMs/)
+    }
   })
 
   it('requests no author identity while the consent gate is closed', () => {

@@ -7,6 +7,7 @@ import { decideRetry, type BackoffPolicy } from '../quota/backoff.js'
 import { classifyYouTubeApiError } from '../quota/classify.js'
 import type { QuotaTracker } from '../quota/tracker.js'
 import type { ChatConfig } from './config.js'
+import type { ChatReconnectWaitReason } from './health.js'
 import {
   CancellableDelay,
   createChatBackoff,
@@ -64,6 +65,7 @@ interface ConnectionEnd {
   readonly kind: 'end' | 'error'
   readonly error?: ServiceError
   readonly responses: number
+  readonly startedAtMonotonicMs: number
 }
 
 type TokenAttempt = { ok: true; token: string } | { ok: false; revoked: boolean }
@@ -170,6 +172,7 @@ export class GrpcChatSource {
         resolve(end)
       }
 
+      const startedAtMonotonicMs = this.#options.clock.monotonicMs()
       const call = this.#options.transport.open(request, accessToken)
       this.#call = call
       call.onData((response) => {
@@ -185,10 +188,10 @@ export class GrpcChatSource {
         }
       })
       call.onError((error) => {
-        settle({ kind: 'error', error, responses })
+        settle({ kind: 'error', error, responses, startedAtMonotonicMs })
       })
       call.onEnd(() => {
-        settle({ kind: 'end', responses })
+        settle({ kind: 'end', responses, startedAtMonotonicMs })
       })
     })
   }
@@ -231,13 +234,16 @@ export class GrpcChatSource {
 
     if (ended.kind === 'end') {
       if (ended.responses > 0) {
-        // Normal close of a long-lived call: resume at once, that is the point
-        // of the low-latency path.
+        // A healthy close resumes from the durable token, but not faster than
+        // the quota-safe start-to-start cap. Time already spent open counts.
         this.#emptyEnds = 0
+        const openMs = this.#options.clock.monotonicMs() - ended.startedAtMonotonicMs
+        const paceMs = Math.max(0, config.successfulStreamMinStartIntervalMs - openMs)
+        await this.#wait('successful_close_pacing', paceMs)
         return null
       }
       this.#emptyEnds += 1
-      await this.#delay.wait(this.#policy.nextDelayMs(Math.min(this.#emptyEnds, 8)))
+      await this.#wait('empty_end_backoff', this.#policy.nextDelayMs(Math.min(this.#emptyEnds, 8)))
       return null
     }
 
@@ -295,6 +301,19 @@ export class GrpcChatSource {
     // Past the attempt budget the source keeps trying at the maximum delay: a
     // chat reader that gave up would end unattended operation (spec §2.1). The
     // exhausted budget is what turns the transport signal `degraded` (§9.4(3)).
-    await this.#delay.wait(decision.retry ? decision.delayMs : config.reconnect.maxDelayMs)
+    await this.#wait(
+      'failure_backoff',
+      decision.retry ? decision.delayMs : config.reconnect.maxDelayMs,
+    )
+  }
+
+  async #wait(reason: ChatReconnectWaitReason, delayMs: number): Promise<void> {
+    if (delayMs <= 0) return
+    this.#options.state.recordReconnectWait(reason, delayMs)
+    try {
+      await this.#delay.wait(delayMs)
+    } finally {
+      this.#options.state.clearReconnectWait()
+    }
   }
 }

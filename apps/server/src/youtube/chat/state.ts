@@ -7,6 +7,8 @@ import type {
   ChatMode,
   ChatObservation,
   ChatReconnectObservation,
+  ChatReconnectWaitObservation,
+  ChatReconnectWaitReason,
 } from './health.js'
 import type { ConsentFailure } from './sink.js'
 
@@ -68,6 +70,7 @@ export class ChatSourceState {
   #reconnectsWithoutToken = 0
   #duplicatesSinceReconnect = 0
   #estimatedLostMessages: number | null = null
+  #reconnectWait: ChatReconnectWaitObservation | null = null
 
   #userEventLastAtUtc: string | null = null
   #userEventLastAtMonotonicMs: number | null = null
@@ -221,6 +224,14 @@ export class ChatSourceState {
     }
   }
 
+  recordReconnectWait(reason: ChatReconnectWaitReason, delayMs: number): void {
+    this.#reconnectWait = { reason, startedAt: this.#clock.nowUtcIso(), delayMs }
+  }
+
+  clearReconnectWait(): void {
+    this.#reconnectWait = null
+  }
+
   /**
    * The response said the underlying livestream is offline (`offline_at`). It
    * is recorded and reported; deciding what it means for the broadcast is
@@ -263,6 +274,7 @@ export class ChatSourceState {
       reconnectsWithoutToken: this.#reconnectsWithoutToken,
       estimatedDuplicates: this.#duplicatesSinceReconnect,
       estimatedLostMessages: this.#estimatedLostMessages,
+      wait: this.#reconnectWait,
     }
     const consent: ChatConsentObservation | null = this.#consentOpen
       ? {

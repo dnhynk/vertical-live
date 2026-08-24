@@ -105,6 +105,11 @@ export interface ChatConfig {
   readonly broadcastId: string | null
   readonly parts: readonly string[]
   readonly maxResults: number
+  /**
+   * Minimum start-to-start interval after a successful non-empty gRPC stream.
+   * The stream's open time counts toward the interval (T47).
+   */
+  readonly successfulStreamMinStartIntervalMs: number
   readonly grpc: ChatGrpcConfig
   readonly rest: ChatRestConfig
   readonly reconnect: ChatReconnectConfig
@@ -174,6 +179,11 @@ export function loadChatConfig(options: LoadChatConfigOptions = {}): ChatConfig 
     ),
     parts: Object.freeze(identityGateOpen ? [...parts, IDENTITY_PART] : parts),
     maxResults,
+    successfulStreamMinStartIntervalMs: readPositiveIntOverride(
+      env['VL_YOUTUBE_CHAT_SUCCESSFUL_STREAM_MIN_START_INTERVAL_MS'] ??
+        section['successfulStreamMinStartIntervalMs'],
+      'youtube.chat.successfulStreamMinStartIntervalMs',
+    ),
     grpc: Object.freeze({
       endpoint: readString(grpc['endpoint'], 'youtube.chat.grpc.endpoint'),
       keepalive: Object.freeze({
@@ -280,4 +290,13 @@ function readRatio(value: unknown, label: string): number {
     throw new AuthConfigError(`${label} must be between 0 and 1`)
   }
   return value
+}
+
+/** Config numbers are JSON numbers; environment overrides arrive as decimal strings. */
+function readPositiveIntOverride(value: unknown, label: string): number {
+  if (typeof value !== 'string') return readPositiveInt(value, label)
+  if (!/^[1-9]\d*$/.test(value)) {
+    throw new AuthConfigError(`${label} must be a positive integer`)
+  }
+  return readPositiveInt(Number(value), label)
 }
