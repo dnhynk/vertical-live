@@ -146,6 +146,20 @@ export class ChatSource {
   /** Starts the source in the background. Idempotent. */
   start(): void {
     if (this.#running !== undefined) return
+
+    // A supervisor restart reuses this object after awaiting stop(). Reset only
+    // the outer lifecycle that belongs to the completed run. In particular,
+    // #grpcStartPacingState deliberately survives so a component restart cannot
+    // open another quota-bearing stream before the previous start's floor.
+    this.#cancelled = false
+    this.#retarget = false
+    this.#lastResult = null
+    this.#target = null
+    this.#sink = undefined
+    this.#grpc = undefined
+    this.#rest = undefined
+    this.#state.clearStop()
+
     this.#running = this.#run().catch((error: unknown) => {
       this.#logger.error('youtube chat: source loop failed', {
         error: (error as Error).message,
@@ -156,12 +170,16 @@ export class ChatSource {
   }
 
   async stop(): Promise<void> {
+    const running = this.#running
     this.#cancelled = true
     this.#readyDelay.cancel()
     this.#targetWatch.cancel()
     this.#grpc?.stop()
     this.#rest?.stop()
-    await this.#running
+    await running
+    // A stale/concurrent stop must not tear down a newer run. `start()` stays a
+    // no-op until the captured promise settles and this boundary clears it.
+    if (this.#running !== running) return
     this.#running = undefined
     this.#transport?.close()
     this.#transport = undefined

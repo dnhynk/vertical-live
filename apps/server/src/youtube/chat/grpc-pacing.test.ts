@@ -12,9 +12,11 @@ import {
   testChatConfig,
   testParseCommand,
 } from '../../testing/chat-test-support.js'
+import { AuthRevokedError } from '../auth/token-manager.js'
 import { QuotaTracker } from '../quota/tracker.js'
 import { ChatSource } from './chat-source.js'
 import { GrpcChatSource } from './grpc-source.js'
+import { CHAT_TRANSPORT_SIGNAL } from './health.js'
 import { ChatIngestSink } from './sink.js'
 import { ChatSourceState } from './state.js'
 import type {
@@ -261,6 +263,7 @@ describe('GrpcChatSource quota start pacing', () => {
     })
 
     chat.start()
+    chat.start()
     await flushMicrotasks()
     expect(transport.starts).toEqual([0])
 
@@ -285,6 +288,97 @@ describe('GrpcChatSource quota start pacing', () => {
     ])
 
     await chat.stop()
+  })
+
+  it('restarts the same production ChatSource after stop without bypassing the shared start floor', async () => {
+    const clock = new FakeClock()
+    temp = createTempStore({ clock })
+    const transport = new VirtualTransport(clock, [
+      { errorCode: status.UNAUTHENTICATED },
+      { response: { items: [], next_page_token: 'token_after_restart' } },
+    ])
+    const config = testChatConfig({
+      grpcStreamMinStartIntervalMs: 25_000,
+      readyPollIntervalMs: 1_000,
+    })
+    const quota = new QuotaTracker({ clock })
+    let revokeFirstRefresh = true
+    const chat = new ChatSource({
+      config,
+      clock,
+      inbox: storeInbox(temp.store),
+      checkpoints: temp.store,
+      parseCommand: testParseCommand,
+      auth: {
+        getAccessToken: () => Promise.resolve('synthetic_access_token'),
+        forceRefresh: () => {
+          if (revokeFirstRefresh) {
+            revokeFirstRefresh = false
+            return Promise.reject(new AuthRevokedError('invalid_grant'))
+          }
+          return Promise.resolve('synthetic_access_token')
+        },
+      },
+      engine: { ready: true },
+      transport,
+      quota,
+      random: () => 0,
+    })
+
+    chat.start()
+    await flushMicrotasks()
+
+    expect(transport.starts).toEqual([0])
+    expect(chat.lastResult).toEqual({ outcome: 'stopped', reason: 'auth_revoked' })
+    expect(chat.observe().stopped?.reason).toBe('auth_revoked')
+    expect(chat.signals().find((signal) => signal.name === CHAT_TRANSPORT_SIGNAL)).toMatchObject({
+      status: 'degraded',
+      reason: 'auth_revoked',
+    })
+    // Auth/policy stops remain terminal until the supervisor explicitly runs
+    // its two-phase action; resetting lifecycle state never self-restarts one.
+    await flushMicrotasks()
+    expect(transport.starts).toEqual([0])
+
+    // Production shape from main.ts: the same object, with stop fully settled
+    // before start. stop() also has to cancel the old binding watcher now.
+    await chat.stop()
+    expect(chat.observe().mode).toBe('idle')
+    expect(clock.pendingTimerCount).toBe(0)
+    chat.start()
+    chat.start()
+    await flushMicrotasks()
+
+    expect(chat.lastResult).toBeNull()
+    expect(chat.observe()).toMatchObject({ mode: 'grpc', stopped: null })
+    expect(transport.starts).toEqual([0])
+
+    await clock.advance(24_999)
+    expect(transport.starts).toEqual([0])
+    await clock.advance(1)
+
+    expect(transport.starts).toEqual([0, 25_000])
+    expect(transport.requests.map((request) => request.live_chat_id)).toEqual([
+      TEST_LIVE_CHAT_ID,
+      TEST_LIVE_CHAT_ID,
+    ])
+    expect(transport.requests.map((request) => request.page_token)).toEqual([undefined, undefined])
+    expect(quota.snapshot()).toMatchObject({
+      spentUnits: 2,
+      byMethod: { 'liveChatMessages.streamList': 2 },
+    })
+    expect(chat.observe()).toMatchObject({
+      mode: 'grpc',
+      connected: false,
+      stopped: null,
+      pageToken: 'token_after_restart',
+    })
+    expect(chat.signals().find((signal) => signal.name === CHAT_TRANSPORT_SIGNAL)?.status).toBe(
+      'ok',
+    )
+
+    await chat.stop()
+    expect(clock.pendingTimerCount).toBe(0)
   })
 
   it('keeps empty-end backoff and adds the remaining quota floor before starting', async () => {

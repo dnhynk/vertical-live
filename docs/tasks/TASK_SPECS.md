@@ -937,6 +937,7 @@
 - **읽을 것**: 스펙 §7.2·§9.4·§11·Gate 2, T44, T46, BOARD A-15, `config/default.json`, `apps/server/src/youtube/chat/config.ts`, `apps/server/src/youtube/chat/grpc-source.ts`, `apps/server/src/youtube/chat/health.ts`, `apps/server/src/youtube/quota/budget.test.ts`
 - **관측**(2026-08-24, T46 배포 뒤 Gate 2 unlisted 실호스트): production server 1개, supervisor chat-source restart attempt 0, resume token 정상인 상태에서도 YouTube가 성공한 gRPC stream을 약 10.6초마다 정상 종료했다. 영속 `quota_usage`의 `liveChatMessages.streamList`는 17:20:07 KST 12, 17:28:28 59, 17:31:15 74로 늘어 약 5.6 calls/minute였다. 이 속도는 chat 약 8,064 units/day이고, T44의 고정 broadcast 예산 약 5,244와 합치면 usable 9,500/day를 넘는다. 따라서 A-T44-2의 2026-08-23 표본(226 reconnects/152분 = 약 1.5/min)은 현재 플랫폼 동작의 상한 근거로 쓸 수 없다.
 - **R-T47-1 관측**: response 뒤 `UNAVAILABLE`이 오는 합법적 경로는 기존 구현에서 FakeClock starts `[0, 1000, 2000]`으로 성공-only pacing을 우회했다. 그 결과 budget test의 3,456/day 상한은 모든 실제 요청을 세지 않았고, usable headroom 검사는 `> 0`으로 약화됐으며, 설정값 `2147483648`은 Node timer overflow로 1ms에 축약될 수 있었다.
+- **R-T47-2R 관측**: production `main.ts`의 chat-source restart는 같은 `ChatSource`에서 `await stop(); start()`를 호출하지만, outer `#cancelled`가 `true`로 남고 `start()`가 새 run lifecycle을 열지 않아 FakeClock을 25,000ms까지 진행해도 starts `[0]`, mode `idle`이었다. 완료된 stop 뒤 명시적 start는 sticky stop을 지우고 실제 새 run을 만들되, process component가 보유한 gRPC start pacing 시각은 유지해야 한다.
 - **가정**: 결과와 무관한 **모든 실제 gRPC stream start-to-start 최소 간격**의 shipped 기본값은 **25,000ms**다. 따라서 최대 2.4 starts/minute, chat 최대 3,456 units/day이고 T44 고정 broadcast 4,608 + rollover 636과 합쳐 8,700/day다. usable 9,500에서 headroom 800은 rollover buffer 636보다 크다. 이 값은 플랫폼이 보장한 주기가 아니므로 `provisional`이며 Gate 2 fresh quota/latency evidence로 calibration한다(A-15).
 - **범위**
   - normal config/env loading path에 `grpcStreamMinStartIntervalMs` / `VL_YOUTUBE_CHAT_GRPC_STREAM_MIN_START_INTERVAL_MS`를 추가하고 shipped 기본값을 25,000ms로 둔다. 호출 시작 시각부터 재므로 stream open 시간과 기존 branch backoff 시간이 interval에 포함된다.
@@ -949,7 +950,7 @@
   1. shipped config를 읽은 budget test가 모든 actual gRPC start의 configured floor에서 `ceil`한 worst-case daily cap을 사용하고, T44 fixed budget과 합쳐 `dailyUnits - reserveUnits` 이하이며 usable headroom이 modeled `rolloverUnits`보다 큼을 증명한다.
   2. 가상 시계 결정론 테스트가 rapid normal closes, response-then-`UNAVAILABLE`(기존 `[0,1000,2000]`), empty end, token rejection, alternating outcome, retarget 뒤 첫 call의 모든 start 간격이 configured minimum 이상임을 증명한다.
   3. 같은 테스트가 response에서 받은 token을 다음 actual request에 resume하고, quota는 actual request마다 정확히 한 번 기록함을 증명한다.
-  4. stop/cancel/retarget이 pace wait 전체를 기다리지 않고 끝난다. 오류·empty-end는 기존 backoff, REST는 서버 `pollingIntervalMillis`, auth 처리는 기존 분류를 유지하는 회귀 테스트가 녹색이다.
+  4. stop/cancel/retarget이 pace wait 전체를 기다리지 않고 끝난다. production과 같은 동일 `ChatSource`의 완료된 `await stop(); start()`는 outer run lifecycle과 sticky stop만 초기화해 실제 재시작하고, 공유 start pacing 시각은 유지해 이전 start + floor 전에는 열지 않으며, auth/policy stop은 명시적 restart 없이 스스로 재시작하지 않는다. 오류·empty-end는 기존 backoff, REST는 서버 `pollingIntervalMillis`, auth 처리는 기존 분류를 유지하는 회귀 테스트가 녹색이다.
   5. health에서 healthy quota pacing과 empty/failure backoff를 구분할 수 있고 fake event는 없다.
   6. JSON/env가 `2,147,483,647ms` boundary를 안전하게 처리하고 `2,147,483,648ms`를 거부하거나 안전하게 chunking한다.
-  7. 티켓에 R-T47-1 findings·fix SHA·exact 관측·budget 계산·provisional 가정·honest result가 있으며 fetch/rebase + `npm ci` + 게이트 5개 + latest-head CI가 녹색이다.
+  7. 티켓에 R-T47-1·R-T47-2R findings·fix SHA·exact 관측·budget 계산·provisional 가정·honest result가 있으며 fetch/rebase + `npm ci` + 게이트 5개 + latest-head CI가 녹색이다.
