@@ -26,9 +26,8 @@ DROP TABLE broadcast_resources;
 -- (review round 2, B1).
 CREATE TABLE broadcast_resources (
   attempt_id           TEXT    PRIMARY KEY,
-  -- spec §9.3 / BOARD D-21: `rolling-experiment` is the selected production path;
-  -- the enum label is retained for persisted compatibility. Both values are recorded
-  -- so a row states which strategy made it.
+  -- spec §9.3 / BOARD A-4: `single` is production, `rolling-experiment` is a
+  -- labelled experiment. Both are recorded so a row states which one made it.
   strategy             TEXT    NOT NULL CHECK (strategy IN ('single', 'rolling-experiment')),
   -- Monotonic lifecycle stage of *our* work. Deliberately not YouTube's
   -- `lifeCycleStatus`: this is what we have durably done, that is what YouTube
