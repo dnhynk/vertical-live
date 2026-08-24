@@ -31,11 +31,11 @@ describe('the repository defaults fit one day of quota', () => {
     streamPollsPerDay * quotaCostOf('liveStreams.list') +
     reconcilesPerDay * quotaCostOf('liveBroadcasts.list')
 
-  // T47 replaces the old 1.5/min host observation: YouTube later closed healthy
-  // streams around every 10.6s. The shipped start-to-start interval is the
-  // deterministic upper bound, including a stream opened at any phase of a day.
-  const successfulGrpcStartsPerDay = Math.ceil(MS_PER_DAY / chat.successfulStreamMinStartIntervalMs)
-  const chatUnits = successfulGrpcStartsPerDay * quotaCostOf('liveChatMessages.streamList')
+  // T47 replaces the old 1.5/min host observation: the floor now covers every
+  // actual start, including response-then-error, empty, and token-retry paths.
+  // `ceil` includes a stream opened at any phase of the modeled day.
+  const grpcStartsPerDay = Math.ceil(MS_PER_DAY / chat.grpcStreamMinStartIntervalMs)
+  const chatUnits = grpcStartsPerDay * quotaCostOf('liveChatMessages.streamList')
 
   // Two 11-hour segments a day (D-21). Each: insert + bind + two transitions,
   // plus the bounded list polls that wait for each transition to settle.
@@ -53,12 +53,17 @@ describe('the repository defaults fit one day of quota', () => {
   const budget = quota.dailyUnits - quota.reserveUnits
 
   it('projects the capped worst-case day inside the allowance, with the reserve untouched', () => {
-    expect(successfulGrpcStartsPerDay).toBe(3456)
+    expect(grpcStartsPerDay).toBe(3456)
+    expect(healthUnits).toBe(4608)
+    expect(rolloverUnits).toBe(636)
+    expect(projected).toBe(8700)
     expect(projected).toBeLessThanOrEqual(budget)
   })
 
-  it('keeps positive headroom after the capped chat and fixed broadcast budget', () => {
-    expect(budget - projected).toBeGreaterThan(0)
+  it('keeps more than one modeled rollover buffer as usable-budget headroom', () => {
+    const usableBudgetHeadroom = budget - projected
+    expect(usableBudgetHeadroom).toBe(800)
+    expect(usableBudgetHeadroom).toBeGreaterThan(rolloverUnits)
   })
 
   /**

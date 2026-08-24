@@ -84,12 +84,11 @@ export interface ChatReconnectObservation {
    * has happened. No number here is ever inferred from an attempt alone.
    */
   readonly estimatedLostMessages: number | null
-  /** Active reconnect wait, distinguishing healthy pacing from failure backoff (T47). */
+  /** Active reconnect wait, distinguishing quota pacing from branch backoff (T47). */
   readonly wait?: ChatReconnectWaitObservation | null
 }
 
-export type ChatReconnectWaitReason =
-  'successful_close_pacing' | 'empty_end_backoff' | 'failure_backoff'
+export type ChatReconnectWaitReason = 'quota_start_pacing' | 'empty_end_backoff' | 'failure_backoff'
 
 export interface ChatReconnectWaitObservation {
   readonly reason: ChatReconnectWaitReason

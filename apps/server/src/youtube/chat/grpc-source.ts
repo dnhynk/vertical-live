@@ -59,13 +59,18 @@ export interface GrpcChatSourceOptions {
   readonly logger?: Logger
   /** Injected in tests so backoff delays are reproducible (CLAUDE.md §4). */
   readonly random?: () => number
+  /** Shared across retargeted sessions so changing chat cannot bypass T47 pacing. */
+  readonly startPacingState?: GrpcStartPacingState
+}
+
+export interface GrpcStartPacingState {
+  lastStartedAtMonotonicMs: number | null
 }
 
 interface ConnectionEnd {
   readonly kind: 'end' | 'error'
   readonly error?: ServiceError
   readonly responses: number
-  readonly startedAtMonotonicMs: number
 }
 
 type TokenAttempt = { ok: true; token: string } | { ok: false; revoked: boolean }
@@ -75,6 +80,7 @@ export class GrpcChatSource {
   readonly #policy: BackoffPolicy
   readonly #delay: CancellableDelay
   readonly #logger: Logger
+  readonly #startPacingState: GrpcStartPacingState
 
   #cancelled = false
   #call: StreamListCall | undefined
@@ -87,6 +93,7 @@ export class GrpcChatSource {
     this.#policy = createChatBackoff(options.config.reconnect, options.random)
     this.#delay = new CancellableDelay(options.clock)
     this.#logger = options.logger ?? silentLogger
+    this.#startPacingState = options.startPacingState ?? { lastStartedAtMonotonicMs: null }
   }
 
   /** Channel connectivity for the keepalive signal (spec §9.4(3)). */
@@ -119,6 +126,9 @@ export class GrpcChatSource {
         await this.#backoff()
         continue
       }
+
+      await this.#paceNextStart()
+      if (this.#cancelled) break
 
       const pageToken = this.#options.sink.pageToken
       state.connectAttempt(pageToken !== null)
@@ -160,6 +170,8 @@ export class GrpcChatSource {
       ...(pageToken === null ? {} : { page_token: pageToken }),
     }
     this.#commitError = undefined
+    const startedAtMonotonicMs = this.#options.clock.monotonicMs()
+    this.#startPacingState.lastStartedAtMonotonicMs = startedAtMonotonicMs
     this.#options.quota?.record('liveChatMessages.streamList')
 
     return new Promise<ConnectionEnd>((resolve) => {
@@ -172,7 +184,6 @@ export class GrpcChatSource {
         resolve(end)
       }
 
-      const startedAtMonotonicMs = this.#options.clock.monotonicMs()
       const call = this.#options.transport.open(request, accessToken)
       this.#call = call
       call.onData((response) => {
@@ -188,10 +199,10 @@ export class GrpcChatSource {
         }
       })
       call.onError((error) => {
-        settle({ kind: 'error', error, responses, startedAtMonotonicMs })
+        settle({ kind: 'error', error, responses })
       })
       call.onEnd(() => {
-        settle({ kind: 'end', responses, startedAtMonotonicMs })
+        settle({ kind: 'end', responses })
       })
     })
   }
@@ -234,12 +245,9 @@ export class GrpcChatSource {
 
     if (ended.kind === 'end') {
       if (ended.responses > 0) {
-        // A healthy close resumes from the durable token, but not faster than
-        // the quota-safe start-to-start cap. Time already spent open counts.
+        // A healthy close resumes from the durable token. The quota-safe floor
+        // is enforced at the one boundary shared by every next actual start.
         this.#emptyEnds = 0
-        const openMs = this.#options.clock.monotonicMs() - ended.startedAtMonotonicMs
-        const paceMs = Math.max(0, config.successfulStreamMinStartIntervalMs - openMs)
-        await this.#wait('successful_close_pacing', paceMs)
         return null
       }
       this.#emptyEnds += 1
@@ -305,6 +313,18 @@ export class GrpcChatSource {
       'failure_backoff',
       decision.retry ? decision.delayMs : config.reconnect.maxDelayMs,
     )
+  }
+
+  /**
+   * Hard quota floor for every actual `streamList` start. Branch-specific
+   * backoffs run first; this adds only the remaining time since the prior start.
+   */
+  async #paceNextStart(): Promise<void> {
+    const lastStartedAt = this.#startPacingState.lastStartedAtMonotonicMs
+    if (lastStartedAt === null) return
+    const elapsedMs = this.#options.clock.monotonicMs() - lastStartedAt
+    const remainingMs = Math.max(0, this.#options.config.grpcStreamMinStartIntervalMs - elapsedMs)
+    await this.#wait('quota_start_pacing', remainingMs)
   }
 
   async #wait(reason: ChatReconnectWaitReason, delayMs: number): Promise<void> {

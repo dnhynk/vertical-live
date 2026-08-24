@@ -1,4 +1,4 @@
-import type { ServiceError } from '@grpc/grpc-js'
+import { status, type ServiceError } from '@grpc/grpc-js'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import { createTempStore, type TempStore } from '../../db/testing/temp-store.js'
@@ -13,6 +13,7 @@ import {
   testParseCommand,
 } from '../../testing/chat-test-support.js'
 import { QuotaTracker } from '../quota/tracker.js'
+import { ChatSource } from './chat-source.js'
 import { GrpcChatSource } from './grpc-source.js'
 import { ChatIngestSink } from './sink.js'
 import { ChatSourceState } from './state.js'
@@ -27,6 +28,8 @@ interface Script {
   readonly response?: StreamListResponse
   /** Omit for an immediate normal end. */
   readonly endAfterMs?: number
+  /** When present, terminate with this gRPC error after any response. */
+  readonly errorCode?: status
 }
 
 class VirtualCall implements StreamListCall {
@@ -54,8 +57,17 @@ class VirtualCall implements StreamListCall {
       if (this.#cancelled) return
       if (this.script.response !== undefined) this.#data?.(this.script.response)
       const endAfterMs = this.script.endAfterMs ?? 0
-      if (endAfterMs === 0) this.#end?.()
-      else this.clock.setTimeout(() => this.#end?.(), endAfterMs)
+      const terminate = (): void => {
+        if (this.script.errorCode === undefined) this.#end?.()
+        else {
+          this.#error?.({
+            code: this.script.errorCode,
+            details: 'synthetic pacing test error',
+          } as ServiceError)
+        }
+      }
+      if (endAfterMs === 0) terminate()
+      else this.clock.setTimeout(terminate, endAfterMs)
     })
   }
 
@@ -93,7 +105,7 @@ class VirtualTransport implements StreamListTransport {
   close(): void {}
 }
 
-describe('GrpcChatSource successful-close pacing', () => {
+describe('GrpcChatSource quota start pacing', () => {
   let temp: TempStore | undefined
 
   afterEach(() => {
@@ -114,7 +126,7 @@ describe('GrpcChatSource successful-close pacing', () => {
     const clock = new FakeClock()
     temp = createTempStore({ clock })
     const config = testChatConfig({
-      successfulStreamMinStartIntervalMs: intervalMs,
+      grpcStreamMinStartIntervalMs: intervalMs,
       reconnect: {
         initialDelayMs: 1_000,
         maxDelayMs: 1_000,
@@ -192,7 +204,7 @@ describe('GrpcChatSource successful-close pacing', () => {
     await flushMicrotasks()
     await h.clock.advance(10_000)
     expect(h.state.observe('token_open', 'READY').reconnect.wait).toMatchObject({
-      reason: 'successful_close_pacing',
+      reason: 'quota_start_pacing',
       delayMs: 15_000,
     })
     await h.clock.advance(14_999)
@@ -204,15 +216,13 @@ describe('GrpcChatSource successful-close pacing', () => {
     await running
   })
 
-  it('cancels a successful-close pace wait without advancing the full interval', async () => {
+  it('cancels a quota start pace wait without advancing the full interval', async () => {
     const h = createSource([{ response: { items: [], next_page_token: 'token_stop' } }])
 
     const running = h.source.run()
     await flushMicrotasks()
     expect(h.clock.pendingTimerCount).toBe(1)
-    expect(h.state.observe('token_stop', 'READY').reconnect.wait?.reason).toBe(
-      'successful_close_pacing',
-    )
+    expect(h.state.observe('token_stop', 'READY').reconnect.wait?.reason).toBe('quota_start_pacing')
 
     h.source.stop()
 
@@ -222,7 +232,62 @@ describe('GrpcChatSource successful-close pacing', () => {
     expect(h.state.observe('token_stop', 'READY').reconnect.wait).toBeNull()
   })
 
-  it('keeps an empty normal end on error backoff instead of successful pacing', async () => {
+  it('cancels the old wait on retarget but keeps the prior start floor for the new chat', async () => {
+    const clock = new FakeClock()
+    temp = createTempStore({ clock })
+    const transport = new VirtualTransport(clock, [
+      { response: { items: [], next_page_token: 'token_first_chat' } },
+      { response: { items: [], next_page_token: 'token_second_chat' } },
+    ])
+    const config = testChatConfig({
+      grpcStreamMinStartIntervalMs: 25_000,
+      readyPollIntervalMs: 1_000,
+    })
+    let target = {
+      liveChatId: TEST_LIVE_CHAT_ID,
+      broadcastId: TEST_BROADCAST_ID,
+    }
+    const chat = new ChatSource({
+      config,
+      clock,
+      inbox: storeInbox(temp.store),
+      checkpoints: temp.store,
+      parseCommand: testParseCommand,
+      auth: fixedTokens(),
+      engine: { ready: true },
+      resolveTarget: () => target,
+      transport,
+      random: () => 0,
+    })
+
+    chat.start()
+    await flushMicrotasks()
+    expect(transport.starts).toEqual([0])
+
+    target = {
+      liveChatId: 'chat_test_retargeted',
+      broadcastId: 'brd_test_retargeted',
+    }
+    await clock.advance(1_000)
+    expect(chat.observe().liveChatId).toBe('chat_test_retargeted')
+    expect(chat.observe().reconnect.wait).toMatchObject({
+      reason: 'quota_start_pacing',
+      delayMs: 24_000,
+    })
+
+    await clock.advance(23_999)
+    expect(transport.starts).toEqual([0])
+    await clock.advance(1)
+    expect(transport.starts).toEqual([0, 25_000])
+    expect(transport.requests.map((request) => request.live_chat_id)).toEqual([
+      TEST_LIVE_CHAT_ID,
+      'chat_test_retargeted',
+    ])
+
+    await chat.stop()
+  })
+
+  it('keeps empty-end backoff and adds the remaining quota floor before starting', async () => {
     const h = createSource([{}, { response: { items: [], next_page_token: 'token_after_empty' } }])
 
     const running = h.source.run()
@@ -234,7 +299,130 @@ describe('GrpcChatSource successful-close pacing', () => {
     await h.clock.advance(999)
     expect(h.transport.starts).toEqual([0])
     await h.clock.advance(1)
-    expect(h.transport.starts).toEqual([0, 1_000])
+    expect(h.transport.starts).toEqual([0])
+    expect(h.state.observe(null, 'READY').reconnect.wait).toMatchObject({
+      reason: 'quota_start_pacing',
+      delayMs: 24_000,
+    })
+    await h.clock.advance(23_999)
+    expect(h.transport.starts).toEqual([0])
+    await h.clock.advance(1)
+    expect(h.transport.starts).toEqual([0, 25_000])
+
+    h.source.stop()
+    await running
+  })
+
+  it('paces the reviewer response-then-UNAVAILABLE sequence that formerly started at 0, 1000, 2000', async () => {
+    const h = createSource([
+      {
+        response: { items: [], next_page_token: 'token_error_1' },
+        errorCode: status.UNAVAILABLE,
+      },
+      {
+        response: { items: [], next_page_token: 'token_error_2' },
+        errorCode: status.UNAVAILABLE,
+      },
+      {
+        response: { items: [], next_page_token: 'token_error_3' },
+        errorCode: status.UNAVAILABLE,
+      },
+    ])
+
+    const running = h.source.run()
+    await flushMicrotasks()
+    expect(h.state.observe('token_error_1', 'READY').reconnect.wait).toMatchObject({
+      reason: 'failure_backoff',
+      delayMs: 1_000,
+    })
+
+    await h.clock.advance(25_000)
+    await h.clock.advance(25_000)
+
+    expect(h.transport.starts).toEqual([0, 25_000, 50_000])
+    expect(h.transport.requests.map((request) => request.page_token)).toEqual([
+      undefined,
+      'token_error_1',
+      'token_error_2',
+    ])
+    expect(h.quota.snapshot()).toMatchObject({
+      spentUnits: 3,
+      byMethod: { 'liveChatMessages.streamList': 3 },
+    })
+    // Every response resets the streak before its terminal error records one.
+    expect(h.state.consecutiveFailures).toBe(1)
+    expect(h.state.observe('token_error_3', 'READY').reconnect.wait?.reason).toBe('failure_backoff')
+
+    h.source.stop()
+    await running
+  })
+
+  it('paces alternating normal, response-error, empty, and token-rejection outcomes without erasing backoff reasons', async () => {
+    const h = createSource([
+      { response: { items: [], next_page_token: 'token_alt_1' } },
+      {
+        response: { items: [], next_page_token: 'token_alt_2' },
+        errorCode: status.UNAVAILABLE,
+      },
+      {},
+      { response: { items: [], next_page_token: 'token_alt_4' } },
+      { errorCode: status.INVALID_ARGUMENT },
+      { response: { items: [], next_page_token: 'token_alt_6' } },
+    ])
+
+    const running = h.source.run()
+    await flushMicrotasks()
+    expect(h.state.observe('token_alt_1', 'READY').reconnect.wait?.reason).toBe(
+      'quota_start_pacing',
+    )
+
+    await h.clock.advance(25_000)
+    expect(h.state.observe('token_alt_2', 'READY').reconnect.wait).toMatchObject({
+      reason: 'failure_backoff',
+      delayMs: 1_000,
+    })
+    await h.clock.advance(1_000)
+    expect(h.state.observe('token_alt_2', 'READY').reconnect.wait).toMatchObject({
+      reason: 'quota_start_pacing',
+      delayMs: 24_000,
+    })
+    await h.clock.advance(24_000)
+    expect(h.state.observe('token_alt_2', 'READY').reconnect.wait).toMatchObject({
+      reason: 'empty_end_backoff',
+      delayMs: 1_000,
+    })
+    await h.clock.advance(1_000)
+    expect(h.state.observe('token_alt_2', 'READY').reconnect.wait).toMatchObject({
+      reason: 'quota_start_pacing',
+      delayMs: 24_000,
+    })
+    await h.clock.advance(24_000)
+    expect(h.state.observe('token_alt_4', 'READY').reconnect.wait?.reason).toBe(
+      'quota_start_pacing',
+    )
+    await h.clock.advance(25_000)
+    expect(h.state.observe(null, 'READY').reconnect).toMatchObject({
+      tokenRejected: true,
+      wait: { reason: 'quota_start_pacing', delayMs: 25_000 },
+    })
+    await h.clock.advance(25_000)
+
+    expect(h.transport.starts).toEqual([0, 25_000, 50_000, 75_000, 100_000, 125_000])
+    expect(
+      h.transport.starts.slice(1).map((start, index) => start - h.transport.starts[index]!),
+    ).toEqual([25_000, 25_000, 25_000, 25_000, 25_000])
+    expect(h.transport.requests.map((request) => request.page_token)).toEqual([
+      undefined,
+      'token_alt_1',
+      'token_alt_2',
+      'token_alt_2',
+      'token_alt_4',
+      undefined,
+    ])
+    expect(h.quota.snapshot()).toMatchObject({
+      spentUnits: 6,
+      byMethod: { 'liveChatMessages.streamList': 6 },
+    })
 
     h.source.stop()
     await running

@@ -35,6 +35,9 @@ export const ALLOWED_PARTS = ['id', 'snippet'] as const
  */
 export const IDENTITY_PART = 'authorDetails'
 
+/** Largest delay Node schedules without coercing it to 1ms. */
+export const MAX_TIMER_DELAY_MS = 2_147_483_647
+
 export class ChatConfigError extends Error {
   constructor(message: string) {
     super(`invalid youtube chat config: ${message}`)
@@ -105,11 +108,8 @@ export interface ChatConfig {
   readonly broadcastId: string | null
   readonly parts: readonly string[]
   readonly maxResults: number
-  /**
-   * Minimum start-to-start interval after a successful non-empty gRPC stream.
-   * The stream's open time counts toward the interval (T47).
-   */
-  readonly successfulStreamMinStartIntervalMs: number
+  /** Minimum interval between every actual gRPC stream start (T47). */
+  readonly grpcStreamMinStartIntervalMs: number
   readonly grpc: ChatGrpcConfig
   readonly rest: ChatRestConfig
   readonly reconnect: ChatReconnectConfig
@@ -179,10 +179,10 @@ export function loadChatConfig(options: LoadChatConfigOptions = {}): ChatConfig 
     ),
     parts: Object.freeze(identityGateOpen ? [...parts, IDENTITY_PART] : parts),
     maxResults,
-    successfulStreamMinStartIntervalMs: readPositiveIntOverride(
-      env['VL_YOUTUBE_CHAT_SUCCESSFUL_STREAM_MIN_START_INTERVAL_MS'] ??
-        section['successfulStreamMinStartIntervalMs'],
-      'youtube.chat.successfulStreamMinStartIntervalMs',
+    grpcStreamMinStartIntervalMs: readTimerDelayOverride(
+      env['VL_YOUTUBE_CHAT_GRPC_STREAM_MIN_START_INTERVAL_MS'] ??
+        section['grpcStreamMinStartIntervalMs'],
+      'youtube.chat.grpcStreamMinStartIntervalMs',
     ),
     grpc: Object.freeze({
       endpoint: readString(grpc['endpoint'], 'youtube.chat.grpc.endpoint'),
@@ -299,4 +299,13 @@ function readPositiveIntOverride(value: unknown, label: string): number {
     throw new AuthConfigError(`${label} must be a positive integer`)
   }
   return readPositiveInt(Number(value), label)
+}
+
+/** Node clamps larger `setTimeout` delays to 1ms, so fail closed at config load. */
+function readTimerDelayOverride(value: unknown, label: string): number {
+  const delayMs = readPositiveIntOverride(value, label)
+  if (delayMs > MAX_TIMER_DELAY_MS) {
+    throw new AuthConfigError(`${label} must be <= ${MAX_TIMER_DELAY_MS}`)
+  }
+  return delayMs
 }

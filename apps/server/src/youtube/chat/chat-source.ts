@@ -7,7 +7,7 @@ import type { HealthSignal, HealthSignalSink } from '../../health/types.js'
 import { silentLogger, type Logger } from '../../secrets/redaction.js'
 import type { QuotaTracker } from '../quota/tracker.js'
 import type { ChatConfig } from './config.js'
-import { GrpcChatSource } from './grpc-source.js'
+import { GrpcChatSource, type GrpcStartPacingState } from './grpc-source.js'
 import { buildChatHealthSignals, type ChatObservation } from './health.js'
 import { RestChatSource } from './rest-source.js'
 import { CancellableDelay, type ChatAccessTokens, type ChatRunResult } from './retry.js'
@@ -97,6 +97,8 @@ export class ChatSource {
   readonly #readyDelay: CancellableDelay
   /** Wakes the binding watcher; separate so stopping one does not stop the other. */
   readonly #targetWatch: CancellableDelay
+  /** Retargeting creates a new gRPC reader, but not a new quota timeline. */
+  readonly #grpcStartPacingState: GrpcStartPacingState = { lastStartedAtMonotonicMs: null }
   #retarget = false
 
   /** The chat this source is currently reading; `null` before it has one. */
@@ -250,6 +252,7 @@ export class ChatSource {
       config,
       auth: this.#options.auth,
       liveChatId: target.liveChatId,
+      startPacingState: this.#grpcStartPacingState,
       logger: this.#logger,
       ...(this.#options.quota === undefined ? {} : { quota: this.#options.quota }),
       ...(this.#options.random === undefined ? {} : { random: this.#options.random }),
