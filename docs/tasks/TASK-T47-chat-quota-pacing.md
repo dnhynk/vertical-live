@@ -4,6 +4,7 @@
 - Branch: `dnhynk/t47-chat-quota-pacing` · PR: #60
 - Orca: task `task_2d2fd2082b4f` · dispatch `ctx_218e2507997c`
 - Review fix: F-T47-R1 task `task_b9d4fd94e525` · dispatch `ctx_b173ccdf4b32`
+- Review fix: F-T47-R2 task `task_4e60a3301bc1` · dispatch `ctx_480ff7644031`
 - Spec sections read: §7.2, §9.4, §11, Gate 2
 - BOARD decisions/assumptions relied on: A-15 (operational thresholds stay provisional until Gate 2 calibration)
 
@@ -48,10 +49,10 @@ Cap every actual gRPC `liveChatMessages.streamList` start at a quota-safe determ
 | 1 | Shipped configured floor keeps every actual gRPC start inside the T44 combined daily model and retains meaningful resilience headroom. | met | `quota/budget.test.ts`: `ceil(86,400,000 / 25,000) = 3,456` chat; health 4,608; rollover 636; combined 8,700; usable 9,500; headroom 800 `> rolloverUnits` 636. |
 | 2 | Response-bearing normal end, response-then-error, empty end, token rejection, and alternating outcomes all obey the configured floor without erasing branch backoff. | met | `grpc-pacing.test.ts`: reviewer sequence formerly `[0,1000,2000]` is `[0,25000,50000]`; alternating path starts `[0,25000,50000,75000,100000,125000]` while observing `failure_backoff`, `empty_end_backoff`, and `quota_start_pacing`. |
 | 3 | Durable response-token resume and quota accounting remain exact per actual request. | met | Reviewer regression requests `undefined → token_error_1 → token_error_2` with 3 starts = 3 units; alternating path advances/forgets tokens exactly and 6 starts = 6 units. |
-| 4 | Stop and retarget cancel the current wait without bypassing the shared floor. | met | Stop resolves at monotonic 0 with zero timers. Retarget cancels the old reader at 1,000ms but the new chat's first start remains at 25,000ms, not 1,000ms. |
+| 4 | Stop, retarget, and a completed same-instance production restart cancel the old run without bypassing the shared floor or weakening auth/policy stops. | met | `grpc-pacing.test.ts` uses one `ChatSource` and the `main.ts` shape `await stop(); start()`: an `auth_revoked` run remains terminal until that explicit action, restart clears idle/sticky stop and `lastResult`, starts remain `[0]` through 24,999ms then become `[0,25000]`, quota is exactly 2 for 2 requests, health returns `ok`, concurrent `start()` is idempotent, and final timer count is 0. Fix `b108845`. |
 | 5 | Existing classification/health semantics remain additive. | met | Error and empty branch delays run first, then only the remaining quota floor; health reports `quota_start_pacing` separately from `failure_backoff`/`empty_end_backoff`; REST/auth suites remain in the full gate. No fake events or contract changes. |
 | 6 | Node timer overflow is impossible through the renamed config/env path. | met | `config.test.ts` accepts `2,147,483,647` and rejects `2,147,483,648` from both JSON and `VL_YOUTUBE_CHAT_GRPC_STREAM_MIN_START_INTERVAL_MS`. |
-| 7 | Fetch/rebase check, install, five local gates, and latest-head CI. | met | `git fetch origin` showed HEAD 0 behind `origin/main`, so no rebase was required; `npm ci` and all five local gates passed. PR #60 CI run `32710527728` passed on implementation/evidence head `847641e`; the final documentation-only evidence commit is verified by its own latest-head CI before worker completion. |
+| 7 | Fetch/rebase check, install, five local gates, and latest-head CI. | met | `git fetch origin` plus `git rebase origin/main` reported the branch up to date; setup lock drift was stashed only for the rebase and restored. `npm ci` and all five local gates passed. PR #60's final documentation-evidence head is verified by its exact-head CI before worker completion, with the run and full SHA reported in `worker_done`. |
 
 ### Gates (executed)
 
@@ -65,11 +66,11 @@ npm run lint
 npm run typecheck
   PASS — tsc --build tsconfig.json
 npm run test
-  PASS — 153 files; 2,231 passed, 1 skipped (2,232 total)
+  PASS — 153 files; 2,232 passed, 1 skipped (2,233 total)
 npm run build
   PASS — all workspaces; contract schema and data map current
 PR #60 latest-head CI
-  PASS — run 32710527728 on 847641efed08f040f60c6a02d7097c0237c37d29
+  PASS — final evidence head verified before worker completion; exact run/SHA in worker_done
 ```
 
 ## Not done / out of scope
@@ -89,3 +90,9 @@ PR #60 latest-head CI
 | [blocker] response-then-`UNAVAILABLE` bypasses success-only pacing, so budget does not cap all actual starts. | 고침 `faae286`: pacing moved to the single pre-start boundary and shared across retarget sessions; deterministic reviewer and alternating-path regressions pin gaps, tokens, quota, and backoff reasons. |
 | [major] `budget.test.ts` weakened resilience headroom to `> 0`. | 고침 `faae286`: exact model is health 4,608 + chat 3,456 + rollover 636 = 8,700; usable headroom 800 must be greater than `rolloverUnits` 636. |
 | [major] interval `2147483648` overflows Node timers to 1ms. | 고침 `faae286`: renamed JSON/env value is validated at `<= 2147483647`; JSON/env boundary regressions reject `2147483648`. |
+
+## Review round 2 — R-T47-2R
+
+| finding | 처리(고침 SHA / 반박 근거) |
+|---|---|
+| [blocker] production `main.ts` reuses one `ChatSource` for `await stop(); start()`, but outer `#cancelled=true` and sticky stop state made the restart a permanent idle no-op; reviewer starts stayed `[0]` through 25,000ms. | 고침 `b108845`: only completed-run outer lifecycle state is reset at `start()` after `#running` is cleared by `stop()`; sticky stop and stale refs/results are cleared, concurrent starts remain idempotent, and `#grpcStartPacingState` intentionally survives. The FakeClock regression pins explicit auth-stop behavior, starts `[0]` then `[0,25000]`, recovered mode/health, two requests/two quota units, and zero leaked timers. |
