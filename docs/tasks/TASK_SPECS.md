@@ -894,3 +894,21 @@
   4. 전이 정착 폴링은 주기가 그대로다(T33 회귀 유지).
   5. 게이트 5개 + CI 녹색.
 
+## T45 — D-21 11시간 rolling production 경로 활성화
+
+- slug `t45-activate-rolling` · PR 접두 `feat(youtube):` · 의존 T33, T36, T42, T44 · **non-contract**
+- **읽을 것**: 스펙 §9.3·§11, BOARD D-21·D-24, `config/default.json`, `apps/server/src/youtube/broadcast/config.ts`, `apps/server/src/youtube/broadcast/api.test.ts`, `apps/server/src/youtube/broadcast/lifecycle.test.ts`, `docs/ops/broadcast-lifecycle.md`
+- **왜**: T33은 11시간 미만 rolling 교체를 구현했고 실제 채널에서 교체·archive 생성을 검증했다. T36은 교체 뒤 chat source가 새 `liveChatId`를 따라가게 했고, 이후 blocker들도 닫혔다. 그러나 shipped 설정은 여전히 `strategy: "single"`, `segmentMs: null`이라 D-21이 선택한 production 경로가 활성화되지 않는다.
+- **범위**
+  - shipped non-secret 설정에서 `youtube.broadcast.strategy = "rolling-experiment"`, `youtube.broadcast.segmentMs = 39600000`으로 고정한다. enum 이름은 기존 persistence/구현 계약이므로 이 task에서 rename하지 않는다.
+  - `39600000`은 정확히 11시간이다. D-21이 확정한 운영값이므로 provisional 목록에 넣지 않는다.
+  - 최초 공개 안전은 그대로다: shipped `privacyStatus`는 `private`이고 broadcast insert도 항상 private다. D-24의 `unlisted`는 calibration 호스트의 `VL_YOUTUBE_PRIVACY_STATUS` override일 뿐 기본값이 아니다.
+  - simulator는 shipped 설정에서 계속 disabled다. secret·실계정 값은 설정·문서·fixture 어디에도 넣지 않는다.
+  - rolling-off 경로는 제거하지 않는다. 테스트가 주입한 `segmentMs: null`에서 `rolloverIfDue()`가 외부 요청 없이 no-op임을 명시적으로 고정한다. 테스트용 기본 config 자체를 production 기본값처럼 바꿔 기존 테스트 전부를 rolling으로 만들지 않는다.
+  - 선택 전 상태를 설명하는 직접 stale한 코드 주석·운영 문서만 갱신한다. 과거 task 결과와 BOARD/HANDOFF 이력은 고치지 않는다.
+- **합격 기준**
+  1. repository의 shipped broadcast config를 읽으면 strategy가 `rolling-experiment`, segment가 정확히 `39,600,000ms`다 — 회귀 테스트.
+  2. 같은 shipped 기본값에서 privacy가 `private`, simulator가 disabled다 — 회귀 테스트.
+  3. 주입한 `segmentMs: null`에서는 rollover가 일어나지 않고 YouTube API 요청도 추가되지 않는다 — 회귀 테스트.
+  4. `BOARD.md`·`HANDOFF.md`·contract·secret은 변경하지 않는다. 직접 stale한 운영 문서만 현재 선택과 11시간 동작을 설명한다.
+  5. fetch/rebase + 게이트 5개 + CI 녹색.
