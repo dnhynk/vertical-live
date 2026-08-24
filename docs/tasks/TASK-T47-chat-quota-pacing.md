@@ -1,7 +1,7 @@
 # TASK-T47-chat-quota-pacing
 
 - Task: T47 successful gRPC `streamList` quota-safe pacing (`docs/tasks/TASK_SPECS.md` §T47)
-- Branch: `dnhynk/t47-chat-quota-pacing` · PR: pending
+- Branch: `dnhynk/t47-chat-quota-pacing` · PR: #60
 - Orca: task `task_2d2fd2082b4f` · dispatch `ctx_218e2507997c`
 - Spec sections read: §7.2, §9.4, §11, Gate 2
 - BOARD decisions/assumptions relied on: A-15 (operational thresholds stay provisional until Gate 2 calibration)
@@ -44,23 +44,35 @@ Cap successful gRPC `liveChatMessages.streamList` reconnect starts at a quota-sa
 
 | # | 기준 | 상태(met/unmet/unverifiable) | 근거(테스트 파일·명령·출력) |
 |---|---|---|---|
-| 1 | Shipped configured start-to-start cap keeps the T44 combined daily model at or below 9,500 units. | pending | — |
-| 2 | Pacing applies only after a normal gRPC end with at least one response and preserves existing failure/empty/REST semantics. | pending | — |
-| 3 | Rapid successful normal closes cannot exceed the configured start rate and resume the durable response token. | pending | — |
-| 4 | Stop/cancel interrupts a pacing wait without waiting the full interval. | pending | — |
-| 5 | Health distinguishes successful pacing from failure backoff; no fake events, duplicate quota records, or contract changes. | pending | — |
-| 6 | Rebase, five local gates, PR latest-head CI. | pending | — |
+| 1 | Shipped configured start-to-start cap keeps the T44 combined daily model at or below 9,500 units. | met | `quota/budget.test.ts`: `ceil(86,400,000 / 25,000) = 3,456` chat units; T44 fixed broadcast 5,244; combined 8,700; usable budget 9,500; headroom 800. |
+| 2 | Pacing applies only after a normal gRPC end with at least one response and preserves existing failure/empty/REST semantics. | met | `grpc-source.ts` branches on `kind === 'end' && responses > 0`; `grpc-pacing.test.ts` pins empty-end to 1,000ms error backoff; existing gRPC/REST/auth suites and full suite pass. |
+| 3 | Rapid successful normal closes cannot exceed the configured start rate and resume the durable response token. | met | `grpc-pacing.test.ts`: virtual starts `[0, 25000, 50000, 75000]`; requests resume `token_1`→`token_3`; 4 actual opens produce exactly 4 quota units. A separate 10,000ms-open case waits only the remaining 15,000ms. |
+| 4 | Stop/cancel interrupts a pacing wait without waiting the full interval. | met | `grpc-pacing.test.ts`: stop during a 25,000ms pace resolves `cancelled` at monotonic 0 with zero pending timers and cleared health wait. Existing target-watcher and source stop suites remain green. |
+| 5 | Health distinguishes successful pacing from failure backoff; no fake events, duplicate quota records, or contract changes. | met | `health.test.ts`: `waitReason=successful_close_pacing` vs `failure_backoff`; reconnect remains observational `ok`. Diff has no contract/fake-event/dependency changes. |
+| 6 | Rebase, five local gates, PR latest-head CI. | partially met | Rebased onto `origin/main` `76399d5`; `npm ci` and all five local gates passed. PR #60 opened; latest-head CI pending at ticket update time and must be verified before worker completion. |
 
 ### Gates (executed)
 
 ```text
-Not run yet.
+npm ci
+  PASS — added 431 packages and audited 437; npm reported 10 existing audit findings
+npm run format:check
+  PASS — all matched files use Prettier style
+npm run lint
+  PASS — ESLint, no-legacy-imports, and reviewed install-script checks
+npm run typecheck
+  PASS — tsc --build tsconfig.json
+npm run test
+  PASS — 153 files; 2,227 passed, 1 skipped (2,228 total)
+npm run build
+  PASS — all workspaces; contract schema and data map current
 ```
 
 ## Not done / out of scope
 
-- Live-host deployment, restart, and Gate 2 production calibration remain coordinator-owned.
+- Live-host deployment, restart, and Gate 2 production calibration remain coordinator-owned; the worker did not touch the running unlisted host.
 - No migrations, contract changes, payment/identity/public-flag changes, or dependencies.
+- A setup-generated `package-lock.json` peer-metadata diff predated implementation, remained unchanged through `npm ci`, and was intentionally excluded from commits/PR rather than overwritten.
 
 ## Follow-ups
 
@@ -70,4 +82,3 @@ Not run yet.
 
 | finding | 처리(고침 SHA / 반박 근거) |
 |---|---|
-
