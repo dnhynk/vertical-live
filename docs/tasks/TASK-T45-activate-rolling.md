@@ -45,7 +45,7 @@ T33과 T36에서 구현·실측까지 끝난 rolling 방송 교체를 shipped no
 | 2 | shipped 기본 privacy는 `private`, simulator는 disabled로 남는다. | met | broadcast config test와 `apps/server/src/engine/config.test.ts` repository-config test |
 | 3 | 주입한 `segmentMs: null`에서는 rollover가 일어나지 않는다. | met | `apps/server/src/youtube/broadcast/lifecycle.test.ts`가 API 요청 증가도 없음을 검증 |
 | 4 | 비밀정보·contract 변경 없이 직접 stale한 운영 문서만 정합화한다. | met | `git diff --name-only origin/main...HEAD`; BOARD/HANDOFF/contract 변경 없음 |
-| 5 | fetch/rebase와 게이트 5개, CI가 녹색이다. | pending(CI) | `git fetch origin; git rebase --autostash origin/main` 완료, 로컬 게이트 전부 통과; PR #58 CI 대기 |
+| 5 | fetch/rebase와 게이트 5개, CI가 녹색이다. | met | `git fetch origin; git rebase --autostash origin/main` 완료, 로컬 게이트 전부 통과; PR #58 CI run 32699875783 통과 |
 
 ### Gates (executed)
 
@@ -56,7 +56,7 @@ npm run lint         -> passed; 0 legacy imports, 4 install scripts reviewed
 npm run typecheck    -> passed
 npm run test         -> passed; 151 files, 2,213 passed, 1 skipped
 npm run build        -> passed; 4 workspace builds, schema/data-map checks up to date
-PR #58 CI            -> pending
+PR #58 CI            -> passed; run 32699875783 (all gates + soak:ci)
 ```
 
 ## Not done / out of scope
