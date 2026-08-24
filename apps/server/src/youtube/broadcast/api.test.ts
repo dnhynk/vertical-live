@@ -422,7 +422,7 @@ describe('broadcast config', () => {
     ).toThrow(/ultraLow does not support/)
   })
 
-  it('accepts the labelled rolling experiment', () => {
+  it('accepts the retained rolling-experiment enum value', () => {
     const config = loadBroadcastConfig({
       configPath: writeConfig({ strategy: 'rolling-experiment' }),
     })
