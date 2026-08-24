@@ -41,16 +41,27 @@ YouTube broadcast와 chat의 모든 quota 사용을 기존 `quota_usage`에 영�
 
 | # | 기준 | 상태(met/unmet/unverifiable) | 근거(테스트 파일·명령·출력) |
 |---|---|---|---|
-| 1 | production shared tracker 하나 | pending | 구현·테스트 예정 |
-| 2 | combined/chat-only health | pending | 구현·테스트 예정 |
-| 3 | store 영속·복원·합산 guard | pending | 구현·테스트 예정 |
-| 4 | aggregate·restart·chat-only·no-double-count 회귀 | pending | 구현·테스트 예정 |
-| 5 | fetch/rebase, 5 gates, latest-head CI | pending | 실행 예정 |
+| 1 | production shared tracker 하나 | met | `youtube/quota/runtime.ts`, `main.ts`, `chat/runtime.ts`, `chat/wiring.test.ts` — production `new QuotaTracker` 1곳, 동일 인스턴스 전달 |
+| 2 | combined/chat-only health | met | `server.test.ts` chat-only `/health.quota`가 gRPC+REST 합산 5 units와 `byMethod` 노출 |
+| 3 | store 영속·복원·합산 guard | met | `quota.test.ts` mixed-method restart 복원, `broadcast/api.test.ts` chat spend 포함 reserve 차단, `quota/runtime.test.ts` 기존 store write-through |
+| 4 | aggregate·restart·chat-only·no-double-count 회귀 | met | gRPC·REST 테스트가 실제 요청 1회당 정확히 1 unit, 전체 2,220 passed·1 skipped |
+| 5 | fetch/rebase, 5 gates, latest-head CI | pending | fetch/rebase와 로컬 5개 gate 통과; PR latest-head CI 대기 |
 
 ### Gates (executed)
 
 ```text
-실행 전
+git fetch origin && git rebase --autostash origin/main
+  PASS — current branch was up to date; pre-existing package-lock.json change restored from autostash
+npm run format:check
+  PASS — all matched files use Prettier style
+npm run lint
+  PASS — ESLint + legacy/import/install-script checks
+npm run typecheck
+  PASS — tsc --build tsconfig.json
+npm run test
+  PASS — 152 files, 2,220 passed, 1 skipped
+npm run build
+  PASS — contract schema current; renderer/server/simulator/soak built
 ```
 
 ## Not done / out of scope
