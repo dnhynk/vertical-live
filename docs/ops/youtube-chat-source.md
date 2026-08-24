@@ -11,7 +11,9 @@
 2. `source_checkpoint`에서 `youtube:{liveChatId}` 행의 `next_page_token`을 복원한다.
 3. gRPC `StreamList`를 열고(`part = id,snippet`, `authorDetails` 없음) 응답마다 item과 token을
    **하나의 트랜잭션**으로 inbox에 commit한다(§7.3(2)).
-4. 끊기면 마지막 token으로 재연결한다. gRPC가 연속 실패하면 REST 폴링으로 넘어가고
+4. 끊기면 마지막 token으로 재연결한다. 이전 결과가 정상 종료·오류·빈 종료·token rejection 중 무엇이든
+   모든 실제 gRPC 호출 시작 사이를 최소 25초로 두어 일일 quota 상한을 지킨다. 기존 오류/빈 종료 backoff는 이 floor에
+   추가로 적용된다. gRPC가 연속 실패하면 REST 폴링으로 넘어가고
    (`pollingIntervalMillis`를 **그대로** 지킨다 — 로컬 하한은 늘리기만 한다), 냉각 시간 뒤 다시
    gRPC를 시도한다. checkpoint는 공유한다.
 
@@ -26,6 +28,7 @@
 | `broadcastId` | `null` (env `VL_YOUTUBE_BROADCAST_ID`) | `eventKey`에 들어간다(§7.4) |
 | `parts` | `["id","snippet"]` | **정확히 이 집합만.** 부분집합·중복·`authorDetails` 모두 기동 거부(§7.2, A-1) |
 | `maxResults` | `500` | 공식 기본값(허용 200–2000) |
+| `grpcStreamMinStartIntervalMs` | `25000` (env `VL_YOUTUBE_CHAT_GRPC_STREAM_MIN_START_INTERVAL_MS`) | provisional. 모든 actual gRPC start의 시작→시작 최소 간격; 열린 시간·branch backoff가 포함된다. Node timer 안전을 위해 최대 `2147483647`; Gate 2에서 재조정 |
 | `grpc.endpoint` | `youtube.googleapis.com:443` | [S4] 데모의 주소 |
 | `grpc.keepalive` | 300000 / 20000 / false | provisional. gRPC 공식 가이드의 서버 기본 허용치(5분) 안쪽 |
 | `rest.minPollIntervalMs` | 2000 | provisional. **하한만 있다** — 서버가 준 간격을 늘리기만 하고 줄이지 않는다 |
@@ -41,7 +44,7 @@
 |---|---|---|---|
 | `youtube.chat.transport` | 수신 중 | 중단(권한·채팅 종료 등), 재시도 예산 소진 | 미시작, 재연결 중 |
 | `youtube.chat.keepalive` | 채널 READY/IDLE | 채널 TRANSIENT_FAILURE | REST 경로, 채널 없음 |
-| `youtube.chat.reconnect` | 정상 | resume token을 잃은 재연결 | — |
+| `youtube.chat.reconnect` | 기록 전용(항상 ok) | — | — |
 | `youtube.chat.user_events` | **항상** | — | — |
 
 `user_events`가 항상 `ok`인 것은 의도다: 스펙 §9.4(3)이 "사용자 메시지 무수신만으로 degraded
@@ -59,6 +62,9 @@
   `true`/`0`, 아니면 `false`/`null`(= 알 수 없음). 첫 재연결 전에는 둘 다 `null`이고 `count`가 0이다.
 - `estimatedDuplicates` — 마지막 복구 이후 inbox가 이미 갖고 있던 event key 수(측정값).
 - `tokenRejected` — 서버가 우리 token을 거부한 적이 있다(재개점 소실). 재연결 여부와 무관한 sticky 사실.
+- `waitReason` / `waitStartedAt` / `waitDelayMs` — 현재 재연결 대기가 모든 실제 시작을 제한하는 quota floor인지
+  (`quota_start_pacing`), 빈 정상 종료 backoff인지(`empty_end_backoff`), 실패 backoff인지
+  (`failure_backoff`)를 구분한다. quota pacing은 결함이 아니며 reconnect 신호는 `ok`다.
 
 **추측한 숫자를 넣지 않는다.**
 
@@ -71,4 +77,4 @@ mock으로는 판정하지 않는다. 절차는 `docs/ops/gate2-experiments.md`(
 - 실제 keepalive 정책(서버가 `too_many_pings`로 GOAWAY를 보내는지) 및 스트림 최대 수명.
 - 실제 `pollingIntervalMillis` 값의 범위와 `rateLimitExceeded` 발생 지점.
 - `streamList`/`list`의 실제 quota 단위 비용.
-- 장시간(수 시간) 연결에서의 재연결 빈도와 중복 수신량.
+- 장시간(수 시간) 연결에서의 재연결 빈도와 중복 수신량, provisional 25초 pacing의 quota·latency 영향.

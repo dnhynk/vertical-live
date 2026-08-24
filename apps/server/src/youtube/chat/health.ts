@@ -84,6 +84,16 @@ export interface ChatReconnectObservation {
    * has happened. No number here is ever inferred from an attempt alone.
    */
   readonly estimatedLostMessages: number | null
+  /** Active reconnect wait, distinguishing quota pacing from branch backoff (T47). */
+  readonly wait?: ChatReconnectWaitObservation | null
+}
+
+export type ChatReconnectWaitReason = 'quota_start_pacing' | 'empty_end_backoff' | 'failure_backoff'
+
+export interface ChatReconnectWaitObservation {
+  readonly reason: ChatReconnectWaitReason
+  readonly startedAt: string
+  readonly delayMs: number
 }
 
 export interface ChatUserEventObservation {
@@ -273,6 +283,9 @@ function reconnect(observation: ChatObservation): SignalBody {
     reconnectsWithoutToken: observation.reconnect.reconnectsWithoutToken,
     estimatedDuplicates: observation.reconnect.estimatedDuplicates,
     estimatedLostMessages: observation.reconnect.estimatedLostMessages,
+    waitReason: observation.reconnect.wait?.reason ?? null,
+    waitStartedAt: observation.reconnect.wait?.startedAt ?? null,
+    waitDelayMs: observation.reconnect.wait?.delayMs ?? null,
     // The reconnect cursor §9.4(3) asks to record. It authorizes nothing: it
     // names a position in one chat's message list, and `/health` is loopback.
     lastPageToken: observation.pageToken,

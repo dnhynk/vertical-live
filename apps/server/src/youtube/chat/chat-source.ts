@@ -7,7 +7,7 @@ import type { HealthSignal, HealthSignalSink } from '../../health/types.js'
 import { silentLogger, type Logger } from '../../secrets/redaction.js'
 import type { QuotaTracker } from '../quota/tracker.js'
 import type { ChatConfig } from './config.js'
-import { GrpcChatSource } from './grpc-source.js'
+import { GrpcChatSource, type GrpcStartPacingState } from './grpc-source.js'
 import { buildChatHealthSignals, type ChatObservation } from './health.js'
 import { RestChatSource } from './rest-source.js'
 import { CancellableDelay, type ChatAccessTokens, type ChatRunResult } from './retry.js'
@@ -97,6 +97,8 @@ export class ChatSource {
   readonly #readyDelay: CancellableDelay
   /** Wakes the binding watcher; separate so stopping one does not stop the other. */
   readonly #targetWatch: CancellableDelay
+  /** Retargeting creates a new gRPC reader, but not a new quota timeline. */
+  readonly #grpcStartPacingState: GrpcStartPacingState = { lastStartedAtMonotonicMs: null }
   #retarget = false
 
   /** The chat this source is currently reading; `null` before it has one. */
@@ -144,6 +146,20 @@ export class ChatSource {
   /** Starts the source in the background. Idempotent. */
   start(): void {
     if (this.#running !== undefined) return
+
+    // A supervisor restart reuses this object after awaiting stop(). Reset only
+    // the outer lifecycle that belongs to the completed run. In particular,
+    // #grpcStartPacingState deliberately survives so a component restart cannot
+    // open another quota-bearing stream before the previous start's floor.
+    this.#cancelled = false
+    this.#retarget = false
+    this.#lastResult = null
+    this.#target = null
+    this.#sink = undefined
+    this.#grpc = undefined
+    this.#rest = undefined
+    this.#state.clearStop()
+
     this.#running = this.#run().catch((error: unknown) => {
       this.#logger.error('youtube chat: source loop failed', {
         error: (error as Error).message,
@@ -154,12 +170,16 @@ export class ChatSource {
   }
 
   async stop(): Promise<void> {
+    const running = this.#running
     this.#cancelled = true
     this.#readyDelay.cancel()
     this.#targetWatch.cancel()
     this.#grpc?.stop()
     this.#rest?.stop()
-    await this.#running
+    await running
+    // A stale/concurrent stop must not tear down a newer run. `start()` stays a
+    // no-op until the captured promise settles and this boundary clears it.
+    if (this.#running !== running) return
     this.#running = undefined
     this.#transport?.close()
     this.#transport = undefined
@@ -250,6 +270,7 @@ export class ChatSource {
       config,
       auth: this.#options.auth,
       liveChatId: target.liveChatId,
+      startPacingState: this.#grpcStartPacingState,
       logger: this.#logger,
       ...(this.#options.quota === undefined ? {} : { quota: this.#options.quota }),
       ...(this.#options.random === undefined ? {} : { random: this.#options.random }),

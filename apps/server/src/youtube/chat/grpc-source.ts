@@ -7,6 +7,7 @@ import { decideRetry, type BackoffPolicy } from '../quota/backoff.js'
 import { classifyYouTubeApiError } from '../quota/classify.js'
 import type { QuotaTracker } from '../quota/tracker.js'
 import type { ChatConfig } from './config.js'
+import type { ChatReconnectWaitReason } from './health.js'
 import {
   CancellableDelay,
   createChatBackoff,
@@ -58,6 +59,12 @@ export interface GrpcChatSourceOptions {
   readonly logger?: Logger
   /** Injected in tests so backoff delays are reproducible (CLAUDE.md §4). */
   readonly random?: () => number
+  /** Shared across retargeted sessions so changing chat cannot bypass T47 pacing. */
+  readonly startPacingState?: GrpcStartPacingState
+}
+
+export interface GrpcStartPacingState {
+  lastStartedAtMonotonicMs: number | null
 }
 
 interface ConnectionEnd {
@@ -73,6 +80,7 @@ export class GrpcChatSource {
   readonly #policy: BackoffPolicy
   readonly #delay: CancellableDelay
   readonly #logger: Logger
+  readonly #startPacingState: GrpcStartPacingState
 
   #cancelled = false
   #call: StreamListCall | undefined
@@ -85,6 +93,7 @@ export class GrpcChatSource {
     this.#policy = createChatBackoff(options.config.reconnect, options.random)
     this.#delay = new CancellableDelay(options.clock)
     this.#logger = options.logger ?? silentLogger
+    this.#startPacingState = options.startPacingState ?? { lastStartedAtMonotonicMs: null }
   }
 
   /** Channel connectivity for the keepalive signal (spec §9.4(3)). */
@@ -117,6 +126,9 @@ export class GrpcChatSource {
         await this.#backoff()
         continue
       }
+
+      await this.#paceNextStart()
+      if (this.#cancelled) break
 
       const pageToken = this.#options.sink.pageToken
       state.connectAttempt(pageToken !== null)
@@ -158,6 +170,8 @@ export class GrpcChatSource {
       ...(pageToken === null ? {} : { page_token: pageToken }),
     }
     this.#commitError = undefined
+    const startedAtMonotonicMs = this.#options.clock.monotonicMs()
+    this.#startPacingState.lastStartedAtMonotonicMs = startedAtMonotonicMs
     this.#options.quota?.record('liveChatMessages.streamList')
 
     return new Promise<ConnectionEnd>((resolve) => {
@@ -231,13 +245,13 @@ export class GrpcChatSource {
 
     if (ended.kind === 'end') {
       if (ended.responses > 0) {
-        // Normal close of a long-lived call: resume at once, that is the point
-        // of the low-latency path.
+        // A healthy close resumes from the durable token. The quota-safe floor
+        // is enforced at the one boundary shared by every next actual start.
         this.#emptyEnds = 0
         return null
       }
       this.#emptyEnds += 1
-      await this.#delay.wait(this.#policy.nextDelayMs(Math.min(this.#emptyEnds, 8)))
+      await this.#wait('empty_end_backoff', this.#policy.nextDelayMs(Math.min(this.#emptyEnds, 8)))
       return null
     }
 
@@ -295,6 +309,31 @@ export class GrpcChatSource {
     // Past the attempt budget the source keeps trying at the maximum delay: a
     // chat reader that gave up would end unattended operation (spec §2.1). The
     // exhausted budget is what turns the transport signal `degraded` (§9.4(3)).
-    await this.#delay.wait(decision.retry ? decision.delayMs : config.reconnect.maxDelayMs)
+    await this.#wait(
+      'failure_backoff',
+      decision.retry ? decision.delayMs : config.reconnect.maxDelayMs,
+    )
+  }
+
+  /**
+   * Hard quota floor for every actual `streamList` start. Branch-specific
+   * backoffs run first; this adds only the remaining time since the prior start.
+   */
+  async #paceNextStart(): Promise<void> {
+    const lastStartedAt = this.#startPacingState.lastStartedAtMonotonicMs
+    if (lastStartedAt === null) return
+    const elapsedMs = this.#options.clock.monotonicMs() - lastStartedAt
+    const remainingMs = Math.max(0, this.#options.config.grpcStreamMinStartIntervalMs - elapsedMs)
+    await this.#wait('quota_start_pacing', remainingMs)
+  }
+
+  async #wait(reason: ChatReconnectWaitReason, delayMs: number): Promise<void> {
+    if (delayMs <= 0) return
+    this.#options.state.recordReconnectWait(reason, delayMs)
+    try {
+      await this.#delay.wait(delayMs)
+    } finally {
+      this.#options.state.clearReconnectWait()
+    }
   }
 }

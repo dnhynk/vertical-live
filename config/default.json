@@ -382,6 +382,7 @@
       "parts": ["id", "snippet"],
       "maxResults": 500,
       "readyPollIntervalMs": 250,
+      "grpcStreamMinStartIntervalMs": 25000,
       "grpc": {
         "endpoint": "youtube.googleapis.com:443",
         "keepalive": {
@@ -411,6 +412,7 @@
         "grpc.keepalive",
         "rest.minPollIntervalMs",
         "rest.requestTimeoutMs",
+        "grpcStreamMinStartIntervalMs",
         "reconnect",
         "fallback"
       ]

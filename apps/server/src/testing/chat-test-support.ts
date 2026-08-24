@@ -34,6 +34,7 @@ export function testChatConfig(overrides: Partial<ChatConfig> = {}): ChatConfig 
     broadcastId: TEST_BROADCAST_ID,
     parts: ['id', 'snippet'],
     maxResults: 200,
+    grpcStreamMinStartIntervalMs: 1,
     grpc: {
       endpoint: '127.0.0.1:1',
       keepalive: { timeMs: 300_000, timeoutMs: 20_000, permitWithoutCalls: false },

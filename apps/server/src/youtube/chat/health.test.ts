@@ -261,6 +261,34 @@ describe('buildChatHealthSignals', () => {
     })
   })
 
+  it('distinguishes healthy quota start pacing from failure backoff', () => {
+    const clock = new FakeClock()
+    const state = new ChatSourceState(clock, KEEPALIVE)
+
+    state.recordReconnectWait('quota_start_pacing', 15_000)
+    const paced = byName(
+      buildChatHealthSignals(state.observe('token_paced', 'READY'), clock),
+      CHAT_RECONNECT_SIGNAL,
+    )
+    expect(paced.status).toBe('ok')
+    expect(paced.detail).toMatchObject({
+      waitReason: 'quota_start_pacing',
+      waitDelayMs: 15_000,
+      lastPageToken: 'token_paced',
+    })
+
+    state.clearReconnectWait()
+    state.recordReconnectWait('failure_backoff', 8_000)
+    const backedOff = byName(
+      buildChatHealthSignals(state.observe('token_paced', 'READY'), clock),
+      CHAT_RECONNECT_SIGNAL,
+    )
+    expect(backedOff.detail).toMatchObject({
+      waitReason: 'failure_backoff',
+      waitDelayMs: 8_000,
+    })
+  })
+
   it('records a reconnect that lost its resume token without calling it a fault', () => {
     const signals = buildChatHealthSignals(
       observation({
