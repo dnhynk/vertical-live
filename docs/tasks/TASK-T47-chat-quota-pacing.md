@@ -1,21 +1,22 @@
 # TASK-T47-chat-quota-pacing
 
-- Task: T47 successful gRPC `streamList` quota-safe pacing (`docs/tasks/TASK_SPECS.md` §T47)
+- Task: T47 all-start gRPC `streamList` quota-safe pacing (`docs/tasks/TASK_SPECS.md` §T47)
 - Branch: `dnhynk/t47-chat-quota-pacing` · PR: #60
 - Orca: task `task_2d2fd2082b4f` · dispatch `ctx_218e2507997c`
+- Review fix: F-T47-R1 task `task_b9d4fd94e525` · dispatch `ctx_b173ccdf4b32`
 - Spec sections read: §7.2, §9.4, §11, Gate 2
 - BOARD decisions/assumptions relied on: A-15 (operational thresholds stay provisional until Gate 2 calibration)
 
 ## Goal
 
-Cap successful gRPC `liveChatMessages.streamList` reconnect starts at a quota-safe deterministic rate while preserving durable response-token resume, existing error and empty-end backoff, cancellation, REST server-directed polling, retarget/stop behavior, and exact per-request quota accounting.
+Cap every actual gRPC `liveChatMessages.streamList` start at a quota-safe deterministic rate while preserving durable response-token resume, existing error and empty-end backoff, auth/error classification, cancellation, REST server-directed polling, retarget/stop behavior, and exact per-request quota accounting.
 
 ## Plan
 
 1. Trace chat config loading, gRPC reconnect state/health, injected clock/timer seams, quota accounting, and T44's daily budget calculation.
-2. Add a provisional configured 25,000ms successful-call start-to-start interval through the normal JSON/env path, with cancellable pacing only after a normal end containing at least one response.
-3. Extend health detail only as needed to distinguish successful paced reconnect waits from failure backoff, without changing supervisor semantics.
-4. Add deterministic regressions for the start-rate cap, durable response-token resume, cancellation/stop, unchanged error/empty/REST behavior, and a daily budget derived from the shipped pacing value.
+2. Add a provisional configured 25,000ms all-start gRPC interval through the normal JSON/env path and enforce it at the one boundary before every actual start, after any existing branch-specific wait.
+3. Extend health detail only as needed to distinguish quota-floor waits from empty/failure backoff, without changing supervisor semantics.
+4. Add deterministic regressions for normal, response-then-error, empty, token-rejection, alternating, stop, and retarget paths plus durable token/accounting and the config timer boundary.
 5. Run `npm ci`, rebase on `origin/main`, execute all five local gates, record exact results, push the worker branch, open a PR, and verify latest-head CI.
 
 ## Sources consulted (official docs)
@@ -36,7 +37,7 @@ Cap successful gRPC `liveChatMessages.streamList` reconnect starts at a quota-sa
 
 | 항목 | 값 | 라벨 | 이유 |
 |---|---|---|---|
-| Successful gRPC call minimum start-to-start interval | 25,000ms | `provisional: true`, Gate 2 calibration | Deterministically caps chat opens at 2.4/minute (3,456/day at one modeled unit/call), keeping the existing T44 fixed budget plus chat below the 9,500 usable daily budget even if streams close immediately. |
+| Every actual gRPC call minimum start-to-start interval | 25,000ms | `provisional: true`, Gate 2 calibration | Deterministically caps all chat opens, independent of terminal outcome, at 2.4/minute (3,456/day at one modeled unit/call), keeping the existing T44 fixed budget plus chat below the 9,500 usable daily budget. |
 
 ## Result
 
@@ -44,12 +45,13 @@ Cap successful gRPC `liveChatMessages.streamList` reconnect starts at a quota-sa
 
 | # | 기준 | 상태(met/unmet/unverifiable) | 근거(테스트 파일·명령·출력) |
 |---|---|---|---|
-| 1 | Shipped configured start-to-start cap keeps the T44 combined daily model at or below 9,500 units. | met | `quota/budget.test.ts`: `ceil(86,400,000 / 25,000) = 3,456` chat units; T44 fixed broadcast 5,244; combined 8,700; usable budget 9,500; headroom 800. |
-| 2 | Pacing applies only after a normal gRPC end with at least one response and preserves existing failure/empty/REST semantics. | met | `grpc-source.ts` branches on `kind === 'end' && responses > 0`; `grpc-pacing.test.ts` pins empty-end to 1,000ms error backoff; existing gRPC/REST/auth suites and full suite pass. |
-| 3 | Rapid successful normal closes cannot exceed the configured start rate and resume the durable response token. | met | `grpc-pacing.test.ts`: virtual starts `[0, 25000, 50000, 75000]`; requests resume `token_1`→`token_3`; 4 actual opens produce exactly 4 quota units. A separate 10,000ms-open case waits only the remaining 15,000ms. |
-| 4 | Stop/cancel interrupts a pacing wait without waiting the full interval. | met | `grpc-pacing.test.ts`: stop during a 25,000ms pace resolves `cancelled` at monotonic 0 with zero pending timers and cleared health wait. Existing target-watcher and source stop suites remain green. |
-| 5 | Health distinguishes successful pacing from failure backoff; no fake events, duplicate quota records, or contract changes. | met | `health.test.ts`: `waitReason=successful_close_pacing` vs `failure_backoff`; reconnect remains observational `ok`. Diff has no contract/fake-event/dependency changes. |
-| 6 | Rebase, five local gates, PR latest-head CI. | met | Rebased onto `origin/main` `76399d5`; `npm ci` and all five local gates passed. PR #60 CI run `32707789506` passed all steps on implementation/evidence head `8b7adc9`; the final documentation-only result commit is verified by its own latest-head CI before worker completion. |
+| 1 | Shipped configured floor keeps every actual gRPC start inside the T44 combined daily model and retains meaningful resilience headroom. | met | `quota/budget.test.ts`: `ceil(86,400,000 / 25,000) = 3,456` chat; health 4,608; rollover 636; combined 8,700; usable 9,500; headroom 800 `> rolloverUnits` 636. |
+| 2 | Response-bearing normal end, response-then-error, empty end, token rejection, and alternating outcomes all obey the configured floor without erasing branch backoff. | met | `grpc-pacing.test.ts`: reviewer sequence formerly `[0,1000,2000]` is `[0,25000,50000]`; alternating path starts `[0,25000,50000,75000,100000,125000]` while observing `failure_backoff`, `empty_end_backoff`, and `quota_start_pacing`. |
+| 3 | Durable response-token resume and quota accounting remain exact per actual request. | met | Reviewer regression requests `undefined → token_error_1 → token_error_2` with 3 starts = 3 units; alternating path advances/forgets tokens exactly and 6 starts = 6 units. |
+| 4 | Stop and retarget cancel the current wait without bypassing the shared floor. | met | Stop resolves at monotonic 0 with zero timers. Retarget cancels the old reader at 1,000ms but the new chat's first start remains at 25,000ms, not 1,000ms. |
+| 5 | Existing classification/health semantics remain additive. | met | Error and empty branch delays run first, then only the remaining quota floor; health reports `quota_start_pacing` separately from `failure_backoff`/`empty_end_backoff`; REST/auth suites remain in the full gate. No fake events or contract changes. |
+| 6 | Node timer overflow is impossible through the renamed config/env path. | met | `config.test.ts` accepts `2,147,483,647` and rejects `2,147,483,648` from both JSON and `VL_YOUTUBE_CHAT_GRPC_STREAM_MIN_START_INTERVAL_MS`. |
+| 7 | Fetch/rebase check, install, five local gates, and latest-head CI. | pending | `git fetch origin` showed HEAD 0 behind `origin/main`, so no rebase was required; `npm ci` and all five local gates passed. Latest-head Actions is verified after this documentation commit is pushed. |
 
 ### Gates (executed)
 
@@ -63,7 +65,7 @@ npm run lint
 npm run typecheck
   PASS — tsc --build tsconfig.json
 npm run test
-  PASS — 153 files; 2,227 passed, 1 skipped (2,228 total)
+  PASS — 153 files; 2,231 passed, 1 skipped (2,232 total)
 npm run build
   PASS — all workspaces; contract schema and data map current
 ```
@@ -78,7 +80,10 @@ npm run build
 
 - Calibrate the provisional 25,000ms interval against fresh Gate 2 quota and latency evidence after deployment.
 
-## Review round <n>
+## Review round 1 — R-T47-1
 
 | finding | 처리(고침 SHA / 반박 근거) |
 |---|---|
+| [blocker] response-then-`UNAVAILABLE` bypasses success-only pacing, so budget does not cap all actual starts. | 고침 `faae286`: pacing moved to the single pre-start boundary and shared across retarget sessions; deterministic reviewer and alternating-path regressions pin gaps, tokens, quota, and backoff reasons. |
+| [major] `budget.test.ts` weakened resilience headroom to `> 0`. | 고침 `faae286`: exact model is health 4,608 + chat 3,456 + rollover 636 = 8,700; usable headroom 800 must be greater than `rolloverUnits` 636. |
+| [major] interval `2147483648` overflows Node timers to 1ms. | 고침 `faae286`: renamed JSON/env value is validated at `<= 2147483647`; JSON/env boundary regressions reject `2147483648`. |
