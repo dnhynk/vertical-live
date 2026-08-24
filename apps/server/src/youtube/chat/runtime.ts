@@ -15,8 +15,7 @@ import { loadOAuthClientCredentials, loadYouTubeAuthConfig } from '../auth/confi
 import type { AuthEventSink } from '../auth/events.js'
 import { OAuthClient } from '../auth/oauth-client.js'
 import { TokenManager } from '../auth/token-manager.js'
-import { QuotaTracker } from '../quota/tracker.js'
-import { loadQuotaConfig } from '../quota/config.js'
+import type { QuotaTracker } from '../quota/tracker.js'
 import { ChatSource, type LiveChatTargetResolver } from './chat-source.js'
 import { loadChatConfig, type ChatConfig } from './config.js'
 import type { ConsentFailure, ConsentObserver } from './sink.js'
@@ -24,7 +23,8 @@ import type { ChatAccessTokens } from './retry.js'
 
 /**
  * Assembles the chat source the way the server process needs it: T3's OAuth
- * token manager and quota tracker, T6's parser port, T8's inbox and engine gate.
+ * token manager and shared quota tracker, T6's parser port, T8's inbox and
+ * engine gate.
  *
  * It returns `null` when `youtube.chat.enabled` is false, and only then touches
  * no credential at all — a developer running the world locally never needs a
@@ -81,6 +81,8 @@ export interface ChatRuntimeDeps {
    * to be *tested*, not raced).
    */
   readonly auth?: ChatAccessTokens
+  /** The process-wide, store-backed tracker shared with broadcast (T46). */
+  readonly quota?: QuotaTracker
 }
 
 export async function createChatSource(deps: ChatRuntimeDeps): Promise<ChatSource | null> {
@@ -88,17 +90,12 @@ export async function createChatSource(deps: ChatRuntimeDeps): Promise<ChatSourc
   if (!config.enabled) return null
 
   const logger = deps.logger ?? silentLogger
+  if (deps.quota === undefined) {
+    throw new Error('youtube.chat.enabled requires the process-wide quota tracker')
+  }
   // An injected source is used as-is, and then no credential is touched here at
   // all: the caller's `TokenManager` already owns the grant (see `auth` above).
   const tokens = deps.auth ?? (await buildTokenManager(deps, logger))
-
-  const quotaConfig = loadQuotaConfig()
-  const quota = new QuotaTracker({
-    clock: deps.clock,
-    dailyUnits: quotaConfig.dailyUnits,
-    reserveUnits: quotaConfig.reserveUnits,
-    timeZone: quotaConfig.resetTimeZone,
-  })
 
   return new ChatSource({
     config,
@@ -108,7 +105,7 @@ export async function createChatSource(deps: ChatRuntimeDeps): Promise<ChatSourc
     parseCommand: chatParserPort(deps),
     auth: tokens,
     engine: deps.engine,
-    quota,
+    quota: deps.quota,
     logger,
     ...(deps.consent === undefined ? {} : { consent: deps.consent }),
     ...(deps.onConsentFailure === undefined ? {} : { onConsentFailure: deps.onConsentFailure }),

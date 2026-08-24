@@ -201,13 +201,18 @@ describe('failure outcomes', () => {
     expect((error as YouTubeApiCallError).outcome).toBe('uncertain')
   })
 
-  it('never attempts a call the quota reserve is protecting', async () => {
-    const h = await harness({ dailyUnits: 100, reserveUnits: 60 })
+  it('includes chat spend when protecting the shared quota reserve', async () => {
+    const h = await harness({ dailyUnits: 100, reserveUnits: 10 })
+    h.quota.record('liveChatMessages.streamList', 41)
 
     const error = await insertBroadcast(h).catch((caught: unknown) => caught)
 
     expect((error as YouTubeApiCallError).outcome).toBe('not_attempted')
     expect(server?.requests).toHaveLength(0)
+    expect(h.quota.snapshot()).toMatchObject({
+      spentUnits: 41,
+      byMethod: { 'liveChatMessages.streamList': 41 },
+    })
     // The reserve is what keeps recovery possible on a heavy day.
     await expect(h.api.listBroadcasts({ broadcastStatus: 'active' })).resolves.toEqual({
       items: [],

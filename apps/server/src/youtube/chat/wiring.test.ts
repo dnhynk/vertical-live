@@ -17,6 +17,7 @@ import { loadRetentionConfig } from '../../privacy/config.js'
 import { silentLogger } from '../../secrets/redaction.js'
 import { testChatConfig } from '../../testing/chat-test-support.js'
 import { FakeClock } from '../../testing/fake-clock.js'
+import { QuotaTracker } from '../quota/tracker.js'
 import { ChatIngestSink } from './sink.js'
 import { chatParserPort } from './runtime.js'
 import { chatRuntimeDeps, type ChatWiring } from './wiring.js'
@@ -45,6 +46,7 @@ interface Wired {
   readonly commandMetrics: CommandMetrics
   readonly harness: ReturnType<typeof createEngineHarness>
   readonly directory: ConsentDirectory | null
+  readonly quota: QuotaTracker
   dispose(): void
 }
 
@@ -72,6 +74,7 @@ function wire(identityGateOpen: boolean): Wired {
     ...(directory === null ? {} : { identity: directory }),
   })
   const commandMetrics = new CommandMetrics({ consentGateOpen: identityGateOpen })
+  const quota = new QuotaTracker({ clock, store: temp.store })
   const wiring: ChatWiring = {
     store: temp.store,
     engine: harness.engine,
@@ -83,6 +86,7 @@ function wire(identityGateOpen: boolean): Wired {
     config: testChatConfig({ enabled: true }),
     logger: silentLogger,
     auth: null,
+    quota,
     resolveTarget: null,
   }
   harness.engine.start()
@@ -91,6 +95,7 @@ function wire(identityGateOpen: boolean): Wired {
     commandMetrics,
     harness,
     directory,
+    quota,
     dispose: () => {
       harness.dispose()
       temp.dispose()
@@ -216,5 +221,12 @@ describe('chatRuntimeDeps', () => {
     expect(active.deps.consent).toBeUndefined()
     expect(active.deps.onConsentFailure).toBeUndefined()
     expect(active.deps.identityGateOpen).toBe(false)
+  })
+
+  it('passes the exact process-wide quota tracker through to the source factory', () => {
+    const active = wire(false)
+    wired = active
+
+    expect(active.deps.quota).toBe(active.quota)
   })
 })

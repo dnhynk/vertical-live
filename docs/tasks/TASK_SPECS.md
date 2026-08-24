@@ -912,3 +912,21 @@
   3. 주입한 `segmentMs: null`에서는 rollover가 일어나지 않고 YouTube API 요청도 추가되지 않는다 — 회귀 테스트.
   4. `BOARD.md`·`HANDOFF.md`·contract·secret은 변경하지 않는다. 직접 stale한 운영 문서만 현재 선택과 11시간 동작을 설명한다.
   5. fetch/rebase + 게이트 5개 + CI 녹색.
+
+## T46 — chat·broadcast가 서로 다른 quota tracker를 써 실제 합계를 보지 못한다
+
+- slug `t46-unified-quota` · PR 접두 `fix(youtube):` · 의존 T3, T4, T9, T10, T44 · **non-contract**
+- **읽을 것**: 스펙 §9.1·§11, T44, BOARD, `apps/server/src/main.ts`, `apps/server/src/youtube/chat/runtime.ts`, `apps/server/src/youtube/chat/wiring.ts`, `apps/server/src/youtube/quota/tracker.ts`, `apps/server/src/youtube/broadcast/api.ts`
+- **관측**(2026-08-24, Gate 2 live run): `createChatSource`가 store 없는 별도 `QuotaTracker`를 생성하고, `main.ts`의 `/health.quota`는 영속 broadcast tracker만 노출한다. 그 결과 `liveChatMessages.streamList`가 `quota_usage`와 health에 없고 combined reserve guard가 chat 지출을 세지 않는다.
+- **범위**
+  - broadcast나 chat 중 하나라도 YouTube quota를 필요로 하면 production process에 영속 store를 공유하는 `QuotaTracker`를 정확히 하나만 만든다.
+  - 같은 tracker를 broadcast lifecycle/health와 chat gRPC `streamList`·REST fallback 호출에 주입한다.
+  - `/health.quota`는 broadcast+chat 합산 snapshot을 내며 chat-only posture에서도 노출한다.
+  - 기존 `quota_usage` store 경로를 그대로 사용해 Pacific 날짜·method별 사용량을 복원하고, `canSpend`·reserve 결정이 양쪽 지출을 모두 보게 한다.
+  - 적용 완료 migration, `packages/contract`, BOARD, HANDOFF, secret, 관련 없는 코드는 바꾸지 않는다. dependency를 추가하지 않는다.
+- **합격 기준**
+  1. production에서 broadcast와 chat은 process-wide shared `QuotaTracker` 하나만 사용한다.
+  2. `/health.quota`가 gRPC `liveChatMessages.streamList`와 REST fallback을 포함한 합산 `byMethod`·`spentUnits`를 chat-only posture에서도 노출한다.
+  3. 모든 사용량이 기존 `quota_usage` store에 기록되고 재시작 뒤 복원되며, 합산 `canSpend`·reserve guard가 chat과 broadcast 지출을 함께 계산한다.
+  4. aggregate `byMethod`·`spentUnits`, restart restoration, chat-only health, no double counting을 회귀 테스트로 고정한다.
+  5. fetch/rebase + 게이트 5개 + latest-head CI 녹색.

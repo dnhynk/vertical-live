@@ -191,6 +191,7 @@ function build(identityGateOpen: boolean, options: BuildOptions = {}): Fixture {
     config: testChatConfig({ enabled: true }),
     logger,
     auth: null,
+    quota: null,
     resolveTarget: null,
   })
   const sink = new ChatIngestSink({

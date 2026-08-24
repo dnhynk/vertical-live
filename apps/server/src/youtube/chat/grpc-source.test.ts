@@ -19,6 +19,7 @@ import {
   testParseCommand,
 } from '../../testing/chat-test-support.js'
 import { AuthRevokedError } from '../auth/token-manager.js'
+import { QuotaTracker } from '../quota/tracker.js'
 import type { ChatConfig } from './config.js'
 import { GrpcChatSource } from './grpc-source.js'
 import { CHAT_RECONNECT_SIGNAL, CHAT_TRANSPORT_SIGNAL, buildChatHealthSignals } from './health.js'
@@ -74,6 +75,7 @@ describe('GrpcChatSource', () => {
       initialPageToken?: string | null
       /** Dial through a relay whose sockets the test can sever. */
       throughBreaker?: boolean
+      quota?: QuotaTracker
     } = {},
   ): Promise<Harness> {
     const server = await FakeStreamListServer.start({ script })
@@ -110,6 +112,7 @@ describe('GrpcChatSource', () => {
       auth: options.auth ?? fixedTokens(),
       liveChatId: TEST_LIVE_CHAT_ID,
       random: () => 0,
+      ...(options.quota === undefined ? {} : { quota: options.quota }),
     })
     const stop = async (): Promise<void> => {
       source.stop()
@@ -134,6 +137,22 @@ describe('GrpcChatSource', () => {
     expect(rows).toHaveLength(2)
     expect(rows.map((row) => row.envelope.sourceShape)).toEqual(['grpc', 'grpc'])
     expect(temp.store.getSourceCheckpoint(TEST_SOURCE_KEY)?.nextPageToken).toBe('token_1')
+  })
+
+  it('books each gRPC stream open exactly once on the shared tracker', async () => {
+    const quota = new QuotaTracker({ clock: systemClock, store: temp.store })
+    const h = await harness(
+      [{ end: { errorCode: status.FAILED_PRECONDITION, details: 'LIVE_CHAT_ENDED' } }],
+      { quota },
+    )
+
+    await h.source.run()
+
+    expect(h.server.requests).toHaveLength(1)
+    expect(quota.snapshot()).toMatchObject({
+      spentUnits: 1,
+      byMethod: { 'liveChatMessages.streamList': 1 },
+    })
   })
 
   it('requests id,snippet only while the consent gate is closed', async () => {
