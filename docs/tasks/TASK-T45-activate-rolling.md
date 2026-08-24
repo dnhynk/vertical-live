@@ -73,6 +73,9 @@ PR #58 CI            -> passed; run 32699875783 (all gates + soak:ci)
 | finding | 처리(고침 SHA / 반박 근거) |
 |---|---|
 | [major] `docs/ops/gate2-experiments.md`가 D-21 단일 rolling 선택 직후 두 전략 구간 스케줄을 지시함 | 고침(`0d18dd7`): 선택된 11시간 rolling 구간의 순차 운영·시간대 기록으로 정합화 |
-| [minor] lifecycle runtime warning과 migration 주석이 rolling을 non-production experiment, `single`을 production으로 설명함 | 고침(`0d18dd7`): retained enum label인 production rolling 선택으로 수정하고 operator-visible warning 회귀 테스트 추가 |
+| [minor] lifecycle runtime warning과 migration 주석이 rolling을 non-production experiment, `single`을 production으로 설명함 | 부분 고침(`0d18dd7`): runtime·인접 테스트 문구를 retained enum label인 production rolling 선택으로 수정하고 operator-visible warning 회귀 테스트 추가. 적용 완료된 migration의 역사적 문구는 checksum 계약상 수정 대상이 아님 |
+| [corrective] 적용된 `003_broadcast-resources.sql` 주석 변경은 migration checksum을 깨뜨림 | 고침(`e93f031`): 파일 전체를 `origin/main`과 byte-identical하게 복원; SHA-256 `78b5b8de09bd4354685dabea03a826cccb45bc7e424285876cdfec02c4323593` 확인. 현재 의미는 runtime/config 문서에서 설명하고 역사적 migration은 immutable로 유지 |
 
 재검증: `npm run format:check`, `npm run lint`, `npm run typecheck`, `npm run test`(151 files, 2,213 passed, 1 skipped), `npm run build` 모두 통과.
+
+Migration corrective 재검증: `apps/server/src/db/migrate.test.ts` + broadcast API/lifecycle tests(3 files, 105 passed), `npm run build -w @vl/server` 통과; `003_broadcast-resources.sql`은 `origin/main`과 diff 없음.
