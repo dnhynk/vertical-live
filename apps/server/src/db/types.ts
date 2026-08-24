@@ -196,7 +196,7 @@ export interface PersistedEffect {
 export type EffectMarkResult =
   'recorded' | 'already_published' | 'already_acked' | 'already_expired'
 
-/** spec §9.3, BOARD A-4: `single` is production, rolling is a labelled experiment. */
+/** Spec §9.3, BOARD D-21: the retained rolling label is the selected production path. */
 export type BroadcastStrategy = 'single' | 'rolling-experiment'
 
 /**

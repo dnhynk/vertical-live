@@ -531,10 +531,10 @@ export class BroadcastLifecycle {
   }
 
   /**
-   * Ends the current broadcast and brings a new one up (spec §9.3 rolling
-   * experiment). Only the `rolling-experiment` strategy may call it: §9.3 forbids
-   * implementing both strategies as production automation, so `single` refuses here
-   * rather than quietly rolling over.
+   * Ends the current broadcast and brings a new one up (spec §9.3 selected rolling
+   * production path). Only the retained `rolling-experiment` enum value may call it:
+   * §9.3 forbids implementing both strategies as production automation, so `single`
+   * refuses here rather than quietly rolling over.
    */
   async rollOver(): Promise<BroadcastTarget> {
     if (this.#config.strategy !== 'rolling-experiment') {
@@ -542,7 +542,7 @@ export class BroadcastLifecycle {
         `rollOver() requires youtube.broadcast.strategy = "rolling-experiment" (spec §9.3); the configured strategy is "${this.#config.strategy}"`,
       )
     }
-    this.#logger.warn('rolling over: experiment strategy, not production automation', {
+    this.#logger.warn('rolling over: selected production rolling strategy', {
       strategy: this.#config.strategy,
     })
     const current = this.#store.findOpenBroadcastAttempt()

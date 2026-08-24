@@ -374,8 +374,11 @@ describe('broadcast config', () => {
   it('loads the repository config with the product defaults', () => {
     const config = loadBroadcastConfig()
 
-    expect(config.strategy).toBe('single')
-    // spec §9.1: the operator publishes; §12.2: the declaration is not the gate.
+    // BOARD D-21 selected the already-implemented rolling label for production,
+    // with an exact eleven-hour segment so every segment stays below 12h.
+    expect(config.strategy).toBe('rolling-experiment')
+    expect(config.segmentMs).toBe(39_600_000)
+    // Spec §9.1: the operator publishes; D-24's unlisted value is host-only.
     expect(config.privacyStatus).toBe('private')
     expect(config.selfDeclaredMadeForKids).toBe(false)
     // No API field sets 9:16 (see config.ts), so nothing pretends to.
@@ -419,7 +422,7 @@ describe('broadcast config', () => {
     ).toThrow(/ultraLow does not support/)
   })
 
-  it('accepts the labelled rolling experiment', () => {
+  it('accepts the retained rolling-experiment enum value', () => {
     const config = loadBroadcastConfig({
       configPath: writeConfig({ strategy: 'rolling-experiment' }),
     })

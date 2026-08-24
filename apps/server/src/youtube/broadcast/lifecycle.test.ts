@@ -928,7 +928,7 @@ describe('rejections that need a human or another component', () => {
     expect((error as YouTubeApiCallError).classification.kind).toBe('quotaExceeded')
   })
 
-  it('refuses to roll over under the production strategy', async () => {
+  it('refuses to roll over under the non-rolling strategy', async () => {
     const h = await setUp()
     await h.lifecycle().ensureLive()
 
@@ -1253,7 +1253,7 @@ describe('request shapes (review round 1, B1)', () => {
   })
 })
 
-describe('rolling experiment (spec §9.3, labelled)', () => {
+describe('selected rolling production path (spec §9.3, retained enum label)', () => {
   it('completes the current broadcast and brings up a new one with a new liveChatId', async () => {
     const h = await setUp({ config: { strategy: 'rolling-experiment' } })
     const first = await h.lifecycle().ensureLive()
@@ -1263,6 +1263,7 @@ describe('rolling experiment (spec §9.3, labelled)', () => {
     expect(second.broadcastId).not.toBe(first.broadcastId)
     expect(second.liveChatId).not.toBe(first.liveChatId)
     expect(h.server.broadcasts.get(first.broadcastId)?.lifeCycleStatus).toBe('complete')
+    expect(h.logger.dump()).toContain('rolling over: selected production rolling strategy')
     // The stream is reused across the rollover, so the operator's key does not change.
     expect(second.streamId).toBe(first.streamId)
     const attempts = h.temp.store.listBroadcastAttempts()
@@ -1468,7 +1469,9 @@ describe('an attempt is only resumed while YouTube can still carry it (T30)', ()
  */
 describe('rolling segments (T33, D-21)', () => {
   it('does nothing while rollover is switched off', async () => {
-    const h = await setUp()
+    // Production ships with 11h rolling after T45. Keeping the off path requires
+    // an explicit injected config, not an accidental dependency on shipped defaults.
+    const h = await setUp({ config: { segmentMs: null } })
     await h.lifecycle().ensureLive()
     const before = h.server.requests.length
 

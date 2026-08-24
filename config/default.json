@@ -338,7 +338,7 @@
       "provisional": ["loginTimeoutMs", "accessTokenRefreshSkewMs"]
     },
     "broadcast": {
-      "strategy": "single",
+      "strategy": "rolling-experiment",
       "title": "Autonomous Vertical Live",
       "description": "",
       "privacyStatus": "private",
@@ -356,7 +356,7 @@
       "lifecycleReconcileIntervalMs": 300000,
       "transitionSettleMs": 90000,
       "reconcileMaxPages": 4,
-      "segmentMs": null,
+      "segmentMs": 39600000,
       "stream": {
         "title": "vertical-live ingest",
         "resolution": "variable",

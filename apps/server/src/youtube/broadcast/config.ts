@@ -70,7 +70,7 @@ export interface IngestionStreamConfig {
 }
 
 export interface BroadcastConfig {
-  /** BOARD A-4: `single` is production, `rolling-experiment` is labelled. */
+  /** BOARD D-21: the retained `rolling-experiment` label is the selected production path. */
   readonly strategy: BroadcastStrategy
   readonly title: string
   /**
@@ -146,9 +146,8 @@ export interface BroadcastConfig {
   readonly reconcileMaxPages: number
   /**
    * How long one broadcast segment runs before it is replaced (BOARD `D-21`).
-   * `null` turns rollover off, which is the default: CI and development hosts
-   * must not replace broadcasts, and a run that never rolls over is the shape
-   * every test before T33 assumed.
+   * `null` turns rollover off for an explicitly injected test/development
+   * configuration. The shipped production default is 39,600,000ms (11h).
    *
    * Spec §9.3 is why the number matters: past twelve hours a broadcast may leave
    * **no archive at all**, and without a VOD its watch time is excluded from YPP.
@@ -276,7 +275,7 @@ export function loadBroadcastConfig(options: LoadAuthConfigOptions = {}): Broadc
   })
 }
 
-/** True when the configured strategy is the labelled experiment (spec §9.3). */
+/** True for the retained rolling strategy label selected for production by BOARD D-21. */
 export function isExperimentalStrategy(strategy: BroadcastStrategy): boolean {
   return strategy === 'rolling-experiment'
 }
