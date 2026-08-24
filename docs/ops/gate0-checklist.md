@@ -17,7 +17,7 @@ Gate 0은 **코드로 통과할 수 없는 게이트**다. 여기서 정하는 �
 권리·모더레이션 정책의 선택, (c) 돈과 시간의 상한이다. 셋 다 저장소가 관측할 수 없다.
 
 승인 전에도 구현은 진행한다. 다만 구현된 것은 **스펙이 정한 안전한 기본 경로**뿐이다(BOARD `A-*`):
-identity 비활성(A-1), `direct` + 비경쟁 집계(A-3), `single` broadcast(A-4). **선택지 양쪽이 다 구현돼 있지는
+identity 비활성(A-1), `direct` + 비경쟁 집계(A-3), 11시간 rolling broadcast(D-21). **선택지 양쪽이 다 구현돼 있지는
 않다** — 예컨대 identity (B)를 고르면 schema extension·동의 UX·삭제 경로가 필요한 **새 작업**이고(1.3),
 그에 딸린 사용자별 cooldown·한 표·분기 투표도 그때 함께 구현된다.
 
@@ -143,15 +143,16 @@ D-11 승인에 따라 **`input.provisional` 목록에서 제거**했다(`maxRawL
 그 사이의 진행 순서만 BOARD **A-20**이 가정으로 정해 둔다(direct 먼저 → T20a/b/c 머지 후 Gate 2에서 동의자
 표본으로 vote 실험). **A-20은 사용자 결정이 아니므로** 이 항목은 문서 머리말의 '가정 1건'으로 센다.
 
-### 1.6 방송 길이 실험 (§9.3, §17) — 승인 2026-08-19 (D-12)
+### 1.6 방송 길이 실험 (§9.3, §17) — D-21로 개정 2026-08-23
 
 - [x] Gate 2에서 실행할 **실험 순서**(단일 장기 Live 먼저인가, 12시간 미만 rolling 먼저인가)
-      — **단일 장기 Live 먼저**(A-4 유지), rolling(<12h)은 그다음 비교. 승인 2026-08-19, D-12
+      — ~~단일 장기 Live 먼저~~ → **11시간 rolling 채택**. D-21이 D-12를 개정했고 T33 실측에서 archive를 확인했다.
 - [x] Gate 3에서 자동화할 **전략의 선택 절차**(어떤 관측으로 하나를 고르는가)
-      — [`gate2-experiments.md`](gate2-experiments.md) 1장의 관측. 승인 2026-08-19, D-12
+      — D-21 선택 완료, T45가 shipped 설정을 활성화한다.
 
-**현재 코드**: `youtube.broadcast.strategy = "single"`이 기본이고 rolling은 실험 플래그다(BOARD A-4).
-**두 전략을 모두 production 구현하지 않는다**(§9.3). 실험 절차는 [`gate2-experiments.md`](gate2-experiments.md) 1장.
+**현재 코드**: `youtube.broadcast.strategy = "rolling-experiment"`, `segmentMs = 39600000`(11시간)이 shipped
+기본이다. enum 라벨은 유지하지만 D-21이 선택한 production 경로이며, `single`을 함께 자동화하지 않는다(§9.3).
+실측 기록은 [`gate2-experiments.md`](gate2-experiments.md) 1장과 T33에 있다.
 
 ### 1.7 운영 합격선(provisional)과 예산 (§11, §7.5, §14.1, §17) — 예산만 승인(D-14)
 
@@ -219,7 +220,7 @@ Gate 0이 미승인인 동안 저장소가 **스스로 지키고 있는** 상태
 | 크리처 비주얼·브랜드·일반 시청자 포지셔닝 | production asset 제작 전 | 일본 패널 5초 이해·연령 인식 검사, 권리 검토 | 현재 자산은 전부 코드 생성 오리지널(`ASSETS.md`) |
 | 일본 패널 조건·통과율과 24시간 콘텐츠·반복 기준 | Gate 0 | 실제 YouTube 모바일 UI를 포함한 화면과 승인 콘텐츠 목록 | 1.4 · **D-15**(초안 T21 → 사용자 승인, 미승인) |
 | 일본 시장 증빙 방식과 별도 합격선 | Gate 0 | 정책상 허용된 YouTube Analytics geography aggregate와 일본 패널 | 1.4 · **D-15**(초안 T21 → 사용자 승인, 미승인) |
-| 단일 장기 Live 또는 12시간 미만 rolling | Gate 2 종료 전 | 실제 vertical feed·VOD·watch-hour·동접 실험 | A-4 · **D-12**(단일 장기 Live 먼저) · `gate2-experiments.md` 1장 |
+| 단일 장기 Live 또는 12시간 미만 rolling | Gate 2 종료 전 | 실제 vertical feed·VOD·watch-hour·동접 실험 | **D-21 11시간 rolling 선택** · T33 실측 · T45 활성화 |
 | Gifts 활성화 또는 Super Sticker 유지 | YPP fan funding 활성화 전 | 일본 Studio 기능과 실제 전환 실험 | 1.2(감사만) · D-10(채널 미생성이라 감사 전) |
 | 파일럿 기본 입력 모드와 hard backlog·flood 보호값 | Gate 0 | local replay의 처리량·화면 이해도 | 1.5 · A-3 · **D-11 승인**(보호값 확정 → provisional 해제) |
 | direct↔vote 자동 전환 임계값 | public traffic 수집 후 | 초당 유효 이벤트, backlog, 명령 이해도 | provisional(A-3) — Gate 0 대상이 아니다 |

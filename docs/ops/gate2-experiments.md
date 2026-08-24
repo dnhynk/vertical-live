@@ -3,7 +3,7 @@
 > 근거: [`docs/PROJECT_SPEC.md`](../PROJECT_SPEC.md) §15 Gate 2, §9.3(개별 방송 길이 실험), §7.5(반응시간),
 > §11(신뢰성·출시 전 기술 합격선 마지막 3문단), §14.2(우선 실험 2·6).
 > 이 문서는 **스펙이 요구한 실험의 실행 순서와 기록 양식**만 정한다. 합격 숫자를 만들지 않는다.
-> 최종 갱신: 2026-08-18.
+> 최종 갱신: 2026-08-24(T45, D-21 rolling activation 반영).
 
 ## 0. 이 문서가 다루지 않는 것
 
@@ -22,7 +22,7 @@
 | API quota와 broadcast lifecycle 측정·reconcile | T10 | 구현 머지, 실계정 미검증 → 3장 |
 | hosting OS·OBS interactive-session과 archive 용량 정책 검증 | T17 | 진행 중 |
 | field별 데이터 삭제·권한 철회·refresh 자동 test와 API compliance gate 확인 | T13(자동 test) + 사람(compliance audit) | 자동 test 머지([`data-map.md`](data-map.md)) |
-| 실제 채널에서 방송 길이 전략 실험 → Gate 3 자동화 경로 하나 선택 | 사람 | **미착수** → 1장 |
+| 실제 채널에서 방송 길이 전략 실험 → Gate 3 자동화 경로 하나 선택 | 사람 + T33/T45 | **D-21 11시간 rolling 선택·archive 실측 완료, shipped 설정 활성화** → 1장 |
 
 ---
 
@@ -42,8 +42,9 @@ broadcast ID의 영속성이 아니다.
 
 1. **실험 순서는 Gate 0에서 승인된 것을 따른다**([`gate0-checklist.md`](gate0-checklist.md) 1.6). 승인 전에 시작하지
    않는다.
-2. 한 번에 **한 전략만** 돌린다. 저장소 설정은 `config/default.json` → `youtube.broadcast.strategy`
-   (`single` 기본, rolling은 실험 플래그, BOARD A-4).
+2. D-21이 **11시간 rolling 하나를 선택**했다. 저장소 shipped 설정은 `config/default.json`의
+   `youtube.broadcast.strategy = "rolling-experiment"`, `segmentMs = 39600000`이다. `-experiment`는 기존 enum
+   라벨이고 production 동작은 rolling 하나다(T45).
 3. 각 실험 구간의 **시작·종료 시각(UTC)과 broadcast ID·video ID·`liveChatId`**를 기록한다. 서버는 이미
    `broadcast_resources`에 단계별로 영속하고 있으므로(§9.1, [`broadcast-lifecycle.md`](broadcast-lifecycle.md)),
    기록은 그 값을 옮기는 것으로 충분하다.
@@ -63,9 +64,10 @@ broadcast ID의 영속성이 아니다.
 
 ### 1.4 선택과 기록
 
-- **하나만 고른다.** 고른 전략만 Gate 3 자동화 범위에 들어간다. 두 전략을 모두 production 구현하지 않는다(§9.3).
-- 선택 근거(측정값)와 함께 `docs/tasks/BOARD.md` §2에 `D-*`로 기록하고, `youtube.broadcast.strategy`를 그 값으로
-  고정한다. §17의 "단일 장기 Live 또는 12시간 미만 rolling" 행이 이때 닫힌다.
+- **선택 완료(D-21).** 11시간 rolling만 Gate 3 자동화 범위에 들어간다. 두 전략을 모두 production 구현하지
+  않는다(§9.3).
+- T33 실채널 검증에서 교체 2회와 종료 구간의 `recorded`/`uploaded` archive를 확인했고 교체 공백은 22초였다.
+  T45가 그 선택을 shipped 설정에 고정한다.
 
 ---
 
@@ -197,7 +199,7 @@ broadcast ID의 영속성이 아니다.
 
 Gate 2는 다음이 **전부** 채워졌을 때 통과 후보가 된다.
 
-- [ ] 1장: 방송 길이 전략 하나 선택, BOARD `D-*` 기록, `youtube.broadcast.strategy` 고정
+- [x] 1장: D-21 11시간 rolling 선택, T33 실측, T45 shipped 설정 고정
 - [ ] 2장: baseline → calibration → 합격선 잠금 → 분리된 validation 완료, 값 BOARD 기록·설정 교체
 - [ ] 3장: 실계정 검증 항목의 완료 조건 충족 또는 "해당 없음(기능 비활성)" 사유 기록
 - [ ] T15: fault matrix 전 행 통과 + 72시간 무인 soak 리포트

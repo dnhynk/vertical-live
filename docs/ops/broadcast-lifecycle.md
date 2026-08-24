@@ -57,7 +57,10 @@ broadcast와 달리 이 마커는 **제거하지 않는다.** `liveStream`은 "i
 - 공개 전 점검: `marker_cleared_at IS NOT NULL`이고 YouTube 쪽 description에 `vl-attempt:`가 없어야 한다.
 - 건강 신호는 `youtube.stream_status`·`youtube.stream_health`·`youtube.broadcast_lifecycle`(§9.4(6))이고 판정은 T12가 한다.
 
-## 5. 아직 열려 있는 것
+## 5. 11시간 rolling 운영 (D-21, T45)
 
-- 방송 길이 전략(단일 장기 vs 12시간 미만 rolling)은 Gate 2 실험으로 정한다(§9.3, BOARD A-4). `rolling-experiment`는 실험 라벨이며 프로덕션 자동화가 아니다.
-- 실제 계정에서의 공개 노출·아카이브·watch-hour 검증은 Gate 2 범위다(§11).
+- shipped 설정은 `strategy: "rolling-experiment"`, `segmentMs: 39600000`이다. enum의 `-experiment`는 기존 persistence와 구현이 쓰는 이름으로 남았지만, D-21이 선택한 production 경로는 11시간 rolling 하나다.
+- 교체 순서는 새 broadcast를 같은 ingestion stream에 bind → 이전 broadcast를 complete → 새 broadcast를 live로 transition이다. OBS 송출은 멈추지 않지만 watch URL은 바뀌고, 실측 교체 공백은 22초였다(T33).
+- T33 실측에서 종료 구간이 `recorded`/`uploaded` archive로 남았고, T36 뒤 chat source는 새 `liveChatId`를 스스로 따라간다.
+- shipped privacy는 계속 `private`다. Gate 2 calibration에서만 호스트 환경 `VL_YOUTUBE_PRIVACY_STATUS=unlisted`로 덮고, 설정 파일에 secret이나 공개 전환 값을 넣지 않는다(D-24).
+- `segmentMs: null`은 주입 테스트·명시적 개발 설정에서 rollover-off 회귀를 검증할 때만 쓴다.
