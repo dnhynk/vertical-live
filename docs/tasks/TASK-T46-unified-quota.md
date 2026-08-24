@@ -42,7 +42,7 @@ YouTube broadcast와 chat의 모든 quota 사용을 기존 `quota_usage`에 영�
 | # | 기준 | 상태(met/unmet/unverifiable) | 근거(테스트 파일·명령·출력) |
 |---|---|---|---|
 | 1 | production shared tracker 하나 | met | `youtube/quota/runtime.ts`, `main.ts`, `chat/runtime.ts`, `chat/wiring.test.ts` — production `new QuotaTracker` 1곳, 동일 인스턴스 전달 |
-| 2 | combined/chat-only health | met | `server.test.ts` chat-only `/health.quota`가 gRPC+REST 합산 5 units와 `byMethod` 노출 |
+| 2 | combined/chat-only health | met | `server.test.ts`는 shared snapshot의 chat-only health 노출을 고정하고, `grpc-source.test.ts`·`rest-source.test.ts`의 실제 호출 계상과 `runtime.test.ts`·`wiring.test.ts`·`quota/runtime.test.ts`의 shared/chat-only production wiring이 그 snapshot의 gRPC·REST 근거를 고정 |
 | 3 | store 영속·복원·합산 guard | met | `quota.test.ts` mixed-method restart 복원, `broadcast/api.test.ts` chat spend 포함 reserve 차단, `quota/runtime.test.ts` 기존 store write-through |
 | 4 | aggregate·restart·chat-only·no-double-count 회귀 | met | gRPC·REST 테스트가 실제 요청 1회당 정확히 1 unit, 전체 2,220 passed·1 skipped |
 | 5 | fetch/rebase, 5 gates, latest-head CI | met | fetch/rebase와 로컬 5개 gate 통과; PR #59 exact-head CI run `32703728337` green |

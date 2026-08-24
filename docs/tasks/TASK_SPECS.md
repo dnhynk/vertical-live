@@ -916,7 +916,7 @@
 ## T46 — chat·broadcast가 서로 다른 quota tracker를 써 실제 합계를 보지 못한다
 
 - slug `t46-unified-quota` · PR 접두 `fix(youtube):` · 의존 T3, T4, T9, T10, T44 · **non-contract**
-- **읽을 것**: 스펙 §9.1·§11, T44, BOARD, `apps/server/src/main.ts`, `apps/server/src/youtube/chat-source.ts`, `apps/server/src/youtube/quota/tracker.ts`, `apps/server/src/youtube/broadcast/runtime.ts`
+- **읽을 것**: 스펙 §9.1·§11, T44, BOARD, `apps/server/src/main.ts`, `apps/server/src/youtube/chat/runtime.ts`, `apps/server/src/youtube/chat/wiring.ts`, `apps/server/src/youtube/quota/tracker.ts`, `apps/server/src/youtube/broadcast/api.ts`
 - **관측**(2026-08-24, Gate 2 live run): `createChatSource`가 store 없는 별도 `QuotaTracker`를 생성하고, `main.ts`의 `/health.quota`는 영속 broadcast tracker만 노출한다. 그 결과 `liveChatMessages.streamList`가 `quota_usage`와 health에 없고 combined reserve guard가 chat 지출을 세지 않는다.
 - **범위**
   - broadcast나 chat 중 하나라도 YouTube quota를 필요로 하면 production process에 영속 store를 공유하는 `QuotaTracker`를 정확히 하나만 만든다.
