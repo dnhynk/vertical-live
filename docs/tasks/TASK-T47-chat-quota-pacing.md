@@ -51,7 +51,7 @@ Cap every actual gRPC `liveChatMessages.streamList` start at a quota-safe determ
 | 4 | Stop and retarget cancel the current wait without bypassing the shared floor. | met | Stop resolves at monotonic 0 with zero timers. Retarget cancels the old reader at 1,000ms but the new chat's first start remains at 25,000ms, not 1,000ms. |
 | 5 | Existing classification/health semantics remain additive. | met | Error and empty branch delays run first, then only the remaining quota floor; health reports `quota_start_pacing` separately from `failure_backoff`/`empty_end_backoff`; REST/auth suites remain in the full gate. No fake events or contract changes. |
 | 6 | Node timer overflow is impossible through the renamed config/env path. | met | `config.test.ts` accepts `2,147,483,647` and rejects `2,147,483,648` from both JSON and `VL_YOUTUBE_CHAT_GRPC_STREAM_MIN_START_INTERVAL_MS`. |
-| 7 | Fetch/rebase check, install, five local gates, and latest-head CI. | pending | `git fetch origin` showed HEAD 0 behind `origin/main`, so no rebase was required; `npm ci` and all five local gates passed. Latest-head Actions is verified after this documentation commit is pushed. |
+| 7 | Fetch/rebase check, install, five local gates, and latest-head CI. | met | `git fetch origin` showed HEAD 0 behind `origin/main`, so no rebase was required; `npm ci` and all five local gates passed. PR #60 CI run `32710527728` passed on implementation/evidence head `847641e`; the final documentation-only evidence commit is verified by its own latest-head CI before worker completion. |
 
 ### Gates (executed)
 
@@ -68,6 +68,8 @@ npm run test
   PASS — 153 files; 2,231 passed, 1 skipped (2,232 total)
 npm run build
   PASS — all workspaces; contract schema and data map current
+PR #60 latest-head CI
+  PASS — run 32710527728 on 847641efed08f040f60c6a02d7097c0237c37d29
 ```
 
 ## Not done / out of scope
