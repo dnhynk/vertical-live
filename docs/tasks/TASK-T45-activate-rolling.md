@@ -1,7 +1,7 @@
 # TASK-T45-activate-rolling
 
 - Task: T45 D-21 11시간 rolling production 경로 활성화 (`docs/tasks/TASK_SPECS.md` §T45)
-- Branch: `dnhynk/t45-activate-rolling` · PR: #<n>
+- Branch: `dnhynk/t45-activate-rolling` · PR: #58
 - Orca: task `task_c10281b8b944` · dispatch `ctx_3daff14bd4c8`
 - Spec sections read: §9.1, §9.3, §11
 - BOARD decisions/assumptions relied on: D-21, D-24
@@ -41,16 +41,22 @@ T33과 T36에서 구현·실측까지 끝난 rolling 방송 교체를 shipped no
 
 | # | 기준 | 상태(met/unmet/unverifiable) | 근거(테스트 파일·명령·출력) |
 |---|---|---|---|
-| 1 | shipped 기본값이 `rolling-experiment`와 정확히 39,600,000ms를 선택한다. | pending | `config/default.json`, `apps/server/src/youtube/broadcast/api.test.ts` |
-| 2 | shipped 기본 privacy는 `private`, simulator는 disabled로 남는다. | pending | broadcast/engine config 회귀 테스트 |
-| 3 | 주입한 `segmentMs: null`에서는 rollover가 일어나지 않는다. | pending | `apps/server/src/youtube/broadcast/lifecycle.test.ts` |
-| 4 | 비밀정보·contract 변경 없이 직접 stale한 운영 문서만 정합화한다. | pending | diff 검토 |
-| 5 | fetch/rebase와 게이트 5개, CI가 녹색이다. | pending | 아래 Gates 및 PR CI |
+| 1 | shipped 기본값이 `rolling-experiment`와 정확히 39,600,000ms를 선택한다. | met | `config/default.json`, `apps/server/src/youtube/broadcast/api.test.ts` product-default test |
+| 2 | shipped 기본 privacy는 `private`, simulator는 disabled로 남는다. | met | broadcast config test와 `apps/server/src/engine/config.test.ts` repository-config test |
+| 3 | 주입한 `segmentMs: null`에서는 rollover가 일어나지 않는다. | met | `apps/server/src/youtube/broadcast/lifecycle.test.ts`가 API 요청 증가도 없음을 검증 |
+| 4 | 비밀정보·contract 변경 없이 직접 stale한 운영 문서만 정합화한다. | met | `git diff --name-only origin/main...HEAD`; BOARD/HANDOFF/contract 변경 없음 |
+| 5 | fetch/rebase와 게이트 5개, CI가 녹색이다. | pending(CI) | `git fetch origin; git rebase --autostash origin/main` 완료, 로컬 게이트 전부 통과; PR #58 CI 대기 |
 
 ### Gates (executed)
 
 ```text
-pending
+git fetch origin; git rebase --autostash origin/main -> up to date; setup-generated package-lock drift autostash/restored
+npm run format:check -> passed; All matched files use Prettier code style
+npm run lint         -> passed; 0 legacy imports, 4 install scripts reviewed
+npm run typecheck    -> passed
+npm run test         -> passed; 151 files, 2,213 passed, 1 skipped
+npm run build        -> passed; 4 workspace builds, schema/data-map checks up to date
+PR #58 CI            -> pending
 ```
 
 ## Not done / out of scope
