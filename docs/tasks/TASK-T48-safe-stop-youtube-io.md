@@ -4,6 +4,7 @@
 - Branch: `dnhynk/t48-safe-stop-youtube-io` · PR: #61
 - Orca: task `task_696a409f6a0a` · dispatch `ctx_7959cc07bfaf`
 - Fix dispatch: task `task_8cf1fe20a43f` · dispatch `ctx_5f2ec6494e97`
+- Fix dispatch 2: task `task_ac34b4a59872` · dispatch `ctx_b1d4af1d4c51`
 - Spec sections read: §9.1, §9.2, §11
 - BOARD decisions/assumptions relied on: D-17, D-21, D-25, A-15
 
@@ -89,3 +90,38 @@ npm run build
 | finding | 처리(고침 SHA / 반박 근거) |
 |---|---|
 | [blocker] `rest-source.ts:101` — `getAccessToken()` pending 중 stop 뒤 resolve되면 quota를 기록하고 `liveChatMessages.list`를 호출함 | 고침 `a316c72`: token resolve/reject 직후 cancellation guard를 두고, fake clock regression이 token hold→stop→release 뒤 quota 0·fetch 0·timer 0을 증명한다. 같은 REST loop의 equivalent await boundary를 좁게 감사해 fetch resolve, response body parse, auth force-refresh resolve/reject 뒤에도 guard를 두었다. in-flight fetch는 기존 AbortController로 중단하고 cancelled catch는 failure/backoff를 만들지 않으며, poll/backoff delay는 기존 `CancellableDelay.cancel()`과 outer post-poll guard가 재예약을 막는다. |
+
+## Review round 2 (R-T48-2R)
+
+| finding | 처리(고침 SHA / 반박 근거) |
+|---|---|
+| [blocker] `docs/tasks/TASK_SPECS.md:996` — T48 추가 diff가 기존 T49 합격 기준 6을 삭제해 T49를 범위 밖에서 변경함 | 고침 `e67446c`: origin/main의 `6. fetch/rebase + \`npm ci\` + 게이트 5개 + latest-head CI가 녹색이다.`를 verbatim 복구했다. `git diff origin/main -- docs/tasks/TASK_SPECS.md`는 이제 T48 절 추가만 보이며 기존 T49 절의 편집은 0건이다. 이 restoration은 `docs/tasks/TASK_SPECS.md` 1개 파일·1줄 추가만 담았고 executable code, `package-lock.json` metadata noise, `HANDOFF.md`를 stage·commit하지 않았다. |
+
+### R-T48-2R 재검증
+
+```text
+git fetch origin; git rebase --autostash origin/main
+  -> pass; branch는 origin/main 8e32ed7 기준 최신이었고 pre-existing package-lock metadata noise만 autostash로 복원
+T49 section Compare-Object (working tree vs git show origin/main:docs/tasks/TASK_SPECS.md)
+  -> pass; T49_COMPARE=PASS lines=19
+npx prettier --check docs/tasks/TASK_SPECS.md docs/tasks/TASK-T48-safe-stop-youtube-io.md
+  -> pass; All matched files use Prettier code style
+git diff --check
+  -> pass; whitespace error 0
+git diff origin/main -- docs/tasks/TASK_SPECS.md
+  -> pass; T48 절 추가만 있고 pre-existing T49 절 edit 0
+npm ci
+  -> pass; 431 packages installed, audit는 기존 10 vulnerabilities 보고
+npm run format:check
+  -> pass; All matched files use Prettier code style
+npm run lint
+  -> pass; ESLint + no-legacy-imports + install-script checks
+npm run typecheck
+  -> pass; tsc --build tsconfig.json
+npm run test
+  -> pass; 154 files, 2,242 passed, 1 skipped
+npm run build
+  -> pass; contract schema current, renderer/server/simulator/soak built
+PR #61 latest-head CI
+  -> 이 티켓 commit·push 뒤 확인 예정; 실행 전 green으로 기록하지 않음
+```
