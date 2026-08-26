@@ -1,7 +1,7 @@
 # TASK-T49-archive-enforcement
 
 - Task: T49 rolling archive default roots and Windows hourly schedule enforcement (`docs/tasks/TASK_SPECS.md` §T49)
-- Branch: `dnhynk/t49-archive-enforcement` · PR: pending
+- Branch: `dnhynk/t49-archive-enforcement` · PR: #62
 - Orca: task `task_cbcd6207d6eb` · dispatch `ctx_b83f0f15c559`
 - Spec sections read: §9.1, §11
 - BOARD decisions/assumptions relied on: D-25, A-15
