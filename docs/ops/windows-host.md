@@ -48,12 +48,20 @@ powershell -ExecutionPolicy Bypass -File ops\windows\Unregister-VerticalLive.ps1
 | task | 트리거 | 하는 일 |
 |---|---|---|
 | `\VerticalLive\vl-autostart` | 로그온 + 30초 지연 | `ops\windows\Start-VerticalLive.ps1` (3장) |
-| `\VerticalLive\vl-archive-sweep` | 로그온 + 5분 지연, 이후 1시간마다 반복 | `node apps\server\dist\bin\archive.js --apply` (4장) |
+| `\VerticalLive\vl-archive-sweep` | 로그온 + 5분 지연; 별도 daily calendar trigger가 24시간 동안 1시간마다 반복되고 다음 날 갱신 | `node apps\server\dist\bin\archive.js --apply` (4장) |
 
 옵션: `-RepoRoot`(다른 체크아웃), `-Account DOMAIN\user`(다른 계정 — 그 계정으로 로그온해 있어야 실행된다), `-NodeExe`(PATH에 node가 없을 때), `-ArchiveInterval PT30M`, `-SkipArchiveTask`.
 
-- 정의는 `ops/windows/tasks/*.xml`이고 스크립트는 `{{USER_ID}}`·`{{REPO_ROOT}}`·`{{NODE_EXE}}`·`{{INTERVAL}}`만 치환한다. 등록은 `schtasks /Create /XML`로 한다([Microsoft Learn, schtasks create](https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/schtasks-create), 2026-08-17 확인).
+- 정의는 `ops/windows/tasks/*.xml`이고 스크립트는 `{{USER_ID}}`·`{{REPO_ROOT}}`·`{{NODE_EXE}}`·`{{INTERVAL}}`와 archive calendar trigger의 등록 시각 기준 미래 `{{START_BOUNDARY}}`를 치환한다. 등록은 `schtasks /Create /XML`로 한다([Microsoft Learn, schtasks create](https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/schtasks-create), 2026-08-17 확인). Archive task는 Microsoft의 [daily trigger XML](https://learn.microsoft.com/en-us/windows/win32/taskschd/daily-trigger-example--xml-)처럼 `CalendarTrigger` + `ScheduleByDay` + `Repetition`을 사용한다(2026-08-26 확인). `DaysInterval=1`이 매일 반복 창을 새로 열고 `Duration=P1D` 동안 `Interval=PT1H`(기본)로 실행하므로 날짜가 바뀌어도 시간 기반 예약이 남는다. Logon trigger는 로그인 직후 sweep만 담당한다.
 - 등록 후 스크립트가 `schtasks /Query /V /FO LIST`를 그대로 출력한다. `Logon Mode: Interactive only`가 1장의 전제가 실제로 적용됐다는 증거다.
+- 배포 후 archive task는 다음 read-only 명령으로 검증한다. 마지막 실행이 성공했어도 미래 실행이 없으면 실패이며, `NextRunTime`이 null이거나 현재 이하면 명령이 throw한다.
+
+  ```powershell
+  $info = Get-ScheduledTaskInfo -TaskPath '\VerticalLive\' -TaskName 'vl-archive-sweep'
+  if ($info.LastTaskResult -ne 0) { throw "archive task failed: LastTaskResult=$($info.LastTaskResult)" }
+  if ($null -eq $info.NextRunTime -or $info.NextRunTime -le (Get-Date)) { throw "archive task has no future NextRunTime: $($info.NextRunTime)" }
+  $info | Select-Object LastRunTime, LastTaskResult, NextRunTime
+  ```
 - 해제는 삭제 후 다시 `/Query`해서 **없어졌음을 확인**한다. 삭제만 하고 성공이라고 쓰지 않는다.
 - 해제는 **실행 중인 프로세스를 멈추지 않는다.** 멈추는 것은 kill switch다(`npm run kill -w @vl/server`, `docs/ops/supervisor.md` 2장).
 

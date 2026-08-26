@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 /**
@@ -16,7 +17,7 @@ import { fileURLToPath } from 'node:url'
 export interface ArchiveRootConfig {
   /** Stable label used in logs and in the sweep report. */
   readonly name: string
-  /** Directory to sweep. Relative paths resolve against the process cwd. */
+  /** Directory to sweep. The CLI resolves relative paths from the repository root. */
   readonly path: string
   /**
    * Lower-case file extensions (with the dot) this root owns. An empty list
@@ -46,9 +47,12 @@ export interface ArchiveConfig {
 }
 
 /** `config/default.json` at the repository root, from `src/ops/archive/` or `dist/ops/archive/`. */
-const DEFAULT_CONFIG_PATH = fileURLToPath(
+export const DEFAULT_CONFIG_PATH = fileURLToPath(
   new URL('../../../../../config/default.json', import.meta.url),
 )
+
+/** Repository owning the default config, independent of the caller's cwd. */
+export const DEFAULT_ARCHIVE_CWD = resolve(dirname(DEFAULT_CONFIG_PATH), '..')
 
 export class ArchiveConfigError extends Error {
   constructor(message: string) {

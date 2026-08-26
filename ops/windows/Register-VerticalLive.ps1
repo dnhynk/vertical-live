@@ -10,7 +10,8 @@
   Two tasks are registered:
 
     \VerticalLive\vl-autostart      at logon, runs Start-VerticalLive.ps1
-    \VerticalLive\vl-archive-sweep  every -ArchiveInterval, runs the archive CLI
+    \VerticalLive\vl-archive-sweep  after logon and every -ArchiveInterval on a
+                                    daily calendar schedule, runs the archive CLI
 
   Both run **as the logged-on user in an interactive session**
   (`LogonType InteractiveToken`), because OBS composites and encodes on a real
@@ -61,6 +62,11 @@ if (-not (Test-Path (Join-Path $RepoRoot 'config\default.json'))) {
 }
 if (-not $Account) { $Account = "$env:USERDOMAIN\$env:USERNAME" }
 $node = Get-VerticalLiveNodeExe -NodeExe $NodeExe
+# A time/calendar trigger requires a StartBoundary. Generate it at registration
+# rather than committing a date that eventually becomes stale. The logon trigger
+# covers the same five-minute startup window; the calendar trigger supplies an
+# observable future NextRunTime and renews its P1D repetition window each day.
+$archiveStartBoundary = (Get-Date).AddMinutes(5).ToString('yyyy-MM-ddTHH:mm:ss')
 
 Write-VLLog -Message "repository: $RepoRoot"
 Write-VLLog -Message "run-as account: $Account (interactive session required)"
@@ -87,6 +93,7 @@ try {
         $xml = $xml.Replace('{{REPO_ROOT}}', $RepoRoot)
         $xml = $xml.Replace('{{NODE_EXE}}', $node)
         $xml = $xml.Replace('{{INTERVAL}}', $ArchiveInterval)
+        $xml = $xml.Replace('{{START_BOUNDARY}}', $archiveStartBoundary)
         # -Broadcast implies -WithObs, so it is passed alone rather than with a
         # redundant second switch the launcher would have to reconcile.
         $startArgs =

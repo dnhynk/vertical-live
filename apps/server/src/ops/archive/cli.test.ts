@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
+import { join, resolve } from 'node:path'
 
 import { FakeClock } from '../../testing/fake-clock.js'
-import type { ArchiveConfig } from './config.js'
+import { DEFAULT_ARCHIVE_CWD, type ArchiveConfig } from './config.js'
 import { runArchiveCli } from './cli.js'
 import type { ArchiveDirEntry, ArchiveFsPort } from './sweep.js'
 
@@ -56,6 +57,77 @@ function run(argv: readonly string[], port: ArchiveFsPort) {
 }
 
 describe('runArchiveCli', () => {
+  it('anchors default roots to the repository from both supported caller directories', () => {
+    const originalCwd = process.cwd()
+    const expected = [
+      resolve(DEFAULT_ARCHIVE_CWD, 'data/archive/recordings'),
+      resolve(DEFAULT_ARCHIVE_CWD, 'data/diagnostics/screenshots'),
+      resolve(DEFAULT_ARCHIVE_CWD, 'data/ops/logs'),
+    ]
+
+    try {
+      for (const callerCwd of [DEFAULT_ARCHIVE_CWD, join(DEFAULT_ARCHIVE_CWD, 'apps/server')]) {
+        const inspected: string[] = []
+        const missing: ArchiveFsPort = {
+          exists: (path) => {
+            inspected.push(path)
+            return false
+          },
+          isLink: () => false,
+          realPath: (path) => path,
+          list: () => [],
+          remove: () => undefined,
+          freeBytes: () => 0,
+        }
+        process.chdir(callerCwd)
+
+        const code = runArchiveCli(['--json'], {
+          io: { write: () => undefined },
+          fs: missing,
+          clock,
+        })
+
+        expect(code).toBe(0)
+        expect(inspected).toEqual(expected)
+        if (callerCwd !== DEFAULT_ARCHIVE_CWD) {
+          expect(inspected).not.toContain(resolve(callerCwd, 'data/ops/logs'))
+        }
+      }
+    } finally {
+      process.chdir(originalCwd)
+    }
+  })
+
+  it('preserves an explicitly injected cwd for isolated roots', () => {
+    const inspected: string[] = []
+    const missing: ArchiveFsPort = {
+      exists: (path) => {
+        inspected.push(path)
+        return false
+      },
+      isLink: () => false,
+      realPath: (path) => path,
+      list: () => [],
+      remove: () => undefined,
+      freeBytes: () => 0,
+    }
+    const relativeConfig: ArchiveConfig = {
+      ...config,
+      roots: [{ name: 'recordings', path: 'data/archive/recordings', extensions: ['.mkv'] }],
+    }
+
+    const code = runArchiveCli(['--json'], {
+      io: { write: () => undefined },
+      config: relativeConfig,
+      fs: missing,
+      clock,
+      cwd: '/isolated/repository',
+    })
+
+    expect(code).toBe(0)
+    expect(inspected).toEqual([resolve('/isolated/repository', 'data/archive/recordings')])
+  })
+
   it('deletes nothing without --apply and says so', () => {
     const port = fs([old])
 
