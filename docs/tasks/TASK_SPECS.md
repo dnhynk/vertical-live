@@ -954,3 +954,23 @@
   5. health에서 healthy quota pacing과 empty/failure backoff를 구분할 수 있고 fake event는 없다.
   6. JSON/env가 `2,147,483,647ms` boundary를 안전하게 처리하고 `2,147,483,648ms`를 거부하거나 안전하게 chunking한다.
   7. 티켓에 R-T47-1·R-T47-2R findings·fix SHA·exact 관측·budget 계산·provisional 가정·honest result가 있으며 fetch/rebase + `npm ci` + 게이트 5개 + latest-head CI가 녹색이다.
+
+## T49 — rolling archive 기본 root와 Windows hourly schedule 강제
+
+- slug `t49-archive-enforcement` · PR 접두 `fix(ops):` · 의존 T17 · **non-contract**
+- **읽을 것**: 스펙 §9.1·§11, BOARD D-25, `apps/server/src/ops/archive/*`, `apps/server/src/bin/archive.ts`, `ops/windows/Register-VerticalLive.ps1`, `ops/windows/tasks/vertical-live-archive.xml`, `docs/ops/windows-host.md`
+- **관측**(2026-08-26, Windows 실호스트): `npm run archive -w @vl/server`는 npm workspace가 cwd를 `apps/server`로 바꿔 `apps/server/data`를 스캔했지만, 저장소 root에서 `node apps/server/dist/bin/archive.js`를 실행하면 실제 ops log 15개를 찾았다. 등록된 `\VerticalLive\vl-archive-sweep`은 2026-08-23 15:07 KST 이후 실행되지 않았고 XML에 `PT1H` repetition이 있어도 `NextRunTime`이 비어 있었다.
+- **범위**
+  - CLI가 기본 config의 상대 archive root를 호출자 cwd가 아니라 저장소 root에 고정한다. 테스트가 명시적으로 주입한 `cwd`는 그대로 우선한다.
+  - 저장소 root와 `apps/server` workspace cwd에서 실행한 두 지원 invocation이 같은 기본 root를 스캔하는 회귀 테스트를 추가한다. `--apply`는 계속 명시적 opt-in이다.
+  - archive task는 interactive account 소유·logon 실행을 유지하고, 별도 daily `CalendarTrigger`와 24시간 repetition window로 매일 hourly schedule을 재생성한다. 등록 시 미래 `StartBoundary`를 넣고 `StartWhenAvailable`을 유지한다.
+  - 등록/생성 XML 테스트가 daily calendar cadence, interval 치환, 미래 boundary, interactive principal, action의 `--apply`, repository working directory를 고정한다.
+  - `docs/ops/windows-host.md`에 `LastTaskResult = 0`과 현재보다 미래인 non-null `NextRunTime`을 함께 검사하는 read-only host 검증 명령을 적는다.
+  - 적용 완료 migration, `packages/contract`, BOARD, HANDOFF, secret, live file, host scheduled task, provisional archive capacity 값, dependency를 바꾸지 않는다.
+- **합격 기준**
+  1. 저장소 root의 직접 Node invocation과 `npm run archive -w @vl/server`가 같은 repository `data/...` root를 스캔하고 `apps/server/data/...`를 보지 않는다.
+  2. 명시적으로 주입한 `cwd`는 상대 root 해석에 계속 사용되며 root/reparse-point refusal과 삭제 containment가 유지된다.
+  3. 생성 XML은 해당 interactive account의 logon trigger와 `DaysInterval=1` daily calendar trigger를 함께 가지며, calendar trigger는 등록 시 미래 `StartBoundary`, `ArchiveInterval`, `P1D` duration을 사용해 logon과 날짜 경계를 넘어 향후 실행을 만든다.
+  4. dry run 기본, 명시적 `--apply`, interactive-account ownership, repository working directory, root/link refusal을 회귀 테스트로 보존한다.
+  5. 운영 문서의 read-only 검증 명령이 `LastTaskResult = 0`, non-null `NextRunTime`, `NextRunTime > now`를 모두 실패 조건으로 검사한다. worker는 실호스트 task를 등록·변경하거나 live 파일을 삭제하지 않는다.
+  6. fetch/rebase + `npm ci` + 게이트 5개 + latest-head CI가 녹색이다.
