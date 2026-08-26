@@ -62,8 +62,8 @@
 | T45 | D-21의 11시간 rolling production 경로를 shipped 기본값으로 활성화 | T33, T36, T44 | — | merged | t45-activate-rolling | #58 | `task_c10281b8b944` |
 | T46 | chat·broadcast가 서로 다른 quota tracker를 써 영속 회계·health·reserve가 실제 합계를 보지 못한다(실측) | T3, T4, T9, T10, T44 | — | merged | t46-unified-quota | #59 | `task_7b961e0d39f5` |
 | T47 | 정상 gRPC `streamList`가 약 10.6초마다 닫힐 때 즉시 재연결해 chat만 하루 약 8,064 units를 쓰는 quota pacing 결함(실측) | T9, T44, T46 | — | merged | t47-chat-quota-pacing | #60 | `task_2d2fd2082b4f` |
-| T48 | `safe_stopped` 뒤에도 broadcast health loop가 YouTube API를 계속 호출해 quota를 소비한다(실측) | T12, T44, T47 | — | ready | t48-safe-stop-youtube-io | — | `task_696a409f6a0a` |
-| T49 | archive CLI가 workspace cwd에서 잘못된 `data/`를 보고 예약 sweep도 다음 실행이 없다(실측) | T17 | — | ready | t49-archive-enforcement | — | `task_cbcd6207d6eb` |
+| T48 | `safe_stopped` 뒤에도 broadcast health loop가 YouTube API를 계속 호출해 quota를 소비한다(실측) | T12, T44, T47 | — | dispatched | t48-safe-stop-youtube-io | — | `task_696a409f6a0a` |
+| T49 | archive CLI가 workspace cwd에서 잘못된 `data/`를 보고 예약 sweep도 다음 실행이 없다(실측) | T17 | — | dispatched | t49-archive-enforcement | — | `task_cbcd6207d6eb` |
 | T50 | D-25: 사전 수동 게이트 대신 72시간 public observational pilot 경로·명시적 `-Public` 운영 스위치 | T48, T49 | — | pending | t50-live-first-public-pilot | — | `task_f941e0758e93` |
 | T40 | `[contract]` 실제 YouTube 메시지 id(`LCC.`+base64url)가 계약 문자 클래스를 통과하지 못해 실물 채팅이 전량 폐기된다(실측) | T1 | — | merged | t40-external-id-charset | #54 | (Orca 미사용, 코디네이터 직접) |
 | T41 | 모든 입력을 버리면서 required family 6개가 전부 `ok`였다 — 계약 검증 실패가 어디에도 보이지 않는다(실측) | T12, T40 | — | merged | t41-ingest-drop-signal | #56 | (Orca 미사용, 코디네이터 직접) |
