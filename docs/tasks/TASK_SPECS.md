@@ -955,6 +955,25 @@
   6. JSON/env가 `2,147,483,647ms` boundary를 안전하게 처리하고 `2,147,483,648ms`를 거부하거나 안전하게 chunking한다.
   7. 티켓에 R-T47-1·R-T47-2R findings·fix SHA·exact 관측·budget 계산·provisional 가정·honest result가 있으며 fetch/rebase + `npm ci` + 게이트 5개 + latest-head CI가 녹색이다.
 
+## T48 — `safe_stopped` 뒤에도 process-owned YouTube API loop가 quota를 쓴다
+
+- slug `t48-safe-stop-youtube-io` · PR 접두 `fix(youtube):` · 의존 T12, T44, T47 · **non-contract**
+- **읽을 것**: 스펙 §9.1·§9.2·§11, BOARD D-25, `apps/server/src/main.ts`, `apps/server/src/supervisor/supervisor.ts`, `apps/server/src/youtube/broadcast/health.ts`, `apps/server/src/youtube/chat/chat-source.ts`
+- **관측**(2026-08-24 23:49 KST, live host): `quotaExceeded` 뒤 supervisor가 `safe_stopped`에 도달했지만 process가 소유한 `BroadcastHealthMonitor`가 계속 폴링했다. 서버를 사람이 종료할 때까지 영속 local quota가 3,365에서 3,968로 증가했다.
+- **범위**
+  - production main wiring이 `BroadcastHealthMonitor` handle을 보존하고, `safe_stopped` 진입 시 이 process가 소유한 모든 반복 YouTube API loop를 중단한다. 확인된 다른 live loop인 chat source도 포함한다.
+  - stop은 멱등이고, health poll이 이미 진행 중이어도 완료 뒤 다음 timer를 예약하지 않는다.
+  - HTTP health surface와 영속 world/store는 process 안에 계속 남긴다. `safe_stopped`에서 YouTube broadcast를 complete로 전이하지 않는다(BOARD D-17·D-21).
+  - 정상 startup/recovery와 live 상태의 health/chat polling, 기존 quota accounting을 보존한다. API unit cost·주기·예산 수치를 추측하거나 바꾸지 않는다.
+  - package/contract, public privacy, secret, BOARD, HANDOFF, dependency, 관련 없는 코드는 바꾸지 않는다.
+- **합격 기준**
+  1. `safe_stopped` 진입이 process-owned broadcast health와 chat recurring API work를 즉시 중단하고, HTTP health와 영속 world/store는 사용할 수 있는 채로 남긴다.
+  2. 가상 시계 결정론 테스트가 health poll 진행 중 stop 뒤 API call과 timer가 더 생기지 않음을 증명한다.
+  3. repeated stop은 안전하고 추가 side effect가 없다.
+  4. 정상 live startup/recovery에서는 broadcast health와 chat polling이 기존처럼 동작하고 quota accounting이 actual request마다 그대로 적용된다.
+  5. `packages/contract`, public privacy, secret, BOARD, HANDOFF, dependency, API unit cost는 변경하지 않는다.
+  6. fetch/rebase + `npm ci` + 게이트 5개 + latest-head CI가 녹색이다.
+
 ## T49 — rolling archive 기본 root와 Windows hourly schedule 강제
 
 - slug `t49-archive-enforcement` · PR 접두 `fix(ops):` · 의존 T17 · **non-contract**
@@ -973,4 +992,3 @@
   3. 생성 XML은 해당 interactive account의 logon trigger와 `DaysInterval=1` daily calendar trigger를 함께 가지며, calendar trigger는 등록 시 미래 `StartBoundary`, `ArchiveInterval`, `P1D` duration을 사용해 logon과 날짜 경계를 넘어 향후 실행을 만든다.
   4. dry run 기본, 명시적 `--apply`, interactive-account ownership, repository working directory, root/link refusal을 회귀 테스트로 보존한다.
   5. 운영 문서의 read-only 검증 명령이 `LastTaskResult = 0`, non-null `NextRunTime`, `NextRunTime > now`를 모두 실패 조건으로 검사한다. worker는 실호스트 task를 등록·변경하거나 live 파일을 삭제하지 않는다.
-  6. fetch/rebase + `npm ci` + 게이트 5개 + latest-head CI가 녹색이다.
