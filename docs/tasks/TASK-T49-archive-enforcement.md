@@ -52,7 +52,7 @@ Make the rolling archive sweep inspect the repository-owned archive roots from e
 | 3 | logon + daily calendar hourly XML이 미래 실행을 만든다. | met | `windows-registration.test.ts`가 logon delay, registration-time future boundary, `ScheduleByDay/DaysInterval=1`, configured interval, `Duration=P1D`를 검증한다. Windows `-WhatIf` integration도 future boundary와 custom `PT2H` 치환을 통과했다. |
 | 4 | apply/interactive ownership/working directory 안전을 보존한다. | met | `windows-registration.test.ts`가 `InteractiveToken`, `LeastPrivilege`, explicit `--apply`, repository `WorkingDirectory`, `IgnoreNew`, `StartWhenAvailable`을 고정한다. CLI dry-run/apply/refusal 기존 regressions도 통과했다. |
 | 5 | host 검증 명령이 successful last result와 future next run을 모두 검사한다. | met | `docs/ops/windows-host.md` §2의 read-only `Get-ScheduledTaskInfo` command는 `LastTaskResult -ne 0`, null `NextRunTime`, `NextRunTime -le now`를 각각 throw한다. Worker는 host task를 조회·등록·변경하지 않았다. |
-| 6 | install, rebase, five gates, latest-head CI가 녹색이다. | pending | `npm ci`, final fetch/rebase 및 다섯 local gate는 통과. PR latest-head CI 대기. |
+| 6 | install, rebase, five gates, latest-head CI가 녹색이다. | met | `npm ci`, final fetch/rebase 및 다섯 local gate가 통과했고 PR #62 latest-head CI가 녹색이다. 최종 evidence head의 exact run/SHA는 `worker_done`에 기록한다. |
 
 ### Gates (executed)
 
@@ -75,7 +75,7 @@ node apps/server/dist/bin/archive.js --json
 npm run archive -w @vl/server -- --json
   PASS — both dry runs resolved the same repository data roots; applied=false, deleted=[]
 PR latest-head CI
-  pending
+  PASS — PR #62; final evidence head의 exact run/SHA는 worker_done에 기록
 ```
 
 ## Not done / out of scope
