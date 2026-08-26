@@ -1,168 +1,77 @@
-# HANDOFF — T44 머지 후 Gate 2 재개 (2026-08-24 KST)
+# HANDOFF — 하드웨어 이전 (작성 2026-08-21 UTC)
 
-> 대상: quota 리셋 뒤 기술 방송과 Gate 2를 이어받는 운영자 또는 에이전트.
-> 정본 우선순위: `docs/PROJECT_SPEC.md` > `docs/tasks/TASK_SPECS.md` >
-> `docs/tasks/BOARD.md` > 이 문서.
-> 상태 시각은 상대 시간이 아니라 **2026-08-24 14:56 KST**로 고정한다.
+> 대상: 새 호스트에서 이 프로젝트를 이어받는 코디네이터(사람 또는 에이전트).
+> 정본 우선순위는 그대로다: `docs/PROJECT_SPEC.md` > `docs/tasks/TASK_SPECS.md` > `docs/tasks/BOARD.md` > 그 외.
+> 이 문서는 **호스트에 묶인 상태**와 **재개 절차**만 다룬다. 제품·작업 상태의 정본은 BOARD다.
 
-## 목표
+## 1. 스냅샷
 
-T44가 반영된 빌드로 quota 리셋 뒤 방송을 재개하고, 다음 순서로 Gate 2 근거를 만든다.
+| 항목 | 값 |
+|---|---|
+| 저장소 | `https://github.com/dnhynk/vertical-live` — **public**, 기본 브랜치 `main`, squash merge만 (D-4) |
+| main | `6a9ffc7` (docs) / 마지막 코드 커밋 `56ec78c` (PR #31) — **CI 녹색**(ubuntu, soak:ci 포함) |
+| PR | **31개 전부 MERGED, open 0** — T0–T17, T1b, T8b–T8e, T17b, T18, T19(Gate 0 반영), T20a/b/c(identity B), T21(일본 패널 초안), T22(모더레이션 보고 경로) |
+| 테스트 | 149 files / 2,145 passed / 1 skipped + `soak:ci` PASS (로컬·CI 동일) |
+| 남은 등록 task | **T8f**(pending, 낮은 우선순위 — 테스트 스위트 CPU 3.7배 증가 계측 + 얇은 타임아웃 점검, `TASK_SPECS` 미작성·BOARD §1 행만 있음) |
+| Node | **26**(`.nvmrc`, BOARD D-1 2026-08-22 개정) · 새 호스트는 nvm-windows로 v26.7.0 사용, v24.19.0 병행 보관 · npm workspaces |
+| 검증 게이트 | `npm run format:check && npm run lint && npm run typecheck && npm run test && npm run build` (+ `npm run soak:ci`) |
+| Orca Run | `run_1c93e897ee3e` · repo id `f5dd030a-828b-4bcc-b1b8-dc22b95053bf` (구 호스트 기준 — §4 참조) |
 
-1. 스택이 `live`에 도달하고 required family 6개가 전부 `ok`인지 확인한다.
-2. 하루 API 소비를 `/health.quota`와 Google Cloud Console에서 함께 측정해
-   **7,404 / 9,500 units/day** 추정과 A-T44-1 비용표를 검증한다.
-3. YouTube 앱 일반 시청 페이지에서 `ごはん` calibration을 재개하고 p95 합격선을 잠근다.
-4. calibration과 겹치지 않는 validation 구간을 통과한 뒤 fault matrix와 72시간 soak를 수행한다.
+**아직 방송을 시작한 적이 없다.** 로컬 `data/`의 SQLite에는 보존할 세계 상태·유료 이력이 없다 → **데이터 이전 불필요.**
 
-완료 기준은 위 네 단계의 표본·시각·판정이 BOARD와 Gate 2 기록에 남고, 잠정 합격선이 승인값으로
-교체되는 것이다.
+## 2. 새 호스트 준비 절차 (순서대로)
 
-## 현재 상태
+> **진행(2026-08-22, 새 호스트 `WORKSTATION`)**: 1·2 완료(단 Node는 nvm-windows로 24.19.0 고정 — 호스트 기본이 26.7.0이었다), 3은 서버 토큰 3종만 완료, 4는 OBS 32.0.2 설치까지(WebSocket·프로파일·probe 미완), 5 미착수, 6 완료. 세부 근거는 BOARD 이력 2026-08-22.
 
-- 저장소 기준점은 `main` / `origin/main`의
-  `6466b05a66e8ef6b265bc8e60822aa0be16e5a08`이며 서로 일치한다.
-- T44 구현은 PR #57, 커밋 `2b661ce`로 머지됐고 후속 BOARD 기록은 `6466b05`다.
-  GitHub CI는 성공했다.
-- 스택과 OBS는 의도적으로 내려가 있다. 2026-08-24 14:56 KST 확인 시
-  `127.0.0.1:8787`과 OBS WebSocket `4455` 리스너가 없고 `obs64` 프로세스도 없다.
-- 마지막 런은 quota 고갈 뒤 `safe_stopped`였다. 이 상태는 terminal이라 같은 프로세스에서
-  회복하지 않는다. 죽은 엔드포인트로 OBS만 계속 송출할 이유가 없어 함께 종료했다.
-- quota 리셋은 **2026-08-24 16:00 KST**(Pacific midnight)다. 그 전에는 방송을 다시 켜지 않는다.
-- 새 산출물은 workspace별 `dist`에 있다. `apps/renderer/dist`,
-  `apps/server/dist`, `tools/simulator/dist`, `tools/soak/dist`는
-  2026-08-24 02:09 KST에 다시 빌드됐고, 서버 산출물에
-  `db/migrations/007_quota-usage.sql`이 포함돼 있다. 모두 gitignored 산출물이다.
-- 실계정 DB는 현재 `config/data/vertical-live.db`다. 14:56 KST 읽기 전용 확인에서는
-  `quota_usage` 테이블이 아직 없었다. T44 빌드로 한 번도 기동하지 않았으므로 정상이며,
-  첫 기동 때 migration 007이 적용돼야 한다.
-- Gate 2의 다음 단계는 짧은 host·OBS baseline 뒤 모바일 calibration이다. 기존 실측의
-  `채팅 게시 → 화면 상태 변화` 약 6초와 내부 `receivedToCommitted` 7ms는 예비 관측일 뿐,
-  표본 수가 있는 p95 합격선은 아직 아니다.
-
-## 변경 사항
-
-### 커밋된 T44
-
-- `apps/server/src/db/migrations/007_quota-usage.sql`,
-  `apps/server/src/db/store.ts`, `apps/server/src/youtube/quota/tracker.ts`:
-  Pacific quota day와 메서드별 소비량을 `quota_usage`에 영속하고, 기동 및 quota-day
-  rollover 때 복원한다.
-- `apps/server/src/youtube/broadcast/health.ts`,
-  `apps/server/src/youtube/broadcast/config.ts`, `config/default.json`:
-  `liveStreams.list`는 20초, `liveBroadcasts.list` reconcile은 300초로 분리했다.
-  reconcile 사이에는 프로세스가 성공시켜 영속한 stage를 쓰되
-  `lifeCycleSource`와 `lastReconciledAt`을 함께 보고한다.
-- `apps/server/src/server.ts`, `apps/server/src/main.ts`:
-  `GET /health`에 현재 quota day, 총 소비, 잔여량, reserve, 메서드별 소비를 노출한다.
-- `apps/server/src/youtube/quota/budget.test.ts`:
-  기본 설정의 하루 예산을 테스트로 고정했다.
-
-| 소비자 | 기준 | 예상 units/day |
-| --- | ---: | ---: |
-| `liveStreams.list` | 20초 | 4,320 |
-| `liveBroadcasts.list` | 300초 | 288 |
-| chat `streamList` | 1.5회/분 | 2,160 |
-| 11시간 구간 2회 + 재시도 1회 | 3회분 | 636 |
-| **합계** | | **7,404** |
-| 사용 가능 예산 | 10,000 - reserve 500 | **9,500** |
-| **예상 여유** | | **2,096 (22%)** |
-
-### 실물 운영에서 드러난 결함의 축
-
-| 축 | 관련 task | 보존할 교훈 |
-| --- | --- | --- |
-| 행동이 대상보다 먼저 발사됨 | T28·T30·T35·T37·T38·T39 | 시작·전이·재시작의 판정 시점을 실물 대상의 준비 상태에 맞춘다. |
-| 판정이 자신이 볼 것을 안 봄 | T41·T44 | 카운터나 health가 아니라 실제 폐기·실제 일일 소비를 판정면에 올린다. |
-| 계약이 플랫폼 값을 못 읽음 | T40 | 합성 fixture만으로 플랫폼 wire shape를 대신하지 않는다. |
-
-T40·T41·T44는 약 2,200개 테스트가 통과하는 동안 남아 있었다고 보고됐다. T44에서는
-호출 주기와 예산 산술을 주석이 아니라 실패 가능한 테스트로 고정했다.
-
-## 검증
-
-- 통과: `git status --short --branch`, `git rev-parse HEAD`,
-  `git rev-parse origin/main` — HANDOFF 수정 전 작업 트리는 깨끗했고 HEAD와 origin/main이
-  모두 `6466b05`였다.
-- 통과: `gh pr view 57 --json ...` — PR #57 `MERGED`, merge commit `2b661ce`,
-  CI conclusion `SUCCESS`.
-- 통과: workspace별 `dist`와 최신 시각 확인 — T44 이후 빌드와 migration 007 산출물 존재.
-- 통과: 프로세스·리스너 읽기 전용 확인 — 14:56 KST에 서버·OBS가 내려가 있었다.
-- 통과: 환경변수는 값을 출력하지 않고 존재 여부만 확인 —
-  현재 에이전트 프로세스에는 `VL_GOOGLE_CLIENT_SECRETS_FILE`이 없지만 User 환경변수에는 있다.
-- 통과: 실계정 DB 읽기 전용 schema 확인 — 첫 T44 기동 전이라 `quota_usage` 미적용.
-- 통과: `npx prettier --check HANDOFF.md` — Prettier 형식 일치.
-- 통과: `npm exec vitest run -- apps/server/src/youtube/quota/budget.test.ts apps/server/src/youtube/quota/quota.test.ts apps/server/src/youtube/broadcast/health.test.ts apps/server/src/server.test.ts` —
-  T44 관련 4 files, 68 tests 통과.
-- 보고됨(미검증): 마지막 방송은 `liveBroadcasts.list rejected: quotaExceeded` 뒤
-  `safe_stop: restart_budget_exhausted (startup:broadcast)`로 끝났다. BOARD에도 같은 사건이
-  기록돼 있으나 이 세션에서 재현하지 않았다.
-- 미실행: quota 리셋 전이므로 스택 재기동, 실계정 `/health.quota`, 모바일 calibration,
-  validation, fault matrix, 72시간 soak는 실행하지 않았다. 저장소 전체 5단계 로컬 게이트는
-  재실행하지 않았고 PR #57 CI 성공으로 교차 확인했다.
-
-## 결정과 근거
-
-- quota 리셋 전에는 스택과 OBS를 모두 끈다 — `safe_stopped`는 자동으로 빠져나오지 않으며,
-  quota가 없는 동안 재시도해도 새 근거 없이 OBS만 죽은 송출 대상으로 보낸다.
-- 전체 health poll을 느리게 하지 않고 API 호출을 분리한다 — required
-  `youtube_broadcast` 신호는 30초보다 오래되면 버려져 정상 component를 재시작하는 반대 고장이 난다.
-- quota 증량 신청은 별도 트랙으로 둔다 — 현재 추정 여유는 22%라 Gate 2 재개를 막지는 않는다.
-- calibration은 `unlisted` 방송을 **YouTube 앱의 일반 시청 페이지, 축소 상태**에서 한다 —
-  unlisted는 Shorts 피드에 뜨지 않고 모바일 웹에는 채팅 수단이 없다.
-
-## 남은 위험과 확인 사항
-
-- **A-T44-1 [확인 필요]**: Live Streaming API 메서드 비용표는 `documented: false`다.
-  `/health.quota`는 저장소 비용표로 계산한 로컬 카운터라 그 값만으로 비용표 자체를 검증할 수 없다.
-  같은 구간의 **Google Cloud Console quota 사용량**과 대조해야 가정을 닫을 수 있다.
-- **A-T44-2 [확인 필요]**: chat 재접속률 1.5회/분은 152분 동안 226회였던 하루 관측 하나다.
-  [추론] 시청자 수나 플랫폼 동작이 바뀌면 소비가 늘 수 있으며, 그때 예산 테스트와 실측을 함께 조정한다.
-- **첫 T44 기동 [확인 필요]**: migration 007 적용 뒤 `/health.quota.quotaDay`가 새 Pacific day이고,
-  메서드별 카운터가 재기동 후에도 이어지는지 확인한다.
-- **설정 불일치 [확인 필요]**: BOARD D-21은 11시간 rolling만 채택했지만 현재
-  `config/default.json`은 `youtube.broadcast.strategy: "single"`,
-  `segmentMs: null`이고 시작 스크립트도 이를 덮지 않는다. 현재 재기동 명령은 자동 rolling을
-  켜지 않는다. 72시간 soak 전에 D-21과 실행 설정을 정합화해야 한다.
-- **DB 경로 [확인 필요]**: CLAUDE.md·일부 런북은 `data/vertical-live.db`를 적지만 실물은
-  `config/data/vertical-live.db`다. quota 영속 상태를 직접 조사할 때 잘못된 DB를 보지 않는다.
-- 현재 에이전트 프로세스는 User 범위 OAuth 파일 환경변수를 상속하지 않았다. 새로 연 사용자
-  PowerShell에서 직접 기동하거나, 값 자체를 노출하지 않은 채 process scope 존재 여부를 먼저 확인한다.
-- 모바일 앱 확대 상태에서는 채팅 overlay가 사라지고, 모바일 웹에는 채팅 수단이 없다.
-  calibration 표본은 일반 시청 페이지의 축소 상태로 한정해 기록한다.
-- 72시간 soak 전에 남은 호스트 실측: 화면 잠금 10분 뒤 frame counter 유지, 실제 TDR 발생 시
-  복구 관측, 사용할 원격 도구의 연결 종료 뒤 GPU 합성 유지. 현재 RDP는 비활성이다.
-
-## 다음 작업
-
-1. **2026-08-24 16:00 KST 이후 새 사용자 PowerShell에서 T44 빌드로 스택을 기동한다.**
-
+1. **기본 도구**: Windows 11, Git, Node 26, `gh`(GitHub CLI, `dnhynk` 로그인), Python 3(코디네이터 스크립트용), Orca(오케스트레이션을 계속할 경우).
+2. **클론·게이트**:
    ```powershell
-   powershell -ExecutionPolicy Bypass -File ops\windows\Start-VerticalLive.ps1 -Broadcast -Unlisted
+   git clone https://github.com/dnhynk/vertical-live.git; cd vertical-live
+   npm ci
+   npm run format:check; npm run lint; npm run typecheck; npm run test; npm run build
    ```
+3. **vault 재생성** — 비밀정보는 Windows Credential Manager(서비스 `vertical-live`)에 있고 **호스트 간 이전이 불가능하다. 전부 새 호스트에서 재생성/재입력한다** (구 호스트 값을 옮길 필요 없음):
+   | 이름 | 구 호스트 상태 | 새 호스트에서 할 일 |
+   |---|---|---|
+   | `server.adminToken` · `server.rendererToken` · `server.simulatorToken` | set | 새로 생성: `python -c "import secrets; print(secrets.token_urlsafe(32))" \| npm run secrets -w @vl/server -- set <이름>` ×3 |
+   | `obs.websocketPassword` | set | OBS 설치 후 §2-4에서 새로 생성해 저장 |
+   | `alerts.slackWebhookUrl` | set | stdin으로 저장 — PowerShell: `'URL' \| npm run secrets …` / bash: `echo 'URL' \| npm run secrets …` |
+   | `youtube.oauthRefreshToken` | missing | OAuth 클라이언트 준비 후 `npm run auth:login -w @vl/server` (docs/ops/youtube-auth-setup.md) |
+   | `youtube.streamKey` | missing | 정상 경로는 T10이 자동 주입 — 수동 입력 불필요 |
+   | `monitoring.deadManPushUrl` | missing | 선택(외부 dead-man 모니터 쓸 때만) |
+4. **OBS (D-6/D-7)**: OBS Studio **32.0.2** 설치(고정 버전, D-6) → `docs/ops/obs-setup.md` §2(WebSocket 서버 켜기 + 비밀번호 vault 저장) → §3(`ops/obs/`의 `vertical-live` 프로파일·씬 컬렉션 가져오기) → `npm run obs:probe`로 스모크(§6의 체크 4개: RPC 1 · 1080x1920@30 yes · browser source · 건강 신호 4개). safe-mode sentinel은 launcher가 자동 처리한다(D-7, T18 — 수동 조치 불필요).
+5. **호스트 운영 체크리스트 (전부 호스트별로 다시 해야 함)**: `docs/ops/windows-host.md` §5 — 자동 로그온, sleep 비활성, GPU reset, remote-session, 자동 업데이트 시험 + `ops/windows/Register-VerticalLive.ps1` 자동시작 등록·해제 1사이클. 72h soak 전 필수(§11).
+6. **BOARD 갱신**: D-2("이 Windows 11 PC")가 구 호스트를 가리키므로 새 호스트로 **D-2 정정 한 줄**을 §2 표에 기록하고 이력에 남긴다. E-1(구 호스트 BSOD 0x50 2회)은 새 호스트에서는 무관하다는 점도 이력에 적는다.
 
-   완료 기준: `GET http://127.0.0.1:8787/health`의 최상위 `status = "ok"`,
-   `supervisor.state = "live"`, required family
-   `coordinator`·`state_commit`·`chat_transport`·`renderer`·`obs_output`·
-   `youtube_broadcast`가 모두 `ok`다. 동시에 `quota`가 null이 아니고 새 quota day를 보고해야 한다.
+## 3. 구 호스트에만 있고 저장소에 없는 것 (유실되는 것)
 
-2. **quota 소비를 첫 관측으로 잡는다.**
-   기동 직후와 일정 간격으로 `/health.quota`의 `spentUnits`·`remainingUnits`·`byMethod`을
-   기록하고, 같은 UTC 구간의 Cloud Console 사용량을 함께 남긴다.
+- **Credential Manager 비밀값 전부** — §2-3대로 재생성. 어떤 값도 저장소·문서·채팅에 없다(원칙).
+- **OBS 설정**(`%APPDATA%\obs-studio\`): websocket 활성화+비밀번호, `vertical-live` 프로파일·씬 선택 상태 — §2-4로 재구성(원본은 저장소 `ops/obs/`에 있음).
+- **schtasks 자동시작 등록** — §2-5로 재등록.
+- **Orca 상태**(run·terminal·worktree) — §4 참조. worktree들은 전부 머지·삭제 완료라 옮길 것 없음.
+- 세션 scratchpad — 코디네이터 스크립트 원본은 전부 `docs/runbooks/scripts/`에 커밋돼 있다(`chk.py`, `mktask.py`, `start_worker.py`, `resume_worker.py`, `start_reviewer.py`, `cleanup_review.py`, `README.md`). 스크립트 안의 Orca 실행 파일 경로(`C:\Users\dongh\AppData\Local\Programs\orca\...`)와 worktree 경로(`C:/Users/dongh/orca/workspaces/...`)는 새 호스트 사용자명에 맞게 수정 필요.
 
-   완료 기준: 호출 빈도와 비용을 분리해 7,404/day 추정과의 차이를 설명할 수 있고,
-   로컬 카운터와 Console이 맞지 않으면 A-T44-1을 열린 채 유지하며 비용표를 수정할 task를 등록한다.
+## 4. 오케스트레이션 재개 (Orca를 계속 쓸 경우)
 
-3. **Gate 2 calibration을 재개한다.**
-   한국 단말의 YouTube 앱 일반 시청 페이지를 축소 상태로 열고 `ごはん`을 게시해
-   게시 시각부터 화면 상태 변화까지 측정한다. 시작·종료 UTC, 단말·회선·지역, 표본 수,
-   p50/p95, 동시 supervisor 상태와 degraded 여부를 남긴다.
+1. `docs/runbooks/agent-orchestration.md` 2.1/2.8(재바인딩·복구) → `docs/tasks/BOARD.md` → `gh pr list --state all` 순으로 실제 상태 확인.
+2. 같은 Run을 잇는다: `orca orchestration run-use --id run_1c93e897ee3e`. 새 호스트에서 run/repo id가 유효하지 않으면 새 Run을 만들고 BOARD 머리말의 Run id를 갱신한다(이력에 한 줄).
+3. worker 2 + codex 리뷰어 1(`gpt-5.6-sol`/`xhigh`/`fast`, D-5) 구성. 리뷰 워크트리는 `review`·`review2` 두 개(병렬 처리용)만 두고, **리뷰가 끝날 때마다 `python docs/runbooks/scripts/cleanup_review.py <review|review2>`** (사용자 지시 2026-08-19: 브랜치·워크트리·리뷰어 세션은 끝나는 즉시 정리).
+4. 알려진 운영 gotcha는 `docs/runbooks/scripts/README.md`와 runbook에 있다(주입 프롬프트 Enter 확인, codex MCP 부팅 중 false-positive, worker_done capability 만료 시 본문은 수신됨 등).
 
-   완료 기준: calibration 표본으로 p95 합격선을 잠그고 BOARD 및 해당 provisional 설정을 갱신한다.
+## 5. 다음 작업 (우선순위순)
 
-4. **분리된 validation을 통과한 뒤 72시간 soak로 간다.**
-   calibration과 다른 데이터로 같은 측정을 통과시키고, rolling 설정 불일치와 남은 호스트 실측을
-   먼저 해소한 뒤 component별 장애 주입과 72시간 무인 soak를 수행한다.
+**사용자(수동) — 코드보다 먼저 풀려야 하는 것:**
+1. ~~Slack webhook 도달 확인~~ — **해소(D-19, 2026-08-23)**: 도달 검증을 하지 않기로 했다. sink 구현(T24)과 호출표의 `escalationChannel`은 그대로다.
+2. **YouTube 전용 채널 + Google Cloud + OAuth**(D-10/D-16): `docs/ACCOUNT_SETUP_FROM_ZERO.md` → `docs/ops/youtube-auth-setup.md`(consent screen을 **In production**으로 — Testing이면 refresh token 7일 만료). 완료 후 `auth:login` → 첫 **private** 기술 방송(공개 전환은 사람 권한, A-18).
+3. **콘텐츠 목록·증빙 방식 승인**: `docs/ops/content-and-market-criteria.md` 3장 **A-3·A-5·A-6·A-7**. 패널 모집은 `D-18`로 기각됐다.
+4. 계정 audit 값 기입(채널 생성 후, gate0-checklist §1.2 — D-10은 '새 채널이라 전부 없음/미달' 가정).
 
-   완료 기준: `docs/ops/gate2-experiments.md` 2장 기록이 채워지고 T15 fault matrix 전 행 및
-   72시간 리포트가 통과한다.
+**코드/오케스트레이션:**
+5. T8f(낮은 우선순위): 스위트 CPU 3.7배 증가(73.76s→271.98s) 원인 계측 + `replay.test.ts` 5s 등 얇은 타임아웃 점검. TASK_SPECS 절은 미작성 — 만들 때 BOARD §1 행과 이력(2026-08-20)의 관측 근거를 인용.
+6. Gate 2 준비: `docs/ops/gate2-experiments.md` — 실시간 72h soak(새 호스트에서, §2-5 체크리스트 후), 모바일 calibration, provisional 합격선 잠금(A-15, D-14).
+
+**Gate 0 잔여(승인 없이는 진행 금지):** §1.4(위 3번), §1.2 audit 값(위 4번), §1.7 합격선(Gate 2 후), §1.5 direct↔vote 순서는 가정 A-20(사용자가 뒤집을 수 있음).
+
+## 6. 문서 지도 (읽기 순서)
+
+`CLAUDE.md` → `docs/PROJECT_SPEC.md` → `docs/tasks/TASK_SPECS.md` → `docs/tasks/BOARD.md`(결정 D-1~D-16 · 가정 A-1~A-20 · 이력) → `docs/runbooks/agent-orchestration.md` → `docs/ops/`(gate0-checklist · obs-setup · windows-host · youtube-auth-setup · moderation-call-table(승인됨, D-13) · identity-consent(D-9) · content-and-market-criteria(승인 대기) · gate2-experiments · fault-matrix · soak · supervisor · runbook-operations) → `README.md`.
