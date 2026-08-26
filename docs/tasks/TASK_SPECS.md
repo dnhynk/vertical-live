@@ -992,3 +992,4 @@
   3. 생성 XML은 해당 interactive account의 logon trigger와 `DaysInterval=1` daily calendar trigger를 함께 가지며, calendar trigger는 등록 시 미래 `StartBoundary`, `ArchiveInterval`, `P1D` duration을 사용해 logon과 날짜 경계를 넘어 향후 실행을 만든다.
   4. dry run 기본, 명시적 `--apply`, interactive-account ownership, repository working directory, root/link refusal을 회귀 테스트로 보존한다.
   5. 운영 문서의 read-only 검증 명령이 `LastTaskResult = 0`, non-null `NextRunTime`, `NextRunTime > now`를 모두 실패 조건으로 검사한다. worker는 실호스트 task를 등록·변경하거나 live 파일을 삭제하지 않는다.
+  6. fetch/rebase + `npm ci` + 게이트 5개 + latest-head CI가 녹색이다.
