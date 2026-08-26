@@ -42,17 +42,29 @@ D-25의 사용자 위험 수용 결정을 정본과 운영 경로에 정직하�
 
 | # | 기준 | 상태(met/unmet/unverifiable) | 근거(테스트 파일·명령·출력) |
 |---|---|---|---|
-| 1 | 정본의 D-25·Gate 경로 정합화 | pending | 구현 후 기록 |
-| 2 | 관련 운영 문서 정합화 | pending | 구현 후 기록 |
-| 3 | Start `-Public` validation/privacy | pending | 구현 후 기록 |
-| 4 | Register exact argument propagation | pending | 구현 후 기록 |
-| 5 | 테스트·범위 불변조건 | pending | 구현 후 기록 |
-| 6 | fetch/rebase·npm ci·게이트 5개·CI | pending | 실행 후 기록 |
+| 1 | 정본의 D-25·Gate 경로 정합화 | met | `docs/PROJECT_SPEC.md` §0·§11·§12·§14·§15: Gate 2/3은 미통과·superseded, 현재 경로는 11시간 rolling·simulator-off·최소 72 real hours 관측 |
+| 2 | 관련 운영 문서 정합화 | met | `docs/ops/public-observational-pilot.md` 신규, gate2/soak/runbook/simulator/supervisor/Windows·ROADMAP·계정/수익화 문서에 skipped 위험·durable facts·5개 stop 범주 반영 |
+| 3 | Start `-Public` validation/privacy | met | `ops/windows/Start-VerticalLive.ps1`: `-Broadcast` 요구, `-Unlisted` 배타, side effect 전 거부, public branch의 단일 privacy env assignment. `public-windows.test.ts` Windows 실행 포함 |
+| 4 | Register exact argument propagation | met | Windows `-WhatIf` 실행이 public `-Broadcast -Public` 정확히 1회, unlisted `-Unlisted`, default 빈 start args를 증명; 잘못된 두 조합은 `schtasks.exe` 전 거부 |
+| 5 | 테스트·범위 불변조건 | met | focused 3 files / 34 passed; full 155 files / 2,246 passed / 1 skipped. `packages/contract`, dependency, channel audience config, secret 변경 0; `engine/config.test.ts`가 shipped simulator disabled 고정 |
+| 6 | fetch/rebase·npm ci·게이트 5개·CI | partial (CI pending) | `origin/main` rebase 성공, `npm ci` 성공, 게이트 5개 성공. PR latest-head CI는 PR 생성 뒤 확인 |
 
 ### Gates (executed)
 
 ```text
-실행 전
+git fetch origin && git rebase --autostash origin/main -> pass (main a3ce1aa 위에 2개 commit 재배치)
+npm ci                -> pass (431 packages; audit 경고 10건, dependency 변경 없음)
+npm run format:check  -> pass
+npm run lint          -> pass (legacy imports 0; install scripts reviewed 4)
+npm run typecheck     -> pass
+npm run test          -> pass (155 files; 2,246 passed, 1 skipped)
+npm run build         -> pass (contract schema up to date; renderer/server/simulator/soak build)
+
+Focused:
+npx vitest run apps/server/src/ops/public-windows.test.ts apps/server/src/youtube/broadcast/api.test.ts apps/server/src/engine/config.test.ts
+-> pass (3 files; 34 passed; Windows PowerShell execution paths included)
+
+CI -> pending PR creation
 ```
 
 ## Not done / out of scope
