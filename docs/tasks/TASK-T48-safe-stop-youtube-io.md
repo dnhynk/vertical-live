@@ -1,7 +1,7 @@
 # TASK-T48-safe-stop-youtube-io
 
 - Task: T48 `safe_stopped` 뒤 process-owned YouTube API loop 중단 (`docs/tasks/TASK_SPECS.md` §T48)
-- Branch: `dnhynk/t48-safe-stop-youtube-io` · PR: pending
+- Branch: `dnhynk/t48-safe-stop-youtube-io` · PR: #61
 - Orca: task `task_696a409f6a0a` · dispatch `ctx_7959cc07bfaf`
 - Spec sections read: §9.1, §9.2, §11
 - BOARD decisions/assumptions relied on: D-17, D-21, D-25, A-15
@@ -41,17 +41,30 @@
 
 | # | 기준 | 상태(met/unmet/unverifiable) | 근거(테스트 파일·명령·출력) |
 |---|---|---|---|
-| 1 | safe stop이 broadcast health/chat API loop를 중단하고 HTTP/world/store는 유지 | pending | 구현·테스트 예정 |
-| 2 | in-flight health poll 뒤 추가 API call/timer 없음 | pending | 구현·테스트 예정 |
-| 3 | repeated stop 멱등 | pending | 구현·테스트 예정 |
-| 4 | 정상 live polling·quota accounting 유지 | pending | 구현·테스트 예정 |
-| 5 | contract/privacy/secret/BOARD/HANDOFF/dependency/unit cost 무변경 | pending | 최종 diff 검사 예정 |
-| 6 | fetch/rebase, npm ci, 게이트 5개, latest-head CI | pending | 실행 예정 |
+| 1 | safe stop이 broadcast health/chat API loop를 중단하고 HTTP/world/store는 유지 | met | `main.ts`가 두 loop handle을 supervisor의 동기 halt 경계에 연결한다. `supervisor.test.ts` blocked-alert safe-stop 회귀가 API loop 중단을 검증하며 HTTP server·engine·store에는 stop을 호출하지 않는다. |
+| 2 | in-flight health poll 뒤 추가 API call/timer 없음 | met | `health.test.ts`: fake clock에서 in-flight `liveStreams.list` 중 stop 뒤 `liveBroadcasts.list` 0회, timer 0개, 이후 120초 advance에도 변화 없음. supervisor safe-stop 통합 회귀도 같은 경계를 검증한다. |
+| 3 | repeated stop 멱등 | met | monitor `stop()` 2회와 supervisor safe-stop request 2회에서 halt/chat stop이 정확히 1회임을 검증한다. |
+| 4 | 정상 live polling·quota accounting 유지 | met | live resource poll에서 `liveStreams.list`와 `liveBroadcasts.list` 사용량이 각각 정확히 1 증가한다. T47 `grpc-pacing.test.ts` 포함 targeted 57 tests와 전체 2,235 tests 통과. |
+| 5 | contract/privacy/secret/BOARD/HANDOFF/dependency/unit cost 무변경 | met | `git diff --name-only origin/main...HEAD`: server lifecycle/test 6개 + T48 문서 2개뿐. `packages/contract`, config, lockfile commit, BOARD, HANDOFF 변경 없음. |
+| 6 | fetch/rebase, npm ci, 게이트 5개, latest-head CI | unverifiable | `origin/main` rebase, `npm ci`, 로컬 게이트 5개 통과. PR #61 latest-head CI 대기 중. |
 
 ### Gates (executed)
 
 ```text
-실행 전
+git fetch origin; git rebase --autostash origin/main
+  -> pass; origin/main 8a47046 위로 2 commits rebase
+npm ci
+  -> pass; 431 packages installed, audit는 기존 10 vulnerabilities 보고
+npm run format:check
+  -> pass; All matched files use Prettier code style
+npm run lint
+  -> pass; ESLint + no-legacy-imports + install-script checks
+npm run typecheck
+  -> pass; tsc --build tsconfig.json
+npm run test
+  -> pass; 153 files, 2,235 passed, 1 skipped
+npm run build
+  -> pass; contract schema current, renderer/server/simulator/soak built
 ```
 
 ## Not done / out of scope
