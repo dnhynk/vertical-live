@@ -142,9 +142,7 @@ describe('RestChatSource', () => {
     const state = new ChatSourceState(clock, config.grpc.keepalive)
     let tokenCalls = 0
     let fetchCalls = 0
-    let releaseAccessToken = (_token: string): void => {
-      throw new Error('access-token lookup was not started')
-    }
+    let releaseAccessToken!: (token: string) => void
     const pendingAccessToken = new Promise<string>((resolve) => {
       releaseAccessToken = resolve
     })
