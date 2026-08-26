@@ -126,6 +126,63 @@ describe('RestChatSource', () => {
     })
   })
 
+  it('does not poll or reschedule when stopped during access-token lookup', async () => {
+    const clock = new FakeClock()
+    const config = testChatConfig()
+    const quota = new QuotaTracker({ clock })
+    const sink = new ChatIngestSink({
+      inbox: storeInbox(temp.store),
+      clock,
+      parseCommand: testParseCommand,
+      sourceKey: TEST_SOURCE_KEY,
+      liveChatId: TEST_LIVE_CHAT_ID,
+      broadcastId: TEST_BROADCAST_ID,
+      initialPageToken: null,
+    })
+    const state = new ChatSourceState(clock, config.grpc.keepalive)
+    let tokenCalls = 0
+    let fetchCalls = 0
+    let releaseAccessToken!: (token: string) => void
+    const pendingAccessToken = new Promise<string>((resolve) => {
+      releaseAccessToken = resolve
+    })
+    const source = new RestChatSource({
+      sink,
+      state,
+      clock,
+      config,
+      auth: {
+        getAccessToken: () => {
+          tokenCalls += 1
+          return pendingAccessToken
+        },
+        forceRefresh: () => Promise.resolve('synthetic-refreshed-token'),
+      },
+      liveChatId: TEST_LIVE_CHAT_ID,
+      quota,
+      fetchImpl: (async () => {
+        fetchCalls += 1
+        return new Response('{}', { status: 200 })
+      }) as typeof fetch,
+    })
+
+    const running = source.run()
+    expect(tokenCalls).toBe(1)
+
+    source.stop()
+    releaseAccessToken('synthetic-access-token')
+
+    expect(await running).toEqual({ outcome: 'cancelled', reason: 'stop_requested' })
+    expect(quota.snapshot().spentUnits).toBe(0)
+    expect(fetchCalls).toBe(0)
+    expect(clock.pendingTimerCount).toBe(0)
+
+    await clock.advance(config.rest.requestTimeoutMs + config.rest.minPollIntervalMs + 1)
+    expect(quota.snapshot().spentUnits).toBe(0)
+    expect(fetchCalls).toBe(0)
+    expect(clock.pendingTimerCount).toBe(0)
+  })
+
   it('requests id,snippet only while the consent gate is closed, and resumes', async () => {
     const h = await harness(
       [

@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it } from 'vitest'
 
 import type { HealthSignal } from '../../health/types.js'
-import { FakeClock } from '../../testing/fake-clock.js'
-import type { LiveStreamStatus } from './api.js'
+import { FakeClock, flushMicrotasks } from '../../testing/fake-clock.js'
+import type { LiveStreamStatus, YouTubeLiveApi } from './api.js'
 import {
   BroadcastHealthMonitor,
   YOUTUBE_BROADCAST_HEALTH_SIGNAL_NAMES,
@@ -11,7 +11,11 @@ import {
   YOUTUBE_STREAM_STATUS_SIGNAL,
   deriveBroadcastHealthSignals,
 } from './health.js'
-import { createBroadcastHarness, type BroadcastHarness } from './test-support.js'
+import {
+  TEST_BROADCAST_CONFIG,
+  createBroadcastHarness,
+  type BroadcastHarness,
+} from './test-support.js'
 
 /** spec §9.4(6): report `liveStreams.status` and the broadcast lifecycle, decide nothing. */
 
@@ -170,12 +174,22 @@ describe('monitor', () => {
       clock,
     })
 
+    const quotaBefore = h.quota.snapshot()
     await monitor.poll()
+    const quotaAfter = h.quota.snapshot()
 
     expect(signals).toHaveLength(3)
     expect(byName(signals, YOUTUBE_STREAM_STATUS_SIGNAL).status).toBe('ok')
     expect(byName(signals, YOUTUBE_BROADCAST_LIFECYCLE_SIGNAL).status).toBe('ok')
     expect(JSON.stringify(signals)).not.toContain(stream?.streamKey)
+    expect(
+      (quotaAfter.byMethod['liveStreams.list'] ?? 0) -
+        (quotaBefore.byMethod['liveStreams.list'] ?? 0),
+    ).toBe(1)
+    expect(
+      (quotaAfter.byMethod['liveBroadcasts.list'] ?? 0) -
+        (quotaBefore.byMethod['liveBroadcasts.list'] ?? 0),
+    ).toBe(1)
   })
 
   it('reports unknown instead of throwing when the API call fails', async () => {
@@ -300,6 +314,82 @@ describe('monitor', () => {
 
     expect(signals.length).toBeGreaterThanOrEqual(3)
     expect(monitor.running).toBe(false)
+    expect(clock.pendingTimerCount).toBe(0)
+  })
+
+  it('does not make another API call or schedule after an in-flight poll is stopped', async () => {
+    const clock = new FakeClock()
+    let releaseStream!: (value: unknown) => void
+    const streamResult = new Promise<unknown>((resolve) => {
+      releaseStream = resolve
+    })
+    const calls: string[] = []
+    const api = {
+      listLiveStreamStatuses: () => {
+        calls.push('liveStreams.list')
+        return streamResult
+      },
+      listBroadcasts: () => {
+        calls.push('liveBroadcasts.list')
+        return Promise.resolve({ items: [] })
+      },
+    } as unknown as YouTubeLiveApi
+    const monitor = new BroadcastHealthMonitor({
+      api,
+      config: TEST_BROADCAST_CONFIG,
+      onSignal: () => {},
+      resources: () => ({
+        streamId: 'synthetic-stream-in-flight',
+        broadcastId: 'synthetic-broadcast-in-flight',
+      }),
+      clock,
+    })
+
+    monitor.start()
+    await clock.advance(20_000)
+    expect(calls).toEqual(['liveStreams.list'])
+    expect(clock.pendingTimerCount).toBe(0)
+
+    monitor.stop()
+    monitor.stop()
+    releaseStream({ items: [{ status: statusOf() }] })
+    await flushMicrotasks()
+    await clock.advance(120_000)
+
+    expect(monitor.running).toBe(false)
+    expect(calls).toEqual(['liveStreams.list'])
+    expect(clock.pendingTimerCount).toBe(0)
+  })
+
+  it('does not let an old in-flight run add a timer after an explicit restart', async () => {
+    const clock = new FakeClock()
+    let releaseStream!: (value: unknown) => void
+    const streamResult = new Promise<unknown>((resolve) => {
+      releaseStream = resolve
+    })
+    const api = {
+      listLiveStreamStatuses: () => streamResult,
+      listBroadcasts: () => Promise.resolve({ items: [] }),
+    } as unknown as YouTubeLiveApi
+    const monitor = new BroadcastHealthMonitor({
+      api,
+      config: TEST_BROADCAST_CONFIG,
+      onSignal: () => {},
+      resources: () => ({ streamId: 'synthetic-stream-old-run', broadcastId: null }),
+      clock,
+    })
+
+    monitor.start()
+    await clock.advance(20_000)
+    monitor.stop()
+    monitor.start()
+    expect(clock.pendingTimerCount).toBe(1)
+
+    releaseStream({ items: [{ status: statusOf() }] })
+    await flushMicrotasks()
+    expect(clock.pendingTimerCount).toBe(1)
+
+    monitor.stop()
     expect(clock.pendingTimerCount).toBe(0)
   })
 })

@@ -372,6 +372,7 @@ const needsGrant = chatConfig.enabled || supervisorConfig.integrations.broadcast
 let tokens: TokenManager | null = null
 let broadcastPort: BroadcastPort | null = null
 let broadcastLifecycle: BroadcastLifecycle | null = null
+let broadcastHealthMonitor: BroadcastHealthMonitor | null = null
 /** Set when either YouTube integration is on; `/health` reads their combined spend. */
 let quotaTracker: QuotaTracker | null = null
 
@@ -476,7 +477,7 @@ if (needsGrant) {
     broadcastLifecycle = lifecycle
 
     let binding: BroadcastBinding | null = null
-    new BroadcastHealthMonitor({
+    broadcastHealthMonitor = new BroadcastHealthMonitor({
       api,
       config: broadcastConfig,
       clock: systemClock,
@@ -491,7 +492,8 @@ if (needsGrant) {
       onSignal: (signal) => {
         supervisor.report(signal)
       },
-    }).start()
+    })
+    broadcastHealthMonitor.start()
 
     broadcastPort = {
       ensureBound: async () => {
@@ -696,6 +698,18 @@ const supervisor: Supervisor = new Supervisor({
       return Promise.resolve()
     },
     obsConnectionAttempts: () => obsClient?.reconnectAttempts ?? 0,
+  },
+  onHaltOutwardWork: () => {
+    // T48: these loops own their own timers/transports rather than supervisor
+    // restart slots. Cancel them synchronously on entry so even a blocked
+    // safe-stop alert cannot spend more YouTube quota. The HTTP server, engine
+    // and store deliberately remain alive for inspection and human recovery.
+    broadcastHealthMonitor?.stop()
+    void chatSource?.stop().catch((error: unknown) => {
+      stdoutLogger.error('youtube chat stop failed during safe stop', {
+        error: error instanceof Error ? error.message : String(error),
+      })
+    })
   },
   onSafeStop: async () => {
     // Stop pushing to YouTube. The world keeps its state; leaving

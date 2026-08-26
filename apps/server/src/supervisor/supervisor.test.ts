@@ -7,6 +7,9 @@ import { testChatConfig } from '../testing/chat-test-support.js'
 import { FakeClock, flushMicrotasks } from '../testing/fake-clock.js'
 import { buildChatHealthSignals } from '../youtube/chat/health.js'
 import { ChatSourceState } from '../youtube/chat/state.js'
+import type { YouTubeLiveApi } from '../youtube/broadcast/api.js'
+import { BroadcastHealthMonitor } from '../youtube/broadcast/health.js'
+import { TEST_BROADCAST_CONFIG } from '../youtube/broadcast/test-support.js'
 import { DELIVERED, type AlertSink } from './alerts.js'
 import { DeadManMonitor } from './deadman.js'
 import { AdminModerationEndpoint } from './moderation-report.js'
@@ -713,6 +716,105 @@ describe('supervisor state machine', () => {
   })
 
   describe('safe_stopped (spec §9.1, §9.2, §12.3)', () => {
+    it('halts process-owned outward loops once before a blocked safe-stop alert', async () => {
+      const order: string[] = []
+      const apiCalls: string[] = []
+      let chatStops = 0
+      let releaseStream!: (value: unknown) => void
+      const streamResult = new Promise<unknown>((resolve) => {
+        releaseStream = resolve
+      })
+      let releaseAlert = (): void => {}
+      const alerting = new Promise<void>((resolve) => {
+        releaseAlert = resolve
+      })
+      const alerts: AlertSink = {
+        name: 'blocking-safe-stop',
+        deliver: async (alert) => {
+          if (alert.kind !== 'supervisor.safe_stopped') return DELIVERED
+          order.push('safe-stop-alert-began')
+          await alerting
+          return DELIVERED
+        },
+      }
+      const loops: { monitor?: BroadcastHealthMonitor } = {}
+      const harness = createSupervisorHarness({
+        preflight: passingPreflight(),
+        alerts,
+        onHaltOutwardWork: () => {
+          order.push('youtube-loops-stopped')
+          loops.monitor?.stop()
+          chatStops += 1
+        },
+      })
+      const api = {
+        listLiveStreamStatuses: () => {
+          apiCalls.push('liveStreams.list')
+          return streamResult
+        },
+        listBroadcasts: () => {
+          apiCalls.push('liveBroadcasts.list')
+          return Promise.resolve({ items: [] })
+        },
+      } as unknown as YouTubeLiveApi
+      const monitor = new BroadcastHealthMonitor({
+        api,
+        config: TEST_BROADCAST_CONFIG,
+        onSignal: harness.supervisor.report,
+        resources: () => ({
+          streamId: 'synthetic-safe-stop-stream',
+          broadcastId: 'synthetic-safe-stop-broadcast',
+        }),
+        clock: harness.clock,
+      })
+      loops.monitor = monitor
+      await goLive(harness)
+      monitor.start()
+      await harness.clock.advance(TEST_BROADCAST_CONFIG.healthPollIntervalMs)
+      expect(apiCalls).toEqual(['liveStreams.list'])
+
+      const stopping = harness.supervisor.requestSafeStop({
+        kind: 'rights_or_policy',
+        at: harness.clock.nowUtcIso(),
+        reason: 'synthetic-quota-stop',
+        detail: {},
+      })
+      await flushMicrotasks()
+
+      expect(harness.supervisor.state).toBe('safe_stopped')
+      expect(order).toEqual(['youtube-loops-stopped', 'safe-stop-alert-began'])
+      expect(chatStops).toBe(1)
+
+      releaseStream({
+        items: [
+          {
+            status: {
+              streamStatus: 'active',
+              healthStatus: 'good',
+              lastUpdateTimeSeconds: 1_767_225_600,
+              configurationIssues: [],
+            },
+          },
+        ],
+      })
+      await flushMicrotasks()
+      await harness.clock.advance(TEST_BROADCAST_CONFIG.healthPollIntervalMs * 4)
+      expect(apiCalls).toEqual(['liveStreams.list'])
+      expect(harness.clock.pendingTimerCount).toBe(0)
+
+      await harness.supervisor.requestSafeStop({
+        kind: 'kill_switch',
+        at: harness.clock.nowUtcIso(),
+        reason: 'repeated-stop',
+        detail: {},
+      })
+      expect(order.filter((item) => item === 'youtube-loops-stopped')).toHaveLength(1)
+      expect(chatStops).toBe(1)
+
+      releaseAlert()
+      await stopping
+    })
+
     it('stops on a rights or policy request from the broadcast lifecycle', async () => {
       let stopped = 0
       const harness = createSupervisorHarness({
