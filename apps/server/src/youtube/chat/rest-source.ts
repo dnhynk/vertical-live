@@ -100,6 +100,9 @@ export class RestChatSource {
       try {
         accessToken = await this.#options.auth.getAccessToken()
       } catch (error) {
+        if (this.#cancelled) {
+          return { outcome: 'cancelled', reason: 'stop_requested' }
+        }
         if (error instanceof AuthRevokedError) {
           state.recordStop('auth_revoked')
           return { outcome: 'stopped', reason: 'auth_revoked' }
@@ -110,6 +113,9 @@ export class RestChatSource {
         )
         await this.#backoff()
         continue
+      }
+      if (this.#cancelled) {
+        return { outcome: 'cancelled', reason: 'stop_requested' }
       }
 
       const pageToken = this.#options.sink.pageToken
@@ -124,6 +130,8 @@ export class RestChatSource {
   /** One request. Returns a run result when the loop must end, else `null`. */
   async #poll(accessToken: string, pageToken: string | null): Promise<ChatRunResult | null> {
     const { config, state } = this.#options
+    if (this.#cancelled) return null
+
     const url = new URL(config.rest.baseUrl)
     url.searchParams.set('liveChatId', this.#options.liveChatId)
     // `id,snippet` only — the REST path never asks for `authorDetails` either
@@ -148,11 +156,14 @@ export class RestChatSource {
         headers: { authorization: `Bearer ${accessToken}`, accept: 'application/json' },
         signal: abort.signal,
       })
+      if (this.#cancelled) return null
       status = response.status
       retryAfter = response.headers.get('retry-after') ?? undefined
       body = await response.json().catch(() => undefined)
+      if (this.#cancelled) return null
     } catch (error) {
-      const code = this.#cancelled ? 'ECONNRESET' : errorCode(error)
+      if (this.#cancelled) return null
+      const code = errorCode(error)
       state.recordFailure(
         classifyYouTubeApiError({ errorCode: code }),
         config.reconnect.maxAttempts,
@@ -271,8 +282,10 @@ export class RestChatSource {
       this.#refreshedForAuth = true
       try {
         await this.#options.auth.forceRefresh()
+        if (this.#cancelled) return null
         return null
       } catch (error) {
+        if (this.#cancelled) return null
         const reason = error instanceof AuthRevokedError ? 'auth_revoked' : stopReason
         state.recordStop(reason)
         return { outcome: 'stopped', reason }
