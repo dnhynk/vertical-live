@@ -47,12 +47,12 @@ Make the rolling archive sweep inspect the repository-owned archive roots from e
 
 | # | 기준 | 상태(met/unmet/unverifiable) | 근거(테스트 파일·명령·출력) |
 |---|---|---|---|
-| 1 | 두 지원 invocation이 같은 repository archive roots를 스캔한다. | pending | 구현 후 기록 |
-| 2 | injected cwd와 deletion/root safeguards를 보존한다. | pending | 구현 후 기록 |
-| 3 | logon + daily calendar hourly XML이 미래 실행을 만든다. | pending | 구현 후 기록 |
-| 4 | apply/interactive ownership/working directory 안전을 보존한다. | pending | 구현 후 기록 |
-| 5 | host 검증 명령이 successful last result와 future next run을 모두 검사한다. | pending | 구현 후 기록 |
-| 6 | install, rebase, five gates, latest-head CI가 녹색이다. | pending | 구현 후 기록 |
+| 1 | 두 지원 invocation이 같은 repository archive roots를 스캔한다. | met | `cli.test.ts`가 repository root와 `apps/server` cwd를 고정한다. 빌드 뒤 직접 Node와 npm workspace dry-run 모두 동일한 checkout의 `data/archive/recordings`, `data/diagnostics/screenshots`, `data/ops/logs`를 출력했고 삭제 0건이었다. |
+| 2 | injected cwd와 deletion/root safeguards를 보존한다. | met | `cli.test.ts`의 isolated `/isolated/repository` regression과 기존 `sweep.test.ts`의 root reparse/canonical containment regressions가 full suite에서 통과했다. |
+| 3 | logon + daily calendar hourly XML이 미래 실행을 만든다. | met | `windows-registration.test.ts`가 logon delay, registration-time future boundary, `ScheduleByDay/DaysInterval=1`, configured interval, `Duration=P1D`를 검증한다. Windows `-WhatIf` integration도 future boundary와 custom `PT2H` 치환을 통과했다. |
+| 4 | apply/interactive ownership/working directory 안전을 보존한다. | met | `windows-registration.test.ts`가 `InteractiveToken`, `LeastPrivilege`, explicit `--apply`, repository `WorkingDirectory`, `IgnoreNew`, `StartWhenAvailable`을 고정한다. CLI dry-run/apply/refusal 기존 regressions도 통과했다. |
+| 5 | host 검증 명령이 successful last result와 future next run을 모두 검사한다. | met | `docs/ops/windows-host.md` §2의 read-only `Get-ScheduledTaskInfo` command는 `LastTaskResult -ne 0`, null `NextRunTime`, `NextRunTime -le now`를 각각 throw한다. Worker는 host task를 조회·등록·변경하지 않았다. |
+| 6 | install, rebase, five gates, latest-head CI가 녹색이다. | pending | `npm ci`, final fetch/rebase 및 다섯 local gate는 통과. PR latest-head CI 대기. |
 
 ### Gates (executed)
 
@@ -60,8 +60,22 @@ Make the rolling archive sweep inspect the repository-owned archive roots from e
 npm ci
   PASS — added 431 packages and audited 437; npm reported 10 existing audit findings
 git fetch origin && git rebase origin/main
-  PASS — rebased before implementation
-나머지 게이트와 CI는 구현 후 기록
+  PASS — implementation 전 rebase; gate 직전 final check도 current branch up to date
+npm run format:check
+  PASS — all matched files use Prettier style
+npm run lint
+  PASS — ESLint + no-legacy-imports + reviewed install scripts
+npm run typecheck
+  PASS — tsc --build tsconfig.json
+npm run test
+  PASS — 154 files; 2,238 passed, 1 skipped (2,239 total)
+npm run build
+  PASS — all workspaces; contract schema and data map current
+node apps/server/dist/bin/archive.js --json
+npm run archive -w @vl/server -- --json
+  PASS — both dry runs resolved the same repository data roots; applied=false, deleted=[]
+PR latest-head CI
+  pending
 ```
 
 ## Not done / out of scope
