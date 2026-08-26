@@ -1,7 +1,7 @@
 # TASK-T50-live-first-public-pilot
 
 - Task: T50 D-25 live-first 72시간 public observational pilot (`docs/tasks/TASK_SPECS.md` §T50)
-- Branch: `dnhynk/t50-live-first-public-pilot` · PR: pending
+- Branch: `dnhynk/t50-live-first-public-pilot` · PR: #63
 - Orca: task `task_f941e0758e93` · dispatch `ctx_ac1eb99cea48`
 - Spec sections read: §0, §11, §12, §14, §15
 - BOARD decisions/assumptions relied on: D-25, D-21, D-24, A-15
@@ -47,7 +47,7 @@ D-25의 사용자 위험 수용 결정을 정본과 운영 경로에 정직하�
 | 3 | Start `-Public` validation/privacy | met | `ops/windows/Start-VerticalLive.ps1`: `-Broadcast` 요구, `-Unlisted` 배타, side effect 전 거부, public branch의 단일 privacy env assignment. `public-windows.test.ts` Windows 실행 포함 |
 | 4 | Register exact argument propagation | met | Windows `-WhatIf` 실행이 public `-Broadcast -Public` 정확히 1회, unlisted `-Unlisted`, default 빈 start args를 증명; 잘못된 두 조합은 `schtasks.exe` 전 거부 |
 | 5 | 테스트·범위 불변조건 | met | focused 3 files / 34 passed; full 155 files / 2,246 passed / 1 skipped. `packages/contract`, dependency, channel audience config, secret 변경 0; `engine/config.test.ts`가 shipped simulator disabled 고정 |
-| 6 | fetch/rebase·npm ci·게이트 5개·CI | partial (CI pending) | `origin/main` rebase 성공, `npm ci` 성공, 게이트 5개 성공. PR latest-head CI는 PR 생성 뒤 확인 |
+| 6 | fetch/rebase·npm ci·게이트 5개·CI | met | `origin/main` rebase·`npm ci`·로컬 5 gates 성공. code/result head `083d293` CI run `32954681749` 성공; 이 티켓 결과만 갱신한 최종 head도 worker_done 전 PR check green 확인 |
 
 ### Gates (executed)
 
@@ -64,7 +64,8 @@ Focused:
 npx vitest run apps/server/src/ops/public-windows.test.ts apps/server/src/youtube/broadcast/api.test.ts apps/server/src/engine/config.test.ts
 -> pass (3 files; 34 passed; Windows PowerShell execution paths included)
 
-CI -> pending PR creation
+GitHub Actions CI run 32954681749 (head 083d293) -> pass (2m11s; five gates + soak:ci)
+Final result-only ticket head -> worker_done 전 PR #63 latest-head check green 재확인
 ```
 
 ## Not done / out of scope
