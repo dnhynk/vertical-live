@@ -1,9 +1,16 @@
-# Gate 2 실험 절차 — 방송 길이·모바일 calibration·실계정 검증 (T16)
+# Gate 2 실험 절차 — D-25로 launch 순서에서 superseded
 
 > 근거: [`docs/PROJECT_SPEC.md`](../PROJECT_SPEC.md) §15 Gate 2, §9.3(개별 방송 길이 실험), §7.5(반응시간),
 > §11(신뢰성·출시 전 기술 합격선 마지막 3문단), §14.2(우선 실험 2·6).
 > 이 문서는 **스펙이 요구한 실험의 실행 순서와 기록 양식**만 정한다. 합격 숫자를 만들지 않는다.
-> 최종 갱신: 2026-08-24(T45, D-21 rolling activation 반영).
+> 최종 갱신: 2026-08-26(T50, BOARD D-25).
+
+> **현재 상태 — 미통과·미실행.** D-25는 이 문서의 baseline → mobile calibration → threshold lock → 별도
+> validation → synthetic/realtime soak → Gate 3 순서를 launch 전에 수행하지 않기로 한 위험 수용 결정이다. 아래
+> 절차는 과거 계획과 미검증 위험을 보존하지만 체크하지 않는다. 현재 운영 경로는
+> [`public-observational-pilot.md`](public-observational-pilot.md)의 simulator-off, 11시간 rolling, 최소 72 real hours
+> public 관측 하나이며 Gate 2 성공을 주장하지 않는다. pilot mandatory-stop 분류는 그 문서 §4의 정확한 다섯 범주를
+> 따르며, 복구된 transient와 `safe_stopped` 상태 자체를 새 범주로 늘리지 않는다.
 
 ## 0. 이 문서가 다루지 않는 것
 
@@ -129,7 +136,7 @@ broadcast ID의 영속성이 아니다.
 §2.2의 (6) Gate 3 public 파일럿에서 처음 관측된다 — 잠그는 값에 붙는 `KR 측정, JP 미검증`
 라벨(`D-23`)과 같은 성격의 미검증 항목이다.
 
-### 2.2 순서 — 이 순서를 바꾸지 않는다 (§11)
+### 2.2 과거 순서 — 실행되지 않았고 D-25로 superseded (§11)
 
 ```text
 (1) 짧은 host·OBS baseline
@@ -197,7 +204,7 @@ broadcast ID의 영속성이 아니다.
 
 ## 4. 통과 판정과 기록
 
-Gate 2는 다음이 **전부** 채워졌을 때 통과 후보가 된다.
+아래 목록은 **채워지지 않았고 통과 후보로 판정하지 않는다**. D-25 pilot의 관측이 이 체크박스를 소급해서 닫지 않는다.
 
 - [x] 1장: D-21 11시간 rolling 선택, T33 실측, T45 shipped 설정 고정
 - [ ] 2장: baseline → calibration → 합격선 잠금 → 분리된 validation 완료, 값 BOARD 기록·설정 교체
@@ -206,4 +213,5 @@ Gate 2는 다음이 **전부** 채워졌을 때 통과 후보가 된다.
 - [ ] T17: hosting OS·OBS interactive-session·archive 용량 정책 검증
 - [ ] T13: field별 삭제·철회·refresh 자동 test 통과 + API compliance gate 확인(사람)
 
-통과해도 그것은 **기술 검증**이다. 24시간 공개 운영은 Gate 3, 수익성은 Gate 5다(§15).
+현재 launch 판단은 이 목록이 아니라 D-25에 따른다. 그래도 skipped calibration·host/dead-man·compliance 증빙은
+`unverified`로 남고, 수익성은 여전히 Gate 5 밖에서 주장하지 않는다(§15).

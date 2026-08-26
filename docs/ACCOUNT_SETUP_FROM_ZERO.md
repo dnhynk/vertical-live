@@ -173,6 +173,11 @@ These are account-side milestones. They are **not** the product gates — those 
 
 ### Milestone 2: Public Launch Ready
 
+> **D-25 override (2026-08-26)**: this milestone's manual soak, host/dead-man, audience/legal and native-language
+> evidence is not complete and must not be marked passed. The user accepted those unverified risks for launch and
+> selected `docs/ops/public-observational-pilot.md`: explicit `-Broadcast -Public`, simulator disabled, 11-hour
+> rolling, at least 72 real hours, factual records and immediate stop conditions.
+
 - Branding completed with original assets (`ASSETS.md`)
 - Audience classification reviewed with evidence (§12.2)
 - Technical soak passed: the spec's bar is a 72-hour unattended soak plus one 24-hour public run, with the

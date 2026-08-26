@@ -1,5 +1,8 @@
 # 로컬 시뮬레이터·replay·지연 리포트 (T11)
 
+> **D-25(2026-08-26)**: simulator는 public observational pilot에서 반드시 끈다. 이 문서의 synthetic 결과는
+> 회귀 근거이지 실제 72시간이나 Gate 2/3 통과 증빙이 아니다.
+
 이 문서는 `tools/simulator`(`@vl/simulator`)를 **운영자·개발자가 어떻게 쓰는가**를 정한다. 근거는 스펙 §7.3(8)(구간별 계측), §7.5(반응시간), §9.2(degraded 창), §11(유료 무결성·모더레이션·상태 복구·엔진 지연), §15 Gate 1("공개 방송과 같은 이벤트 계약을 쓰는 local simulator"), 명세 `docs/tasks/TASK_SPECS.md` §T11.
 
 시뮬레이터는 **공개 방송과 같은 계약**만 쓴다. 시나리오는 `IngestEnvelope` 시퀀스가 되어 `POST /ingest/simulator`로 들어가고, 그 뒤는 실제 단일 writer·outbox·WS 경로다. 서버 내부 함수를 직접 호출하는 우회 경로는 없다.

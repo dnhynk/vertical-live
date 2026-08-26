@@ -191,6 +191,10 @@ No account work. The world runs locally against the same event contract as the p
 
 ### Gate 2 — technical validation on the real account
 
+**Superseded for launch by D-25 (2026-08-26); not passed.** The calibration, threshold-lock, host/dead-man and
+separate validation evidence below remains unverified. The current launch path is the minimum-72-real-hour public
+observational pilot in `docs/ops/public-observational-pilot.md`.
+
 Private/unlisted streams only. OAuth reconnect, `streamList` collection and REST fallback, broadcast lifecycle and
 quota, the OBS host, the data deletion/revocation tests, the broadcast-length experiment and the mobile end-to-end
 calibration. Procedures: `docs/ops/gate2-experiments.md`.
@@ -200,6 +204,9 @@ on a cloud machine is removed — that prototype is excluded from the production
 `legacy/`.
 
 ### Gate 3 — public pilot
+
+**Superseded for launch by D-25; not passed.** The current pilot uses 11-hour rolling segments for at least 72 real
+hours with simulator disabled and factual records only. The original Gate 3 evidence below remains unverified.
 
 Public, Japanese-language, 24 hours unattended, with the moderation call table in place (§12.3). Note what is **not**
 done here: raw chat is not shown on screen and viewer names are not displayed while the identity gate is closed

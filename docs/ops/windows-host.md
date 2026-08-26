@@ -4,6 +4,11 @@
 
 코드는 `ops/windows/`(스크립트·Task Scheduler XML)와 `apps/server/src/ops/`(정적 서빙·아카이브 스위퍼)에 있다.
 
+> **D-25(2026-08-26)**: 5장의 reboot·lock/sleep·GPU reset·remote session·update 시험과 off-host proof는 public
+> launch 전 필수 gate에서 면제됐다. 실행하지 않은 항목은 아래 역사적 체크리스트에서 `미검증`으로 남고 통과가 아니다.
+> 현재 public 경로는 [`public-observational-pilot.md`](public-observational-pilot.md)와 `-Broadcast -Public`이다. pilot
+> mandatory stop은 연결 문서 §4의 정확한 다섯 범주이며, recovered transient와 `safe_stopped` 자체는 추가 범주가 아니다.
+
 ## 0. 이 문서가 다루지 않는 것
 
 - supervisor 상태기계·건강 신호·kill switch·알림 → `docs/ops/supervisor.md`(T12)
@@ -36,8 +41,11 @@ npm run build
 # 2) 무엇이 등록될지 먼저 본다 — dry run, 아무것도 바꾸지 않는다
 powershell -ExecutionPolicy Bypass -File ops\windows\Register-VerticalLive.ps1 -WhatIf
 
-# 3) 등록 — 방송 호스트는 -WithObs로 등록한다(아래 3장)
-powershell -ExecutionPolicy Bypass -File ops\windows\Register-VerticalLive.ps1 -WithObs
+# 3) 일반 broadcast 등록(기본 privacy=private)
+powershell -ExecutionPolicy Bypass -File ops\windows\Register-VerticalLive.ps1 -Broadcast
+
+# D-25 public pilot만 명시적으로 두 switch를 함께 준다
+powershell -ExecutionPolicy Bypass -File ops\windows\Register-VerticalLive.ps1 -Broadcast -Public
 
 # 4) 해제 (역시 -WhatIf로 먼저 볼 수 있다)
 powershell -ExecutionPolicy Bypass -File ops\windows\Unregister-VerticalLive.ps1
@@ -51,6 +59,10 @@ powershell -ExecutionPolicy Bypass -File ops\windows\Unregister-VerticalLive.ps1
 | `\VerticalLive\vl-archive-sweep` | 로그온 + 5분 지연; 별도 daily calendar trigger가 24시간 동안 1시간마다 반복되고 다음 날 갱신 | `node apps\server\dist\bin\archive.js --apply` (4장) |
 
 옵션: `-RepoRoot`(다른 체크아웃), `-Account DOMAIN\user`(다른 계정 — 그 계정으로 로그온해 있어야 실행된다), `-NodeExe`(PATH에 node가 없을 때), `-ArchiveInterval PT30M`, `-SkipArchiveTask`.
+
+privacy 운영 switch는 셋이다. 인자가 없거나 `-Broadcast`만 주면 shipped `private`, 기존 `-Unlisted`는 unlisted
+broadcast를 함의한다. `-Public`은 반드시 `-Broadcast`와 함께 주고 `-Unlisted`와 함께 줄 수 없다. 등록 XML에는
+exact `-Broadcast -Public`이 남으며 public 분기는 비밀이 아닌 privacy env만 설정한다.
 
 - 정의는 `ops/windows/tasks/*.xml`이고 스크립트는 `{{USER_ID}}`·`{{REPO_ROOT}}`·`{{NODE_EXE}}`·`{{INTERVAL}}`와 archive calendar trigger의 등록 시각 기준 미래 `{{START_BOUNDARY}}`를 치환한다. 등록은 `schtasks /Create /XML`로 한다([Microsoft Learn, schtasks create](https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/schtasks-create), 2026-08-17 확인). Archive task는 Microsoft의 [daily trigger XML](https://learn.microsoft.com/en-us/windows/win32/taskschd/daily-trigger-example--xml-)처럼 `CalendarTrigger` + `ScheduleByDay` + `Repetition`을 사용한다(2026-08-26 확인). `DaysInterval=1`이 매일 반복 창을 새로 열고 `Duration=P1D` 동안 `Interval=PT1H`(기본)로 실행하므로 날짜가 바뀌어도 시간 기반 예약이 남는다. Logon trigger는 로그인 직후 sweep만 담당한다.
 - 등록 후 스크립트가 `schtasks /Query /V /FO LIST`를 그대로 출력한다. `Logon Mode: Interactive only`가 1장의 전제가 실제로 적용됐다는 증거다.
@@ -154,7 +166,8 @@ V1 기본은 녹화 없음이다. Gate 2 실험 등으로 로컬 녹화가 필�
 
 ## 5. 호스트 체크리스트 (사용자 실행, 스펙 §11)
 
-§11이 "72시간 soak 전에 시험한다"고 못박은 6가지다. **각 항목은 설정과 확인이 짝이다.** 확인하지 않은 항목은 "확인 필요"로 남긴다.
+아래는 D-25 이전 §11이 "72시간 soak 전에 시험한다"고 정한 6가지다. D-25로 launch 전 실행을 면제했으며,
+**확인하지 않은 항목은 그대로 `미검증`**이다. 실제 public 관측이 이 체크리스트를 소급 통과시키지 않는다.
 
 ### 5.1 재부팅
 

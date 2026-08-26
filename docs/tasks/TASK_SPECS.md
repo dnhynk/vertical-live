@@ -993,3 +993,23 @@
   4. dry run 기본, 명시적 `--apply`, interactive-account ownership, repository working directory, root/link refusal을 회귀 테스트로 보존한다.
   5. 운영 문서의 read-only 검증 명령이 `LastTaskResult = 0`, non-null `NextRunTime`, `NextRunTime > now`를 모두 실패 조건으로 검사한다. worker는 실호스트 task를 등록·변경하거나 live 파일을 삭제하지 않는다.
   6. fetch/rebase + `npm ci` + 게이트 5개 + latest-head CI가 녹색이다.
+
+## T50 — D-25 live-first 72시간 public observational pilot
+
+- slug `t50-live-first-public-pilot` · PR 접두 `feat(ops):` · 의존 T48, T49 · **non-contract**
+- **읽을 것**: 스펙 §0·§11·§12·§14·§15, BOARD D-25, `docs/ops/gate2-experiments.md`, `docs/ops/soak.md`, `docs/ops/runbook-operations.md`, `docs/ops/windows-host.md`, `ops/windows/Start-VerticalLive.ps1`, `ops/windows/Register-VerticalLive.ps1`
+- **사용자 결정(2026-08-26)**: 사전 모바일 calibration·threshold lock·분리 validation·host/reboot/lock/GPU/update 시험·off-host dead-man 증명·일본어 원어민·Made-for-Kids/법률 지정 승인자 증빙을 launch gate에서 면제하고, 실제 방송에서 동작을 확인한다. 이 결정은 기존 Gate 2·Gate 3 통과나 건너뛴 항목의 검증 성공을 뜻하지 않는다.
+- **범위**
+  - `PROJECT_SPEC.md` 정본과 gate2/soak/public/Windows 운영 문서를 D-25에 맞춘다. 기존 Gate 2 → Gate 3 순서는 하나의 risk-accepted public observational pilot(실제 11시간 rolling, 최소 72 real hours)로 supersede하고, simulator를 끈 상태에서 durable한 사실 지표만 기록한다.
+  - 임계값은 잠그지 않고 `provisional`/`not-locked`로 유지한다. 관측 결과를 pass/fail 합격 주장으로 바꾸지 않으며, 건너뛴 calibration·host·dead-man·법률·원어민 항목을 통과로 표시하지 않는다.
+  - mandatory stop은 정확히 다섯 범주로 명시한다: 실제 YouTube/Google API `quotaExceeded`; platform/policy enforcement, warning, strike 또는 imposed feature restriction; 자동 복구 뒤에도 남는 viewer-facing video/renderer/OBS output loss; 자동 복구 뒤의 repeated component/process crash; 새 secret exposure 또는 suspected leakage. `safe_stopped`는 기록하고 outward work가 이미 중단된 durable event지만 여섯 번째 범주가 아니다. 복구된 transient quota/output/crash/safe-stop 사건은 factual journal과 duration/gap 계산에 남기되 mandatory termination으로 조용히 승격하지 않는다. 기존 채널 audience 설정은 변경하지 않고 권리·법률·원어민 승인을 만들거나 추정하지 않는다.
+  - `Start-VerticalLive.ps1`과 `Register-VerticalLive.ps1`에 명시적 `-Public` switch를 추가한다. `-Public`은 `-Broadcast`와 함께만 허용하고 `-Unlisted`와 상호 배타적이며, public 분기는 비밀이 아닌 `VL_YOUTUBE_PRIVACY_STATUS=public`만 설정한다. 인자 없는 기본은 `private`, 기존 `-Unlisted`의 broadcast 함의와 전달 동작은 그대로다.
+  - PowerShell 실행/정적 회귀 테스트와 broadcast config 테스트로 public 유효성 검사, private 기본값, public env override, registration의 exact `-Broadcast -Public` 전달, 기존 `-Unlisted` 전달을 고정한다.
+  - 실제 채널 audience 설정, production secret, Orca runtime, `packages/contract`, dependency는 바꾸지 않는다. 실제 72시간 public 실행은 이 PR에서 수행하거나 통과 처리하지 않고 사용자 운영 단계로 남긴다.
+- **합격 기준**
+  1. `PROJECT_SPEC.md` §0·§11·§12·§14·§15가 D-25를 결정으로 명시하고, Gate 2/3을 통과했다고 쓰지 않은 채 최소 72 real hours의 11시간 rolling public observational pilot 하나로 supersede한다.
+  2. 관련 gate2/soak/public/Windows 문서가 simulator off, durable factual metrics, threshold `not-locked`, 생략 위험, 위의 정확한 다섯 stop-condition 범주와 `safe_stopped` 비범주 구분, 실제 실행 전후 절차를 일관되게 설명한다.
+  3. `Start-VerticalLive.ps1 -Broadcast -Public`만 public privacy를 설정한다. `-Public` 단독과 `-Public -Unlisted`는 side effect 전에 거부되고, `-Unlisted`는 기존처럼 broadcast를 함의하며 기본 privacy는 `private`다.
+  4. `Register-VerticalLive.ps1 -Broadcast -Public -WhatIf`의 autostart XML은 exact `-Broadcast -Public`을 한 번 전달한다. `-Public` 단독/`-Public -Unlisted`는 거부하고, 기본과 `-Unlisted` argument propagation은 회귀하지 않는다.
+  5. PowerShell·config 테스트가 성공/거부 경로를 고정하고, secret·audience 설정·contract·dependency·Orca runtime 변경이 없다.
+  6. fetch/rebase + `npm ci` + 게이트 5개 + latest-head CI가 녹색이며 PR 본문은 실제 72시간 운전과 Gate 2 성공을 주장하지 않는다.

@@ -10,6 +10,11 @@ Windows 호스트 운영 스크립트(T17). 절차·전제·체크리스트는 *
 | `VerticalLive.Common.ps1` | 위 셋이 dot-source하는 공용 함수(로그·설정 조회·포트 소유자 확인·준비 probe·schtasks 호출) | — |
 | `tasks/*.xml` | Task Scheduler 정의 템플릿(`{{USER_ID}}`·`{{REPO_ROOT}}`·`{{NODE_EXE}}`·`{{INTERVAL}}` 치환) | — |
 
+운영 privacy 기본은 `private`다. 기존 `-Unlisted`는 broadcast를 함의한다. D-25 public pilot는
+`Register-VerticalLive.ps1 -Broadcast -Public` / `Start-VerticalLive.ps1 -Broadcast -Public`로만 열며,
+`-Public` 단독과 `-Unlisted -Public`은 side effect 전에 거부된다. public switch는 privacy만 설정하고 secret이나
+YouTube channel audience 설정은 건드리지 않는다.
+
 - Windows PowerShell 5.1 기준으로 쓴다(파이프라인 체인 연산자·삼항·null 병합 사용 금지).
 - **설정을 스스로 파싱하지 않는다.** 포트·URL·스위치는 `node apps/server/dist/bin/ops-config.js`(= `npm run ops:config -w @vl/server`)가 서버의 로더로 해석해 준 JSON에서 온다. `VL_*` env override가 서버와 같은 뜻을 갖는 이유이고, 규칙이 두 곳에 생기지 않는 이유다(리뷰 round 1 M1).
 - **준비 판정은 프로토콜 응답이다.** 렌더러는 200, 서버는 `/health` 건강 문서, OBS는 4455를 `obs64.exe`가 잡고 있는 것. 열린 포트만으로는 준비로 치지 않고, 우리 저장소가 아닌 프로세스가 잡은 포트는 채택하지 않는다(리뷰 round 1 M2).

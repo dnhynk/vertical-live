@@ -48,12 +48,23 @@ param(
     [switch] $Broadcast,
     # Registers the logon task with -Unlisted (BOARD D-24, Gate 2 calibration).
     [switch] $Unlisted,
+    # Registers the logon task with the explicit D-25 public opt-in. It must be
+    # paired with -Broadcast and is forwarded separately so the task XML keeps
+    # that operator intent auditable.
+    [switch] $Public,
     [switch] $SkipArchiveTask
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'VerticalLive.Common.ps1')
+
+if ($Public -and $Unlisted) {
+    throw '-Public and -Unlisted are mutually exclusive privacy modes'
+}
+if ($Public -and -not $Broadcast) {
+    throw '-Public requires -Broadcast'
+}
 
 if (-not $RepoRoot) { $RepoRoot = Get-VerticalLiveRepoRoot -ScriptRoot $PSScriptRoot }
 $RepoRoot = (Resolve-Path $RepoRoot).Path
@@ -97,7 +108,8 @@ try {
         # -Broadcast implies -WithObs, so it is passed alone rather than with a
         # redundant second switch the launcher would have to reconcile.
         $startArgs =
-            if ($Unlisted) { ' -Unlisted' }
+            if ($Public) { ' -Broadcast -Public' }
+            elseif ($Unlisted) { ' -Unlisted' }
             elseif ($Broadcast) { ' -Broadcast' }
             elseif ($WithObs) { ' -WithObs' }
             else { '' }
@@ -132,4 +144,8 @@ try {
 }
 
 Write-VLLog -Message 'done. Unregister with ops\windows\Unregister-VerticalLive.ps1'
-Write-VLLog -Message 'the host still needs the docs/ops/windows-host.md checklist (automatic logon, sleep, updates) before it runs unattended' -Level 'warn'
+if ($Public) {
+    Write-VLLog -Message 'D-25 public pilot: skipped host evidence remains unverified; follow docs/ops/public-observational-pilot.md and its immediate stop conditions' -Level 'warn'
+} else {
+    Write-VLLog -Message 'the host checklist remains unverified; see docs/ops/windows-host.md before claiming unattended validation' -Level 'warn'
+}

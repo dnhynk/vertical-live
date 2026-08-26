@@ -197,10 +197,10 @@ export function loadBroadcastConfig(options: LoadAuthConfigOptions = {}): Broadc
     // `VL_YOUTUBE_PRIVACY_STATUS` overrides it for one host, the way every other
     // broadcast switch works. The default stays `private` — spec §9.1 keeps first
     // publication with the operator (BOARD A-18), and a default that exposes a
-    // broadcast is a default nobody chose. Gate 2's calibration is what needs
-    // `unlisted`: a private broadcast cannot be opened on a phone, and unlisted
-    // is visible to a link without entering search, recommendations or the
-    // vertical feed (BOARD D-24).
+    // broadcast is a default nobody chose. D-24's retained calibration path
+    // needs `unlisted`; D-25's public pilot uses the same validated host-only
+    // override with `public`, set by an explicit `-Broadcast -Public`. Neither
+    // changes this shipped default or any channel audience setting.
     privacyStatus: readEnum(
       env['VL_YOUTUBE_PRIVACY_STATUS'] ?? section['privacyStatus'],
       'youtube.broadcast.privacyStatus',

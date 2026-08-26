@@ -7,6 +7,11 @@
 
 이 문서는 사람이 자리를 비운 동안 **worker가 PR을 올리고, 리뷰어가 검토하고, 코디네이터가 머지한 뒤 다음 작업을 자동으로 지시하는 절차**와 각 역할의 **계약**을 정한다. `CLAUDE.md`와 `~/.claude/CLAUDE.md`의 규칙을 완화하지 않는다. 충돌하면 그쪽이 이긴다.
 
+> **D-25/T50 운영 경계(2026-08-26)**: repository worker는 `-Public` 코드·테스트·문서와 PR까지만 다룬다. 실제
+> scheduled task 등록, broadcast 시작, channel audience/secret 조작과 72시간 관측은
+> [`../ops/public-observational-pilot.md`](../ops/public-observational-pilot.md)에 따라 사용자/코디네이터가 수행한다.
+> worker는 T50을 이유로 Orca Run·task·automation runtime을 만들거나 바꾸지 않는다(주입된 lifecycle 보고는 예외).
+
 ---
 
 ## 0. 결정된 전제 (2026-08-16, 사용자 확정)

@@ -6,6 +6,12 @@
 > 운영자가 실행하는 순서**만 정한다.
 > 최종 갱신: 2026-08-18.
 
+> **D-25 public 경로(2026-08-26)**: 사전 Gate 2/3 manual evidence는 미통과 상태로 supersede됐다. 실제 public
+> 시작·관측·즉시 중단 조건은 [`public-observational-pilot.md`](public-observational-pilot.md)가 정한다. 이 런북의
+> health·kill·복구 절차는 그대로 사용하지만 skipped calibration/threshold/host/dead-man/native/legal 항목을
+> 통과로 표시하지 않는다. pilot mandatory stop은 연결 문서 §4의 정확한 다섯 범주이고, recovered transient와
+> `safe_stopped` 상태 자체는 별도 범주가 아니라 factual journal 및 duration/gap 기록 대상이다.
+
 ## 0. 이 문서가 다루지 않는 것
 
 - Windows 자동시작·OBS 프로세스 기동·rolling archive 순환 → **T17**(`ops/windows/`, `docs/ops/windows-host.md`)
@@ -52,6 +58,8 @@
   **셋 다 켜야 한다**: `chat_transport`는 required family라 채팅을 끈 채로 방송하면 `chat-source`가 재시작 예산을
   소진하고 스택이 `safe_stopped`로 떨어진다(2026-08-23 실측, 방송 시작 30초 뒤).
 - `simulator.enabled`는 **공개 방송에서 끈다.** 켜져 있어야만 `POST /ingest/simulator`가 존재한다(§T11).
+- D-25 public pilot는 `Start-VerticalLive.ps1 -Broadcast -Public` 또는 같은 인자를 등록한 scheduled task만 쓴다.
+  `-Public`은 `-Broadcast`를 요구하고 `-Unlisted`와 함께 쓸 수 없으며 privacy 외 비밀/채널 audience 설정을 건드리지 않는다.
 
 ### 1.3 기동
 
