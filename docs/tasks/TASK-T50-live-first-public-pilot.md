@@ -43,7 +43,7 @@ D-25의 사용자 위험 수용 결정을 정본과 운영 경로에 정직하�
 | # | 기준 | 상태(met/unmet/unverifiable) | 근거(테스트 파일·명령·출력) |
 |---|---|---|---|
 | 1 | 정본의 D-25·Gate 경로 정합화 | met | `docs/PROJECT_SPEC.md` §0·§11·§12·§14·§15: Gate 2/3은 미통과·superseded, 현재 경로는 11시간 rolling·simulator-off·최소 72 real hours 관측 |
-| 2 | 관련 운영 문서 정합화 | met | `docs/ops/public-observational-pilot.md` 신규, gate2/soak/runbook/simulator/supervisor/Windows·ROADMAP·계정/수익화 문서에 skipped 위험·durable facts·5개 stop 범주 반영 |
+| 2 | 관련 운영 문서 정합화 | met | R-T50-1 fix `28d9441`: 실제 API `quotaExceeded`, platform/policy enforcement, 자동 복구 뒤에도 남는 viewer-facing output loss, 자동 복구 뒤 repeated crash, 새 secret exposure/suspected leakage의 정확한 5개 범주. `safe_stopped` 비범주와 recovered transient journal/gap 처리를 정본·연결 runbook에 반영 |
 | 3 | Start `-Public` validation/privacy | met | `ops/windows/Start-VerticalLive.ps1`: `-Broadcast` 요구, `-Unlisted` 배타, side effect 전 거부, public branch의 단일 privacy env assignment. `public-windows.test.ts` Windows 실행 포함 |
 | 4 | Register exact argument propagation | met | Windows `-WhatIf` 실행이 public `-Broadcast -Public` 정확히 1회, unlisted `-Unlisted`, default 빈 start args를 증명; 잘못된 두 조합은 `schtasks.exe` 전 거부 |
 | 5 | 테스트·범위 불변조건 | met | focused 3 files / 34 passed; full 155 files / 2,246 passed / 1 skipped. `packages/contract`, dependency, channel audience config, secret 변경 0; `engine/config.test.ts`가 shipped simulator disabled 고정 |
@@ -78,7 +78,8 @@ Final result-only ticket head -> worker_done 전 PR #63 latest-head check green 
 
 - PR 머지·호스트 배포 뒤 사용자가 운영 런북대로 public pilot를 시작하고 durable factual record를 최소 72 real hours 수집한다.
 
-## Review round <n>
+## Review round 1 (R-T50-1)
 
 | finding | 처리(고침 SHA / 반박 근거) |
 |---|---|
+| [major] [`public-observational-pilot.md` §4가 모든 quota 관련 오류, 첫 output loss, 모든 `safe_stopped`를 mandatory stop으로 넓힘](https://github.com/dnhynk/vertical-live/pull/63#pullrequestreview-5029091360) | **고침 `28d9441`.** mandatory stop을 실제 API `quotaExceeded`; platform/policy enforcement, warning, strike 또는 imposed feature restriction; 자동 복구 뒤에도 남는 viewer-facing video/renderer/OBS output loss; 자동 복구 뒤 repeated component/process crash; 새 secret exposure 또는 suspected leakage의 정확한 다섯 범주로 좁혔다. `safe_stopped`는 outward work가 이미 멈춘 durable event지만 여섯 번째 범주가 아니며, recovered transient quota/output/crash/safe-stop은 factual journal과 duration/gap 계산에 남는다고 정본 §11·§12·§15, T50, public/gate2/soak/operations/Windows/supervisor/ROADMAP 문서에 일관되게 명시했다. focused Prettier와 `git diff --check`는 통과했고 worker_done 전 전체 게이트와 exact-new-head CI를 다시 실행한다. |
