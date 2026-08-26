@@ -176,6 +176,12 @@ export class BroadcastHealthMonitor {
   readonly #clock: Clock
 
   #running = false
+  /**
+   * Identifies one continuous run. A stopped poll may finish after a later
+   * `start()`; the generation keeps that old completion from scheduling a
+   * second timer into the new run (T48).
+   */
+  #generation = 0
   #timer: TimerHandle | undefined
   /** Monotonic instant of the last `liveBroadcasts.list`; null before the first. */
   #lastReconcileMonotonicMs: number | null = null
@@ -198,7 +204,8 @@ export class BroadcastHealthMonitor {
       return
     }
     this.#running = true
-    this.#scheduleNext()
+    this.#generation += 1
+    this.#scheduleNext(this.#generation)
   }
 
   stop(): void {
@@ -206,6 +213,7 @@ export class BroadcastHealthMonitor {
       return
     }
     this.#running = false
+    this.#generation += 1
     if (this.#timer !== undefined) {
       this.#clock.clearTimeout(this.#timer)
       this.#timer = undefined
@@ -214,18 +222,26 @@ export class BroadcastHealthMonitor {
 
   /** One sample. Never rejects: a failed observation is itself a signal. */
   async poll(): Promise<readonly HealthSignal[]> {
+    return this.#poll(() => true)
+  }
+
+  /** A scheduled poll stops between API requests as soon as its run is halted. */
+  async #poll(allowed: () => boolean): Promise<readonly HealthSignal[]> {
+    if (!allowed()) return []
     const observedAt: ObservedAt = {
       utc: this.#clock.nowUtcIso(),
       monotonicMs: this.#clock.monotonicMs(),
     }
     const { streamId, broadcastId, lifeCycleStage } = this.#resources()
 
-    const sample: BroadcastHealthSample = {
-      streamId,
-      stream: streamId === null ? null : await this.#readStream(streamId),
-      broadcastId,
-      ...(await this.#lifeCycle(broadcastId, lifeCycleStage ?? null, observedAt)),
-    }
+    const stream = streamId === null ? null : await this.#readStream(streamId)
+    // `safe_stopped` may land while liveStreams.list is in flight. Do not turn
+    // that completion into another quota-bearing request or another signal.
+    if (!allowed()) return []
+    const lifeCycle = await this.#lifeCycle(broadcastId, lifeCycleStage ?? null, observedAt)
+    if (!allowed()) return []
+
+    const sample: BroadcastHealthSample = { streamId, stream, broadcastId, ...lifeCycle }
 
     const signals = deriveBroadcastHealthSignals(sample, observedAt)
     for (const item of signals) {
@@ -327,16 +343,20 @@ export class BroadcastHealthMonitor {
     throw error
   }
 
-  #scheduleNext(): void {
-    if (!this.#running) {
+  #scheduleNext(generation: number): void {
+    if (!this.#active(generation)) {
       return
     }
     this.#timer = this.#clock.setTimeout(() => {
       this.#timer = undefined
-      void this.poll().then(() => {
-        this.#scheduleNext()
+      void this.#poll(() => this.#active(generation)).then(() => {
+        this.#scheduleNext(generation)
       })
     }, this.#config.healthPollIntervalMs)
+  }
+
+  #active(generation: number): boolean {
+    return this.#running && this.#generation === generation
   }
 }
 

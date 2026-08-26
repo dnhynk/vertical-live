@@ -116,6 +116,7 @@ export interface HarnessOptions {
   readonly preflight?: PreflightProbes
   readonly startup?: StartupSteps
   readonly onSafeStop?: () => void
+  readonly onHaltOutwardWork?: () => void
   /**
    * Flattens the restart backoff so a test can spend a component's whole budget
    * without advancing the fake clock past the other families' freshness windows.
@@ -221,6 +222,9 @@ export function createSupervisorHarness(options: HarnessOptions = {}): Superviso
     ...(options.preflight === undefined ? {} : { preflight: options.preflight }),
     ...(options.startup === undefined ? {} : { startup: options.startup }),
     ...(options.onSafeStop === undefined ? {} : { onSafeStop: options.onSafeStop }),
+    ...(options.onHaltOutwardWork === undefined
+      ? {}
+      : { onHaltOutwardWork: options.onHaltOutwardWork }),
     ...(options.deadMan === undefined ? {} : { deadMan: options.deadMan }),
     ...(options.screenshots === undefined ? {} : { screenshots: options.screenshots }),
     ...(options.commandMetrics === undefined ? {} : { commandMetrics: options.commandMetrics }),

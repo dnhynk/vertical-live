@@ -115,6 +115,12 @@ export interface SupervisorOptions {
    * It never restarts anything.
    */
   readonly onSafeStop?: (trigger: SafeStopTrigger) => Promise<void> | void
+  /**
+   * Synchronous cancellation boundary for process-owned outward loops that are
+   * not supervisor restart actions. Called once before any safe-stop alert can
+   * block; asynchronous cleanup stays in `onSafeStop` (T48).
+   */
+  readonly onHaltOutwardWork?: () => void
   /** Injected in tests; defaults to the shared exponential backoff jitter. */
   readonly random?: () => number
   /** Schedule the evaluation loop on `start()`. Off in tests (fake clocks). */
@@ -160,6 +166,7 @@ export class Supervisor {
   #interactionEnabled = true
   #timer: TimerHandle | undefined
   #stopped = false
+  #outwardWorkHalted = false
   /** Tail of the alert delivery queue — see `#alert` (review round 2, B1). */
   #alertQueue: Promise<void> = Promise.resolve()
 
@@ -397,6 +404,19 @@ export class Supervisor {
     if (this.#timer !== undefined) {
       this.#clock.clearTimeout(this.#timer)
       this.#timer = undefined
+    }
+    if (!this.#outwardWorkHalted) {
+      this.#outwardWorkHalted = true
+      try {
+        this.#options.onHaltOutwardWork?.()
+      } catch (error) {
+        // One broken loop owner must not keep the other safety boundaries from
+        // taking effect. This hook is cancellation only; cleanup remains best
+        // effort in `onSafeStop`.
+        this.#logger.error('outward work halt failed', {
+          error: error instanceof Error ? error.message : String(error),
+        })
+      }
     }
   }
 
