@@ -6,7 +6,8 @@
 
 > **D-25(2026-08-26)**: 5장의 reboot·lock/sleep·GPU reset·remote session·update 시험과 off-host proof는 public
 > launch 전 필수 gate에서 면제됐다. 실행하지 않은 항목은 아래 역사적 체크리스트에서 `미검증`으로 남고 통과가 아니다.
-> 현재 public 경로는 [`public-observational-pilot.md`](public-observational-pilot.md)와 `-Broadcast -Public`이다.
+> 현재 public 경로는 [`public-observational-pilot.md`](public-observational-pilot.md)와 `-Broadcast -Public`이다. pilot
+> mandatory stop은 연결 문서 §4의 정확한 다섯 범주이며, recovered transient와 `safe_stopped` 자체는 추가 범주가 아니다.
 
 ## 0. 이 문서가 다루지 않는 것
 

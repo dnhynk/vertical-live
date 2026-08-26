@@ -478,9 +478,15 @@ process restart/crash, 영속 quota usage와 API 오류, renderer frame/state re
 명령 수·거부 수·지연 histogram, archive 생성·sweep, platform enforcement와 secret-exposure 사건을 포함한다. secret 값,
 raw chat, 승인되지 않은 개인 파생지표는 기록하지 않는다.
 
-quota 오류, platform enforcement/warning/strike, 송출 또는 화면 output loss, 반복 crash, 새로운 secret leakage가 하나라도
-발생하면 즉시 pilot를 중단하고 사실을 보존한다. 72시간 관측은 장기 `24/7 검증 완료`가 아니며, 임계값이나 사업 모델의
-성공도 증명하지 않는다.
+mandatory stop은 정확히 다섯 범주다: (1) YouTube/Google API의 실제 `quotaExceeded` condition, (2) platform/policy
+enforcement, warning, strike 또는 imposed feature restriction, (3) 자동 복구 뒤에도 남는 viewer-facing
+video/renderer/OBS output loss, (4) 자동 복구 뒤 component/process가 다시 crash하는 repeated crash, (5) 새 secret
+exposure 또는 suspected leakage. 하나라도 발생하면 즉시 pilot를 중단하고 사실을 보존한다.
+
+`safe_stopped`는 durable event이고 outward work가 이미 중단된 상태지만 그 자체가 여섯 번째 mandatory-stop 범주는 아니다.
+복구된 transient quota error/warning/reserve 관측, 짧은 output loss, 단일 crash, safe-stop 사건은 factual journal과 real
+duration/gap 계산에 남기되 위 다섯 범주로 조용히 승격하지 않는다. 72시간 관측은 장기 `24/7 검증 완료`가 아니며,
+임계값이나 사업 모델의 성공도 증명하지 않는다.
 
 ## 12. 안전·권리·정책 요구사항
 
@@ -521,7 +527,8 @@ public 파일럿 전 다음을 함께 검토하고 증빙을 남긴다.
 `무인 방송`은 `무인 모더레이션`을 뜻하지 않는다. allowlist 명령만 상태에 영향을 주고 raw chat은 기본적으로 방송 화면에 노출하지 않아 자동 방어 범위를 좁힌다. 표적 혐오·협박, 개인정보 노출, 성적·자해 위험, 필터 우회 폭증은 사람 호출 대상이다. 화면 노출 필터나 차단 제어가 불건전하면 먼저 이름 표시와 interaction CTA를 끄고, 안전을 보장할 수 없으면 `safe_stopped`로 전환한다.
 
 Gate 0에서 정한 호출 책임자, 최대 응답시간, escalation 채널, 자동 차단 범위와 safe-stop 조건은 public pilot 중에도
-유지한다. D-25가 생략한 것은 사전 증빙이며 quota/platform/output/crash/secret 중단 조건이나 runtime 안전 정지가 아니다.
+유지한다. D-25가 생략한 것은 사전 증빙이며 §11의 다섯 mandatory-stop 범주나 runtime 안전 정지가 아니다. 다만
+`safe_stopped` 상태 자체를 별도 여섯 번째 pilot mandatory-stop 범주로 해석하지 않는다.
 
 ### 12.4 데이터
 
@@ -652,7 +659,12 @@ update 시험, off-host dead-man proof, native-language·Made-for-Kids·권리/�
 - 사전 manual preflight/calibration/threshold/host/dead-man/native/legal evidence gate를 요구하지 않는다. skipped는
   `unverified / risk accepted`이고 pass가 아니다. channel audience 설정, secret, 권리·법률·원어민 승인 상태를 바꾸지 않는다.
 - §11의 durable factual metrics를 segment별 UTC로 기록하고 임계값 pass/fail, Gate 2/3 성공, `24/7 검증 완료`를 주장하지 않는다.
-- quota 오류, platform enforcement/warning/strike, 송출·화면 output loss, 반복 crash, 새 secret leakage에서 즉시 중단한다.
+- mandatory stop은 §11의 정확한 다섯 범주다: 실제 API `quotaExceeded`; platform/policy enforcement, warning, strike 또는
+  imposed feature restriction; 자동 복구 뒤에도 남는 viewer-facing video/renderer/OBS output loss; 자동 복구 뒤의
+  repeated component/process crash; 새 secret exposure 또는 suspected leakage.
+- `safe_stopped`는 기록하고 outward work가 이미 중단된 durable event지만 여섯 번째 범주가 아니다. 복구된 transient
+  quota/output/crash/safe-stop 사건은 factual journal과 real duration/gap 계산에 남기며 mandatory termination으로
+  조용히 승격하지 않는다.
 
 ### Gate 4 — 트래픽·YPP 자격 획득
 

@@ -53,14 +53,18 @@ gitignore 대상이며 production 값을 public 저장소에 커밋하지 않는
 
 ## 4. 즉시 중단 조건
 
-다음 중 하나가 처음 관측되면 72시간을 채우기 위해 계속 돌리지 않는다. 기존 admin kill/supervisor safe-stop 절차로
-outward work를 멈추고, UTC 시각·reason·마지막 정상 사실을 보존한다.
+다음 **다섯 범주** 중 하나가 관측되면 72시간을 채우기 위해 계속 돌리지 않는다. 기존 admin
+kill/supervisor safe-stop 절차로 outward work를 멈추고, UTC 시각·reason·마지막 정상 사실을 보존한다.
 
-1. quota 관련 API 오류 또는 reserve/limit로 정상 API work를 지속할 수 없음
-2. YouTube/Google platform enforcement, warning, strike, 기능 제한 또는 정책 위반 통지
-3. 시청자에게 나가는 영상·렌더러·OBS output loss
-4. 자동 복구 뒤 같은 component가 다시 crash하는 반복 crash, 또는 supervisor `safe_stopped`
-5. 새 secret leakage 의심 또는 확인(로그·화면·저장소·외부 전송 포함)
+1. YouTube/Google API 응답의 실제 condition/reason이 `quotaExceeded`인 경우
+2. YouTube/Google의 platform 또는 policy enforcement, warning, strike, imposed feature restriction
+3. 자동 복구 뒤에도 남아 있는 시청자-facing 영상·renderer·OBS output loss(잠깐 발생했다 복구된 transient는 제외)
+4. 자동 복구 뒤 component/process가 다시 crash하는 repeated crash(한 번 발생했다 복구된 crash는 제외)
+5. 새 secret exposure 또는 suspected leakage(로그·화면·저장소·외부 전송 포함)
+
+일시적인 quota error/warning/reserve 관측은 1번이 아니다. `safe_stopped` 전이는 durable event로 기록하고 outward work는
+이미 중단된 상태지만, 그 상태 자체를 여섯 번째 mandatory-stop 범주로 세지 않는다. 복구된 transient
+quota/output/crash/safe-stop 사건도 factual journal과 real duration/gap 계산에 남기되 위 범주로 조용히 승격하지 않는다.
 
 중단은 pilot 실패 판정이 아니라 **사실 사건과 위험 통제**다. 원인을 고쳐 새 pilot를 시작하더라도 이전 구간을 이어
 붙여 최소 72 real hours라고 쓰지 않는다.

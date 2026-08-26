@@ -9,7 +9,8 @@
 > **현재 launch 경로(2026-08-26, BOARD D-25)**: 아래 Gate 2→Gate 3 순서는 통과하지 않은 채 사전 launch
 > 순서에서 supersede됐다. 현재는 T48·T49·T50 뒤 simulator를 끈 11시간 rolling public 방송을 최소 72 real hours
 > 사실 관측한다. calibration·threshold·host/dead-man·native/legal 증빙은 `unverified / risk accepted`이며,
-> [`ops/public-observational-pilot.md`](ops/public-observational-pilot.md)의 stop conditions를 적용한다.
+> [`ops/public-observational-pilot.md`](ops/public-observational-pilot.md) §4의 정확한 다섯 stop-condition 범주를 적용한다.
+> recovered transient와 `safe_stopped` 자체는 추가 범주가 아니라 factual journal 및 duration/gap 기록 대상이다.
 
 ## 0. 게이트를 읽는 법
 

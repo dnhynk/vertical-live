@@ -9,7 +9,8 @@
 > validation → synthetic/realtime soak → Gate 3 순서를 launch 전에 수행하지 않기로 한 위험 수용 결정이다. 아래
 > 절차는 과거 계획과 미검증 위험을 보존하지만 체크하지 않는다. 현재 운영 경로는
 > [`public-observational-pilot.md`](public-observational-pilot.md)의 simulator-off, 11시간 rolling, 최소 72 real hours
-> public 관측 하나이며 Gate 2 성공을 주장하지 않는다.
+> public 관측 하나이며 Gate 2 성공을 주장하지 않는다. pilot mandatory-stop 분류는 그 문서 §4의 정확한 다섯 범주를
+> 따르며, 복구된 transient와 `safe_stopped` 상태 자체를 새 범주로 늘리지 않는다.
 
 ## 0. 이 문서가 다루지 않는 것
 

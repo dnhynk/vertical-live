@@ -9,7 +9,8 @@
 > **D-25 public 경로(2026-08-26)**: 사전 Gate 2/3 manual evidence는 미통과 상태로 supersede됐다. 실제 public
 > 시작·관측·즉시 중단 조건은 [`public-observational-pilot.md`](public-observational-pilot.md)가 정한다. 이 런북의
 > health·kill·복구 절차는 그대로 사용하지만 skipped calibration/threshold/host/dead-man/native/legal 항목을
-> 통과로 표시하지 않는다.
+> 통과로 표시하지 않는다. pilot mandatory stop은 연결 문서 §4의 정확한 다섯 범주이고, recovered transient와
+> `safe_stopped` 상태 자체는 별도 범주가 아니라 factual journal 및 duration/gap 기록 대상이다.
 
 ## 0. 이 문서가 다루지 않는 것
 

@@ -7,7 +7,8 @@
 > **D-25 구분(2026-08-26)**: 이 synthetic harness는 deterministic CI/진단 자산으로 남지만 launch gate도, 실제
 > public 72시간도 아니다. D-25는 사전 realtime soak·host 시험·threshold lock을 면제했고
 > [`public-observational-pilot.md`](public-observational-pilot.md)의 simulator-off 11시간 rolling public 방송을 최소
-> 72 real hours 관측한다. 아래 `PASS`는 harness invariant 결과일 뿐 Gate 2/3 또는 public pilot 합격이 아니다.
+> 72 real hours 관측한다. 아래 `PASS`는 harness invariant 결과일 뿐 Gate 2/3 또는 public pilot 합격이 아니다. pilot의
+> mandatory stop은 같은 문서 §4의 정확한 다섯 범주이며, recovered transient와 `safe_stopped` 자체를 추가 범주로 세지 않는다.
 
 스펙 §11 무인성 합격선은 **"synthetic/replay 입력을 포함한 72시간 soak 동안 사람 조작
 없이 콘텐츠·상태·송출이 계속되고 사전 승인된 중단·복구 임계값을 넘지 않음"** 입니다.
