@@ -5,6 +5,7 @@
 - Orca: task `task_696a409f6a0a` · dispatch `ctx_7959cc07bfaf`
 - Fix dispatch: task `task_8cf1fe20a43f` · dispatch `ctx_5f2ec6494e97`
 - Fix dispatch 2: task `task_ac34b4a59872` · dispatch `ctx_b1d4af1d4c51`
+- Fix dispatch 3: task `task_d8b6f2937469` · dispatch `ctx_10e652b6cf60`
 - Spec sections read: §9.1, §9.2, §11
 - BOARD decisions/assumptions relied on: D-17, D-21, D-25, A-15
 
@@ -48,7 +49,7 @@
 | 3 | repeated stop 멱등 | met | monitor `stop()` 2회와 supervisor safe-stop request 2회에서 halt/chat stop이 정확히 1회임을 검증한다. |
 | 4 | 정상 live polling·quota accounting 유지 | met | live resource poll에서 `liveStreams.list`와 `liveBroadcasts.list` 사용량이 각각 정확히 1 증가한다. REST quota 회귀와 전체 2,242 tests 통과. |
 | 5 | contract/privacy/secret/BOARD/HANDOFF/dependency/unit cost 무변경 | met | `git diff --name-only origin/main...HEAD`: server lifecycle/test 8개 + T48 문서 2개뿐. `packages/contract`, config, committed lockfile, BOARD, HANDOFF 변경 없음. |
-| 6 | fetch/rebase, npm ci, 게이트 5개, latest-head CI | unverifiable | `origin/main` `8e32ed7` 위로 rebase, `npm ci`, 로컬 게이트 5개 통과. 이 티켓 commit 뒤 PR #61 exact-head CI 대기 중. |
+| 6 | fetch/rebase, npm ci, 게이트 5개, latest-head CI | met | `origin/main` `8e32ed7` 위로 rebase, `npm ci`, 로컬 게이트 5개 통과. PR #61 head `10e3cb807aab5a4b52e5c8742f6d4b1162828957`의 Actions run `32950322081` attempt 1은 `apps/server/src/engine/clock-jump.test.ts:108`의 5초 timeout 한 건 때문에 실패했고, 코드 변경 없이 같은 head를 재실행한 attempt 2는 `soak:ci`까지 모든 CI step을 통과했다. |
 
 ### Gates (executed)
 
@@ -123,5 +124,34 @@ npm run test
 npm run build
   -> pass; contract schema current, renderer/server/simulator/soak built
 PR #61 latest-head CI
-  -> 이 티켓 commit·push 뒤 확인 예정; 실행 전 green으로 기록하지 않음
+  -> head 10e3cb807aab5a4b52e5c8742f6d4b1162828957, Actions run 32950322081
+  -> attempt 1 fail; apps/server/src/engine/clock-jump.test.ts:108의 단일 test가 5,000ms timeout, build·soak:ci는 선행 test 실패로 skipped
+  -> 코드 변경 없이 같은 head를 rerun한 attempt 2 pass; npm ci, format:check, lint, typecheck, test, build, soak:ci 포함 모든 CI step success
+```
+
+## Review round 3 (R-T48-3R)
+
+- Review: https://github.com/dnhynk/vertical-live/pull/61#pullrequestreview-5028638441
+
+| finding | 처리(고침 SHA / 반박 근거) |
+|---|---|
+| [blocker] `docs/tasks/TASK-T48-safe-stop-youtube-io.md:126` — PR #61 exact-head CI가 pending이라는 stale 기록이 run `32950322081`의 attempt 1 실패와 attempt 2 성공을 누락함 | 고침: head `10e3cb807aab5a4b52e5c8742f6d4b1162828957`을 명시하고, attempt 1은 `apps/server/src/engine/clock-jump.test.ts:108`의 5,000ms timeout 한 건 때문에 실패했으며 build·`soak:ci`가 skipped였음을 보존했다. 코드 변경 없이 같은 head를 재실행한 attempt 2가 `soak:ci`까지 모든 CI step을 통과한 사실을 별도로 기록해 attempt 1을 통과로 오인하지 않게 했다. |
+
+### R-T48-3R 재검증
+
+```text
+git fetch origin; git rebase --autostash origin/main
+  -> pass; branch는 origin/main 8e32ed7 기준 최신이었고 pre-existing package-lock metadata noise만 autostash로 복원
+npm ci
+  -> pass; 431 packages installed, audit는 기존 10 vulnerabilities 보고
+npm run format:check
+  -> pass; All matched files use Prettier code style
+npm run lint
+  -> pass; ESLint + no-legacy-imports + install-script checks
+npm run typecheck
+  -> pass; tsc --build tsconfig.json
+npm run test
+  -> pass; 154 files, 2,242 passed, 1 skipped
+npm run build
+  -> pass; contract schema current, renderer/server/simulator/soak built
 ```
