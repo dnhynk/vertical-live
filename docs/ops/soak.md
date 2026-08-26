@@ -4,6 +4,11 @@
 > `docs/tasks/TASK_SPECS.md` §T15. 고장 행별 예상 상태는 `docs/ops/fault-matrix.md`.
 > 도구: `tools/soak` (`@vl/soak`, CLI `vl-soak`).
 
+> **D-25 구분(2026-08-26)**: 이 synthetic harness는 deterministic CI/진단 자산으로 남지만 launch gate도, 실제
+> public 72시간도 아니다. D-25는 사전 realtime soak·host 시험·threshold lock을 면제했고
+> [`public-observational-pilot.md`](public-observational-pilot.md)의 simulator-off 11시간 rolling public 방송을 최소
+> 72 real hours 관측한다. 아래 `PASS`는 harness invariant 결과일 뿐 Gate 2/3 또는 public pilot 합격이 아니다.
+
 스펙 §11 무인성 합격선은 **"synthetic/replay 입력을 포함한 72시간 soak 동안 사람 조작
 없이 콘텐츠·상태·송출이 계속되고 사전 승인된 중단·복구 임계값을 넘지 않음"** 입니다.
 이 문서는 그 실행 절차입니다. 실시간 72시간 실행은 사용자가 하며, T15 PR의 합격 조건이
@@ -14,7 +19,7 @@
 | 모드 | 시계 | 언제 | 실행 |
 |---|---|---|---|
 | 가속 | `VirtualClock` — 72시간을 루프로 압축 | CI, 코드 변경마다 | `npm run soak:ci` |
-| 실시간 | 시스템 시계 — 진짜 72시간 | Gate 2 이후 호스트에서 1회 | `npm run soak -- run --mode realtime --report data/diagnostics/soak/realtime.json` |
+| 실시간 | 시스템 시계 — 진짜 72시간 synthetic harness | D-25 이전 선택 절차(현재 launch에 미실행) | `npm run soak -- run --mode realtime --report data/diagnostics/soak/realtime.json` |
 
 가속 모드의 모든 시간 값은 **시나리오 시간**이지 측정된 지연이 아닙니다. 리포트가 그 사실을
 머리말에 적습니다. p95를 밀리초로 읽어야 하면 실시간 모드로 돌립니다(§7.5, BOARD A-15).
@@ -72,9 +77,9 @@ crash 행(F-10, F-14~F-17)은 soak 스케줄이 아니라 matrix 드릴에서 �
   명백한 합성값이고 `source: "simulator"`로 표시됩니다(§2.6).
 - env override: `VL_SOAK_DURATION_MS`, `VL_SOAK_SLICE_MS`, `VL_SOAK_REPORT_DIR`.
 
-## 4. 실시간 72시간 절차 (사용자 실행)
+## 4. 실시간 synthetic 72시간 절차 (선택 진단, public pilot 아님)
 
-**먼저 §11이 요구하는 호스트 시험을 끝냅니다.** "72시간 soak 전에 hosting OS와 OBS
+**D-25 이전 절차는 먼저 §11의 호스트 시험을 요구했습니다.** "72시간 soak 전에 hosting OS와 OBS
 interactive-session 실행 방식을 선택하고 reboot, 자동 시작, sleep, GPU reset,
 remote-session 종료, 자동 업데이트를 시험한다." 체크리스트는 T17의
 `docs/ops/windows-host.md`이고, rolling archive 규칙도 같은 시점에 승인합니다.
@@ -101,10 +106,10 @@ remote-session 종료, 자동 업데이트를 시험한다." 체크리스트는 
      gitignore이므로 저장소에 커밋하지 않습니다).
    - 중단이 하나라도 복구되지 않았거나 이벤트가 유실됐으면 실패입니다. 리포트의
      `interruptions` 표에 시각·사유·복구 여부가 그대로 있습니다.
-6. **이 실행만으로 "24/7 검증 완료"라고 쓰지 않습니다.** §11 마지막 문단: 72시간 soak과
-   한 번의 public 24시간 운전은 첫 파일럿 합격선이지 장기 검증이 아닙니다.
+6. **이 실행만으로 "24/7 검증 완료"라고 쓰지 않습니다.** D-25 이전에도 synthetic 72시간과 public
+   24시간은 장기 검증이 아니었고, 현재는 이 harness 자체가 public pilot 시간이 아닙니다.
 
-## 5. 합격선: 불변조건과 임계값
+## 5. harness 판정: 불변조건과 잠기지 않은 임계값
 
 리포트는 두 가지를 구분해서 냅니다.
 
@@ -118,7 +123,7 @@ remote-session 종료, 자동 업데이트를 시험한다." 체크리스트는 
 | `writer_not_wedged` — 종료 시 연속 writer 실패 0 | §9.4(2) |
 | `ends_live` — 종료 상태 `live` | §9.2 live 정의 |
 
-**임계값 (Gate 0/2가 잠금 — 전부 `null`)**
+**임계값 (D-25로 lock 미실행 — 전부 `null`)**
 
 최대 연속 중단시간, 자동복구시간, renderer freeze 허용치, alert 전달시간, end-to-end p95,
 방송·상호작용 가용률. 승인 전에는 `not-locked`으로 **측정만** 하고 판정하지 않습니다.
@@ -157,8 +162,8 @@ npm run soak:matrix
 
 ## 8. 알려진 제약
 
-- 가속 모드의 지연 수치는 시나리오 시간입니다. 실제 p95는 실시간 모드에서만 의미가 있고,
-  §7.5 합격선은 Gate 2 실기기 calibration 뒤에 잠깁니다.
+- 가속 모드의 지연 수치는 시나리오 시간입니다. 실제 p95는 실시간 모드에서만 의미가 있습니다. D-25로 Gate 2
+  calibration·합격선 lock은 실행하지 않으므로 `not-locked` 상태를 유지합니다.
 - soak은 외부 서비스에 접속하지 않습니다. Slack alert sink와 dead-man push는 꺼져 있고
   alert 전달시간은 측정 대상이 아닙니다(§9.4(8)의 off-host 관측은 실제 monitor가 필요).
 - 실계정 YouTube 경로(공개 노출, YPP watch-hour, 실거래 유료 이벤트)는 mock으로 합격

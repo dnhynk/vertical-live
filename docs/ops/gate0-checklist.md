@@ -6,6 +6,9 @@
 > **상태: 부분 승인(2026-08-19, D-8~D-16). 미승인 잔여 3건 + 가정 1건.**
 > **잔여 3건(사용자 승인이 있어야 닫힌다)** — §1.2 audit 값(채널 생성 후 기입), §1.4 초안 승인(T21),
 > §1.7 운영 합격선(Gate 2 baseline 후 잠금).
+> **D-25(2026-08-26)**: Gate 2 baseline·calibration·threshold lock은 launch 전에 실행하지 않는다. 이 open
+> checkbox와 provisional 값은 통과가 아니라 `unverified / risk accepted`로 남고, 현재 경로는
+> [`public-observational-pilot.md`](public-observational-pilot.md)다.
 > **가정 1건** — §1.5 `direct↔vote 실험 순서`는 D-8~D-16에 사용자 결정이 없어 BOARD **A-20**(코디네이터 가정)으로
 > 두었다. 가정은 승인이 아니므로 **체크박스는 열려 있고 사용자가 뒤집을 수 있다.**
 > 즉 열린 체크박스는 §1.2·§1.4·§1.5·§1.7의 **4건**이다. 체크되지 않은 항목은 아직 승인되지 않은 것이다.

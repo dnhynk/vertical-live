@@ -6,9 +6,14 @@
 > 작업 진행 상태의 정본은 [`docs/tasks/BOARD.md`](tasks/BOARD.md)다. 이 문서는 게이트 단위 요약만 유지한다.
 > 최종 갱신: 2026-08-19(T19 Gate 0 승인 반영).
 
+> **현재 launch 경로(2026-08-26, BOARD D-25)**: 아래 Gate 2→Gate 3 순서는 통과하지 않은 채 사전 launch
+> 순서에서 supersede됐다. 현재는 T48·T49·T50 뒤 simulator를 끈 11시간 rolling public 방송을 최소 72 real hours
+> 사실 관측한다. calibration·threshold·host/dead-man·native/legal 증빙은 `unverified / risk accepted`이며,
+> [`ops/public-observational-pilot.md`](ops/public-observational-pilot.md)의 stop conditions를 적용한다.
+
 ## 0. 게이트를 읽는 법
 
-- **게이트는 순서다.** 통과하기 전에는 다음 단계로 진행하지 않는다(§0).
+- **게이트는 원래 순서였고, D-25가 launch에 한해 예외를 결정했다.** 이 예외는 Gate 2/3 통과가 아니다(§0).
 - **통과 선언은 사람이 한다.** CI가 초록인 것과 게이트 통과는 다른 사건이다. 구현이 머지됐다는 사실은 게이트
   통과가 아니다.
 - **숫자 합격선을 임의로 만들지 않는다.** 중단·복구·freeze·지연 p95·가용률의 계산식과 provisional 목표는 Gate 0에서
@@ -70,7 +75,7 @@ D-13(호출표)은 반영이 끝났고, D-9(identity (B))는 **T20a/b/c 구현�
 
 ---
 
-## Gate 2 — YouTube 기술 검증
+## Gate 2 — YouTube 기술 검증 (미통과, D-25로 launch 순서에서 superseded)
 
 **성격**: 실제 계정·실제 호스트가 필요하다. 절차는 [`docs/ops/gate2-experiments.md`](ops/gate2-experiments.md).
 
@@ -91,7 +96,7 @@ reboot·자동 시작·sleep·GPU reset·remote-session 종료·자동 업데이
 
 ---
 
-## Gate 3 — 일본 public 24시간 파일럿
+## Gate 3 — 일본 public 24시간 파일럿 (미통과, D-25로 launch 순서에서 superseded)
 
 **성격**: 첫 공개 운영. **Gate 0의 moderation 호출표가 없으면 시작하지 않는다**(§12.3).
 

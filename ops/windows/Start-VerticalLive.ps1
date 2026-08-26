@@ -65,6 +65,12 @@ param(
     # vertical feed (BOARD D-24). Implies -Broadcast. The config default stays
     # `private` — first publication is the operator's (spec §9.1, BOARD A-18).
     [switch] $Unlisted,
+    # Explicit opt-in for D-25's risk-accepted public observational pilot.
+    # Unlike -Unlisted, this does not imply broadcasting: the operator must
+    # spell out both -Broadcast and -Public. This branch changes privacy only;
+    # credentials remain in the vault and channel audience settings are not
+    # touched.
+    [switch] $Public,
     [int] $RendererTimeoutSec = 60,
     [int] $ServerTimeoutSec = 120,
     [int] $ObsTimeoutSec = 120
@@ -74,6 +80,12 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'VerticalLive.Common.ps1')
 
+if ($Public -and $Unlisted) {
+    throw '-Public and -Unlisted are mutually exclusive privacy modes'
+}
+if ($Public -and -not $Broadcast) {
+    throw '-Public requires -Broadcast'
+}
 if ($Unlisted -and $SkipObs) {
     throw '-Unlisted and -SkipObs contradict each other: a broadcast needs an encoder'
 }
@@ -95,6 +107,8 @@ if ($Broadcast -or $Unlisted) {
 }
 if ($Unlisted) {
     $env:VL_YOUTUBE_PRIVACY_STATUS = 'unlisted'
+} elseif ($Public) {
+    $env:VL_YOUTUBE_PRIVACY_STATUS = 'public'
 }
 
 if (-not $RepoRoot) { $RepoRoot = Get-VerticalLiveRepoRoot -ScriptRoot $PSScriptRoot }

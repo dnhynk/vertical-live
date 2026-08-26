@@ -393,14 +393,17 @@ describe('broadcast config', () => {
     expect(config.provisional).toContain('scheduledStartLeadMs')
   })
 
-  // Gate 2's mobile calibration needs a link a phone can open, which `private`
-  // is not (BOARD D-24). The override is per-host, like every other broadcast
-  // switch, and it goes through the same enumeration as the config value — a
-  // typo in the environment must fail the same way a typo in the file does.
+  // D-24's unlisted calibration path and D-25's explicit public pilot path are
+  // host-only overrides. Both go through the same enumeration as the config
+  // value; a typo must fail the same way a typo in the file does. The shipped
+  // file remains private and simulator-disabled.
   it('takes privacyStatus from the environment when the host sets it', () => {
     expect(
       loadBroadcastConfig({ env: { VL_YOUTUBE_PRIVACY_STATUS: 'unlisted' } }).privacyStatus,
     ).toBe('unlisted')
+    expect(
+      loadBroadcastConfig({ env: { VL_YOUTUBE_PRIVACY_STATUS: 'public' } }).privacyStatus,
+    ).toBe('public')
     expect(loadBroadcastConfig({ env: {} }).privacyStatus).toBe('private')
     expect(() => loadBroadcastConfig({ env: { VL_YOUTUBE_PRIVACY_STATUS: 'friends' } })).toThrow(
       AuthConfigError,

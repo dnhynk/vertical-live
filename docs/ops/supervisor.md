@@ -1,5 +1,9 @@
 # supervisor 운영 (T12)
 
+> **D-25(2026-08-26)**: runtime 안전 정지·복구는 public pilot에서도 그대로 강제한다. provisional threshold와
+> off-host/host evidence는 잠기거나 통과하지 않았으며, 실제 관측 경로는
+> [`public-observational-pilot.md`](public-observational-pilot.md)다.
+
 이 문서는 supervisor 상태기계(스펙 §9.2), 8개 건강 신호 집계(§9.4), 컴포넌트별 restart supervisor(§10.2), kill switch(§9.1·§11), 알림(§9.1·§12.3, BOARD D-3), dead-man 감시(§9.4(8), [S23])의 **운영 절차**다. 코드는 `apps/server/src/supervisor/`.
 
 원칙 하나: **producer는 보고하고, supervisor만 판단한다.** T2(OBS)·T9(chat)·T10(broadcast)이 만드는 `HealthSignal`은 사실의 보고이고, "degraded인가", "재시작할까", "멈출까"는 전부 여기서 정해진다.

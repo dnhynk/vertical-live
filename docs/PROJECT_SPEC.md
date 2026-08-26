@@ -15,6 +15,11 @@
 - **게이트**: 통과하기 전에는 다음 단계로 진행하지 않는다.
 - **미정**: 현재 정보로 결정하면 추측이 되므로 실험 또는 사용자 결정까지 보류한다.
 
+**2026-08-26 결정(D-25)**: 사용자는 기존 Gate 2 → Gate 3의 사전 수동 검증 순서를 면제하고 실제 public
+방송에서 최소 72 real hours 동안 관측하는 위험 수용 경로를 선택했다. 이는 게이트를 통과했다는 뜻이 아니라 해당
+launch 순서를 **supersede**한 결정이다. 이 문서에서 D-25와 충돌하는 과거 Gate 2/3 요구는 역사적 미완료 항목으로
+읽고, calibration·threshold lock·host/dead-man·권리/법률·일본어 원어민 증빙이 완료됐다고 추론하지 않는다.
+
 ## 1. 절대 목표
 
 > 최초 계정·권한 설정을 마친 운영자가 한 번 실행하면, 시스템이 YouTube 세로 라이브를 24시간 스스로 진행하고, 시청자 행동을 실시간 방송 변화로 연결하며, 유입·반복 참여·플랫폼 내 수익화를 하나의 측정 가능한 루프로 운영한다.
@@ -434,19 +439,25 @@ Health/metrics from every stage
 
 OBS가 V1 primary encoder다. FFmpeg CLI는 media probe·archive 검증·오프라인 변환 같은 진단 도구로 사용할 수 있으며, 배포할 binary의 version·configuration·license를 고정한다. FFmpeg headless primary 송출과 MediaMTX fallback relay는 필요가 관측된 뒤 별도 실험한다. [S40]
 
-## 11. 신뢰성 및 출시 전 기술 합격선
+## 11. 신뢰성 및 public pilot 관측 기준
 
-아래 숫자는 동작 주장이나 사업 예측이 아니라 첫 구현의 시험 기준이다. Gate 0에서 최대 연속 중단시간, 자동복구시간, renderer freeze, alert 전달시간, 방송·상호작용 가용률의 계산식과 provisional 목표를 승인한다. Gate 2의 짧은 host·OBS baseline과 end-to-end calibration 뒤, validation·72시간 soak 전에 최종 임계값을 잠근다. 값을 임의로 채우지 않으며 하나라도 초과하면 실패다.
+아래 항목은 동작 주장이나 사업 예측이 아니라 첫 구현의 관측 축과 설계 guardrail이다. D-25 이전에는 Gate 2의
+host·OBS baseline과 end-to-end calibration 뒤 임계값을 잠그고 validation·synthetic 72시간 soak를 통과하는
+경로였다. D-25는 그 수동 사전 경로를 면제했으므로 값은 `provisional`/`not-locked`로 남고, public pilot에서
+임계값 pass/fail이나 Gate 2 성공을 주장하지 않는다.
+
+현재 launch 경로는 simulator를 끈 실제 11시간 rolling public 방송을 **최소 72 real hours** 연속 관측하는
+risk-accepted observational pilot이다. 가속 시계나 synthetic soak는 이 기간을 대신할 수 없다.
 
 | 영역 | 합격선 |
 | --- | --- |
-| 무인성 | synthetic/replay 입력을 포함한 72시간 soak 동안 사람 조작 없이 콘텐츠·상태·송출이 계속되고 사전 승인된 중단·복구 임계값을 넘지 않음 |
-| 첫 공개 운영 | 일본 대상 public vertical Live를 24시간 무인 운영하고 내부·off-host에서 관측된 장애·복구·중단을 기록함 |
+| 무인성 | 최소 72 real hours의 public pilot 동안 사람 조작, 재시작, 장애·복구·중단을 UTC로 사실 기록함. 사전 임계값 합격 주장은 하지 않음 |
+| 첫 공개 운영 | 11시간 rolling public vertical Live의 각 segment와 내부에서 관측된 장애·복구·중단을 기록함. off-host 증빙은 미검증으로 명시 |
 | 상태 복구 | backend, renderer, OBS를 각각 재시작해도 inbox의 미처리 `ingestSeq`, 마지막 commit 상태와 deadline이 정의된 replay/coalesce/skip 규칙대로 복구됨 |
 | 유료 무결성 | replay에서 동일 Super Chat은 한 번만, Gift combo는 증가분만 한 번 반영되고 같은 paid `effectId`가 재전송돼도 연출을 재시작하지 않음. 실제 기능이 활성화된 경우 public paid event로 다시 검증함 |
 | 연결 복구 | `nextPageToken`과 backoff로 재연결하고 중복·손실 추정치를 보고함 |
-| 엔진 지연 | API 수신부터 renderer 확인까지 p95 2초 이하 |
-| 화면 | 9:16 1080p30 기본 프로파일에서 72시간 동안 frame counter·state revision·WebGL context를 계측하고 승인된 freeze 허용치를 넘지 않음 |
+| 엔진 지연 | API 수신부터 renderer 확인까지 p50/p95를 기록함. 기존 p95 2초 목표는 잠긴 pilot 합격선이 아님 |
+| 화면 | 9:16 1080p30 기본 프로파일에서 frame counter·state revision·WebGL context를 계측하고 output loss를 사건으로 기록함 |
 | 송출 | RTMPS, H.264 CBR, 2초 keyframe의 공식 1080p30 권장 프로파일로 검증함. [S26] [S27] |
 | 모더레이션 | 악성 이름·Unicode·URL·금칙어·명령 flood replay가 화면이나 상태 규칙을 우회하지 못함 |
 | 관측성 | 호스트 내부와 외부 monitor가 각각 장애를 탐지하고, 호스트 전원·디스크 장애에도 off-host availability 사건이 남음 |
@@ -454,11 +465,22 @@ OBS가 V1 primary encoder다. FFmpeg CLI는 media probe·archive 검증·오프�
 
 실제 YouTube 계정이 필요한 public 9:16 상태·traffic-source 계측, YPP watch-hour, Gifts/Sticker 상호 배제는 mock만으로 완료 판정하지 않는다. 계정에서 활성화된 paid 기능은 Gate 5 전에 실거래로 검증하고, 비활성 기능은 해당 게이트의 합격 대상에서 제외한다. vertical feed 실제 노출량은 알고리즘이 결정하는 사업 실험 결과이지 기술 mock의 합격조건이 아니다.
 
-Gate 2 fault matrix에는 OAuth access-token 만료, refresh-token 철회, API 403·429와 quota 고갈, DNS·RTMPS 단절, DB lock, disk-full, WebGL context loss, OBS·host crash를 포함한다. inbox commit·token checkpoint·state commit·effect ACK 사이 각 crash window도 주입한다. 각 행마다 예상 상태인 `retry`, `degraded`, `safe_stopped`와 데이터 보존 결과를 먼저 고정한다.
+fault matrix와 가속 soak는 deterministic 회귀 자산으로 계속 실행한다. OAuth access-token 만료, refresh-token 철회,
+API 403·429와 quota 고갈, DNS·RTMPS 단절, DB lock, disk-full, WebGL context loss, OBS·host crash와 crash window를
+검사하지만, mock/가속 결과를 실제 public pilot 72시간이나 Gate 2 통과 증빙으로 바꾸지 않는다.
 
-72시간 soak 전에 hosting OS와 OBS interactive-session 실행 방식을 선택하고 reboot, 자동 시작, sleep, GPU reset, remote-session 종료, 자동 업데이트를 시험한다. rolling archive의 최대 용량·최소 여유공간·보존·자동 삭제 규칙도 같은 시점에 승인한다.
+D-25로 reboot, 자동 시작, lock/sleep, GPU reset, remote-session 종료, 자동 업데이트와 off-host dead-man proof는
+launch 전 필수 시험에서 제거됐다. 수행하지 않은 항목은 `skipped / unverified`로 남으며 통과로 표시하지 않는다.
+rolling archive 코드는 계속 켜고 실제 segment별 archive 결과와 디스크 사건을 관측한다.
 
-72시간 soak와 한 번의 public 24시간 운전은 첫 파일럿 합격선이지 장기 `24/7 검증 완료`가 아니다. 그 표현은 별도로 승인한 장기 평가 기간과 방송·상호작용 가용률, 최대 복구시간 기준을 통과한 뒤에만 사용한다.
+pilot의 durable factual record는 UTC 시작·종료, broadcast/video/liveChat resource와 rollover 결과, supervisor 상태 전이와
+process restart/crash, 영속 quota usage와 API 오류, renderer frame/state revision/WebGL, OBS output bytes·duration·frame loss,
+명령 수·거부 수·지연 histogram, archive 생성·sweep, platform enforcement와 secret-exposure 사건을 포함한다. secret 값,
+raw chat, 승인되지 않은 개인 파생지표는 기록하지 않는다.
+
+quota 오류, platform enforcement/warning/strike, 송출 또는 화면 output loss, 반복 crash, 새로운 secret leakage가 하나라도
+발생하면 즉시 pilot를 중단하고 사실을 보존한다. 72시간 관측은 장기 `24/7 검증 완료`가 아니며, 임계값이나 사업 모델의
+성공도 증명하지 않는다.
 
 ## 12. 안전·권리·정책 요구사항
 
@@ -483,6 +505,11 @@ public 파일럿 전 다음을 함께 검토하고 증빙을 남긴다.
 
 제품이 일반 시청자 대상이라는 근거를 만들 수 없으면 이 사업 모델로 출시하지 않는다.
 
+> **D-25 launch 예외(2026-08-26)**: 위 evidence/sign-off와 일본 현지 법률 지정 승인자 검토를 사전 launch gate에서
+> 면제했다. 이 예외는 Made for Kids 또는 법률 검토가 통과했다는 뜻이 아니며 channel audience 설정을 바꾸라는
+> 권한도 아니다. 현재 설정을 유지하고 `unverified / risk accepted`로 기록한다. 새 자산·새 권리 주장은 만들지 않고
+> §12.1의 금지 IP와 raw chat·secret·개인정보 불변조건은 그대로 강제한다.
+
 ### 12.3 채팅 안전
 
 - YouTube의 blocked words, URL hold, 부적절 메시지 hold, slow mode를 기본 설정한다. [S16]
@@ -493,7 +520,8 @@ public 파일럿 전 다음을 함께 검토하고 증빙을 남긴다.
 
 `무인 방송`은 `무인 모더레이션`을 뜻하지 않는다. allowlist 명령만 상태에 영향을 주고 raw chat은 기본적으로 방송 화면에 노출하지 않아 자동 방어 범위를 좁힌다. 표적 혐오·협박, 개인정보 노출, 성적·자해 위험, 필터 우회 폭증은 사람 호출 대상이다. 화면 노출 필터나 차단 제어가 불건전하면 먼저 이름 표시와 interaction CTA를 끄고, 안전을 보장할 수 없으면 `safe_stopped`로 전환한다.
 
-Gate 0에서 24시간 호출 책임자, 최대 응답시간, escalation 채널, 자동 차단 범위와 safe-stop 조건을 승인한다. 이 운영표가 없으면 Gate 3 public 파일럿을 시작하지 않는다.
+Gate 0에서 정한 호출 책임자, 최대 응답시간, escalation 채널, 자동 차단 범위와 safe-stop 조건은 public pilot 중에도
+유지한다. D-25가 생략한 것은 사전 증빙이며 quota/platform/output/crash/secret 중단 조건이나 runtime 안전 정지가 아니다.
 
 ### 12.4 데이터
 
@@ -551,6 +579,10 @@ Gate 0에서 `명시적 고지·동의·삭제 경로 + API compliance audit` �
 
 표의 승인 후 후보는 S42의 analytics use case 승인을 받기 전에는 계산·저장하지 않는다. 추천·YPP·매출의 절대 성공 수치는 정책상 허용된 채널 기준선과 비용을 수집한 뒤, 결과를 보기 전에 평가 기간과 함께 고정한다. public 실행 전 월 예산, 누적 손실 중단선, 최대 관측기간도 승인한다.
 
+D-25 public pilot에서는 위 표의 **이미 허용된 사실 지표만** durable record로 남긴다. 72시간 동안 나온 수치를 보고
+사후 임계값을 만들어 같은 데이터에 통과를 선언하지 않는다. 개인 식별·승인 후 후보 지표, 법률/원어민 승인 상태,
+vertical-feed 노출 성공은 관측값이 대신 증명할 수 없다.
+
 ### 14.2 우선 실험
 
 1. **첫 화면 이해**: 실제 YouTube 모바일 UI가 겹친 5초 무음 화면에서 상황·명령·목표를 올바르게 설명하는지 일본 타깃 패널로 검사한다.
@@ -563,6 +595,13 @@ Gate 0에서 `명시적 고지·동의·삭제 경로 + API compliance audit` �
 8. **가상 진영**: Gate 5 통과 후 사용자가 별도 스펙을 승인한 경우에만 첫 화면 이해와 장기 재참여를 별도 시즌으로 비교한다.
 
 ## 15. 출시 단계와 완료 정의
+
+### D-25가 supersede한 Gate 2 → Gate 3 경로
+
+아래 Gate 2와 Gate 3 목록은 원래 계획과 미검증 위험을 보존하기 위한 기록이다. 2026-08-26 현재 둘 다 통과하지
+않았고, D-25가 launch 전 순서로서 supersede했다. calibration, threshold lock, 분리 validation, host/reboot/lock/GPU/
+update 시험, off-host dead-man proof, native-language·Made-for-Kids·권리/법률 evidence/sign-off를 체크하거나
+성공으로 소급하지 않는다.
 
 ### Gate 0 — 스펙 승인
 
@@ -584,7 +623,7 @@ Gate 0에서 `명시적 고지·동의·삭제 경로 + API compliance audit` �
 - snapshot만으로 복구되는 9:16 renderer
 - 공개 방송과 같은 이벤트 계약을 쓰는 local simulator
 
-### Gate 2 — YouTube 기술 검증
+### Gate 2 — YouTube 기술 검증 (미통과, launch 순서에서 superseded)
 
 - 공식 `streamList` listener와 OAuth 재연결
 - OBS Browser Source와 obs-websocket 감시
@@ -594,7 +633,7 @@ Gate 0에서 `명시적 고지·동의·삭제 경로 + API compliance audit` �
 - field별 데이터 삭제·권한 철회·refresh 자동 test와 API compliance gate 확인
 - 실제 채널에서 방송 길이 전략을 실험하고 Gate 3 자동화 경로 하나 선택
 
-### Gate 3 — 일본 public 24시간 파일럿
+### Gate 3 — 일본 public 24시간 파일럿 (미통과, launch 순서에서 superseded)
 
 - 상업 이용권이 증명된 오리지널 자산만 사용
 - Made for Kids audience 체크리스트·채널 설정·권리/법률 기록과 사용자 지정 승인자 sign-off
@@ -604,6 +643,16 @@ Gate 0에서 `명시적 고지·동의·삭제 경로 + API compliance audit` �
 - 승인된 콘텐츠 목록으로 24시간 사람 조작 없이 방송·상호작용·상태 복구를 유지하고 중단·복구와 `채팅 게시 → 화면 상태 변화` p95 기준 통과
 - 24시간 산출물 사후 표본이 승인된 일일 챕터 완결성과 반복 장면 기준을 통과하고 검토 기록을 남김
 - 정책 warning·개인정보 화면 노출 0건, replay paid-event 무결성 통과
+
+### 현재 launch 경로 — D-25 public observational pilot
+
+- 선행 코드 결함 T48·T49와 명시적 public opt-in T50이 독립 리뷰·CI까지 끝난 뒤 시작한다.
+- shipped 기본 `private`와 기존 `unlisted`를 보존하고, 운영자가 `-Broadcast -Public`을 함께 준 경우에만 public이다.
+- simulator를 끄고 D-21의 11시간 rolling production 경로를 최소 72 real hours 운전한다.
+- 사전 manual preflight/calibration/threshold/host/dead-man/native/legal evidence gate를 요구하지 않는다. skipped는
+  `unverified / risk accepted`이고 pass가 아니다. channel audience 설정, secret, 권리·법률·원어민 승인 상태를 바꾸지 않는다.
+- §11의 durable factual metrics를 segment별 UTC로 기록하고 임계값 pass/fail, Gate 2/3 성공, `24/7 검증 완료`를 주장하지 않는다.
+- quota 오류, platform enforcement/warning/strike, 송출·화면 output loss, 반복 crash, 새 secret leakage에서 즉시 중단한다.
 
 ### Gate 4 — 트래픽·YPP 자격 획득
 
@@ -620,7 +669,7 @@ Gate 0에서 `명시적 고지·동의·삭제 경로 + API compliance audit` �
 - 사전에 고정한 장기 기간 동안 방송·상호작용 가용성과 최대 복구시간 기준 통과
 - 이 제품 Live에 귀속 가능한 증분 AdSense for YouTube 확정 정산과 기타 확정 수익만으로 운영 공헌이익을 계산하고, 수익 건전성·누적 현금손익·총투자 회수기간 측정
 
-Gate 3은 공개 파일럿이지 절대 목표의 완료가 아니다. “자동으로 돈 버는 운영 모델이 검증됐다”는 선언은 Gate 5에서 실제 확정 순수익이 변동비를 넘고 정책·안전 guardrail을 지켰을 때만 가능하다. 초기 투자까지 회수하는 사업 수익성은 별도 승인한 누적 현금손익·회수기간 기준으로만 선언한다.
+D-25 pilot은 공개 관측이지 절대 목표나 Gate 2/3의 완료가 아니다. “자동으로 돈 버는 운영 모델이 검증됐다”는 선언은 Gate 5에서 실제 확정 순수익이 변동비를 넘고 정책·안전 guardrail을 지켰을 때만 가능하다. 초기 투자까지 회수하는 사업 수익성은 별도 승인한 누적 현금손익·회수기간 기준으로만 선언한다.
 
 ## 16. 현재 레포의 위치
 

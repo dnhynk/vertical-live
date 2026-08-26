@@ -62,5 +62,7 @@ broadcast와 달리 이 마커는 **제거하지 않는다.** `liveStream`은 "i
 - shipped 설정은 `strategy: "rolling-experiment"`, `segmentMs: 39600000`이다. enum의 `-experiment`는 기존 persistence와 구현이 쓰는 이름으로 남았지만, D-21이 선택한 production 경로는 11시간 rolling 하나다.
 - 교체 순서는 새 broadcast를 같은 ingestion stream에 bind → 이전 broadcast를 complete → 새 broadcast를 live로 transition이다. OBS 송출은 멈추지 않지만 watch URL은 바뀌고, 실측 교체 공백은 22초였다(T33).
 - T33 실측에서 종료 구간이 `recorded`/`uploaded` archive로 남았고, T36 뒤 chat source는 새 `liveChatId`를 스스로 따라간다.
-- shipped privacy는 계속 `private`다. Gate 2 calibration에서만 호스트 환경 `VL_YOUTUBE_PRIVACY_STATUS=unlisted`로 덮고, 설정 파일에 secret이나 공개 전환 값을 넣지 않는다(D-24).
+- shipped privacy는 계속 `private`다. 기존 `-Unlisted`는 D-24 경로로 보존한다. D-25 public pilot는 운영자가
+  `-Broadcast -Public`을 함께 준 경우에만 `VL_YOUTUBE_PRIVACY_STATUS=public`으로 덮으며 secret이나 channel audience
+  설정을 바꾸지 않는다(T50).
 - `segmentMs: null`은 주입 테스트·명시적 개발 설정에서 rollover-off 회귀를 검증할 때만 쓴다.
