@@ -1,6 +1,6 @@
 import type { Clock } from '../../clock.js'
 import type { Logger } from '../../secrets/redaction.js'
-import { loadArchiveConfig, type ArchiveConfig } from './config.js'
+import { DEFAULT_ARCHIVE_CWD, loadArchiveConfig, type ArchiveConfig } from './config.js'
 import { runArchiveSweep, type ArchiveFsPort, type ArchiveSweepResult } from './sweep.js'
 
 /**
@@ -66,7 +66,11 @@ export function runArchiveCli(argv: readonly string[], deps: ArchiveCliDeps): nu
     ...(deps.fs === undefined ? {} : { fs: deps.fs }),
     ...(deps.clock === undefined ? {} : { clock: deps.clock }),
     ...(deps.logger === undefined ? {} : { logger: deps.logger }),
-    ...(deps.cwd === undefined ? {} : { cwd: deps.cwd }),
+    // npm workspaces run package scripts from the workspace directory. Archive
+    // roots belong to the repository config, so caller cwd must not redirect a
+    // production sweep to apps/server/data. Tests can still inject an isolated
+    // base explicitly.
+    cwd: deps.cwd ?? DEFAULT_ARCHIVE_CWD,
   })
 
   if (args.json) {

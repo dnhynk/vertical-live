@@ -2,12 +2,13 @@
 <!--
   Rolling archive sweep (spec §9.1 "용량 제한이 있는 로컬 rolling archive", §11).
 
-  ops/windows/Register-VerticalLive.ps1 substitutes four placeholders below (in
+  ops/windows/Register-VerticalLive.ps1 substitutes five placeholders below (in
   double braces, so this comment names them without the braces):
     USER_ID    the account that owns the archive files
     REPO_ROOT  absolute path of this repository on the host
     NODE_EXE   absolute path of node.exe on the host
     INTERVAL   repetition interval, ISO 8601 duration (default PT1H)
+    START_BOUNDARY  a registration-time local timestamp five minutes ahead
 
   The sweep is a separate task, not a job inside the server process, so it keeps
   working while the server is stopped — a full disk is exactly the state in which
@@ -30,11 +31,26 @@
       <Enabled>true</Enabled>
       <UserId>{{USER_ID}}</UserId>
       <Delay>PT5M</Delay>
+    </LogonTrigger>
+    <!--
+      A logon trigger is event-based: it guarantees a sweep after each logon,
+      but does not by itself provide the timed task's future NextRunTime. The
+      daily calendar trigger renews a one-day repetition window every day.
+      Microsoft documents StartBoundary as required for calendar triggers and
+      ScheduleByDay as the daily cadence.
+    -->
+    <CalendarTrigger>
+      <StartBoundary>{{START_BOUNDARY}}</StartBoundary>
+      <Enabled>true</Enabled>
       <Repetition>
         <Interval>{{INTERVAL}}</Interval>
+        <Duration>P1D</Duration>
         <StopAtDurationEnd>false</StopAtDurationEnd>
       </Repetition>
-    </LogonTrigger>
+      <ScheduleByDay>
+        <DaysInterval>1</DaysInterval>
+      </ScheduleByDay>
+    </CalendarTrigger>
   </Triggers>
   <Principals>
     <Principal id="Author">
