@@ -119,6 +119,19 @@ export class ChatSourceState {
   }
 
   /**
+   * Opens a fresh transport-attempt budget after the supervisor has completed
+   * stop(). A READY zero-viewer gRPC channel is canonical readiness only when
+   * it is not carrying the previous run's failure streak. Everything that is
+   * historical or durable-looking on the health surface deliberately survives:
+   * outage/reconnect measurements, token facts, user-event facts and the last
+   * error observation (T47, T51 review round 2).
+   */
+  resetAttemptFailuresForRestart(): void {
+    this.#consecutiveFailures = 0
+    this.#retryBudgetExhausted = false
+  }
+
+  /**
    * A request is about to be sent — one gRPC stream, or one REST poll.
    *
    * It only remembers whether this attempt carries a resume token. Nothing is

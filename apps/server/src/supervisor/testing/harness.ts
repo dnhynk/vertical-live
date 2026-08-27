@@ -10,6 +10,7 @@ import type { DiagnosticScreenshotRecorder } from '../screenshot.js'
 import { PREFLIGHT_OK, type PreflightProbes } from '../preflight.js'
 import { Supervisor, type ComponentActions } from '../supervisor.js'
 import type { StartupSteps } from '../startup.js'
+import type { SupervisedComponent } from '../types.js'
 
 /**
  * Test double for the supervisor's collaborators. Everything is injected — the
@@ -132,6 +133,8 @@ export interface HarnessOptions {
   readonly alerts?: AlertSink
   /** Replaces individual component actions, e.g. with one that can be gated. */
   readonly actions?: Partial<ComponentActions>
+  /** Post-action canonical-health verification windows (T51). */
+  readonly restartRecoveryTimeoutMs?: Readonly<Partial<Record<SupervisedComponent, number>>>
   /** The segment swap of BOARD D-21; absent means nothing rolls over. */
   readonly rollSegment?: () => Promise<void>
   /**
@@ -216,6 +219,9 @@ export function createSupervisorHarness(options: HarnessOptions = {}): Superviso
     renderer: rendererHealth,
     alerts: options.alerts ?? alerts,
     actions,
+    ...(options.restartRecoveryTimeoutMs === undefined
+      ? {}
+      : { restartRecoveryTimeoutMs: options.restartRecoveryTimeoutMs }),
     autoEvaluate: false,
     // Fixed jitter so the backoff delays in a test are the same every run.
     random: () => 0,

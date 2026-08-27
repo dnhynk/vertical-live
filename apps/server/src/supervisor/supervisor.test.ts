@@ -11,6 +11,7 @@ import type { YouTubeLiveApi } from '../youtube/broadcast/api.js'
 import { BroadcastHealthMonitor } from '../youtube/broadcast/health.js'
 import { TEST_BROADCAST_CONFIG } from '../youtube/broadcast/test-support.js'
 import { DELIVERED, type AlertSink } from './alerts.js'
+import { loadSupervisorConfig } from './config.js'
 import { DeadManMonitor } from './deadman.js'
 import { AdminModerationEndpoint } from './moderation-report.js'
 import { STARTUP_STEP_ORDER, type StartupStep, type StartupSteps } from './startup.js'
@@ -623,6 +624,267 @@ describe('supervisor state machine', () => {
       harness.pushHealthy()
       await harness.supervisor.evaluate()
       expect(harness.supervisor.state).toBe('live')
+    })
+
+    it('holds one OBS attempt until YouTube confirms active ingest (T51)', async () => {
+      const harness = createSupervisorHarness({
+        preflight: passingPreflight(),
+        restartDelayMs: 500,
+        restartRecoveryTimeoutMs: { 'obs-stream': 10_000 },
+      })
+      await goLive(harness)
+
+      const pushInactive = (): void => {
+        harness.pushHealthy(['youtube.stream_status'])
+        harness.push(
+          signal('youtube.stream_status', 'degraded', {
+            component: 'youtube',
+            reason: 'stream_inactive',
+            at: harness.clock.nowUtcIso(),
+            monotonicMs: harness.clock.monotonicMs(),
+          }),
+        )
+      }
+
+      await harness.clock.advance(1000)
+      pushInactive()
+      await harness.supervisor.evaluate()
+      await harness.clock.advance(500)
+
+      const component = () =>
+        harness.supervisor.components().find((entry) => entry.component === 'obs-stream')
+      expect(harness.restarts).toEqual(['obs-stream'])
+      expect(component()?.inFlight).toBe(true)
+      expect(component()?.attempts).toBe(1)
+
+      // Repeated production ticks with the same YouTube verdict cannot spend
+      // attempts 2/3 while attempt 1 is awaiting the canonical active signal.
+      for (let tick = 0; tick < 3; tick += 1) {
+        await harness.clock.advance(harness.config.evaluateIntervalMs)
+        pushInactive()
+        await harness.supervisor.evaluate()
+      }
+      expect(harness.restarts).toEqual(['obs-stream'])
+      expect(component()?.attempts).toBe(1)
+      expect(component()?.inFlight).toBe(true)
+
+      await harness.clock.advance(harness.config.evaluateIntervalMs)
+      harness.pushHealthy()
+      await harness.supervisor.evaluate()
+
+      expect(component()?.attempts).toBe(0)
+      expect(component()?.inFlight).toBe(false)
+      expect(harness.supervisor.state).toBe('live')
+    })
+
+    it('does not accept an unknown stream status through the generic healthy path', async () => {
+      const harness = createSupervisorHarness({
+        preflight: passingPreflight(),
+        restartDelayMs: 500,
+        restartRecoveryTimeoutMs: { 'obs-stream': 10_000 },
+      })
+      await goLive(harness)
+
+      await harness.clock.advance(1000)
+      harness.pushHealthy(['youtube.stream_status'])
+      harness.push(
+        signal('youtube.stream_status', 'degraded', {
+          component: 'youtube',
+          reason: 'stream_inactive',
+          at: harness.clock.nowUtcIso(),
+          monotonicMs: harness.clock.monotonicMs(),
+        }),
+      )
+      await harness.supervisor.evaluate()
+      await harness.clock.advance(500)
+
+      const component = () =>
+        harness.supervisor.components().find((entry) => entry.component === 'obs-stream')
+      expect(component()).toMatchObject({ attempts: 1, inFlight: true })
+
+      await harness.clock.advance(harness.config.evaluateIntervalMs)
+      harness.pushHealthy(['youtube.stream_status'])
+      harness.push(
+        signal('youtube.stream_status', 'unknown', {
+          component: 'youtube',
+          reason: 'status_unreadable',
+          at: harness.clock.nowUtcIso(),
+          monotonicMs: harness.clock.monotonicMs(),
+        }),
+      )
+      const aggregate = await harness.supervisor.evaluate()
+
+      // stream health/lifecycle make the aggregate family look ok, but neither
+      // is an explicit positive ingest observation.
+      expect(aggregate.families.youtube_broadcast.status).toBe('ok')
+      expect(component()).toMatchObject({ attempts: 1, inFlight: true })
+      expect(harness.restarts).toEqual(['obs-stream'])
+      expect(harness.clock.pendingTimerCount).toBe(1)
+    })
+
+    it('keeps a timed-out OBS attempt failed until fresh active status, then exhausts on attempt 2', async () => {
+      const loaded = loadSupervisorConfig()
+      const harness = createSupervisorHarness({
+        config: {
+          ...loaded,
+          restart: {
+            ...loaded.restart,
+            maxAttempts: { ...loaded.restart.maxAttempts, 'obs-stream': 2 },
+          },
+        },
+        preflight: passingPreflight(),
+        restartDelayMs: 500,
+        restartRecoveryTimeoutMs: { 'obs-stream': 10_000 },
+      })
+      await goLive(harness)
+
+      const pushStatus = (status: 'degraded' | 'unknown', reason: string): void => {
+        harness.pushHealthy(['youtube.stream_status'])
+        harness.push(
+          signal('youtube.stream_status', status, {
+            component: 'youtube',
+            reason,
+            at: harness.clock.nowUtcIso(),
+            monotonicMs: harness.clock.monotonicMs(),
+          }),
+        )
+      }
+      const component = () =>
+        harness.supervisor.components().find((entry) => entry.component === 'obs-stream')
+
+      await harness.clock.advance(1000)
+      pushStatus('degraded', 'stream_inactive')
+      await harness.supervisor.evaluate()
+      await harness.clock.advance(500)
+      await harness.clock.advance(10_000)
+
+      expect(component()).toMatchObject({ attempts: 1, inFlight: false, exhausted: false })
+      expect(component()?.lastError).toContain('not observed within 10000ms')
+
+      // After the timeout this family aggregates to ok, but its canonical
+      // status is still unknown. The failed attempt and its error must survive.
+      pushStatus('unknown', 'status_unreadable')
+      const unknown = await harness.supervisor.evaluate()
+      expect(unknown.families.youtube_broadcast.status).toBe('ok')
+      expect(component()).toMatchObject({ attempts: 1, inFlight: false, exhausted: false })
+      expect(component()?.lastError).toContain('not observed within 10000ms')
+
+      // A later canonical inactive observation schedules attempt 2 rather than
+      // silently turning the old timeout back into attempt 1.
+      pushStatus('degraded', 'stream_inactive')
+      await harness.supervisor.evaluate()
+      expect(component()).toMatchObject({ attempts: 2, inFlight: true, exhausted: false })
+      await harness.clock.advance(500)
+      expect(harness.restarts).toEqual(['obs-stream', 'obs-stream'])
+
+      await harness.clock.advance(10_000)
+      await flushMicrotasks()
+      expect(component()).toMatchObject({ attempts: 2, inFlight: false, exhausted: true })
+      expect(component()?.lastError).toContain('not observed within 10000ms')
+      expect(harness.supervisor.state).toBe('safe_stopped')
+    })
+
+    it('does not accept a different degraded YouTube reason without active stream status', async () => {
+      const harness = createSupervisorHarness({
+        preflight: passingPreflight(),
+        restartDelayMs: 500,
+        restartRecoveryTimeoutMs: { 'obs-stream': 10_000 },
+      })
+      await goLive(harness)
+
+      await harness.clock.advance(1000)
+      harness.pushHealthy(['youtube.stream_status'])
+      harness.push(
+        signal('youtube.stream_status', 'degraded', {
+          component: 'youtube',
+          reason: 'stream_inactive',
+          at: harness.clock.nowUtcIso(),
+          monotonicMs: harness.clock.monotonicMs(),
+        }),
+      )
+      await harness.supervisor.evaluate()
+      await harness.clock.advance(500)
+
+      await harness.clock.advance(harness.config.evaluateIntervalMs)
+      harness.pushHealthy(['youtube.stream_status', 'youtube.stream_health'])
+      harness.push(
+        signal('youtube.stream_status', 'unknown', {
+          component: 'youtube',
+          reason: 'status_unreadable',
+          at: harness.clock.nowUtcIso(),
+          monotonicMs: harness.clock.monotonicMs(),
+        }),
+        signal('youtube.stream_health', 'degraded', {
+          component: 'youtube',
+          reason: 'health_bad',
+          at: harness.clock.nowUtcIso(),
+          monotonicMs: harness.clock.monotonicMs(),
+        }),
+      )
+      const aggregate = await harness.supervisor.evaluate()
+      const component = harness.supervisor
+        .components()
+        .find((entry) => entry.component === 'obs-stream')
+
+      // `health_bad` deliberately does not map to an OBS restart, but that
+      // absence cannot acknowledge the in-flight stream recovery either.
+      expect(aggregate.families.youtube_broadcast).toMatchObject({
+        status: 'degraded',
+        reason: 'health_bad',
+      })
+      expect(component).toMatchObject({ attempts: 1, inFlight: true })
+      expect(harness.restarts).toEqual(['obs-stream'])
+      expect(harness.clock.pendingTimerCount).toBe(1)
+    })
+
+    it('preserves OBS-output-only recovery after a fresh active stream observation', async () => {
+      const harness = createSupervisorHarness({
+        preflight: passingPreflight(),
+        restartDelayMs: 500,
+        restartRecoveryTimeoutMs: { 'obs-stream': 10_000 },
+      })
+      await goLive(harness)
+
+      await harness.clock.advance(1000)
+      harness.pushHealthy(['obs.stream'])
+      harness.push(
+        signal('obs.stream', 'degraded', {
+          component: 'obs',
+          reason: 'output_inactive',
+          at: harness.clock.nowUtcIso(),
+          monotonicMs: harness.clock.monotonicMs(),
+        }),
+      )
+      await harness.supervisor.evaluate()
+      await harness.clock.advance(500)
+
+      const component = () =>
+        harness.supervisor.components().find((entry) => entry.component === 'obs-stream')
+      expect(component()).toMatchObject({ attempts: 1, inFlight: true })
+
+      await harness.clock.advance(harness.config.evaluateIntervalMs)
+      harness.pushHealthy(['youtube.stream_health'])
+      harness.push(
+        signal('youtube.stream_health', 'degraded', {
+          component: 'youtube',
+          reason: 'health_bad',
+          at: harness.clock.nowUtcIso(),
+          monotonicMs: harness.clock.monotonicMs(),
+        }),
+      )
+      const aggregate = await harness.supervisor.evaluate()
+
+      // The OBS output family recovered and this tick included a fresh active
+      // stream status. A separate stream-health problem keeps the machine
+      // degraded, but it must not strand the completed OBS restart attempt.
+      expect(aggregate.families.obs_output.status).toBe('ok')
+      expect(aggregate.families.youtube_broadcast).toMatchObject({
+        status: 'degraded',
+        reason: 'health_bad',
+      })
+      expect(component()).toMatchObject({ attempts: 0, inFlight: false })
+      expect(harness.restarts).toEqual(['obs-stream'])
+      expect(harness.clock.pendingTimerCount).toBe(0)
     })
 
     it("never dials OBS itself: the connection loop stays ObsClient's (spec §10.2)", async () => {

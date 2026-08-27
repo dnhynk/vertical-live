@@ -165,6 +165,7 @@ describe('ChatSource', () => {
 
     expect(servers.grpc.connectionCount).toBe(0)
     expect(chat.observe().mode).toBe('idle')
+    expect(chat.transportReady()).toBe(false)
   })
 
   it('publishes the four health signals, with silence reported as ok', async () => {
@@ -205,6 +206,7 @@ describe('ChatSource', () => {
 
     const transport = chat.signals().find((signal) => signal.name === CHAT_TRANSPORT_SIGNAL)
     expect(transport?.status).toBe('ok')
+    expect(chat.transportReady()).toBe(true)
     // Nothing has been delivered: this is readiness of the path, not of a message.
     expect(chat.observe().connected).toBe(false)
     expect(transport?.detail['lastResponseAt']).toBeNull()

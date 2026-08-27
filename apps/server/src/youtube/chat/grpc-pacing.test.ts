@@ -8,6 +8,7 @@ import {
   TEST_LIVE_CHAT_ID,
   TEST_SOURCE_KEY,
   fixedTokens,
+  grpcFixture,
   storeInbox,
   testChatConfig,
   testParseCommand,
@@ -25,6 +26,8 @@ import type {
   StreamListResponse,
   StreamListTransport,
 } from './transport.js'
+
+const GRPC_MESSAGE = grpcFixture('text-message-event')
 
 interface Script {
   readonly response?: StreamListResponse
@@ -331,6 +334,10 @@ describe('GrpcChatSource quota start pacing', () => {
     expect(transport.starts).toEqual([0])
     expect(chat.lastResult).toEqual({ outcome: 'stopped', reason: 'auth_revoked' })
     expect(chat.observe().stopped?.reason).toBe('auth_revoked')
+    expect(chat.observe()).toMatchObject({
+      consecutiveFailures: 1,
+      retryBudgetExhausted: false,
+    })
     expect(chat.signals().find((signal) => signal.name === CHAT_TRANSPORT_SIGNAL)).toMatchObject({
       status: 'degraded',
       reason: 'auth_revoked',
@@ -350,7 +357,14 @@ describe('GrpcChatSource quota start pacing', () => {
     await flushMicrotasks()
 
     expect(chat.lastResult).toBeNull()
-    expect(chat.observe()).toMatchObject({ mode: 'grpc', stopped: null })
+    expect(chat.observe()).toMatchObject({
+      mode: 'grpc',
+      stopped: null,
+      consecutiveFailures: 0,
+      retryBudgetExhausted: false,
+      lastError: { kind: 'unauthorized' },
+    })
+    expect(chat.transportReady()).toBe(true)
     expect(transport.starts).toEqual([0])
 
     await clock.advance(24_999)
@@ -376,6 +390,109 @@ describe('GrpcChatSource quota start pacing', () => {
     expect(chat.signals().find((signal) => signal.name === CHAT_TRANSPORT_SIGNAL)?.status).toBe(
       'ok',
     )
+
+    await chat.stop()
+    expect(clock.pendingTimerCount).toBe(0)
+  })
+
+  it('restarts READY after an exhausted prior run without losing pacing, checkpoint, or history', async () => {
+    const clock = new FakeClock()
+    temp = createTempStore({ clock })
+    const transport = new VirtualTransport(clock, [
+      {
+        response: {
+          items: [GRPC_MESSAGE],
+          next_page_token: 'token_before_restart',
+        },
+        errorCode: status.UNAVAILABLE,
+      },
+      { errorCode: status.UNAVAILABLE },
+      { response: { items: [], next_page_token: 'token_after_restart' } },
+    ])
+    const base = testChatConfig({
+      grpcStreamMinStartIntervalMs: 5000,
+      readyPollIntervalMs: 100,
+      reconnect: {
+        initialDelayMs: 100,
+        maxDelayMs: 100,
+        factor: 1,
+        jitterRatio: 0,
+        maxAttempts: 1,
+      },
+      fallback: {
+        enterAfterConsecutiveFailures: 99,
+        retryPrimaryAfterMs: 60_000,
+      },
+    })
+    const quota = new QuotaTracker({ clock })
+    const chat = new ChatSource({
+      config: base,
+      clock,
+      inbox: storeInbox(temp.store),
+      checkpoints: temp.store,
+      parseCommand: testParseCommand,
+      auth: fixedTokens(),
+      engine: { ready: true },
+      transport,
+      quota,
+      random: () => 0,
+    })
+
+    chat.start()
+    await flushMicrotasks()
+    await clock.advance(5000)
+
+    expect(transport.starts).toEqual([0, 5000])
+    expect(chat.observe()).toMatchObject({
+      consecutiveFailures: 2,
+      retryBudgetExhausted: true,
+      pageToken: 'token_before_restart',
+      userEvents: { total: 1 },
+      reconnect: { count: 0 },
+    })
+
+    await chat.stop()
+    chat.start()
+    await flushMicrotasks()
+
+    // The new run receives a fresh local failure budget, so a READY channel is
+    // canonical readiness even with zero new viewer messages. The previous
+    // error remains history, while the next quota-bearing start is still paced.
+    expect(chat.observe()).toMatchObject({
+      mode: 'grpc',
+      consecutiveFailures: 0,
+      retryBudgetExhausted: false,
+      lastError: { kind: 'serverError' },
+      pageToken: 'token_before_restart',
+      userEvents: { total: 1 },
+      reconnect: { count: 0 },
+    })
+    expect(chat.transportReady()).toBe(true)
+    expect(transport.starts).toEqual([0, 5000])
+
+    await clock.advance(4999)
+    expect(transport.starts).toEqual([0, 5000])
+    await clock.advance(1)
+
+    expect(transport.starts).toEqual([0, 5000, 10_000])
+    expect(transport.requests.map((request) => request.page_token)).toEqual([
+      undefined,
+      'token_before_restart',
+      'token_before_restart',
+    ])
+    expect(chat.observe()).toMatchObject({
+      pageToken: 'token_after_restart',
+      userEvents: { total: 1 },
+      reconnect: {
+        count: 1,
+        resumedWithToken: true,
+        estimatedLostMessages: 0,
+      },
+    })
+    expect(quota.snapshot()).toMatchObject({
+      spentUnits: 3,
+      byMethod: { 'liveChatMessages.streamList': 3 },
+    })
 
     await chat.stop()
     expect(clock.pendingTimerCount).toBe(0)

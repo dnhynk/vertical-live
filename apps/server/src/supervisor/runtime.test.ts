@@ -2,14 +2,20 @@ import { describe, expect, it, vi } from 'vitest'
 
 import type { EngineHealth } from '../engine/engine.js'
 import type { SecretName, SecretProvider } from '../secrets/types.js'
-import { FakeClock } from '../testing/fake-clock.js'
+import { FakeClock, flushMicrotasks } from '../testing/fake-clock.js'
+import { createExponentialBackoff } from '../youtube/quota/backoff.js'
 import { loadSupervisorConfig, type SupervisorConfig } from './config.js'
 import { runPreflight } from './preflight.js'
+import { RestartSupervisor } from './restart.js'
 import {
   buildPreflightProbes,
   buildStartupSteps,
+  chatRestartReadinessTimeoutMs,
+  obsStreamRecoveryVerificationTimeoutMs,
+  restartChatSource,
   type BroadcastPort,
   type ObsPort,
+  type RestartableChatPort,
   type RuntimeDeps,
 } from './runtime.js'
 import { runStartupSequence } from './startup.js'
@@ -31,7 +37,7 @@ function secretsWith(present: readonly SecretName[]): SecretProvider {
 function deps(overrides: Partial<RuntimeDeps> = {}): RuntimeDeps & { readonly calls: string[] } {
   const calls: string[] = []
   const engineState = { ready: false }
-  const chatState = { started: false }
+  const chatState = { ready: false }
   return {
     calls,
     config: loadSupervisorConfig(),
@@ -82,9 +88,9 @@ function deps(overrides: Partial<RuntimeDeps> = {}): RuntimeDeps & { readonly ca
     chat: {
       start: () => {
         calls.push('chat.start')
-        chatState.started = true
+        chatState.ready = true
       },
-      started: () => chatState.started,
+      started: () => chatState.ready,
     },
     ...overrides,
   }
@@ -164,7 +170,7 @@ describe('buildStartupSteps', () => {
 
     expect(result.completed).toBe(false)
     expect(result.failedStep).toBe('chatSource')
-    expect(result.error).toContain('chat source did not start')
+    expect(result.error).toContain('chat source did not become ready')
   })
 
   it('stops waiting for the listener when the run stops (round 3)', async () => {
@@ -196,9 +202,9 @@ describe('buildStartupSteps', () => {
     expect(polls).toBeLessThan(5)
   })
 
-  it('waits for the listener to report that it is really running (round 2)', async () => {
-    // `started()` flips only after the background loop has selected a path, so
-    // the step polls instead of accepting the object the moment it exists.
+  it('waits for the canonical transport readiness signal (round 2, T51)', async () => {
+    // `started()` flips only after the selected path reports transport `ok`, so
+    // the step does not accept mode selection while it is still dialling.
     let polls = 0
     const runtime = deps({
       chat: {
@@ -229,6 +235,158 @@ describe('buildStartupSteps', () => {
 
     expect(result.completed).toBe(true)
     expect(runtime.calls).toEqual(['store.open', 'engine.start'])
+  })
+})
+
+describe('restartChatSource (T51)', () => {
+  const backoff = () =>
+    createExponentialBackoff({
+      initialDelayMs: 1000,
+      maxDelayMs: 2000,
+      factor: 2,
+      jitterRatio: 0,
+      maxAttempts: 2,
+      random: () => 0,
+    })
+
+  it('keeps one attempt in flight until the transport is ready', async () => {
+    const clock = new FakeClock()
+    const effects: string[] = []
+    let ready = false
+    const chat: RestartableChatPort = {
+      stop: () => {
+        effects.push('stop')
+        return Promise.resolve()
+      },
+      start: () => effects.push('start'),
+      started: () => ready,
+    }
+    const supervisor = new RestartSupervisor({
+      component: 'chat-source',
+      clock,
+      backoff: backoff(),
+      restart: (signal) =>
+        restartChatSource({
+          chat,
+          clock,
+          timeoutMs: 55_000,
+          pollIntervalMs: 250,
+          signal,
+        }),
+    })
+
+    expect(supervisor.request('chat_transport')).toBe('scheduled')
+    await clock.advance(1000)
+    expect(effects).toEqual(['stop', 'start'])
+    expect(supervisor.inFlight).toBe(true)
+
+    // The incident spent all three attempts in 13s. Every equivalent recovery
+    // tick now sees the first attempt still verifying instead.
+    for (let elapsed = 0; elapsed < 14_000; elapsed += 2000) {
+      expect(supervisor.request('chat_transport')).toBe('in_flight')
+      await clock.advance(2000)
+    }
+    expect(supervisor.attempts).toBe(1)
+
+    ready = true
+    await clock.advance(250)
+    expect(supervisor.inFlight).toBe(false)
+    expect(supervisor.health().lastError).toBeNull()
+  })
+
+  it('uses the pacing floor plus the existing readiness window', () => {
+    expect(chatRestartReadinessTimeoutMs(30_000, 25_000)).toBe(55_000)
+    expect(() => chatRestartReadinessTimeoutMs(Number.MAX_SAFE_INTEGER, 1)).toThrow(RangeError)
+  })
+
+  it('uses the existing YouTube ingest window plus one health poll for OBS recovery', () => {
+    expect(obsStreamRecoveryVerificationTimeoutMs(120_000, 20_000)).toBe(140_000)
+    expect(() => obsStreamRecoveryVerificationTimeoutMs(Number.MAX_SAFE_INTEGER, 1)).toThrow(
+      RangeError,
+    )
+  })
+
+  it('times out as a failed attempt and preserves bounded exhaustion', async () => {
+    const clock = new FakeClock()
+    const chat: RestartableChatPort = {
+      stop: () => Promise.resolve(),
+      start: () => {},
+      started: () => false,
+    }
+    const supervisor = new RestartSupervisor({
+      component: 'chat-source',
+      clock,
+      backoff: backoff(),
+      restart: (signal) =>
+        restartChatSource({ chat, clock, timeoutMs: 1000, pollIntervalMs: 250, signal }),
+    })
+
+    supervisor.request('chat_transport')
+    await clock.advance(2000)
+    expect(supervisor.health().lastError).toContain('did not become ready within 1000ms')
+    expect(supervisor.exhausted).toBe(false)
+
+    supervisor.request('chat_transport')
+    await clock.advance(3000)
+    expect(supervisor.exhausted).toBe(true)
+    expect(supervisor.attempts).toBe(2)
+  })
+
+  it('does not start after an abort lands while stop is awaiting', async () => {
+    const clock = new FakeClock()
+    const controller = new AbortController()
+    const start = vi.fn()
+    let release = (): void => {}
+    const stopping = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const chat: RestartableChatPort = {
+      stop: () => stopping,
+      start,
+      started: () => false,
+    }
+
+    const restarting = restartChatSource({
+      chat,
+      clock,
+      timeoutMs: 55_000,
+      pollIntervalMs: 250,
+      signal: controller.signal,
+    })
+    controller.abort()
+    release()
+    await restarting
+    await flushMicrotasks()
+
+    expect(start).not.toHaveBeenCalled()
+    expect(clock.pendingTimerCount).toBe(0)
+  })
+
+  it('cancels an active readiness poll immediately when aborted', async () => {
+    const clock = new FakeClock()
+    const controller = new AbortController()
+    const start = vi.fn()
+    const chat: RestartableChatPort = {
+      stop: () => Promise.resolve(),
+      start,
+      started: () => false,
+    }
+
+    const restarting = restartChatSource({
+      chat,
+      clock,
+      timeoutMs: 55_000,
+      pollIntervalMs: 250,
+      signal: controller.signal,
+    })
+    await flushMicrotasks()
+    expect(start).toHaveBeenCalledOnce()
+    expect(clock.pendingTimerCount).toBe(1)
+
+    controller.abort()
+    await restarting
+
+    expect(clock.pendingTimerCount).toBe(0)
   })
 })
 

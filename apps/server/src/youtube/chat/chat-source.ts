@@ -8,7 +8,7 @@ import { silentLogger, type Logger } from '../../secrets/redaction.js'
 import type { QuotaTracker } from '../quota/tracker.js'
 import type { ChatConfig } from './config.js'
 import { GrpcChatSource, type GrpcStartPacingState } from './grpc-source.js'
-import { buildChatHealthSignals, type ChatObservation } from './health.js'
+import { buildChatHealthSignals, CHAT_TRANSPORT_SIGNAL, type ChatObservation } from './health.js'
 import { RestChatSource } from './rest-source.js'
 import { CancellableDelay, type ChatAccessTokens, type ChatRunResult } from './retry.js'
 import { ChatIngestSink, type ConsentFailure, type ConsentObserver } from './sink.js'
@@ -133,6 +133,19 @@ export class ChatSource {
     return buildChatHealthSignals(this.observe(), this.#options.clock)
   }
 
+  /**
+   * Positive readiness for startup and supervisor restart completion (T51).
+   * Mode alone only says the background loop selected gRPC or REST; it can do
+   * that while quota pacing, dialling, or carrying an exhausted retry streak.
+   * The canonical transport signal already owns the zero-viewer-safe answer,
+   * so lifecycle wiring reads it instead of inventing another verdict.
+   */
+  transportReady(): boolean {
+    return this.signals().some(
+      (signal) => signal.name === CHAT_TRANSPORT_SIGNAL && signal.status === 'ok',
+    )
+  }
+
   observe(): ChatObservation {
     const channelState =
       this.#state.mode === 'grpc' && this.#grpc !== undefined ? this.#grpc.channelState() : null
@@ -159,6 +172,7 @@ export class ChatSource {
     this.#grpc = undefined
     this.#rest = undefined
     this.#state.clearStop()
+    this.#state.resetAttemptFailuresForRestart()
 
     this.#running = this.#run().catch((error: unknown) => {
       this.#logger.error('youtube chat: source loop failed', {

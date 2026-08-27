@@ -152,6 +152,145 @@ describe('RestartSupervisor', () => {
     expect(supervisor.attempts).toBe(0)
   })
 
+  describe('post-action health verification (T51)', () => {
+    it('keeps the same attempt in flight until canonical health confirms recovery', async () => {
+      const clock = new FakeClock()
+      const restart = vi.fn(() => Promise.resolve())
+      let observation = { version: 1, recovered: true }
+      const supervisor = new RestartSupervisor({
+        component: 'obs-stream',
+        clock,
+        backoff: backoff(3),
+        restart,
+        recoveryTimeoutMs: 5000,
+        recoveryObservation: () => observation,
+      })
+
+      expect(supervisor.request('youtube_broadcast')).toBe('scheduled')
+      await clock.advance(1000)
+
+      expect(restart).toHaveBeenCalledOnce()
+      expect(supervisor.inFlight).toBe(true)
+      expect(supervisor.request('youtube_broadcast')).toBe('in_flight')
+      expect(supervisor.attempts).toBe(1)
+
+      // A generic healthy aggregate and the active status from before the
+      // action returned are not a recovery acknowledgement.
+      supervisor.noteHealthy()
+      expect(supervisor.inFlight).toBe(true)
+      expect(supervisor.attempts).toBe(1)
+      expect(clock.pendingTimerCount).toBe(1)
+
+      observation = { version: 2, recovered: false }
+      supervisor.noteHealthy()
+      expect(supervisor.inFlight).toBe(true)
+
+      observation = { version: 3, recovered: true }
+      supervisor.noteHealthy()
+
+      expect(supervisor.inFlight).toBe(false)
+      expect(supervisor.attempts).toBe(0)
+      expect(supervisor.health().lastError).toBeNull()
+      expect(clock.pendingTimerCount).toBe(0)
+    })
+
+    it('turns an unconfirmed recovery into a failed attempt and bounded exhaustion', async () => {
+      const clock = new FakeClock()
+      const exhausted: RestartExhaustedEvent[] = []
+      const supervisor = new RestartSupervisor({
+        component: 'obs-stream',
+        clock,
+        backoff: backoff(2),
+        restart: () => Promise.resolve(),
+        recoveryTimeoutMs: 5000,
+        onExhausted: (event) => exhausted.push(event),
+      })
+
+      supervisor.request('youtube_broadcast')
+      await clock.advance(6000)
+      expect(supervisor.inFlight).toBe(false)
+      expect(supervisor.exhausted).toBe(false)
+      expect(supervisor.health().lastError).toContain('not observed within 5000ms')
+
+      supervisor.request('youtube_broadcast')
+      await clock.advance(7000)
+
+      expect(supervisor.exhausted).toBe(true)
+      expect(supervisor.attempts).toBe(2)
+      expect(exhausted).toHaveLength(1)
+    })
+
+    it('requires the same fresh canonical boundary after verification times out', async () => {
+      const clock = new FakeClock()
+      let observation = { version: 1, recovered: false }
+      const supervisor = new RestartSupervisor({
+        component: 'obs-stream',
+        clock,
+        backoff: backoff(2),
+        restart: () => Promise.resolve(),
+        recoveryTimeoutMs: 5000,
+        recoveryObservation: () => observation,
+      })
+
+      supervisor.request('youtube_broadcast')
+      await clock.advance(6000)
+      expect(supervisor.health()).toMatchObject({ attempts: 1, inFlight: false })
+      expect(supervisor.health().lastError).toContain('not observed within 5000ms')
+
+      observation = { version: 2, recovered: false }
+      supervisor.noteHealthy()
+      expect(supervisor.health()).toMatchObject({ attempts: 1, inFlight: false })
+      expect(supervisor.health().lastError).toContain('not observed within 5000ms')
+
+      observation = { version: 3, recovered: true }
+      supervisor.noteHealthy()
+      expect(supervisor.health()).toMatchObject({ attempts: 0, inFlight: false, lastError: null })
+    })
+
+    it('cancels a pending health verification when the run stops', async () => {
+      const clock = new FakeClock()
+      const exhausted = vi.fn()
+      const supervisor = new RestartSupervisor({
+        component: 'obs-stream',
+        clock,
+        backoff: backoff(1),
+        restart: () => Promise.resolve(),
+        recoveryTimeoutMs: 5000,
+        onExhausted: exhausted,
+      })
+
+      supervisor.request('youtube_broadcast')
+      await clock.advance(1000)
+      expect(supervisor.inFlight).toBe(true)
+      expect(clock.pendingTimerCount).toBe(1)
+
+      supervisor.stop()
+      await clock.advance(10_000)
+
+      expect(supervisor.inFlight).toBe(false)
+      expect(clock.pendingTimerCount).toBe(0)
+      expect(exhausted).not.toHaveBeenCalled()
+    })
+
+    it('rejects a non-positive or unsafe verification window', () => {
+      const options = {
+        component: 'obs-stream' as const,
+        clock: new FakeClock(),
+        backoff: backoff(1),
+        restart: () => Promise.resolve(),
+      }
+
+      expect(() => new RestartSupervisor({ ...options, recoveryTimeoutMs: 0 })).toThrow(RangeError)
+      expect(
+        () =>
+          new RestartSupervisor({
+            ...options,
+            recoveryTimeoutMs: Number.MAX_SAFE_INTEGER + 1,
+          }),
+      ).toThrow(RangeError)
+    })
+  })
+
   describe('delegated components (spec §10.2)', () => {
     it('refuses to restart a component whose loop is owned elsewhere', () => {
       const supervisor = new RestartSupervisor({
