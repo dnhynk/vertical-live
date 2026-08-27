@@ -6,6 +6,7 @@ import type { CommandMetricsSnapshot } from '../input/metrics.js'
 import { silentLogger, type Logger } from '../secrets/redaction.js'
 import type { AuthEvent, AuthEventSink } from '../youtube/auth/events.js'
 import type { SafeStopRequest } from '../youtube/broadcast/alerts.js'
+import { YOUTUBE_STREAM_STATUS_SIGNAL } from '../youtube/broadcast/health.js'
 import { createExponentialBackoff, type BackoffPolicy } from '../youtube/quota/backoff.js'
 import { nullAlertSink, type Alert, type AlertSeverity, type AlertSink } from './alerts.js'
 import type { SupervisorConfig } from './config.js'
@@ -169,6 +170,13 @@ export class Supervisor {
   #lastEvaluationMonotonicMs: number | null = null
   #lastPreflightMonotonicMs: number | null = null
   #lastAggregate: HealthAggregate | null = null
+  /**
+   * Every canonical stream-status report advances this version. OBS recovery
+   * captures it after StartStream returns, so only a later explicit `ok`
+   * (which the producer emits only for streamStatus=active) can return the
+   * attempt budget. Other YouTube family signals cannot impersonate ingest.
+   */
+  #youtubeStreamStatusObservation = { version: 0, recovered: false }
   #interactionEnabled = true
   #timer: TimerHandle | undefined
   #stopped = false
@@ -206,6 +214,12 @@ export class Supervisor {
   /** Sink handed to every health producer (`HealthSignalSink`). */
   readonly report = (signal: HealthSignal): void => {
     this.#aggregator.report(signal)
+    if (signal.name === YOUTUBE_STREAM_STATUS_SIGNAL) {
+      this.#youtubeStreamStatusObservation = {
+        version: this.#youtubeStreamStatusObservation.version + 1,
+        recovered: signal.status === 'ok',
+      }
+    }
   }
 
   get state(): SupervisorState {
@@ -570,6 +584,11 @@ export class Supervisor {
           },
           canRestart: () => this.#outwardActionsAllowed(),
           ...(recoveryTimeoutMs === undefined ? {} : { recoveryTimeoutMs }),
+          ...(component === 'obs-stream' && recoveryTimeoutMs !== undefined
+            ? {
+                recoveryObservation: () => this.#youtubeStreamStatusObservation,
+              }
+            : {}),
         }),
       )
     }
@@ -768,7 +787,7 @@ export class Supervisor {
     this.#observeModerationHeuristics()
     await this.#maybeRetryPreflight()
     const nowMonotonicMs = this.#clock.monotonicMs()
-    for (const signal of this.#options.sources?.() ?? []) this.#aggregator.report(signal)
+    for (const signal of this.#options.sources?.() ?? []) this.report(signal)
     const engine = this.#options.engine.health()
     const aggregate = this.#aggregator.evaluate({
       engine,

@@ -676,6 +676,154 @@ describe('supervisor state machine', () => {
       expect(harness.supervisor.state).toBe('live')
     })
 
+    it('does not accept an unknown stream status through the generic healthy path', async () => {
+      const harness = createSupervisorHarness({
+        preflight: passingPreflight(),
+        restartDelayMs: 500,
+        restartRecoveryTimeoutMs: { 'obs-stream': 10_000 },
+      })
+      await goLive(harness)
+
+      await harness.clock.advance(1000)
+      harness.pushHealthy(['youtube.stream_status'])
+      harness.push(
+        signal('youtube.stream_status', 'degraded', {
+          component: 'youtube',
+          reason: 'stream_inactive',
+          at: harness.clock.nowUtcIso(),
+          monotonicMs: harness.clock.monotonicMs(),
+        }),
+      )
+      await harness.supervisor.evaluate()
+      await harness.clock.advance(500)
+
+      const component = () =>
+        harness.supervisor.components().find((entry) => entry.component === 'obs-stream')
+      expect(component()).toMatchObject({ attempts: 1, inFlight: true })
+
+      await harness.clock.advance(harness.config.evaluateIntervalMs)
+      harness.pushHealthy(['youtube.stream_status'])
+      harness.push(
+        signal('youtube.stream_status', 'unknown', {
+          component: 'youtube',
+          reason: 'status_unreadable',
+          at: harness.clock.nowUtcIso(),
+          monotonicMs: harness.clock.monotonicMs(),
+        }),
+      )
+      const aggregate = await harness.supervisor.evaluate()
+
+      // stream health/lifecycle make the aggregate family look ok, but neither
+      // is an explicit positive ingest observation.
+      expect(aggregate.families.youtube_broadcast.status).toBe('ok')
+      expect(component()).toMatchObject({ attempts: 1, inFlight: true })
+      expect(harness.restarts).toEqual(['obs-stream'])
+      expect(harness.clock.pendingTimerCount).toBe(1)
+    })
+
+    it('does not accept a different degraded YouTube reason without active stream status', async () => {
+      const harness = createSupervisorHarness({
+        preflight: passingPreflight(),
+        restartDelayMs: 500,
+        restartRecoveryTimeoutMs: { 'obs-stream': 10_000 },
+      })
+      await goLive(harness)
+
+      await harness.clock.advance(1000)
+      harness.pushHealthy(['youtube.stream_status'])
+      harness.push(
+        signal('youtube.stream_status', 'degraded', {
+          component: 'youtube',
+          reason: 'stream_inactive',
+          at: harness.clock.nowUtcIso(),
+          monotonicMs: harness.clock.monotonicMs(),
+        }),
+      )
+      await harness.supervisor.evaluate()
+      await harness.clock.advance(500)
+
+      await harness.clock.advance(harness.config.evaluateIntervalMs)
+      harness.pushHealthy(['youtube.stream_status', 'youtube.stream_health'])
+      harness.push(
+        signal('youtube.stream_status', 'unknown', {
+          component: 'youtube',
+          reason: 'status_unreadable',
+          at: harness.clock.nowUtcIso(),
+          monotonicMs: harness.clock.monotonicMs(),
+        }),
+        signal('youtube.stream_health', 'degraded', {
+          component: 'youtube',
+          reason: 'health_bad',
+          at: harness.clock.nowUtcIso(),
+          monotonicMs: harness.clock.monotonicMs(),
+        }),
+      )
+      const aggregate = await harness.supervisor.evaluate()
+      const component = harness.supervisor
+        .components()
+        .find((entry) => entry.component === 'obs-stream')
+
+      // `health_bad` deliberately does not map to an OBS restart, but that
+      // absence cannot acknowledge the in-flight stream recovery either.
+      expect(aggregate.families.youtube_broadcast).toMatchObject({
+        status: 'degraded',
+        reason: 'health_bad',
+      })
+      expect(component).toMatchObject({ attempts: 1, inFlight: true })
+      expect(harness.restarts).toEqual(['obs-stream'])
+      expect(harness.clock.pendingTimerCount).toBe(1)
+    })
+
+    it('preserves OBS-output-only recovery after a fresh active stream observation', async () => {
+      const harness = createSupervisorHarness({
+        preflight: passingPreflight(),
+        restartDelayMs: 500,
+        restartRecoveryTimeoutMs: { 'obs-stream': 10_000 },
+      })
+      await goLive(harness)
+
+      await harness.clock.advance(1000)
+      harness.pushHealthy(['obs.stream'])
+      harness.push(
+        signal('obs.stream', 'degraded', {
+          component: 'obs',
+          reason: 'output_inactive',
+          at: harness.clock.nowUtcIso(),
+          monotonicMs: harness.clock.monotonicMs(),
+        }),
+      )
+      await harness.supervisor.evaluate()
+      await harness.clock.advance(500)
+
+      const component = () =>
+        harness.supervisor.components().find((entry) => entry.component === 'obs-stream')
+      expect(component()).toMatchObject({ attempts: 1, inFlight: true })
+
+      await harness.clock.advance(harness.config.evaluateIntervalMs)
+      harness.pushHealthy(['youtube.stream_health'])
+      harness.push(
+        signal('youtube.stream_health', 'degraded', {
+          component: 'youtube',
+          reason: 'health_bad',
+          at: harness.clock.nowUtcIso(),
+          monotonicMs: harness.clock.monotonicMs(),
+        }),
+      )
+      const aggregate = await harness.supervisor.evaluate()
+
+      // The OBS output family recovered and this tick included a fresh active
+      // stream status. A separate stream-health problem keeps the machine
+      // degraded, but it must not strand the completed OBS restart attempt.
+      expect(aggregate.families.obs_output.status).toBe('ok')
+      expect(aggregate.families.youtube_broadcast).toMatchObject({
+        status: 'degraded',
+        reason: 'health_bad',
+      })
+      expect(component()).toMatchObject({ attempts: 0, inFlight: false })
+      expect(harness.restarts).toEqual(['obs-stream'])
+      expect(harness.clock.pendingTimerCount).toBe(0)
+    })
+
     it("never dials OBS itself: the connection loop stays ObsClient's (spec §10.2)", async () => {
       const harness = createSupervisorHarness({ preflight: passingPreflight() })
       await goLive(harness)

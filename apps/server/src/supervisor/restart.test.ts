@@ -156,12 +156,14 @@ describe('RestartSupervisor', () => {
     it('keeps the same attempt in flight until canonical health confirms recovery', async () => {
       const clock = new FakeClock()
       const restart = vi.fn(() => Promise.resolve())
+      let observation = { version: 1, recovered: true }
       const supervisor = new RestartSupervisor({
         component: 'obs-stream',
         clock,
         backoff: backoff(3),
         restart,
         recoveryTimeoutMs: 5000,
+        recoveryObservation: () => observation,
       })
 
       expect(supervisor.request('youtube_broadcast')).toBe('scheduled')
@@ -172,6 +174,18 @@ describe('RestartSupervisor', () => {
       expect(supervisor.request('youtube_broadcast')).toBe('in_flight')
       expect(supervisor.attempts).toBe(1)
 
+      // A generic healthy aggregate and the active status from before the
+      // action returned are not a recovery acknowledgement.
+      supervisor.noteHealthy()
+      expect(supervisor.inFlight).toBe(true)
+      expect(supervisor.attempts).toBe(1)
+      expect(clock.pendingTimerCount).toBe(1)
+
+      observation = { version: 2, recovered: false }
+      supervisor.noteHealthy()
+      expect(supervisor.inFlight).toBe(true)
+
+      observation = { version: 3, recovered: true }
       supervisor.noteHealthy()
 
       expect(supervisor.inFlight).toBe(false)
