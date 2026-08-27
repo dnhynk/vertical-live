@@ -84,6 +84,12 @@ export interface SupervisorOptions {
   readonly clock: Clock
   readonly engine: SupervisedEngine
   readonly actions: ComponentActions
+  /**
+   * Components whose restart command returns before external health can prove
+   * recovery. The action remains in flight until `#driveRecovery` observes the
+   * component healthy or this timeout fails the attempt (T51).
+   */
+  readonly restartRecoveryTimeoutMs?: Readonly<Partial<Record<SupervisedComponent, number>>>
   /** Last renderer health frame (`RendererHub.lastHealth`), spec §9.4(4). */
   readonly renderer?: () => RendererHealthReport | null
   /**
@@ -540,6 +546,7 @@ export class Supervisor {
       ['obs-process', actions.obsProcess],
     ]
     for (const [component, restart] of owned) {
+      const recoveryTimeoutMs = this.#options.restartRecoveryTimeoutMs?.[component]
       this.registry.register(
         new RestartSupervisor({
           component,
@@ -562,6 +569,7 @@ export class Supervisor {
             void this.#handleExhausted(event)
           },
           canRestart: () => this.#outwardActionsAllowed(),
+          ...(recoveryTimeoutMs === undefined ? {} : { recoveryTimeoutMs }),
         }),
       )
     }

@@ -1014,22 +1014,27 @@
   5. PowerShell·config 테스트가 성공/거부 경로를 고정하고, secret·audience 설정·contract·dependency·Orca runtime 변경이 없다.
   6. fetch/rebase + `npm ci` + 게이트 5개 + latest-head CI가 녹색이며 PR 본문은 실제 72시간 운전과 Gate 2 성공을 주장하지 않는다.
 
-## T51 — chat-source 재시작 완료를 transport 회복까지 검증한다
+## T51 — component 재시작 완료를 정본 health 회복까지 검증한다
 
 - slug `t51-chat-restart-readiness` · PR 접두 `fix(supervisor):` · 의존 T12, T47, T48 · **non-contract**
 - **읽을 것**: 스펙 §9.1·§9.2·§9.4·§10.2·§11, BOARD D-25, T47, `apps/server/src/main.ts`, `apps/server/src/supervisor/restart.ts`, `apps/server/src/supervisor/runtime.ts`, `apps/server/src/youtube/chat/chat-source.ts`, `apps/server/src/youtube/chat/health.ts`
 - **관측**(2026-08-27 KST, 첫 public pilot): 2026-08-26T16:00:38.380Z, 16:00:42.286Z, 16:00:51.317Z에 chat-source restart 1·2·3회가 `stop()` 뒤 `start()` 호출만으로 즉시 completed 처리됐다. T47의 25,000ms gRPC start pacing과 transport 회복이 끝나기 전에 기존 `chat_transport` degraded가 다음 tick에 그대로 읽혀 예산이 연속 소모됐고, 세 번째 `start()` 139ms 뒤 `restart_budget_exhausted` safe-stop이 발생했다. 같은 시각의 `frame_loss`는 restart 대상이 아니며 reason 문자열에 함께 기록됐을 뿐이다.
+- **추가 관측**(2026-08-27 KST, 두 번째 public pilot): OBS output은 2026-08-27T12:18:37.899Z, 12:18:54.443Z, 12:18:57.996Z에 restart action 1·2·3회를 completed 처리했지만, YouTube `streamStatus`는 계속 `inactive`였다. 세 번째 action 8.799초 뒤인 12:19:06.795Z에도 `youtube_broadcast`가 degraded였고 4ms 뒤 `obs-stream:youtube_broadcast` 예산 소진으로 safe-stop했다. `ObsControl.startStream()`의 로컬 output 검증과 YouTube ingest 회복은 서로 다른 완료 경계다.
 - **범위**
   - production chat restart action은 `stop()` 완료와 abort 재확인 뒤 `start()`하고, 정본 chat transport readiness signal이 `ok`가 될 때까지 bounded/cancellable하게 기다린 뒤에만 restart 성공으로 반환한다.
   - restart readiness timeout은 T47의 최악 start pacing wait와 기존 `supervisor.chatStart.timeoutMs`를 모두 포함한다. 새 임계값을 만들지 않는다.
   - readiness wait 동안 `RestartSupervisor.inFlight`를 유지해 반복 supervisor tick이 같은 장애에 다음 attempt를 예약하거나 예산을 소모하지 못하게 한다.
   - readiness timeout은 실패한 attempt로 기록되어 기존 exponential backoff·최대 횟수·safe-stop 경로를 유지한다. safe-stop/stop abort는 wait를 즉시 끝내고 이후 outward start를 만들지 않는다.
   - startup의 chat `started()` 판정도 같은 정본 transport readiness를 사용해 mode 선택만으로 성공하지 않게 한다.
-  - T47 quota pacing·checkpoint·reconnect history, T48 safe-stop I/O halt, 다른 component restart ownership은 보존한다. live process, host task, secret, `packages/contract`, dependency, BOARD 외 운영 문서, HANDOFF는 바꾸지 않는다.
+  - `obs-stream`은 `StartStream` RPC 성공 뒤에도 현재 장애를 만든 정본 health family가 회복될 때까지 attempt를 in-flight로 유지한다. 회복 관측 전에는 같은 degraded tick이 다음 attempt를 예약하지 못한다.
+  - OBS 회복 확인 timeout은 기존 `youtube.broadcast.autoStartWaitMs + healthPollIntervalMs`를 사용한다. ingest 회복에 이미 허용한 최대 시간과 마지막 상태 poll 한 번을 포함하며 새 임계값을 만들지 않는다.
+  - 회복 확인 timeout은 실패한 attempt로 기록되어 기존 backoff·bounded exhaustion을 유지하고, safe-stop/stop은 확인 timer도 취소한다.
+  - T47 quota pacing·checkpoint·reconnect history, T48 safe-stop I/O halt, component restart ownership은 보존한다. live process, host task, secret, `packages/contract`, dependency, BOARD 외 운영 문서, HANDOFF는 바꾸지 않는다.
 - **합격 기준**
   1. chat restart는 source start 호출이 아니라 정본 `youtube.chat.transport=ok` 관측 뒤에만 completed 처리된다.
   2. transport가 아직 회복 중인 동안 반복 recovery request/tick은 최초 attempt 하나만 유지하고 2·3회 예산을 소모하지 않는다.
   3. T47 pacing 직후의 transport 회복을 기다릴 수 있도록 timeout이 `grpcStreamMinStartIntervalMs + supervisor.chatStart.timeoutMs` 이상이며 polling은 주입 clock으로 결정론적으로 검증된다.
   4. timeout이면 attempt가 실패로 기록되고 기존 backoff와 bounded exhaustion이 계속 동작한다. abort면 wait가 즉시 끝나고 safe-stop 뒤 start가 없다.
   5. startup도 canonical transport readiness가 `ok`가 될 때까지 성공하지 않으며 기존 정상 startup, quota pacing, checkpoint/reconnect, T48 halt가 회귀하지 않는다.
-  6. focused 회귀 테스트 + fetch/rebase + `npm ci` + 게이트 5개 + latest-head CI가 녹색이다.
+  6. `obs-stream` action 반환 뒤 `youtube.stream_status=active`가 관측될 때까지 같은 attempt가 in-flight이며, inactive가 지속되면 `autoStartWaitMs + healthPollIntervalMs` 뒤 실패·backoff·bounded exhaustion으로 이어진다.
+  7. focused 회귀 테스트 + fetch/rebase + `npm ci` + 게이트 5개 + latest-head CI가 녹색이다.

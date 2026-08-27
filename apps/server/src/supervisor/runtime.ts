@@ -235,6 +235,22 @@ export function chatRestartReadinessTimeoutMs(
   return timeoutMs
 }
 
+/**
+ * The existing maximum wait for YouTube to see ingest, plus one full canonical
+ * health-poll interval so a recovery at the edge can still be observed (T51).
+ * Both inputs are already provisional production settings; this adds no knob.
+ */
+export function obsStreamRecoveryVerificationTimeoutMs(
+  autoStartWaitMs: number,
+  healthPollIntervalMs: number,
+): number {
+  const timeoutMs = autoStartWaitMs + healthPollIntervalMs
+  if (!Number.isSafeInteger(timeoutMs)) {
+    throw new RangeError('OBS stream recovery verification timeout exceeds Number.MAX_SAFE_INTEGER')
+  }
+  return timeoutMs
+}
+
 export async function waitForChatSourceReady(options: ChatReadinessWaitOptions): Promise<void> {
   const deadlineMs = options.clock.monotonicMs() + options.timeoutMs
   for (;;) {

@@ -625,6 +625,57 @@ describe('supervisor state machine', () => {
       expect(harness.supervisor.state).toBe('live')
     })
 
+    it('holds one OBS attempt until YouTube confirms active ingest (T51)', async () => {
+      const harness = createSupervisorHarness({
+        preflight: passingPreflight(),
+        restartDelayMs: 500,
+        restartRecoveryTimeoutMs: { 'obs-stream': 10_000 },
+      })
+      await goLive(harness)
+
+      const pushInactive = (): void => {
+        harness.pushHealthy(['youtube.stream_status'])
+        harness.push(
+          signal('youtube.stream_status', 'degraded', {
+            component: 'youtube',
+            reason: 'stream_inactive',
+            at: harness.clock.nowUtcIso(),
+            monotonicMs: harness.clock.monotonicMs(),
+          }),
+        )
+      }
+
+      await harness.clock.advance(1000)
+      pushInactive()
+      await harness.supervisor.evaluate()
+      await harness.clock.advance(500)
+
+      const component = () =>
+        harness.supervisor.components().find((entry) => entry.component === 'obs-stream')
+      expect(harness.restarts).toEqual(['obs-stream'])
+      expect(component()?.inFlight).toBe(true)
+      expect(component()?.attempts).toBe(1)
+
+      // Repeated production ticks with the same YouTube verdict cannot spend
+      // attempts 2/3 while attempt 1 is awaiting the canonical active signal.
+      for (let tick = 0; tick < 3; tick += 1) {
+        await harness.clock.advance(harness.config.evaluateIntervalMs)
+        pushInactive()
+        await harness.supervisor.evaluate()
+      }
+      expect(harness.restarts).toEqual(['obs-stream'])
+      expect(component()?.attempts).toBe(1)
+      expect(component()?.inFlight).toBe(true)
+
+      await harness.clock.advance(harness.config.evaluateIntervalMs)
+      harness.pushHealthy()
+      await harness.supervisor.evaluate()
+
+      expect(component()?.attempts).toBe(0)
+      expect(component()?.inFlight).toBe(false)
+      expect(harness.supervisor.state).toBe('live')
+    })
+
     it("never dials OBS itself: the connection loop stays ObsClient's (spec §10.2)", async () => {
       const harness = createSupervisorHarness({ preflight: passingPreflight() })
       await goLive(harness)

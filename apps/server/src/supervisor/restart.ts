@@ -72,6 +72,14 @@ export interface RestartSupervisorOptions {
    * which is exactly the automatic restart spec §9.1/§9.2 prohibit.
    */
   readonly canRestart?: () => boolean
+  /**
+   * Keep a successful action in flight until the next aggregate says this
+   * component is healthy. Command completion and recovery are different
+   * boundaries for remote systems: OBS can accept `StartStream` before YouTube
+   * reports active ingest (T51). If health never confirms recovery, the attempt
+   * fails after this window and the existing backoff/budget continues.
+   */
+  readonly recoveryTimeoutMs?: number
 }
 
 export interface RestartAttemptEvent {
@@ -112,6 +120,7 @@ export class RestartSupervisor {
 
   #attempts = 0
   #inFlight = false
+  #verifyingRecovery = false
   #exhausted = false
   #stopped = false
   #timer: TimerHandle | undefined
@@ -129,6 +138,14 @@ export class RestartSupervisor {
     this.#logger = options.logger ?? silentLogger
     if (options.restart === undefined && options.owner === undefined) {
       throw new Error(`${options.component}: a supervisor-owned component needs a restart action`)
+    }
+    if (
+      options.recoveryTimeoutMs !== undefined &&
+      (!Number.isSafeInteger(options.recoveryTimeoutMs) || options.recoveryTimeoutMs <= 0)
+    ) {
+      throw new RangeError(
+        `${options.component}: recoveryTimeoutMs must be a positive safe integer`,
+      )
     }
   }
 
@@ -174,6 +191,7 @@ export class RestartSupervisor {
       this.#clock.clearTimeout(this.#timer)
       this.#timer = undefined
     }
+    this.#verifyingRecovery = false
     this.#inFlight = false
   }
 
@@ -208,7 +226,23 @@ export class RestartSupervisor {
    * restart is exactly the case §9.2 wants to end in `safe_stopped`.
    */
   noteHealthy(): void {
-    if (this.#inFlight || this.#stopped) return
+    if (this.#stopped) return
+    // Backoff and the action itself remain protected from a transient healthy
+    // sample. Once the action has returned, however, this is the canonical
+    // acknowledgement it was waiting for (T51).
+    if (this.#inFlight && !this.#verifyingRecovery) return
+    if (this.#verifyingRecovery) {
+      if (this.#timer !== undefined) {
+        this.#clock.clearTimeout(this.#timer)
+        this.#timer = undefined
+      }
+      this.#verifyingRecovery = false
+      this.#inFlight = false
+      this.#logger.info('supervisor restart recovery verified', {
+        component: this.component,
+        attempt: this.#attempts,
+      })
+    }
     this.#attempts = 0
     this.#exhausted = false
     this.#lastError = null
@@ -287,6 +321,7 @@ export class RestartSupervisor {
     }
     const abort = new AbortController()
     this.#abort = abort
+    let awaitingRecovery = false
     try {
       await restart(abort.signal)
       if (abort.signal.aborted) {
@@ -300,11 +335,17 @@ export class RestartSupervisor {
         return
       }
       this.#lastError = null
-      this.#logger.info('supervisor restart completed', {
-        component: this.component,
-        attempt: this.#attempts,
-        reason,
-      })
+      const recoveryTimeoutMs = this.#options.recoveryTimeoutMs
+      if (recoveryTimeoutMs === undefined) {
+        this.#logger.info('supervisor restart completed', {
+          component: this.component,
+          attempt: this.#attempts,
+          reason,
+        })
+      } else {
+        this.#beginRecoveryVerification(reason, recoveryTimeoutMs)
+        awaitingRecovery = true
+      }
     } catch (error) {
       this.#lastError = error instanceof Error ? error.message : String(error)
       this.#logger.error('supervisor restart failed', {
@@ -315,7 +356,7 @@ export class RestartSupervisor {
       })
     } finally {
       if (this.#abort === abort) this.#abort = undefined
-      this.#inFlight = false
+      if (!awaitingRecovery) this.#inFlight = false
       if (
         !this.#stopped &&
         this.#attempts >= this.#options.backoff.maxAttempts &&
@@ -324,6 +365,32 @@ export class RestartSupervisor {
         this.#markExhausted(reason)
       }
     }
+  }
+
+  #beginRecoveryVerification(reason: string, timeoutMs: number): void {
+    this.#timer = this.#clock.setTimeout(() => {
+      this.#timer = undefined
+      if (!this.#verifyingRecovery || this.#stopped) return
+      this.#verifyingRecovery = false
+      this.#inFlight = false
+      this.#lastError = `health recovery was not observed within ${timeoutMs}ms`
+      this.#logger.error('supervisor restart health recovery timed out', {
+        component: this.component,
+        attempt: this.#attempts,
+        reason,
+        timeoutMs,
+      })
+      if (this.#attempts >= this.#options.backoff.maxAttempts) {
+        this.#markExhausted(reason)
+      }
+    }, timeoutMs)
+    this.#verifyingRecovery = true
+    this.#logger.info('supervisor restart action completed; awaiting health recovery', {
+      component: this.component,
+      attempt: this.#attempts,
+      reason,
+      timeoutMs,
+    })
   }
 
   #markExhausted(reason: string): void {

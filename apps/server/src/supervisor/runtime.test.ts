@@ -11,6 +11,7 @@ import {
   buildPreflightProbes,
   buildStartupSteps,
   chatRestartReadinessTimeoutMs,
+  obsStreamRecoveryVerificationTimeoutMs,
   restartChatSource,
   type BroadcastPort,
   type ObsPort,
@@ -296,6 +297,13 @@ describe('restartChatSource (T51)', () => {
   it('uses the pacing floor plus the existing readiness window', () => {
     expect(chatRestartReadinessTimeoutMs(30_000, 25_000)).toBe(55_000)
     expect(() => chatRestartReadinessTimeoutMs(Number.MAX_SAFE_INTEGER, 1)).toThrow(RangeError)
+  })
+
+  it('uses the existing YouTube ingest window plus one health poll for OBS recovery', () => {
+    expect(obsStreamRecoveryVerificationTimeoutMs(120_000, 20_000)).toBe(140_000)
+    expect(() => obsStreamRecoveryVerificationTimeoutMs(Number.MAX_SAFE_INTEGER, 1)).toThrow(
+      RangeError,
+    )
   })
 
   it('times out as a failed attempt and preserves bounded exhaustion', async () => {

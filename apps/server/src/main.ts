@@ -40,6 +40,7 @@ import {
   buildPreflightProbes,
   buildStartupSteps,
   chatRestartReadinessTimeoutMs,
+  obsStreamRecoveryVerificationTimeoutMs,
   restartChatSource,
   type BroadcastPort,
   type ObsPort,
@@ -375,6 +376,8 @@ let tokens: TokenManager | null = null
 let broadcastPort: BroadcastPort | null = null
 let broadcastLifecycle: BroadcastLifecycle | null = null
 let broadcastHealthMonitor: BroadcastHealthMonitor | null = null
+/** T51: action completion is not YouTube ingest recovery. Null without broadcast. */
+let obsStreamRecoveryVerificationMs: number | null = null
 /** Set when either YouTube integration is on; `/health` reads their combined spend. */
 let quotaTracker: QuotaTracker | null = null
 
@@ -442,6 +445,10 @@ if (needsGrant) {
 
   if (supervisorConfig.integrations.broadcast) {
     const broadcastConfig = loadBroadcastConfig()
+    obsStreamRecoveryVerificationMs = obsStreamRecoveryVerificationTimeoutMs(
+      broadcastConfig.autoStartWaitMs,
+      broadcastConfig.healthPollIntervalMs,
+    )
     const custodian = new StreamKeyCustodian({ vault, redactor, logger: stdoutLogger })
     const api = new YouTubeLiveApi({
       tokens,
@@ -710,6 +717,13 @@ const supervisor: Supervisor = new Supervisor({
     },
     obsConnectionAttempts: () => obsClient?.reconnectAttempts ?? 0,
   },
+  ...(obsStreamRecoveryVerificationMs === null
+    ? {}
+    : {
+        restartRecoveryTimeoutMs: {
+          'obs-stream': obsStreamRecoveryVerificationMs,
+        },
+      }),
   onHaltOutwardWork: () => {
     // T48: these loops own their own timers/transports rather than supervisor
     // restart slots. Cancel them synchronously on entry so even a blocked
