@@ -46,6 +46,12 @@ restart action의 명령 반환을 실제 회복 완료로 오인해 동일한 d
 | restart readiness timeout | `grpcStreamMinStartIntervalMs + supervisor.chatStart.timeoutMs` | 기존 provisional 값의 합 | T47 pacing 전체와 기존 chat readiness window를 모두 보장하며 새 임계값을 만들지 않는다. |
 | OBS recovery verification timeout | `youtube.broadcast.autoStartWaitMs + healthPollIntervalMs` | 기존 provisional 값의 합 | YouTube ingest에 이미 허용한 최대 회복 시간 뒤 마지막 canonical status poll 한 번을 포함하며 새 임계값을 만들지 않는다. |
 
+## Review round 1
+
+- [blocker] `apps/server/src/supervisor/restart.ts` / `supervisor.ts`: action 이후 verification 중에도 `componentsToRestart()`가 `obs-stream`을 선택하지 않으면 generic `noteHealthy()`가 timer·in-flight·attempt budget을 지웠다. 따라서 `youtube.stream_status=unknown/status_unreadable`이고 같은 family의 다른 신호가 `ok`인 경우, 또는 `youtube.stream_health=degraded/health_bad`처럼 OBS restart 대상이 아닌 reason인 경우에도 `active` 관측 없이 recovery가 승인됐다.
+- 고침 (`57880e4`): `StartStream` action 반환 시점의 canonical stream-status observation version을 캡처한다. 그 뒤 새 `youtube.stream_status=ok` 관측이 들어왔고 현재 관측도 `ok`일 때만 generic healthy acknowledgement가 verification을 끝낸다. production producer에서 이 `ok`는 명시적 `streamStatus=active`만 뜻한다.
+- 회귀 (`supervisor.test.ts`, `restart.test.ts`): (1) status unknown + family aggregate `ok`, (2) status unknown + 별도 `health_bad` degraded reason은 timer/in-flight/attempts를 보존한다. (3) OBS-output-only 장애는 output 회복과 새 active status 뒤 정상 완료되며, 별도 `health_bad`는 supervisor를 degraded로 유지하되 OBS restart budget을 붙잡지 않는다.
+
 ## Result
 
 ### Acceptance criteria
@@ -56,25 +62,25 @@ restart action의 명령 반환을 실제 회복 완료로 오인해 동일한 d
 | 2 | 회복 대기 중 attempt 1회 유지 | met | `runtime.test.ts`: incident보다 긴 14초 동안 2초 간격 recovery request를 반복해도 모두 `in_flight`, attempts=1이며 readiness 뒤에만 완료된다. |
 | 3 | pacing + readiness timeout, injected clock | met | production은 `chatRestartReadinessTimeoutMs(chatStart.timeoutMs, grpcStreamMinStartIntervalMs)`를 사용한다. shipped 30,000+25,000=55,000ms를 FakeClock으로 고정했고 unsafe integer 합은 거부한다. |
 | 4 | timeout/backoff/exhaustion 및 abort 보존 | met | FakeClock에서 1,000ms readiness timeout이 `lastError`로 남고 두 번째 실패 뒤 기존 maxAttempts=2 exhaustion에 도달한다. stop-await abort는 start 0회, active wait abort는 pending timer 1→0을 증명한다. |
-| 5 | startup 및 T47/T48 회귀 없음 | met | startup도 canonical readiness를 기다린다. 전체 155 files/2,257 passed/1 skipped; contract/dependency/host/live 변경 0. |
-| 6 | OBS action 이후 canonical health 회복까지 in-flight | met | `RestartSupervisor.recoveryTimeoutMs`가 action 반환 뒤에도 `inFlight=true`를 유지한다. `#driveRecovery()`가 `youtube.stream_status=active`를 포함한 aggregate 회복을 관측하면 같은 attempt를 승인·reset한다. 3회 반복 inactive tick에서도 restart 1회/attempts 1을 유지하고, 5,000ms timeout 2회 뒤 기존 maxAttempts=2 exhaustion, stop timer 취소를 FakeClock으로 고정했다. production 120,000+20,000=140,000ms다. |
-| 7 | focused + 5 gates + latest-head CI | met | fetch 결과 behind 0, focused 4 files/95 passed 및 로컬 5 gates 성공. PR #64 implementation head `8d6518f`의 GitHub Actions CI `33091132424`도 soak 포함 2m09s에 성공했다. 이 결과-only 티켓 head의 CI를 최종 handoff 전에 다시 확인한다. |
+| 5 | startup 및 T47/T48 회귀 없음 | met | startup도 canonical readiness를 기다린다. 전체 155 files/2,260 passed/1 skipped; contract/dependency/host/live 변경 0. |
+| 6 | OBS action 이후 canonical health 회복까지 in-flight | met | `57880e4`: action 반환 뒤 stream-status observation version을 캡처하고, 이후의 새 `youtube.stream_status=ok`만 timer/in-flight/attempts를 지운다. unknown + aggregate ok와 unknown + `health_bad`는 모두 attempt 1/timer를 보존한다. OBS-output-only 장애는 새 active 관측 뒤 완료된다. 기존 5,000ms timeout 2회→maxAttempts=2 exhaustion, stop timer 취소 회귀도 유지되며 production window는 120,000+20,000=140,000ms다. |
+| 7 | focused + 5 gates + latest-head CI | unverifiable | fetch/rebase behind 0, `npm ci`, focused 4 files/98 passed, 로컬 5 gates가 성공했다. 이 티켓 갱신으로 생기는 최종 head의 GitHub CI(`soak:ci` 포함)는 push 뒤 확인하고 PR evidence에 exact SHA/run을 기록한다. |
 
 ## Gates (executed)
 
 ```text
 git fetch origin --prune
-git rev-list --left-right --count origin/main...HEAD -> 0 5 (rebase 불필요)
+git rebase origin/main -> current branch up to date
+git rev-list --left-right --count origin/main...HEAD -> 0 8
 npm ci                -> pass (431 packages; audit 경고 10건, dependency 변경 없음)
 npx vitest run apps/server/src/supervisor/runtime.test.ts apps/server/src/supervisor/restart.test.ts apps/server/src/supervisor/supervisor.test.ts apps/server/src/youtube/chat/chat-source.test.ts
-                      -> pass (4 files; 95 passed)
+                      -> pass (4 files; 98 passed)
 npm run format:check  -> pass
 npm run lint          -> pass (legacy imports 0; install scripts reviewed 4)
 npm run typecheck     -> pass
-npm run test          -> pass (155 files; 2,257 passed; 1 skipped)
+npm run test          -> pass (155 files; 2,260 passed; 1 skipped)
 npm run build         -> pass (schema/data map up to date; renderer/server/simulator/soak)
-GitHub Actions CI     -> pass (run 33091132424; exact implementation head 8d6518f; 2m09s; soak:ci 포함)
-Final result-only head -> PR check green을 handoff 전에 재확인
+GitHub Actions CI     -> pending for the final result-only head; exact SHA/run은 PR evidence에 기록
 ```
 
 ## Not done / out of scope
