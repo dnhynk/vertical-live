@@ -40,17 +40,27 @@ chat-source restart가 `start()` 호출만으로 성공 처리되어 새 transpo
 
 | # | 기준 | 상태(met/unmet/unverifiable) | 근거 |
 |---|---|---|---|
-| 1 | canonical transport `ok` 뒤 completed | pending | — |
-| 2 | 회복 대기 중 attempt 1회 유지 | pending | — |
-| 3 | pacing + readiness timeout, injected clock | pending | — |
-| 4 | timeout/backoff/exhaustion 및 abort 보존 | pending | — |
-| 5 | startup 및 T47/T48 회귀 없음 | pending | — |
-| 6 | focused + 5 gates + latest-head CI | pending | — |
+| 1 | canonical transport `ok` 뒤 completed | met | fix `89a64e7`: `ChatSource.transportReady()`가 정본 `youtube.chat.transport=ok`를 읽고 production startup/restart port가 같은 판정을 사용한다. `restartChatSource()`는 이 판정 전에는 반환하지 않는다. |
+| 2 | 회복 대기 중 attempt 1회 유지 | met | `runtime.test.ts`: incident보다 긴 14초 동안 2초 간격 recovery request를 반복해도 모두 `in_flight`, attempts=1이며 readiness 뒤에만 완료된다. |
+| 3 | pacing + readiness timeout, injected clock | met | production은 `chatRestartReadinessTimeoutMs(chatStart.timeoutMs, grpcStreamMinStartIntervalMs)`를 사용한다. shipped 30,000+25,000=55,000ms를 FakeClock으로 고정했고 unsafe integer 합은 거부한다. |
+| 4 | timeout/backoff/exhaustion 및 abort 보존 | met | FakeClock에서 1,000ms readiness timeout이 `lastError`로 남고 두 번째 실패 뒤 기존 maxAttempts=2 exhaustion에 도달한다. stop-await abort는 start 0회, active wait abort는 pending timer 1→0을 증명한다. |
+| 5 | startup 및 T47/T48 회귀 없음 | met | startup도 canonical readiness를 기다린다. focused 3 files/51 passed 및 전체 155 files/2,251 passed/1 skipped; contract/dependency/host/live 변경 0. |
+| 6 | focused + 5 gates + latest-head CI | pending | `npm ci`, fetch(HEAD가 origin/main보다 2 commits ahead/behind 0), focused 및 로컬 5 gates는 성공. PR latest-head CI 대기. |
 
 ## Gates (executed)
 
 ```text
-pending
+git fetch origin --prune
+git rev-list --left-right --count origin/main...HEAD -> 0 2 (rebase 불필요)
+npm ci                -> pass (431 packages; audit 경고 10건, dependency 변경 없음)
+npx vitest run apps/server/src/supervisor/runtime.test.ts apps/server/src/supervisor/restart.test.ts apps/server/src/youtube/chat/chat-source.test.ts
+                      -> pass (3 files; 51 passed)
+npm run format:check  -> pass
+npm run lint          -> pass (legacy imports 0; install scripts reviewed 4)
+npm run typecheck     -> pass
+npm run test          -> pass (155 files; 2,251 passed; 1 skipped)
+npm run build         -> pass (schema/data map up to date; renderer/server/simulator/soak)
+GitHub Actions CI     -> pending
 ```
 
 ## Not done / out of scope
