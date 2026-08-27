@@ -67,7 +67,7 @@
 | T48 | `safe_stopped` 뒤에도 broadcast health loop가 YouTube API를 계속 호출해 quota를 소비한다(실측) | T12, T44, T47 | — | merged | t48-safe-stop-youtube-io | #61 | `task_696a409f6a0a` |
 | T49 | archive CLI가 workspace cwd에서 잘못된 `data/`를 보고 예약 sweep도 다음 실행이 없다(실측) | T17 | — | merged | t49-archive-enforcement | #62 | `task_cbcd6207d6eb` |
 | T50 | D-25: 사전 수동 게이트 대신 72시간 public observational pilot 경로·명시적 `-Public` 운영 스위치 | T48, T49 | — | merged | t50-live-first-public-pilot | #63 | `task_f941e0758e93` |
-| T51 | component restart action이 정본 health 회복 전에 completed되어 chat/OBS 예산을 연속 소진한 public pilot 실측 결함 | T12, T47, T48 | — | in_review | t51-chat-restart-readiness | #64 | primary Codex/GPT |
+| T51 | component restart action이 정본 health 회복 전에 completed되어 chat/OBS 예산을 연속 소진한 public pilot 실측 결함 | T12, T47, T48 | — | merged | t51-chat-restart-readiness | #64 | primary Codex/GPT |
 | T40 | `[contract]` 실제 YouTube 메시지 id(`LCC.`+base64url)가 계약 문자 클래스를 통과하지 못해 실물 채팅이 전량 폐기된다(실측) | T1 | — | merged | t40-external-id-charset | #54 | (Orca 미사용, 코디네이터 직접) |
 | T41 | 모든 입력을 버리면서 required family 6개가 전부 `ok`였다 — 계약 검증 실패가 어디에도 보이지 않는다(실측) | T12, T40 | — | merged | t41-ingest-drop-signal | #56 | (Orca 미사용, 코디네이터 직접) |
 | T42 | 방송 privacy를 환경으로 덮는다(D-24) — Gate 2 calibration이 열 수 있는 링크를 요구한다 | T10 | — | merged | t42-unlisted-privacy | #55 | (Orca 미사용, 코디네이터 직접) |
