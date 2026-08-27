@@ -45,7 +45,7 @@ chat-source restart가 `start()` 호출만으로 성공 처리되어 새 transpo
 | 3 | pacing + readiness timeout, injected clock | met | production은 `chatRestartReadinessTimeoutMs(chatStart.timeoutMs, grpcStreamMinStartIntervalMs)`를 사용한다. shipped 30,000+25,000=55,000ms를 FakeClock으로 고정했고 unsafe integer 합은 거부한다. |
 | 4 | timeout/backoff/exhaustion 및 abort 보존 | met | FakeClock에서 1,000ms readiness timeout이 `lastError`로 남고 두 번째 실패 뒤 기존 maxAttempts=2 exhaustion에 도달한다. stop-await abort는 start 0회, active wait abort는 pending timer 1→0을 증명한다. |
 | 5 | startup 및 T47/T48 회귀 없음 | met | startup도 canonical readiness를 기다린다. focused 3 files/51 passed 및 전체 155 files/2,251 passed/1 skipped; contract/dependency/host/live 변경 0. |
-| 6 | focused + 5 gates + latest-head CI | pending | `npm ci`, fetch(HEAD가 origin/main보다 2 commits ahead/behind 0), focused 및 로컬 5 gates는 성공. PR latest-head CI 대기. |
+| 6 | focused + 5 gates + latest-head CI | met | `npm ci`, fetch(behind 0), focused 및 로컬 5 gates 성공. PR #64 head `8167665`의 GitHub Actions CI `33056708814` 성공(2m16s); 이 결과-only 티켓 head도 최종 handoff 전에 PR check green을 재확인한다. |
 
 ## Gates (executed)
 
@@ -60,7 +60,8 @@ npm run lint          -> pass (legacy imports 0; install scripts reviewed 4)
 npm run typecheck     -> pass
 npm run test          -> pass (155 files; 2,251 passed; 1 skipped)
 npm run build         -> pass (schema/data map up to date; renderer/server/simulator/soak)
-GitHub Actions CI     -> pending
+GitHub Actions CI     -> pass (run 33056708814; exact head 8167665; 2m16s)
+Final result-only head -> PR check green을 handoff 전에 재확인
 ```
 
 ## Not done / out of scope
