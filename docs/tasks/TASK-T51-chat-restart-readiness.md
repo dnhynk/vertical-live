@@ -58,7 +58,7 @@ restart action의 명령 반환을 실제 회복 완료로 오인해 동일한 d
 | 4 | timeout/backoff/exhaustion 및 abort 보존 | met | FakeClock에서 1,000ms readiness timeout이 `lastError`로 남고 두 번째 실패 뒤 기존 maxAttempts=2 exhaustion에 도달한다. stop-await abort는 start 0회, active wait abort는 pending timer 1→0을 증명한다. |
 | 5 | startup 및 T47/T48 회귀 없음 | met | startup도 canonical readiness를 기다린다. 전체 155 files/2,257 passed/1 skipped; contract/dependency/host/live 변경 0. |
 | 6 | OBS action 이후 canonical health 회복까지 in-flight | met | `RestartSupervisor.recoveryTimeoutMs`가 action 반환 뒤에도 `inFlight=true`를 유지한다. `#driveRecovery()`가 `youtube.stream_status=active`를 포함한 aggregate 회복을 관측하면 같은 attempt를 승인·reset한다. 3회 반복 inactive tick에서도 restart 1회/attempts 1을 유지하고, 5,000ms timeout 2회 뒤 기존 maxAttempts=2 exhaustion, stop timer 취소를 FakeClock으로 고정했다. production 120,000+20,000=140,000ms다. |
-| 7 | focused + 5 gates + latest-head CI | pending | fetch 결과 behind 0, focused 4 files/95 passed 및 로컬 5 gates 성공. PR push 뒤 latest-head CI를 재확인한다. |
+| 7 | focused + 5 gates + latest-head CI | met | fetch 결과 behind 0, focused 4 files/95 passed 및 로컬 5 gates 성공. PR #64 implementation head `8d6518f`의 GitHub Actions CI `33091132424`도 soak 포함 2m09s에 성공했다. 이 결과-only 티켓 head의 CI를 최종 handoff 전에 다시 확인한다. |
 
 ## Gates (executed)
 
@@ -73,7 +73,8 @@ npm run lint          -> pass (legacy imports 0; install scripts reviewed 4)
 npm run typecheck     -> pass
 npm run test          -> pass (155 files; 2,257 passed; 1 skipped)
 npm run build         -> pass (schema/data map up to date; renderer/server/simulator/soak)
-GitHub Actions CI     -> pending latest pushed head
+GitHub Actions CI     -> pass (run 33091132424; exact implementation head 8d6518f; 2m09s; soak:ci 포함)
+Final result-only head -> PR check green을 handoff 전에 재확인
 ```
 
 ## Not done / out of scope
