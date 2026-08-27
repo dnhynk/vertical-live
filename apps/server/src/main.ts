@@ -39,6 +39,8 @@ import { AdminModerationEndpoint } from './supervisor/moderation-report.js'
 import {
   buildPreflightProbes,
   buildStartupSteps,
+  chatRestartReadinessTimeoutMs,
+  restartChatSource,
   type BroadcastPort,
   type ObsPort,
 } from './supervisor/runtime.js'
@@ -592,14 +594,15 @@ const runtimeDeps = {
           }
           chatSource.start()
         },
-        // Running, not merely constructed (review round 2): a path has been
-        // selected (`mode` left `idle`) and the loop has not given up. Both are
-        // T9's own state, so this cannot drift from what the source reports on
-        // `/health`.
+        stop: async () => {
+          await chatSource?.stop()
+        },
+        // T51: mode selection happens before auth, quota pacing and transport
+        // readiness. Use the source's canonical §9.4(3) transport signal so
+        // startup and restart completion cannot disagree with `/health`.
         started: () => {
           if (chatSource === null) return false
-          const observation = chatSource.observe()
-          return observation.stopped === null && observation.mode !== 'idle'
+          return chatSource.transportReady()
         },
       }
     : null,
@@ -653,14 +656,22 @@ const supervisor: Supervisor = new Supervisor({
       engine.start()
       return Promise.resolve()
     },
-    // Two-phase, so it is the action that has to re-check: stopping the source
-    // awaits, and by the time it returns the run may have entered
-    // `safe_stopped`. Starting a listener after that is exactly the automatic
-    // restart §9.1/§9.2 forbid (review round 3).
     chatSource: async (signal) => {
-      await chatSource?.stop()
-      if (signal.aborted) return
-      chatSource?.start()
+      const chat = runtimeDeps.chat
+      if (chat === null) throw new Error('chat source is not configured')
+      await restartChatSource({
+        chat,
+        clock: systemClock,
+        // A just-failed gRPC start can consume the whole T47 floor before the
+        // next actual call. Only after that does the existing readiness window
+        // begin; their sum is the bounded verification window (T51).
+        timeoutMs: chatRestartReadinessTimeoutMs(
+          supervisorConfig.chatStart.timeoutMs,
+          chatConfig.grpcStreamMinStartIntervalMs,
+        ),
+        pollIntervalMs: supervisorConfig.chatStart.pollIntervalMs,
+        signal,
+      })
     },
     obsStream: async (signal) => {
       if (obsControl === null) throw new Error('obs integration is not configured')

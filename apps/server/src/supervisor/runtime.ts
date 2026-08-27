@@ -61,11 +61,32 @@ export interface ObsPort {
 export interface ChatPort {
   start(): void
   /**
-   * True once the listener is **running** — a path selected and not stopped —
-   * not merely once the object exists (review round 2). It flips
-   * asynchronously, so the start-up step polls it.
+   * True only when the canonical chat transport readiness signal is `ok`.
+   * Selecting a path is not enough: T51 measured a source in gRPC pacing with
+   * its previous failure verdict still active while restart attempts burned.
    */
   started(): boolean
+}
+
+export interface RestartableChatPort extends ChatPort {
+  stop(): Promise<void>
+}
+
+export interface ChatReadinessWaitOptions {
+  readonly chat: ChatPort
+  readonly clock: Clock
+  readonly timeoutMs: number
+  readonly pollIntervalMs: number
+  readonly cancelled: () => boolean
+  readonly signal?: AbortSignal
+}
+
+export interface RestartChatSourceOptions {
+  readonly chat: RestartableChatPort
+  readonly clock: Clock
+  readonly timeoutMs: number
+  readonly pollIntervalMs: number
+  readonly signal: AbortSignal
 }
 
 export interface RuntimeDeps {
@@ -155,20 +176,15 @@ export function buildStartupSteps(deps: RuntimeDeps): StartupSteps {
       // configured chat disappear silently (review round 1, B2). Round 2 found
       // the check too weak: it asked whether the *object* existed. Starting is a
       // background job — resolve the `liveChatId`, dial gRPC, fall back to REST —
-      // so the step waits for the listener to report that it is actually running
-      // and fails the sequence if it never does.
-      const deadlineMs = deps.clock.monotonicMs() + deps.config.chatStart.timeoutMs
-      while (!deps.chat.started()) {
-        // A wait of up to `chatStart.timeoutMs` is exactly the window a kill
-        // switch is most likely to land in, so the loop watches for it too.
-        if (context.cancelled()) return
-        if (deps.clock.monotonicMs() >= deadlineMs) {
-          throw new Error(
-            `chat source did not start within ${deps.config.chatStart.timeoutMs}ms; the configured input path (spec §9.4(3)) is not running`,
-          )
-        }
-        await sleep(deps.clock, deps.config.chatStart.pollIntervalMs)
-      }
+      // so the step waits for the transport's canonical positive readiness and
+      // fails the sequence if it never arrives.
+      await waitForChatSourceReady({
+        chat: deps.chat,
+        clock: deps.clock,
+        timeoutMs: deps.config.chatStart.timeoutMs,
+        pollIntervalMs: deps.config.chatStart.pollIntervalMs,
+        cancelled: context.cancelled,
+      })
     },
     publish: async (context) => {
       if (deps.broadcast === null) {
@@ -184,6 +200,53 @@ export function buildStartupSteps(deps: RuntimeDeps): StartupSteps {
       }
       await deps.broadcast.publish()
     },
+  }
+}
+
+/**
+ * Restarts chat and keeps the supervisor attempt in flight until the input path
+ * is positively ready (T51). A `start()` call only launches a background loop;
+ * returning there let the 2026-08-27 public pilot spend attempts 1/2/3 in 13s
+ * while T47 pacing still prevented a new stream from opening.
+ */
+export async function restartChatSource(options: RestartChatSourceOptions): Promise<void> {
+  await options.chat.stop()
+  if (options.signal.aborted) return
+  options.chat.start()
+  await waitForChatSourceReady({
+    chat: options.chat,
+    clock: options.clock,
+    timeoutMs: options.timeoutMs,
+    pollIntervalMs: options.pollIntervalMs,
+    cancelled: () => options.signal.aborted,
+    signal: options.signal,
+  })
+}
+
+/** T47's maximum pacing wait plus the existing readiness window, no new knob. */
+export function chatRestartReadinessTimeoutMs(
+  chatStartTimeoutMs: number,
+  grpcStreamMinStartIntervalMs: number,
+): number {
+  const timeoutMs = chatStartTimeoutMs + grpcStreamMinStartIntervalMs
+  if (!Number.isSafeInteger(timeoutMs)) {
+    throw new RangeError('chat restart readiness timeout exceeds Number.MAX_SAFE_INTEGER')
+  }
+  return timeoutMs
+}
+
+export async function waitForChatSourceReady(options: ChatReadinessWaitOptions): Promise<void> {
+  const deadlineMs = options.clock.monotonicMs() + options.timeoutMs
+  for (;;) {
+    if (options.cancelled()) return
+    if (options.chat.started()) return
+    const remainingMs = deadlineMs - options.clock.monotonicMs()
+    if (remainingMs <= 0) {
+      throw new Error(
+        `chat source did not become ready within ${options.timeoutMs}ms; the configured input path (spec §9.4(3)) is not running`,
+      )
+    }
+    await sleep(options.clock, Math.min(options.pollIntervalMs, remainingMs), options.signal)
   }
 }
 
@@ -253,9 +316,22 @@ export function buildPreflightProbes(deps: PreflightDeps): PreflightProbes {
   }
 }
 
-async function sleep(clock: Clock, delayMs: number): Promise<void> {
+async function sleep(clock: Clock, delayMs: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted === true) return
   await new Promise<void>((resolve) => {
-    clock.setTimeout(resolve, delayMs)
+    let settled = false
+    function finish(): void {
+      if (settled) return
+      settled = true
+      signal?.removeEventListener('abort', onAbort)
+      resolve()
+    }
+    function onAbort(): void {
+      clock.clearTimeout(timer)
+      finish()
+    }
+    const timer = clock.setTimeout(finish, delayMs)
+    signal?.addEventListener('abort', onAbort, { once: true })
   })
 }
 
