@@ -1,7 +1,7 @@
 # TASK-T51-chat-restart-readiness
 
 - Task: T51 chat-source 재시작 완료를 transport 회복까지 검증 (`docs/tasks/TASK_SPECS.md` §T51)
-- Branch: `dnhynk/t51-chat-restart-readiness` · PR: —
+- Branch: `dnhynk/t51-chat-restart-readiness` · PR: #64
 - Orca worktree: `t51-chat-restart-readiness`
 - Spec sections read: §9.1, §9.2, §9.4, §10.2, §11
 - BOARD decisions/assumptions relied on: D-25, A-15
