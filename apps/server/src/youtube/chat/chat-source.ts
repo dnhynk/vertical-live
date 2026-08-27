@@ -172,6 +172,7 @@ export class ChatSource {
     this.#grpc = undefined
     this.#rest = undefined
     this.#state.clearStop()
+    this.#state.resetAttemptFailuresForRestart()
 
     this.#running = this.#run().catch((error: unknown) => {
       this.#logger.error('youtube chat: source loop failed', {

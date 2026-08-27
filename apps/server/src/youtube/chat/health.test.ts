@@ -350,6 +350,61 @@ describe('buildChatHealthSignals', () => {
 })
 
 describe('ChatSourceState', () => {
+  it('resets only the per-run failure budget at a supervisor restart boundary', () => {
+    const clock = new FakeClock()
+    const state = new ChatSourceState(clock, KEEPALIVE)
+
+    state.setMode('grpc')
+    state.connectAttempt(false)
+    state.recordResponse()
+    state.recordCommit({
+      duplicates: 2,
+      dropped: 1,
+      userEvents: 3,
+      userEventAt: '2026-08-28T00:00:00.000Z',
+    })
+    state.recordDisconnect()
+    clock.advance(250)
+    state.recordTokenRejected()
+    state.connectAttempt(false)
+    state.recordResponse()
+    state.recordOffline('2026-08-28T00:00:01.000Z')
+    state.recordReconnectWait('quota_start_pacing', 25_000)
+    state.recordFailure({ kind: 'serverError', action: 'retry', retryable: true }, 1)
+    state.recordFailure({ kind: 'serverError', action: 'retry', retryable: true }, 1)
+
+    const before = state.observe('token_checkpoint', 'READY')
+    expect(before).toMatchObject({
+      consecutiveFailures: 2,
+      retryBudgetExhausted: true,
+      offlineAt: '2026-08-28T00:00:01.000Z',
+      pageToken: 'token_checkpoint',
+      userEvents: { total: 3 },
+      reconnect: {
+        count: 1,
+        gapMs: 250,
+        tokenRejected: true,
+        tokenRejections: 1,
+        reconnectsWithoutToken: 1,
+        estimatedDuplicates: 0,
+        estimatedLostMessages: null,
+        wait: { reason: 'quota_start_pacing', delayMs: 25_000 },
+      },
+    })
+
+    state.resetAttemptFailuresForRestart()
+
+    expect(state.observe('token_checkpoint', 'READY')).toMatchObject({
+      consecutiveFailures: 0,
+      retryBudgetExhausted: false,
+      lastError: before.lastError,
+      offlineAt: before.offlineAt,
+      pageToken: before.pageToken,
+      userEvents: before.userEvents,
+      reconnect: before.reconnect,
+    })
+  })
+
   it('counts a reconnect only when a response proves the path recovered', () => {
     const clock = new FakeClock()
     const state = new ChatSourceState(clock, KEEPALIVE)

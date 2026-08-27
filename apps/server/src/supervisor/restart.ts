@@ -136,7 +136,14 @@ export class RestartSupervisor {
   #attempts = 0
   #inFlight = false
   #verifyingRecovery = false
-  #recoveryObservationVersionAtStart: number | undefined
+  /**
+   * A successful action does not become a successful attempt until a later
+   * canonical positive observation crosses this boundary. Keep it after a
+   * verification timeout: the timeout is still a failed attempt, and an
+   * unrelated healthy aggregate must not return its budget (T51 review round
+   * 2).
+   */
+  #requiredRecoveryObservationVersion: number | undefined
   #exhausted = false
   #stopped = false
   #timer: TimerHandle | undefined
@@ -208,7 +215,7 @@ export class RestartSupervisor {
       this.#timer = undefined
     }
     this.#verifyingRecovery = false
-    this.#recoveryObservationVersionAtStart = undefined
+    this.#requiredRecoveryObservationVersion = undefined
     this.#inFlight = false
   }
 
@@ -248,25 +255,29 @@ export class RestartSupervisor {
     // sample. Once the action has returned, however, this is the canonical
     // acknowledgement it was waiting for (T51).
     if (this.#inFlight && !this.#verifyingRecovery) return
-    if (this.#verifyingRecovery) {
-      const observationVersionAtStart = this.#recoveryObservationVersionAtStart
-      if (observationVersionAtStart !== undefined) {
-        const observation = this.#options.recoveryObservation?.()
-        if (
-          observation === undefined ||
-          !observation.recovered ||
-          observation.version <= observationVersionAtStart
-        ) {
-          return
-        }
+    const observationVersionAtStart = this.#requiredRecoveryObservationVersion
+    if (observationVersionAtStart !== undefined) {
+      const observation = this.#options.recoveryObservation?.()
+      if (
+        observation === undefined ||
+        !observation.recovered ||
+        observation.version <= observationVersionAtStart
+      ) {
+        return
       }
+    }
+    const recoveryWasRequired =
+      this.#verifyingRecovery || this.#requiredRecoveryObservationVersion !== undefined
+    if (this.#verifyingRecovery) {
       if (this.#timer !== undefined) {
         this.#clock.clearTimeout(this.#timer)
         this.#timer = undefined
       }
       this.#verifyingRecovery = false
-      this.#recoveryObservationVersionAtStart = undefined
       this.#inFlight = false
+    }
+    this.#requiredRecoveryObservationVersion = undefined
+    if (recoveryWasRequired) {
       this.#logger.info('supervisor restart recovery verified', {
         component: this.component,
         attempt: this.#attempts,
@@ -397,12 +408,17 @@ export class RestartSupervisor {
   }
 
   #beginRecoveryVerification(reason: string, timeoutMs: number): void {
-    this.#recoveryObservationVersionAtStart = this.#options.recoveryObservation?.().version
+    const observationVersion = this.#options.recoveryObservation?.().version
+    if (observationVersion !== undefined) {
+      this.#requiredRecoveryObservationVersion = Math.max(
+        this.#requiredRecoveryObservationVersion ?? observationVersion,
+        observationVersion,
+      )
+    }
     this.#timer = this.#clock.setTimeout(() => {
       this.#timer = undefined
       if (!this.#verifyingRecovery || this.#stopped) return
       this.#verifyingRecovery = false
-      this.#recoveryObservationVersionAtStart = undefined
       this.#inFlight = false
       this.#lastError = `health recovery was not observed within ${timeoutMs}ms`
       this.#logger.error('supervisor restart health recovery timed out', {

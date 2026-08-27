@@ -220,6 +220,33 @@ describe('RestartSupervisor', () => {
       expect(exhausted).toHaveLength(1)
     })
 
+    it('requires the same fresh canonical boundary after verification times out', async () => {
+      const clock = new FakeClock()
+      let observation = { version: 1, recovered: false }
+      const supervisor = new RestartSupervisor({
+        component: 'obs-stream',
+        clock,
+        backoff: backoff(2),
+        restart: () => Promise.resolve(),
+        recoveryTimeoutMs: 5000,
+        recoveryObservation: () => observation,
+      })
+
+      supervisor.request('youtube_broadcast')
+      await clock.advance(6000)
+      expect(supervisor.health()).toMatchObject({ attempts: 1, inFlight: false })
+      expect(supervisor.health().lastError).toContain('not observed within 5000ms')
+
+      observation = { version: 2, recovered: false }
+      supervisor.noteHealthy()
+      expect(supervisor.health()).toMatchObject({ attempts: 1, inFlight: false })
+      expect(supervisor.health().lastError).toContain('not observed within 5000ms')
+
+      observation = { version: 3, recovered: true }
+      supervisor.noteHealthy()
+      expect(supervisor.health()).toMatchObject({ attempts: 0, inFlight: false, lastError: null })
+    })
+
     it('cancels a pending health verification when the run stops', async () => {
       const clock = new FakeClock()
       const exhausted = vi.fn()
