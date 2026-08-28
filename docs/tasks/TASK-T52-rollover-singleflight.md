@@ -3,6 +3,7 @@
 - Task: T52 rolling lifecycle single-flight and crash recovery (`docs/tasks/TASK_SPECS.md` §T52)
 - Branch: `dnhynk/t52-rollover-singleflight` · PR: #65
 - Orca: task `task_55c76aed6821` · dispatch `ctx_ad8cf70abb12`
+- Review fix: task `task_01e19e3a2abe` · dispatch `ctx_7e8030e89bb0`
 - Spec sections read: §9.1, §9.2, §9.3, §9.4, §10.2, §11
 - BOARD decisions/assumptions relied on: D-21, D-25, A-15, A-18
 
@@ -44,18 +45,20 @@ Prevent the production rollover crash in which `rolloverIfDue()` and chat target
 | # | 기준 | 상태(met/unmet/unverifiable) | 근거(테스트 파일·명령·출력) |
 |---|---|---|---|
 | 1 | rollover와 `ensureBound()`/chat target resolution의 결정론적 중첩에서 mutation owner가 하나이고 duplicate insert/repoint가 없다. | met | `lifecycle.test.ts`의 `single-flights rollover with production chat target resolution`: fake API pre-apply barrier에서 두 흐름을 중첩해 replacement insert 1회·broadcast 총 2개·동일 최종 target·visibility update 1회를 검증. focused 재실행 결과는 아래 Gates에 기록한다. |
-| 2 | 모든 충돌 mutation이 lifecycle 단일 경계를 통과하고 retry/reconcile·고정 rollover 순서·publish·OBS ingest·chat refresh를 보존하며 reentrant wait가 없다. | met | `BroadcastLifecycle.#serializeMutation`과 private composite 구현; public/unlisted에서 marker clear→bind→old complete→visibility→new live, private no-op, explicit rollover 공개, 실패 뒤 queue 진행을 focused regression으로 검증. |
-| 3 | 여러 stale/open attempt 재시작이 최신 정당 상태를 결정론적으로 복구하고 evidence 없이 row/ID를 고치거나 resource를 만들지 않으며 background 오류가 관측된다. | met | exact incident shape(newest `broadcast_created` + two older `live`)는 아무 row/resource/visibility도 바꾸지 않고 safe-stop하며, 단일 predecessor 및 durable predecessor-close interruption은 같은 replacement만 이어 공개한다. detached rejection observer도 검증. |
-| 4 | `segmentMs=39,600,000`, simulator off, privacy/world/quota/T51 semantics가 유지된다. | met | config/contract/lockfile 변경 없음; full suite 155 files 통과, accelerated soak 72h PASS·20/20 recovery·final `live`·safe stop 0. |
-| 5 | 모든 로컬 gate와 exact-head CI/`soak:ci`가 녹색이고 단일 PR이 열려 있다. | met | 로컬 gate 전부 통과. implementation head `3b5fc398c0c86d50154370e4816ed8338e0586a6`의 CI run 33152179513에서 install/format/lint/typecheck/test/build/`soak:ci` 전부 통과했고 PR #65는 open이다. 이 Result 기록 commit도 push 후 exact-head CI를 worker completion gate로 재확인한다. |
+| 2 | 모든 충돌 mutation이 lifecycle 단일 경계를 통과하고 retry/reconcile·고정 rollover 순서·publish·OBS ingest·chat refresh를 보존하며 reentrant wait가 없다. | met | `BroadcastLifecycle.#serializeMutation`과 private composite 구현; due와 explicit request가 동일한 `#performRollover`를 사용하며 public/unlisted marker clear→bind→old complete→visibility→new live, private no-op, 실패 뒤 queue 진행을 focused regression으로 검증. |
+| 3 | 여러 stale/open attempt 재시작이 candidate-specific evidence로만 복구하며 ambiguity/binding mismatch에서 outward/row mutation 없이 safe-stop한다. | met | migration 008의 direct predecessor id와 동일 stream 검증. unrelated historical close, unlinked multiple candidate, cross-stream linked candidate, competing live, exact production two-live/newest-created regressions가 API·row mutation 없는 safe-stop/초기 publish 경계를 고정한다. |
+| 4 | visibility crash-before/during/after와 두 번째 crash에서 configured update가 중복되지 않고 같은 replacement만 이어진다. | met | focused regressions가 predecessor-close 뒤 두 번째 restart, pending unknown-response reconcile, 이미 public인 replacement read-back을 각각 검증하며 visibility update count가 0 또는 정확히 1 증가한다. |
+| 5 | 반복 restart에도 resource/ID가 안정적이고 quota-bearing mutation은 reconcile-before-retry를 지킨다. | met | controlled rollover/chat barrier와 unknown visibility regression에서 replacement insert 1회, external ID write-once, visibility update 1회 이하. 기존 timeout/reconcile/limit tests 포함 lifecycle 85/85 통과. |
+| 6 | background rejection, T47/T51/world/OBS continuity와 shipped rolling/private/simulator defaults, 범위 제한을 보존한다. | met | focused supervisor 포함 5 files/166 tests, full 155 files/2,282 passed/1 skipped, accelerated soak 72h 20/20 recovery/final live/safe stop 0. contract/dependency/lockfile/BOARD/HANDOFF 변경 없음. |
+| 7 | `npm ci`, rebase, focused, format/lint/typecheck/full test/build/soak와 latest-head CI가 녹색이다. | unverifiable | 로컬 전부 통과, behind 0. 최종 evidence commit push 뒤 exact-head GitHub Actions(`soak:ci` 포함)을 worker completion 전에 확인하고 PR evidence/worker_done에 SHA/run을 기록한다. |
 
 ### Gates (executed)
 
 ```text
 npm ci
   PASS — 431 packages installed; package-lock.json unchanged
-npm test -- --run apps/server/src/youtube/broadcast/lifecycle.test.ts apps/server/src/db/broadcast-resources.test.ts apps/server/src/supervisor/supervisor.test.ts
-  PASS — 3 files, 141 tests
+npm test -- --run apps/server/src/youtube/broadcast/lifecycle.test.ts apps/server/src/db/broadcast-resources.test.ts apps/server/src/db/migrate.test.ts apps/server/src/privacy/data-map.test.ts apps/server/src/supervisor/supervisor.test.ts
+  PASS — 5 files, 166 tests
 npm run format:check
   PASS — all matched files use Prettier
 npm run lint
@@ -63,17 +66,16 @@ npm run lint
 npm run typecheck
   PASS — tsc --build tsconfig.json
 npm run test
-  PASS — 155 files, 2,275 passed, 1 skipped
+  PASS — 155 files, 2,282 passed, 1 skipped
 npm run build
   PASS — contract schema current; renderer/server/simulator/soak built
 npm run soak:ci
   PASS — accelerated 72.00h; 1,728/1,728 processed; 20/20 recoveries;
-         final live; no safe stop; verdict PASS
+         final live; no safe stop; verdict PASS (30.3s wall clock)
 git fetch origin && git rebase origin/main
-  PASS — current branch up to date
-GitHub Actions run 33152179513 (implementation head 3b5fc398c0c86d50154370e4816ed8338e0586a6)
-  PASS — npm ci, format:check, lint, typecheck, test, build, soak:ci
-  https://github.com/dnhynk/vertical-live/actions/runs/33152179513
+  PASS — current branch up to date; origin/main...HEAD = 0 behind / 8 ahead before this evidence commit
+GitHub Actions exact final head
+  PENDING — verified after this evidence commit is pushed; exact SHA/run goes in PR evidence and worker_done
 ```
 
 ## Not done / out of scope
@@ -90,9 +92,9 @@ GitHub Actions run 33152179513 (implementation head 3b5fc398c0c86d50154370e4816e
 
 | finding | 처리(고침 SHA / 반박 근거) |
 |---|---|
-| [blocker] older-open/history heuristics can complete an unrelated predecessor and bypass startup publication | 고침(현재 fix commit): migration 008 adds write-once candidate→predecessor provenance in the replacement's first durable row. Recovery validates the exact linked row and same `streamId` before API/row mutation; missing linkage, extra candidates/live rows, missing predecessor, and mismatch safe-stop. Historical same-stream close reasons are no longer consulted. |
-| [major] recovery replays a configured visibility update already applied | 고침(현재 fix commit): each successful response or exact-id read-back persists `privacy_status` + observation time. Recovery reconciles a pending update and also reads back legacy/unrecorded visibility before mutation, so before/unknown-response/after crash boundaries issue at most one visibility update. |
-| [major] public `rollOver()` completes predecessor before replacement bind | 고침(현재 fix commit): due and explicit paths now share `#performRollover`: linked private replacement create → marker clear/bind on predecessor stream → predecessor complete → configured visibility → replacement live. |
+| [blocker] older-open/history heuristics can complete an unrelated predecessor and bypass startup publication | 고침 `093956d`, stream reuse hardening `195cf01`: migration 008 adds write-once candidate→predecessor provenance in the replacement's first durable row. Recovery validates the exact linked row and same `streamId` before API/row mutation; missing linkage, extra candidates/live rows, missing predecessor, and mismatch safe-stop. Historical same-stream close reasons are no longer consulted. |
+| [major] recovery replays a configured visibility update already applied | 고침 `093956d`: each successful response or exact-id read-back persists `privacy_status` + observation time. Recovery reconciles a pending update and also reads back legacy/unrecorded visibility before mutation, so before/unknown-response/after crash boundaries issue at most one visibility update. |
+| [major] public `rollOver()` completes predecessor before replacement bind | 고침 `093956d`: due and explicit paths now share `#performRollover`: linked private replacement create → marker clear/bind on predecessor stream → predecessor complete → configured visibility → replacement live. |
 
 ### Round 1 storage note
 
