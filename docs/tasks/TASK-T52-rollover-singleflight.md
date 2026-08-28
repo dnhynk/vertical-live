@@ -120,6 +120,20 @@ npm test -- --run apps/server/src/youtube/broadcast/lifecycle.test.ts apps/serve
   PASS — 5 files, 170 tests
 npm run format:check
   PASS — all matched files use Prettier
+npm run lint
+  PASS — ESLint; 0 legacy imports; 4 install scripts reviewed
+npm run typecheck
+  PASS — tsc --build tsconfig.json
+npm run test
+  PASS — 155 files, 2,286 passed, 1 skipped
+npm run build
+  PASS — contract schema current; renderer/server/simulator/soak built; 8 migrations copied;
+         data map current
+npm run soak:ci
+  PASS — accelerated 72.00h; 1,728/1,728 processed; 20/20 recoveries;
+         final live; safe stops 0; verdict PASS
+git fetch origin && git rebase origin/main
+  PASS — current branch up to date; origin/main...HEAD = 0 behind / 11 ahead
 ```
 
-Pending for the final evidence commit: lint, typecheck, full test, build, accelerated `soak:ci`, fetch/rebase, and exact-final-head GitHub Actions verification.
+`npm ci` was not rerun for round 2: dependencies and `package-lock.json` are unchanged, and reviewer round 2 had already completed a clean `npm ci` at `a7daa51` immediately before dispatching these fixes. Exact-final-head GitHub Actions verification remains pending until this evidence commit is pushed; the final SHA/run will be recorded in the PR evidence and worker completion report.
