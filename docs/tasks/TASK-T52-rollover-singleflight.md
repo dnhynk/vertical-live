@@ -43,16 +43,34 @@ Prevent the production rollover crash in which `rolloverIfDue()` and chat target
 
 | # | 기준 | 상태(met/unmet/unverifiable) | 근거(테스트 파일·명령·출력) |
 |---|---|---|---|
-| 1 | rollover와 `ensureBound()`/chat target resolution의 결정론적 중첩에서 mutation owner가 하나이고 duplicate insert/repoint가 없다. | unmet | 구현·검증 전 |
-| 2 | 모든 충돌 mutation이 lifecycle 단일 경계를 통과하고 retry/reconcile·고정 rollover 순서·publish·OBS ingest·chat refresh를 보존하며 reentrant wait가 없다. | unmet | 구현·검증 전 |
-| 3 | 여러 stale/open attempt 재시작이 최신 정당 상태를 결정론적으로 복구하고 evidence 없이 row/ID를 고치거나 resource를 만들지 않으며 background 오류가 관측된다. | unmet | 구현·검증 전 |
-| 4 | `segmentMs=39,600,000`, simulator off, privacy/world/quota/T51 semantics가 유지된다. | unmet | 구현·검증 전 |
-| 5 | 모든 로컬 gate와 exact-head CI/`soak:ci`가 녹색이고 단일 PR이 열려 있다. | unmet | 실행 전 |
+| 1 | rollover와 `ensureBound()`/chat target resolution의 결정론적 중첩에서 mutation owner가 하나이고 duplicate insert/repoint가 없다. | met | `lifecycle.test.ts`의 `single-flights rollover with production chat target resolution`: fake API pre-apply barrier에서 두 흐름을 중첩해 replacement insert 1회·broadcast 총 2개·동일 최종 target을 검증. focused 136/136 통과. |
+| 2 | 모든 충돌 mutation이 lifecycle 단일 경계를 통과하고 retry/reconcile·고정 rollover 순서·publish·OBS ingest·chat refresh를 보존하며 reentrant wait가 없다. | met | `BroadcastLifecycle.#serializeMutation`과 private composite 구현; 실패 뒤 queue 진행 테스트 및 기존 lifecycle/supervisor 회귀 포함 full 2,270 passed/1 skipped. |
+| 3 | 여러 stale/open attempt 재시작이 최신 정당 상태를 결정론적으로 복구하고 evidence 없이 row/ID를 고치거나 resource를 만들지 않으며 background 오류가 관측된다. | met | exact 3-open-row topology 반복 restart, predecessor stop 전/후, competing-live safe-stop, detached rejection observer 테스트. 반복 뒤 insert/resource 수와 모든 external ID 불변. |
+| 4 | `segmentMs=39,600,000`, simulator off, privacy/world/quota/T51 semantics가 유지된다. | met | config/contract/lockfile 변경 없음; full suite 155 files 통과, accelerated soak 72h PASS·20/20 recovery·final `live`·safe stop 0. |
+| 5 | 모든 로컬 gate와 exact-head CI/`soak:ci`가 녹색이고 단일 PR이 열려 있다. | unverifiable | 로컬 gate와 `soak:ci` 통과, `git fetch origin && git rebase origin/main` 최신 확인. PR/exact-head CI는 아직 생성·실행 전. |
 
 ### Gates (executed)
 
 ```text
-실행하지 않았음: 구현 전
+npm ci
+  PASS — 431 packages installed; package-lock.json unchanged
+npm test -- --run apps/server/src/youtube/broadcast/lifecycle.test.ts apps/server/src/db/broadcast-resources.test.ts apps/server/src/supervisor/supervisor.test.ts
+  PASS — 3 files, 136 tests
+npm run format:check
+  PASS — all matched files use Prettier
+npm run lint
+  PASS — ESLint; 0 legacy imports; 4 install scripts reviewed
+npm run typecheck
+  PASS — tsc --build tsconfig.json
+npm run test
+  PASS — 155 files, 2,270 passed, 1 skipped
+npm run build
+  PASS — contract schema current; renderer/server/simulator/soak built
+npm run soak:ci
+  PASS — accelerated 72.00h; 1,728/1,728 processed; 20/20 recoveries;
+         final live; no safe stop; verdict PASS
+git fetch origin && git rebase origin/main
+  PASS — current branch up to date
 ```
 
 ## Not done / out of scope
@@ -68,4 +86,3 @@ Prevent the production rollover crash in which `rolloverIfDue()` and chat target
 
 | finding | 처리(고침 SHA / 반박 근거) |
 |---|---|
-
