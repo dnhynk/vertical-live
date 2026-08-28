@@ -1,7 +1,7 @@
 # TASK-T52-rollover-singleflight
 
 - Task: T52 rolling lifecycle single-flight and crash recovery (`docs/tasks/TASK_SPECS.md` §T52)
-- Branch: `dnhynk/t52-rollover-singleflight` · PR: pending
+- Branch: `dnhynk/t52-rollover-singleflight` · PR: #65
 - Orca: task `task_55c76aed6821` · dispatch `ctx_ad8cf70abb12`
 - Spec sections read: §9.1, §9.2, §9.3, §9.4, §10.2, §11
 - BOARD decisions/assumptions relied on: D-21, D-25, A-15, A-18
@@ -47,7 +47,7 @@ Prevent the production rollover crash in which `rolloverIfDue()` and chat target
 | 2 | 모든 충돌 mutation이 lifecycle 단일 경계를 통과하고 retry/reconcile·고정 rollover 순서·publish·OBS ingest·chat refresh를 보존하며 reentrant wait가 없다. | met | `BroadcastLifecycle.#serializeMutation`과 private composite 구현; 실패 뒤 queue 진행 테스트 및 기존 lifecycle/supervisor 회귀 포함 full 2,270 passed/1 skipped. |
 | 3 | 여러 stale/open attempt 재시작이 최신 정당 상태를 결정론적으로 복구하고 evidence 없이 row/ID를 고치거나 resource를 만들지 않으며 background 오류가 관측된다. | met | exact 3-open-row topology 반복 restart, predecessor stop 전/후, competing-live safe-stop, detached rejection observer 테스트. 반복 뒤 insert/resource 수와 모든 external ID 불변. |
 | 4 | `segmentMs=39,600,000`, simulator off, privacy/world/quota/T51 semantics가 유지된다. | met | config/contract/lockfile 변경 없음; full suite 155 files 통과, accelerated soak 72h PASS·20/20 recovery·final `live`·safe stop 0. |
-| 5 | 모든 로컬 gate와 exact-head CI/`soak:ci`가 녹색이고 단일 PR이 열려 있다. | unverifiable | 로컬 gate와 `soak:ci` 통과, `git fetch origin && git rebase origin/main` 최신 확인. PR/exact-head CI는 아직 생성·실행 전. |
+| 5 | 모든 로컬 gate와 exact-head CI/`soak:ci`가 녹색이고 단일 PR이 열려 있다. | unverifiable | 로컬 gate와 `soak:ci` 통과, `git fetch origin && git rebase origin/main` 최신 확인, PR #65 생성. exact-head CI 진행 전. |
 
 ### Gates (executed)
 
