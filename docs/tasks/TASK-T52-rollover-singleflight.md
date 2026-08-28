@@ -46,8 +46,8 @@ Prevent the production rollover crash in which `rolloverIfDue()` and chat target
 | 1 | rollover와 `ensureBound()`/chat target resolution의 결정론적 중첩에서 mutation owner가 하나이고 duplicate insert/repoint가 없다. | met | `lifecycle.test.ts`의 `single-flights rollover with production chat target resolution`: fake API pre-apply barrier에서 두 흐름을 중첩해 replacement insert 1회·broadcast 총 2개·동일 최종 target·visibility update 1회를 검증. focused 재실행 결과는 아래 Gates에 기록한다. |
 | 2 | 모든 충돌 mutation이 lifecycle 단일 경계를 통과하고 retry/reconcile·고정 rollover 순서·publish·OBS ingest·chat refresh를 보존하며 reentrant wait가 없다. | met | `BroadcastLifecycle.#serializeMutation`과 private composite 구현; public/unlisted에서 marker clear→bind→old complete→visibility→new live, private no-op, explicit rollover 공개, 실패 뒤 queue 진행을 focused regression으로 검증. |
 | 3 | 여러 stale/open attempt 재시작이 최신 정당 상태를 결정론적으로 복구하고 evidence 없이 row/ID를 고치거나 resource를 만들지 않으며 background 오류가 관측된다. | met | exact incident shape(newest `broadcast_created` + two older `live`)는 아무 row/resource/visibility도 바꾸지 않고 safe-stop하며, 단일 predecessor 및 durable predecessor-close interruption은 같은 replacement만 이어 공개한다. detached rejection observer도 검증. |
-| 4 | `segmentMs=39,600,000`, simulator off, privacy/world/quota/T51 semantics가 유지된다. | pending | config/contract/lockfile 변경 없음. 최종 full suite와 accelerated 72h soak 결과는 아래 Gates에 기록한다. |
-| 5 | 모든 로컬 gate와 exact-head CI/`soak:ci`가 녹색이고 단일 PR이 열려 있다. | pending | PR #65를 새 head로 업데이트한 뒤 exact-head CI까지 확인한다. |
+| 4 | `segmentMs=39,600,000`, simulator off, privacy/world/quota/T51 semantics가 유지된다. | met | config/contract/lockfile 변경 없음; full suite 155 files 통과, accelerated soak 72h PASS·20/20 recovery·final `live`·safe stop 0. |
+| 5 | 모든 로컬 gate와 exact-head CI/`soak:ci`가 녹색이고 단일 PR이 열려 있다. | met | 로컬 gate 전부 통과. implementation head `3b5fc398c0c86d50154370e4816ed8338e0586a6`의 CI run 33152179513에서 install/format/lint/typecheck/test/build/`soak:ci` 전부 통과했고 PR #65는 open이다. 이 Result 기록 commit도 push 후 exact-head CI를 worker completion gate로 재확인한다. |
 
 ### Gates (executed)
 
@@ -55,7 +55,7 @@ Prevent the production rollover crash in which `rolloverIfDue()` and chat target
 npm ci
   PASS — 431 packages installed; package-lock.json unchanged
 npm test -- --run apps/server/src/youtube/broadcast/lifecycle.test.ts apps/server/src/db/broadcast-resources.test.ts apps/server/src/supervisor/supervisor.test.ts
-  PASS — 3 files, 136 tests
+  PASS — 3 files, 141 tests
 npm run format:check
   PASS — all matched files use Prettier
 npm run lint
@@ -63,7 +63,7 @@ npm run lint
 npm run typecheck
   PASS — tsc --build tsconfig.json
 npm run test
-  PASS — 155 files, 2,270 passed, 1 skipped
+  PASS — 155 files, 2,275 passed, 1 skipped
 npm run build
   PASS — contract schema current; renderer/server/simulator/soak built
 npm run soak:ci
@@ -71,6 +71,9 @@ npm run soak:ci
          final live; no safe stop; verdict PASS
 git fetch origin && git rebase origin/main
   PASS — current branch up to date
+GitHub Actions run 33152179513 (implementation head 3b5fc398c0c86d50154370e4816ed8338e0586a6)
+  PASS — npm ci, format:check, lint, typecheck, test, build, soak:ci
+  https://github.com/dnhynk/vertical-live/actions/runs/33152179513
 ```
 
 ## Not done / out of scope
