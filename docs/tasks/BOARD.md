@@ -13,6 +13,8 @@
 
 > **D-25 public 경로 준비 완료(2026-08-26 UTC):** T49는 PR #62(squash `8e32ed7`)로 머지했고 독립 GPT 리뷰 6/6·2,238 passed/1 skipped·main CI `32948081996` 성공을 확인했다. T48은 PR #61(squash `5e0f1b1`)로 머지했으며 최종 독립 GPT 리뷰 6/6·집중 95/95·전체 2,242 passed/1 skipped·main CI `32953323596` 성공을 확인했다. T48의 첫 exact-head CI에서 기존 `clock-jump.test.ts` 5초 timeout이 1회 발생했고 동일 SHA 재실행은 성공했음을 티켓에 보존했다. T50은 PR #63(squash `62bca95`)으로 머지했고 최종 독립 GPT 리뷰 6/6·집중 34/34·전체 2,246 passed/1 skipped·exact-head CI `32956528104`·main CI `32957733095` 성공을 확인했다. 이는 명시적 public 운영 경로의 코드·문서 검증 완료이며, 실제 72시간 관측이나 면제된 Gate 2/3을 합격으로 기록한 것이 아니다.
 
+> **T52 merged(2026-08-28 UTC): 첫 실제 11시간 rollover의 lifecycle 동시 mutation 결함을 PR #65(squash `0179b82`)로 수정했다.** 최종 독립 Codex/GPT 리뷰는 합격 기준 7/7·finding 0, 집중 170/170, 별도 adversarial probe 13/13, 전체 2,286 passed/1 skipped와 exact-head CI `33157207926` 성공을 확인했다. main CI `33158455297`도 성공했다. 이 기록은 코드 머지 근거이며 실호스트 배포나 새 72시간 관측 완료를 뜻하지 않는다.
+
 > **과거 상태(2026-08-23 UTC; D-25로 superseded): 등록 task 50개 전부 머지, open PR 0, main CI 녹색이고 호스트가 `live`를 유지했다.** 당시 다음 순서는 calibration→합격선 잠금→validation→72h soak였으나 D-25가 이 사전 게이트 순서를 대체했다. 그 밖의 실측 이력과 결함 수정 근거는 아래 이력 표에 보존한다.
 
 | T-ID | 제목 | 의존 | [contract] | 상태 | 브랜치 slug | PR | Orca task |
@@ -68,6 +70,7 @@
 | T49 | archive CLI가 workspace cwd에서 잘못된 `data/`를 보고 예약 sweep도 다음 실행이 없다(실측) | T17 | — | merged | t49-archive-enforcement | #62 | `task_cbcd6207d6eb` |
 | T50 | D-25: 사전 수동 게이트 대신 72시간 public observational pilot 경로·명시적 `-Public` 운영 스위치 | T48, T49 | — | merged | t50-live-first-public-pilot | #63 | `task_f941e0758e93` |
 | T51 | component restart action이 정본 health 회복 전에 completed되어 chat/OBS 예산을 연속 소진한 public pilot 실측 결함 | T12, T47, T48 | — | merged | t51-chat-restart-readiness | #64 | primary Codex/GPT |
+| T52 | 첫 실제 11시간 rollover에서 lifecycle 동시 mutation이 duplicate insert/repoint를 일으킨 결함 | T10, T30, T33, T45, T47, T51 | — | merged | t52-rollover-singleflight | #65 | primary Codex/GPT |
 | T40 | `[contract]` 실제 YouTube 메시지 id(`LCC.`+base64url)가 계약 문자 클래스를 통과하지 못해 실물 채팅이 전량 폐기된다(실측) | T1 | — | merged | t40-external-id-charset | #54 | (Orca 미사용, 코디네이터 직접) |
 | T41 | 모든 입력을 버리면서 required family 6개가 전부 `ok`였다 — 계약 검증 실패가 어디에도 보이지 않는다(실측) | T12, T40 | — | merged | t41-ingest-drop-signal | #56 | (Orca 미사용, 코디네이터 직접) |
 | T42 | 방송 privacy를 환경으로 덮는다(D-24) — Gate 2 calibration이 열 수 있는 링크를 요구한다 | T10 | — | merged | t42-unlisted-privacy | #55 | (Orca 미사용, 코디네이터 직접) |
