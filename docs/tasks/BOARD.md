@@ -15,6 +15,8 @@
 
 > **T52 merged(2026-08-28 UTC): 첫 실제 11시간 rollover의 lifecycle 동시 mutation 결함을 PR #65(squash `0179b82`)로 수정했다.** 최종 독립 Codex/GPT 리뷰는 합격 기준 7/7·finding 0, 집중 170/170, 별도 adversarial probe 13/13, 전체 2,286 passed/1 skipped와 exact-head CI `33157207926` 성공을 확인했다. main CI `33158455297`도 성공했다. 이 기록은 코드 머지 근거이며 실호스트 배포나 새 72시간 관측 완료를 뜻하지 않는다.
 
+> **T52 실호스트 배포·public 72시간 재시작(2026-08-28 UTC): main `a0fabf9`(fix `0179b82`)를 배포하고 migration 008을 적용했다.** 충돌로 남은 중복 live `xcGlCHnRqEs`는 complete, exact attempt marker가 일치한 private/unbound 고아 `zCAyrskFpx4`·`vEI6jjv9JsA`·`BvhFdMGU18E`는 삭제했다. 수정된 단일 rollover가 `LS3TRJrZczg`를 complete하고 `yLEZmHaTprI`를 public/live로 교체했으며, 2026-08-28 09:22:17.308 UTC에 required family 6개 `ok`·safeStop 없음·현재 component attempt 0·renderer 30fps를 확인했다. 새 72시간의 가장 이른 종료는 2026-08-31 09:22:17.308 UTC이고 이전 중단 구간은 이어 붙이지 않는다. 시간별 Orca monitor는 사용자 결정대로 disabled이며, 면제한 calibration·법률/권리·원어민·off-host/dead-man 등은 여전히 unverified/risk accepted다.
+
 > **과거 상태(2026-08-23 UTC; D-25로 superseded): 등록 task 50개 전부 머지, open PR 0, main CI 녹색이고 호스트가 `live`를 유지했다.** 당시 다음 순서는 calibration→합격선 잠금→validation→72h soak였으나 D-25가 이 사전 게이트 순서를 대체했다. 그 밖의 실측 이력과 결함 수정 근거는 아래 이력 표에 보존한다.
 
 | T-ID | 제목 | 의존 | [contract] | 상태 | 브랜치 slug | PR | Orca task |
