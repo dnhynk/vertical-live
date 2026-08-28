@@ -19,10 +19,13 @@ ALTER TABLE broadcast_resources
 ALTER TABLE broadcast_resources
   ADD COLUMN privacy_status_observed_at TEXT;
 
--- One predecessor cannot legitimately own two replacement candidates.
+-- One predecessor cannot legitimately own two open replacement candidates. A
+-- conclusively failed candidate keeps its provenance after closure, but must not
+-- reserve the predecessor forever: a later operator-approved/restarted attempt
+-- needs to be able to create a fresh, independently evidenced replacement.
 CREATE UNIQUE INDEX broadcast_resources_rollover_predecessor
   ON broadcast_resources (rollover_predecessor_attempt_id)
-  WHERE rollover_predecessor_attempt_id IS NOT NULL;
+  WHERE rollover_predecessor_attempt_id IS NOT NULL AND closed_at IS NULL;
 
 -- Visibility evidence is either absent as a whole or complete as a whole.
 CREATE TRIGGER broadcast_resources_visibility_evidence_insert

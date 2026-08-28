@@ -95,6 +95,109 @@ describe('loadMigrations', () => {
 })
 
 describe('migrate', () => {
+  it('upgrades a populated pre-008 database without guessing provenance and enforces open-only uniqueness', () => {
+    const directory = tempDir()
+    const file = join(tempDir(), 'db.sqlite')
+    const migrations = loadMigrations()
+    for (const migration of migrations.filter(({ version }) => version < 8)) {
+      writeFileSync(join(directory, migration.fileName), migration.sql)
+    }
+    const database = openDatabase({ file, busyTimeoutMs: BUSY_TIMEOUT_MS })
+    try {
+      const clock = new FakeClock()
+      migrate(database, { clock, directory })
+      database
+        .prepare(
+          `INSERT INTO broadcast_resources (
+            attempt_id, strategy, stage, stream_title, scheduled_start_time,
+            attempt_marker, stream_id, broadcast_id, live_chat_id, auto_start,
+            marker_cleared_at, pending_call, pending_transition,
+            last_error_reason, created_at, updated_at, closed_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          'attempt-predecessor',
+          'rolling-experiment',
+          'live',
+          'synthetic-ingest',
+          '2026-08-28T00:02:00.000Z',
+          'vl-attempt:attempt-predecessor',
+          'synthetic-stream-1',
+          'synthetic-broadcast-1',
+          'synthetic-chat-1',
+          0,
+          '2026-08-28T00:00:01.000Z',
+          null,
+          null,
+          null,
+          '2026-08-28T00:00:00.000Z',
+          '2026-08-28T00:00:01.000Z',
+          null,
+        )
+
+      const migration008 = migrations.find(({ version }) => version === 8)
+      if (migration008 === undefined) throw new Error('migration 008 fixture is missing')
+      writeFileSync(join(directory, migration008.fileName), migration008.sql)
+      expect(migrate(database, { clock, directory }).applied.map(({ version }) => version)).toEqual(
+        [8],
+      )
+
+      const upgraded = database
+        .prepare(
+          `SELECT attempt_id, stage, stream_id, broadcast_id,
+                  rollover_predecessor_attempt_id, privacy_status, privacy_status_observed_at
+             FROM broadcast_resources WHERE attempt_id = ?`,
+        )
+        .get('attempt-predecessor') as Record<string, unknown>
+      expect(upgraded).toEqual({
+        attempt_id: 'attempt-predecessor',
+        stage: 'live',
+        stream_id: 'synthetic-stream-1',
+        broadcast_id: 'synthetic-broadcast-1',
+        rollover_predecessor_attempt_id: null,
+        privacy_status: null,
+        privacy_status_observed_at: null,
+      })
+
+      const insertCandidate = database.prepare(
+        `INSERT INTO broadcast_resources (
+          attempt_id, strategy, stage, stream_title, scheduled_start_time,
+          attempt_marker, rollover_predecessor_attempt_id,
+          created_at, updated_at, closed_at
+        ) VALUES (?, 'rolling-experiment', ?, 'synthetic-ingest',
+                  '2026-08-28T00:02:00.000Z', ?, 'attempt-predecessor', ?, ?, ?)`,
+      )
+      insertCandidate.run(
+        'attempt-candidate-1',
+        'abandoned',
+        'vl-attempt:attempt-candidate-1',
+        '2026-08-28T00:01:00.000Z',
+        '2026-08-28T00:01:01.000Z',
+        '2026-08-28T00:01:01.000Z',
+      )
+      insertCandidate.run(
+        'attempt-candidate-2',
+        'planned',
+        'vl-attempt:attempt-candidate-2',
+        '2026-08-28T00:02:00.000Z',
+        '2026-08-28T00:02:00.000Z',
+        null,
+      )
+      expect(() =>
+        insertCandidate.run(
+          'attempt-candidate-3',
+          'planned',
+          'vl-attempt:attempt-candidate-3',
+          '2026-08-28T00:03:00.000Z',
+          '2026-08-28T00:03:00.000Z',
+          null,
+        ),
+      ).toThrow(/UNIQUE constraint failed/)
+    } finally {
+      database.close()
+    }
+  })
+
   it('creates every table the persistence layer owns', () => {
     const file = join(tempDir(), 'db.sqlite')
     const database = openDatabase({ file, busyTimeoutMs: BUSY_TIMEOUT_MS })

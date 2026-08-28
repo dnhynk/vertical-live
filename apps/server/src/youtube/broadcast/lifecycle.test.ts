@@ -1940,6 +1940,105 @@ describe('rolling segments (T33, D-21)', () => {
     expect(h.temp.store.findOpenBroadcastAttempt()?.stage).toBe('bound')
   })
 
+  it.each(['due', 'explicit'] as const)(
+    'safe-stops the %s rollover on insert limit without adopting or mutating its predecessor',
+    async (path) => {
+      const clock = new FakeClock()
+      const h = await setUp({
+        clock,
+        config: {
+          strategy: 'rolling-experiment',
+          segmentMs: 1,
+          privacyStatus: 'public',
+        },
+      })
+      const lifecycle = h.lifecycle()
+      const predecessor = await lifecycle.ensureLive()
+      await lifecycle.publish()
+      await clock.advance(1)
+      const predecessorRow = h.temp.store.getBroadcastAttempt(predecessor.attemptId)
+      const insertsBefore = h.server.requestsFor('liveBroadcasts.insert').length
+      const listsBefore = h.server.requestsFor('liveBroadcasts.list').length
+      const transitionsBefore = h.server.requestsFor('liveBroadcasts.transition').length
+      const visibilityBefore = h.server
+        .requestsFor('liveBroadcasts.update')
+        .filter((request) => (request.body as { status?: unknown }).status !== undefined).length
+      h.server.queueFailure('liveBroadcasts.insert', {
+        status: 403,
+        reason: 'userBroadcastsExceedLimit',
+      })
+
+      const rolling = path === 'due' ? lifecycle.rolloverIfDue() : lifecycle.rollOver()
+      await expect(rolling).rejects.toThrow(BroadcastSafeStopRequiredError)
+
+      expect(h.server.broadcasts.get(predecessor.broadcastId)).toMatchObject({
+        lifeCycleStatus: 'live',
+        privacyStatus: 'public',
+        boundStreamId: predecessor.streamId,
+      })
+      expect(h.temp.store.getBroadcastAttempt(predecessor.attemptId)).toEqual(predecessorRow)
+      expect(h.server.requestsFor('liveBroadcasts.insert')).toHaveLength(insertsBefore + 1)
+      expect(h.server.requestsFor('liveBroadcasts.list')).toHaveLength(listsBefore + 2)
+      expect(h.server.requestsFor('liveBroadcasts.transition')).toHaveLength(transitionsBefore)
+      expect(
+        h.server
+          .requestsFor('liveBroadcasts.update')
+          .filter((request) => (request.body as { status?: unknown }).status !== undefined),
+      ).toHaveLength(visibilityBefore)
+      expect(h.safeStops.at(-1)).toMatchObject({
+        reason: 'userBroadcastsExceedLimit',
+        detail: {
+          method: 'liveBroadcasts.insert',
+          recoverable: false,
+          candidatesComplete: true,
+        },
+      })
+      const failedCandidate = h.temp.store.listBroadcastAttempts()[0]
+      expect(failedCandidate).toMatchObject({
+        stage: 'abandoned',
+        closedAt: expect.any(String),
+        lastErrorReason: 'userBroadcastsExceedLimit',
+        rolloverPredecessorAttemptId: predecessor.attemptId,
+      })
+      expect(failedCandidate?.broadcastId).toBeNull()
+      expect(h.alerts.ofKind('broadcast_recovered')).toHaveLength(0)
+      expect(h.temp.store.findOpenBroadcastAttempt()?.attemptId).toBe(predecessor.attemptId)
+    },
+  )
+
+  it('successfully retries a replacement after the failed linked candidate is closed', async () => {
+    const h = await setUp({
+      config: { strategy: 'rolling-experiment', privacyStatus: 'public' },
+    })
+    const predecessor = await h.lifecycle().ensureLive()
+    await h.lifecycle().publish()
+    h.server.queueFailure('liveBroadcasts.insert', {
+      status: 403,
+      reason: 'userBroadcastsExceedLimit',
+    })
+    await expect(h.lifecycle().rollOver()).rejects.toThrow(BroadcastSafeStopRequiredError)
+    const failedCandidate = h.temp.store.listBroadcastAttempts()[0]
+
+    const replacement = await h.restart().rollOver()
+
+    expect(replacement.broadcastId).not.toBe(predecessor.broadcastId)
+    expect(replacement.streamId).toBe(predecessor.streamId)
+    expect(h.server.broadcasts.get(predecessor.broadcastId)?.lifeCycleStatus).toBe('complete')
+    expect(h.server.broadcasts.get(replacement.broadcastId)).toMatchObject({
+      lifeCycleStatus: 'live',
+      privacyStatus: 'public',
+    })
+    expect(failedCandidate).toMatchObject({
+      stage: 'abandoned',
+      rolloverPredecessorAttemptId: predecessor.attemptId,
+    })
+    expect(
+      h.temp.store
+        .listBroadcastAttempts()
+        .filter((attempt) => attempt.rolloverPredecessorAttemptId === predecessor.attemptId),
+    ).toHaveLength(2)
+  })
+
   it('does nothing while rollover is switched off', async () => {
     // Production ships with 11h rolling after T45. Keeping the off path requires
     // an explicit injected config, not an accidental dependency on shipped defaults.

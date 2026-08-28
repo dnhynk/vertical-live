@@ -1685,13 +1685,23 @@ export class BroadcastLifecycle {
       seen.push(...page.items)
       complete = complete && page.complete
     }
-    const ours = seen.filter(
-      (candidate) =>
-        isAdoptableLifeCycleStatus(candidate.lifeCycleStatus) &&
-        (candidate.id === attempt.broadcastId ||
-          (attempt.streamId !== null && candidate.boundStreamId === attempt.streamId) ||
-          candidate.title === this.#config.title),
-    )
+    const ours = seen.filter((candidate) => {
+      if (!isAdoptableLifeCycleStatus(candidate.lifeCycleStatus)) return false
+      if (attempt.rolloverPredecessorAttemptId !== null) {
+        // A linked row is candidate-specific provenance. Its predecessor is
+        // intentionally live on the same stream and normally has the same title,
+        // so the generic recovery predicates below would select precisely the
+        // resource this rollover must preserve. Only the replacement's own
+        // write-once id is admissible; an insert limit before that id exists has
+        // no exact replacement to recover and therefore safe-stops.
+        return attempt.broadcastId !== null && candidate.id === attempt.broadcastId
+      }
+      return (
+        candidate.id === attempt.broadcastId ||
+        (attempt.streamId !== null && candidate.boundStreamId === attempt.streamId) ||
+        candidate.title === this.#config.title
+      )
+    })
     // Prefer one that is already carrying video: adopting it costs no transition.
     const candidate =
       ours.find((entry) => isLiveLifeCycleStatus(entry.lifeCycleStatus)) ?? ours[0] ?? null
@@ -1762,6 +1772,18 @@ export class BroadcastLifecycle {
     candidate: LiveBroadcastSummary,
     resolvedStreamId: string | null,
   ): Promise<BroadcastAttemptRecord> {
+    if (attempt.rolloverPredecessorAttemptId !== null && candidate.id !== attempt.broadcastId) {
+      // Defense in depth for every present and future caller: linked rollover
+      // provenance authorizes this row to recover only its own exact resource.
+      // Closing the candidate is conservative; the predecessor row/resource is
+      // deliberately not adopted, closed, rebound, or otherwise mutated.
+      return this.#requestSafeStop(attempt, 'rollover_recovery_candidate_unproven', {
+        candidateAttemptId: attempt.attemptId,
+        candidateBroadcastId: candidate.id,
+        replacementBroadcastId: attempt.broadcastId,
+        predecessorAttemptId: attempt.rolloverPredecessorAttemptId,
+      })
+    }
     const owner = this.#store
       .listBroadcastAttempts()
       .find((row) => row.broadcastId === candidate.id && row.closedAt === null)

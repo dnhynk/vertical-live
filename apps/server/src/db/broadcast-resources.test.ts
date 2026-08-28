@@ -168,7 +168,7 @@ describe('broadcast attempts', () => {
     expect(unchanged.lastErrorReason).toBe('rollover_predecessor_complete')
   })
 
-  it('writes exact rollover provenance before resource mutation and owns one candidate', () => {
+  it('writes exact rollover provenance before resource mutation and owns one open candidate', () => {
     temp.store.beginBroadcastAttempt({ ...ATTEMPT, strategy: 'rolling-experiment' })
     temp.store.recordBroadcastCallResult(ATTEMPT.attemptId, {
       stage: 'live',
@@ -198,6 +198,25 @@ describe('broadcast attempts', () => {
         rolloverPredecessorAttemptId: ATTEMPT.attemptId,
       }),
     ).toThrow()
+
+    temp.store.closeBroadcastAttempt(replacement.attemptId, 'abandoned', 'broadcast_missing')
+    const retry = temp.store.beginBroadcastAttempt({
+      ...ATTEMPT,
+      attemptId: 'attempt-0003',
+      strategy: 'rolling-experiment',
+      rolloverPredecessorAttemptId: ATTEMPT.attemptId,
+    })
+
+    expect(retry.rolloverPredecessorAttemptId).toBe(ATTEMPT.attemptId)
+    expect(retry.closedAt).toBeNull()
+    expect(
+      temp.store
+        .listBroadcastAttempts()
+        .filter(
+          (attempt) =>
+            attempt.rolloverPredecessorAttemptId === ATTEMPT.attemptId && attempt.closedAt === null,
+        ),
+    ).toHaveLength(1)
   })
 
   it('durably records visibility established by an API result or read-back', () => {
