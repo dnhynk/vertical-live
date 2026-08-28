@@ -130,6 +130,14 @@ export interface AppliedHold {
   release(): void
 }
 
+/** A queued barrier reached after validation but before the request is applied. */
+export interface BeforeApplyHold {
+  /** Resolves while the external mutation is still provably absent. */
+  readonly reached: Promise<void>
+  /** Allows the request to mutate fake YouTube state. */
+  release(): void
+}
+
 export class FakeYouTubeApiServer {
   readonly requests: FakeRequest[] = []
   readonly streams = new Map<string, FakeStream>()
@@ -141,6 +149,8 @@ export class FakeYouTubeApiServer {
   readonly #delays = new Map<FakeApiMethod, number[]>()
   /** Queued applied-but-withheld holds, consumed one per matching call. */
   readonly #holds = new Map<FakeApiMethod, InternalHold[]>()
+  /** Queued pre-apply barriers, consumed one per matching call. */
+  readonly #beforeApplyHolds = new Map<FakeApiMethod, InternalHold[]>()
 
   readonly #server: Server
   #baseUrl = ''
@@ -231,6 +241,26 @@ export class FakeYouTubeApiServer {
     queue.push({ signalApplied, released })
     this.#holds.set(method, queue)
     return { applied, release: releaseResponse }
+  }
+
+  /**
+   * Stops the next request immediately before application. Unlike `holdApplied`,
+   * this models the T52 race where another caller reconciles while the first
+   * caller has marked its DB call pending but YouTube has not inserted anything.
+   */
+  holdBeforeApply(method: FakeApiMethod): BeforeApplyHold {
+    let signalReached: () => void = () => {}
+    const reached = new Promise<void>((resolve) => {
+      signalReached = resolve
+    })
+    let releaseRequest: () => void = () => {}
+    const released = new Promise<void>((resolve) => {
+      releaseRequest = resolve
+    })
+    const queue = this.#beforeApplyHolds.get(method) ?? []
+    queue.push({ signalApplied: signalReached, released })
+    this.#beforeApplyHolds.set(method, queue)
+    return { reached, release: releaseRequest }
   }
 
   requestsFor(method: FakeApiMethod): FakeRequest[] {
@@ -324,7 +354,13 @@ export class FakeYouTubeApiServer {
 
     const delayMs = this.#delays.get(method)?.shift()
     const hold = this.#holds.get(method)?.shift()
+    const beforeApply = this.#beforeApplyHolds.get(method)?.shift()
     const failure = this.#failures.get(method)?.shift()
+
+    if (beforeApply !== undefined) {
+      beforeApply.signalApplied()
+      await beforeApply.released
+    }
 
     const respond = (): void => {
       if (failure !== undefined) {

@@ -1232,12 +1232,21 @@ export class PersistenceStore {
 
   /** The newest attempt that has not been closed — what a restart resumes. */
   findOpenBroadcastAttempt(): BroadcastAttemptRecord | null {
-    const row = this.#db
+    return this.listOpenBroadcastAttempts()[0] ?? null
+  }
+
+  /**
+   * Every open attempt, newest first. A rollover deliberately has two open rows
+   * between replacement creation and predecessor completion, so restart recovery
+   * must inspect the topology rather than pretending only the newest row exists.
+   */
+  listOpenBroadcastAttempts(): BroadcastAttemptRecord[] {
+    const rows = this.#db
       .prepare<[], BroadcastAttemptColumns>(
-        `${BROADCAST_COLUMNS} WHERE closed_at IS NULL ORDER BY created_at DESC, attempt_id DESC LIMIT 1`,
+        `${BROADCAST_COLUMNS} WHERE closed_at IS NULL ORDER BY created_at DESC, attempt_id DESC`,
       )
-      .get()
-    return row === undefined ? null : toBroadcastAttempt(row)
+      .all()
+    return rows.map(toBroadcastAttempt)
   }
 
   /** Newest first. Used by `/health` and by the rolling-experiment report. */

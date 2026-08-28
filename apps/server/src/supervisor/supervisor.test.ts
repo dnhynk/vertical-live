@@ -1488,4 +1488,29 @@ describe('segment rollover timing (T33)', () => {
     expect(h.supervisor.state).toBe('live')
     expect(h.alerts.alerts.some((alert) => alert.reason === 'rollover_failed')).toBe(true)
   })
+
+  it('observes a detached rollover rejection even when failure reporting throws (T52)', async () => {
+    let errorCalls = 0
+    const h = createSupervisorHarness({
+      preflight: passingPreflight(),
+      rollSegment: () => Promise.reject(new Error('synthetic persistence invariant')),
+      logger: {
+        debug: () => {},
+        info: () => {},
+        warn: () => {},
+        error: () => {
+          errorCalls += 1
+          if (errorCalls === 1) throw new Error('synthetic logger failure')
+        },
+      },
+    })
+
+    await goLive(h)
+    await flushMicrotasks()
+
+    // First call is the lifecycle failure report; its throw rejects the detached
+    // task. The second is the final observer at the `void` boundary.
+    expect(errorCalls).toBe(2)
+    expect(h.supervisor.state).toBe('live')
+  })
 })

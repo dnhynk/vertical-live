@@ -2,6 +2,7 @@ import type { EngineHealth, InputHealth } from '../../engine/engine.js'
 import type { RendererHealthReport } from '../../engine/publisher.js'
 import type { HealthSignal } from '../../health/types.js'
 import type { CommandMetricsSnapshot } from '../../input/metrics.js'
+import type { Logger } from '../../secrets/redaction.js'
 import { FakeClock } from '../../testing/fake-clock.js'
 import { RecordingAlertSink, type AlertSink } from '../alerts.js'
 import { loadSupervisorConfig, type SupervisorConfig } from '../config.js'
@@ -131,6 +132,8 @@ export interface HarnessOptions {
    * which is where the safe-stop ordering matters (review round 4).
    */
   readonly alerts?: AlertSink
+  /** Replaces the silent logger for detached-promise/error-boundary tests. */
+  readonly logger?: Logger
   /** Replaces individual component actions, e.g. with one that can be gated. */
   readonly actions?: Partial<ComponentActions>
   /** Post-action canonical-health verification windows (T51). */
@@ -218,6 +221,7 @@ export function createSupervisorHarness(options: HarnessOptions = {}): Superviso
     },
     renderer: rendererHealth,
     alerts: options.alerts ?? alerts,
+    ...(options.logger === undefined ? {} : { logger: options.logger }),
     actions,
     ...(options.restartRecoveryTimeoutMs === undefined
       ? {}

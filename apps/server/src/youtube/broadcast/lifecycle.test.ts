@@ -34,6 +34,32 @@ async function setUp(...args: Parameters<typeof createBroadcastHarness>) {
   return harness
 }
 
+function persistBoundAttempt(
+  h: BroadcastHarness,
+  input: {
+    readonly attemptId: string
+    readonly streamId: string
+    readonly broadcastId: string
+    readonly liveChatId: string
+  },
+): void {
+  h.temp.store.beginBroadcastAttempt({
+    attemptId: input.attemptId,
+    strategy: 'rolling-experiment',
+    streamTitle: h.config.stream.title,
+    scheduledStartTime: new Date(Date.parse(h.temp.clock.nowUtcIso()) + 120_000).toISOString(),
+    attemptMarker: `vl-attempt:${input.attemptId}`,
+  })
+  h.temp.store.recordBroadcastCallResult(input.attemptId, {
+    stage: 'bound',
+    streamId: input.streamId,
+    broadcastId: input.broadcastId,
+    liveChatId: input.liveChatId,
+    autoStart: false,
+    markerCleared: true,
+  })
+}
+
 /**
  * Runs `work` with one call of `method` applied at YouTube but never answered, and
  * the client's timeout fired from the injected clock (review round 1, M2). Nothing
@@ -1454,6 +1480,111 @@ describe('an attempt is only resumed while YouTube can still carry it (T30)', ()
     expect(untouched?.closedAt).toBeNull()
     expect(untouched?.stage).toBe('live')
   })
+
+  it('recovers the exact T52 topology newest-first without resource spam', async () => {
+    const h = await setUp({ config: { strategy: 'rolling-experiment', segmentMs: 1 } })
+    const oldest = await h.lifecycle().ensureLive()
+    const middleBroadcast = h.server.seedBroadcast({
+      boundStreamId: oldest.streamId,
+      lifeCycleStatus: 'ready',
+    })
+    persistBoundAttempt(h, {
+      attemptId: 'attempt-0002',
+      streamId: oldest.streamId,
+      broadcastId: middleBroadcast.id,
+      liveChatId: middleBroadcast.liveChatId,
+    })
+    const newestBroadcast = h.server.seedBroadcast({
+      boundStreamId: oldest.streamId,
+      lifeCycleStatus: 'ready',
+    })
+    persistBoundAttempt(h, {
+      attemptId: 'attempt-0003',
+      streamId: oldest.streamId,
+      broadcastId: newestBroadcast.id,
+      liveChatId: newestBroadcast.liveChatId,
+    })
+    const insertsBefore = h.server.requestsFor('liveBroadcasts.insert').length
+    const streamsBefore = h.server.streams.size
+    const broadcastsBefore = h.server.broadcasts.size
+
+    const recovered = await h.restart().ensureLive()
+
+    expect(recovered.attemptId).toBe('attempt-0003')
+    expect(recovered.broadcastId).toBe(newestBroadcast.id)
+    expect(h.server.broadcasts.get(oldest.broadcastId)?.lifeCycleStatus).toBe('complete')
+    expect(h.temp.store.getBroadcastAttempt(oldest.attemptId)?.stage).toBe('complete')
+    // The older non-terminal replacement has no terminal evidence, so it stays
+    // explicit and ignored rather than being rewritten or guessed closed.
+    expect(h.temp.store.getBroadcastAttempt('attempt-0002')?.closedAt).toBeNull()
+    expect(h.temp.store.getBroadcastAttempt('attempt-0002')?.broadcastId).toBe(middleBroadcast.id)
+    expect(h.server.requestsFor('liveBroadcasts.insert')).toHaveLength(insertsBefore)
+    expect(h.server.streams.size).toBe(streamsBefore)
+    expect(h.server.broadcasts.size).toBe(broadcastsBefore)
+
+    // A second crash/restart selects the same live newest row and still creates
+    // nothing. This is the bounded-resource guarantee the incident lacked.
+    const second = await h.restart().ensureLive()
+    expect(second.attemptId).toBe(recovered.attemptId)
+    expect(second.broadcastId).toBe(recovered.broadcastId)
+    expect(h.server.requestsFor('liveBroadcasts.insert')).toHaveLength(insertsBefore)
+    expect(h.server.broadcasts.size).toBe(broadcastsBefore)
+  })
+
+  it('uses terminal YouTube evidence when the predecessor stopped before the crash', async () => {
+    const h = await setUp({ config: { strategy: 'rolling-experiment', segmentMs: 1 } })
+    const predecessor = await h.lifecycle().ensureLive()
+    const observed = h.server.broadcasts.get(predecessor.broadcastId)
+    if (observed !== undefined) observed.lifeCycleStatus = 'complete'
+    const replacement = h.server.seedBroadcast({
+      boundStreamId: predecessor.streamId,
+      lifeCycleStatus: 'ready',
+    })
+    persistBoundAttempt(h, {
+      attemptId: 'attempt-0002',
+      streamId: predecessor.streamId,
+      broadcastId: replacement.id,
+      liveChatId: replacement.liveChatId,
+    })
+    const before = h.server.requestsFor('liveBroadcasts.insert').length
+
+    const recovered = await h.restart().ensureLive()
+
+    expect(recovered.attemptId).toBe('attempt-0002')
+    expect(h.temp.store.getBroadcastAttempt(predecessor.attemptId)).toMatchObject({
+      stage: 'complete',
+      lastErrorReason: 'restart_observed_complete',
+    })
+    expect(h.server.requestsFor('liveBroadcasts.insert')).toHaveLength(before)
+  })
+
+  it('safe-stops competing live rows without closing or rewriting either one', async () => {
+    const h = await setUp({ config: { strategy: 'rolling-experiment', segmentMs: 1 } })
+    const predecessor = await h.lifecycle().ensureLive()
+    const competing = h.server.seedBroadcast({
+      boundStreamId: predecessor.streamId,
+      lifeCycleStatus: 'live',
+    })
+    persistBoundAttempt(h, {
+      attemptId: 'attempt-0002',
+      streamId: predecessor.streamId,
+      broadcastId: competing.id,
+      liveChatId: competing.liveChatId,
+    })
+    h.temp.store.recordBroadcastCallResult('attempt-0002', { stage: 'live' })
+    const before = h.server.requestsFor('liveBroadcasts.insert').length
+
+    await expect(h.restart().resume()).rejects.toThrow(BroadcastSafeStopRequiredError)
+
+    expect(h.safeStops.at(-1)?.reason).toBe('competing_live_broadcast_attempts')
+    expect(h.temp.store.getBroadcastAttempt(predecessor.attemptId)?.closedAt).toBeNull()
+    expect(h.temp.store.getBroadcastAttempt('attempt-0002')?.closedAt).toBeNull()
+    expect(h.temp.store.getBroadcastAttempt(predecessor.attemptId)?.broadcastId).toBe(
+      predecessor.broadcastId,
+    )
+    expect(h.temp.store.getBroadcastAttempt('attempt-0002')?.broadcastId).toBe(competing.id)
+    expect(h.server.requestsFor('liveBroadcasts.insert')).toHaveLength(before)
+  })
 })
 
 /**
@@ -1468,6 +1599,53 @@ describe('an attempt is only resumed while YouTube can still carry it (T30)', ()
  * starts. Both quoted in `rolloverIfDue`.
  */
 describe('rolling segments (T33, D-21)', () => {
+  it('single-flights rollover with production chat target resolution (T52)', async () => {
+    const clock = new FakeClock()
+    const h = await setUp({ clock, config: { segmentMs: 1 } })
+    const lifecycle = h.lifecycle()
+    const first = await lifecycle.ensureLive()
+    await clock.advance(1)
+    const hold = h.server.holdBeforeApply('liveBroadcasts.insert')
+
+    const rolling = lifecycle.rolloverIfDue()
+    await hold.reached
+    const resolveTarget = async () => {
+      const binding = await lifecycle.ensureBound()
+      return binding.liveChatId === null
+        ? null
+        : { liveChatId: binding.liveChatId, broadcastId: binding.broadcastId }
+    }
+    const resolving = resolveTarget()
+
+    // The resolver is queued behind the lifecycle owner. Without the T52
+    // boundary it sees a pending insert before YouTube has applied it, concludes
+    // "not applied", and sends the second insert that repoints this attempt.
+    expect(h.server.requestsFor('liveBroadcasts.insert')).toHaveLength(2)
+    hold.release()
+    const [next, target] = await Promise.all([rolling, resolving])
+
+    expect(next).not.toBeNull()
+    expect(target).toEqual({
+      liveChatId: next?.liveChatId,
+      broadcastId: next?.broadcastId,
+    })
+    expect(next?.broadcastId).not.toBe(first.broadcastId)
+    expect(h.server.requestsFor('liveBroadcasts.insert')).toHaveLength(2)
+    expect(h.server.broadcasts.size).toBe(2)
+    expect(h.temp.store.findOpenBroadcastAttempt()?.broadcastId).toBe(next?.broadcastId)
+  })
+
+  it('releases the lifecycle queue after a failed mutation', async () => {
+    const h = await setUp()
+    const lifecycle = h.lifecycle()
+
+    const [failed, next] = await Promise.allSettled([lifecycle.publish(), lifecycle.ensureBound()])
+
+    expect(failed.status).toBe('rejected')
+    expect(next.status).toBe('fulfilled')
+    expect(h.temp.store.findOpenBroadcastAttempt()?.stage).toBe('bound')
+  })
+
   it('does nothing while rollover is switched off', async () => {
     // Production ships with 11h rolling after T45. Keeping the off path requires
     // an explicit injected config, not an accidental dependency on shipped defaults.
