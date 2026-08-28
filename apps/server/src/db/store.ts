@@ -174,6 +174,9 @@ interface BroadcastAttemptColumns {
   readonly scheduled_start_time: string
   readonly attempt_marker: string
   readonly marker_cleared_at: string | null
+  readonly rollover_predecessor_attempt_id: string | null
+  readonly privacy_status: string | null
+  readonly privacy_status_observed_at: string | null
   readonly auto_start: number | null
   readonly last_error_reason: string | null
   readonly created_at: string
@@ -1112,13 +1115,22 @@ export class PersistenceStore {
     assertNonEmptyString(input.streamTitle, 'streamTitle')
     assertNonEmptyString(input.scheduledStartTime, 'scheduledStartTime')
     assertNonEmptyString(input.attemptMarker, 'attemptMarker')
+    if (input.rolloverPredecessorAttemptId != null) {
+      assertNonEmptyString(input.rolloverPredecessorAttemptId, 'rolloverPredecessorAttemptId')
+      const predecessor = this.#requireBroadcastAttempt(input.rolloverPredecessorAttemptId)
+      if (predecessor.closedAt !== null || predecessor.stage !== 'live') {
+        throw new PersistenceInvariantError(
+          `rollover predecessor ${predecessor.attemptId} must be an open live attempt`,
+        )
+      }
+    }
     const now = this.#clock.nowUtcIso()
     this.#db
       .prepare(
         `INSERT INTO broadcast_resources
            (attempt_id, strategy, stage, stream_title, scheduled_start_time, attempt_marker,
-            created_at, updated_at)
-         VALUES (?, ?, 'planned', ?, ?, ?, ?, ?)`,
+            rollover_predecessor_attempt_id, created_at, updated_at)
+         VALUES (?, ?, 'planned', ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         input.attemptId,
@@ -1126,6 +1138,7 @@ export class PersistenceStore {
         input.streamTitle,
         input.scheduledStartTime,
         input.attemptMarker,
+        input.rolloverPredecessorAttemptId ?? null,
         now,
         now,
       )
@@ -1209,7 +1222,15 @@ export class PersistenceStore {
   ): BroadcastAttemptRecord {
     const current = this.#requireBroadcastAttempt(attemptId)
     if (current.closedAt !== null) {
-      return current
+      if (reason === undefined || current.lastErrorReason !== null) return current
+      this.#db
+        .prepare(
+          `UPDATE broadcast_resources
+              SET last_error_reason = ?, updated_at = ?
+            WHERE attempt_id = ?`,
+        )
+        .run(reason, this.#clock.nowUtcIso(), attemptId)
+      return this.#requireBroadcastAttempt(attemptId)
     }
     this.#db
       .prepare(
@@ -1232,12 +1253,21 @@ export class PersistenceStore {
 
   /** The newest attempt that has not been closed — what a restart resumes. */
   findOpenBroadcastAttempt(): BroadcastAttemptRecord | null {
-    const row = this.#db
+    return this.listOpenBroadcastAttempts()[0] ?? null
+  }
+
+  /**
+   * Every open attempt, newest first. A rollover deliberately has two open rows
+   * between replacement creation and predecessor completion, so restart recovery
+   * must inspect the topology rather than pretending only the newest row exists.
+   */
+  listOpenBroadcastAttempts(): BroadcastAttemptRecord[] {
+    const rows = this.#db
       .prepare<[], BroadcastAttemptColumns>(
-        `${BROADCAST_COLUMNS} WHERE closed_at IS NULL ORDER BY created_at DESC, attempt_id DESC LIMIT 1`,
+        `${BROADCAST_COLUMNS} WHERE closed_at IS NULL ORDER BY created_at DESC, attempt_id DESC`,
       )
-      .get()
-    return row === undefined ? null : toBroadcastAttempt(row)
+      .all()
+    return rows.map(toBroadcastAttempt)
   }
 
   /** Newest first. Used by `/health` and by the rolling-experiment report. */
@@ -1278,6 +1308,8 @@ export class PersistenceStore {
                 auto_start = COALESCE(?, auto_start),
                 -- Write-once: a marker that has been removed cannot come back.
                 marker_cleared_at = COALESCE(marker_cleared_at, ?),
+                privacy_status = COALESCE(?, privacy_status),
+                privacy_status_observed_at = CASE WHEN ? IS NULL THEN privacy_status_observed_at ELSE ? END,
                 last_error_reason = CASE WHEN ? THEN ? ELSE last_error_reason END,
                 pending_call = CASE WHEN ? THEN NULL ELSE pending_call END,
                 pending_transition = CASE WHEN ? THEN NULL ELSE pending_transition END,
@@ -1293,6 +1325,9 @@ export class PersistenceStore {
         update.scheduledStartTime ?? null,
         update.autoStart === undefined ? null : update.autoStart ? 1 : 0,
         update.markerCleared === true ? now : null,
+        update.privacyStatus ?? null,
+        update.privacyStatus ?? null,
+        update.privacyStatus === undefined ? null : now,
         update.lastErrorReason === undefined ? 0 : 1,
         update.lastErrorReason ?? null,
         options.clearPending ? 1 : 0,
@@ -1322,7 +1357,8 @@ const DEADLINE_COLUMNS = `SELECT id, kind, due_at, policy, payload_json, status 
 
 const BROADCAST_COLUMNS = `SELECT attempt_id, strategy, stage, pending_call, pending_transition, pending_since,
          stream_id, stream_title, broadcast_id, live_chat_id, scheduled_start_time, attempt_marker,
-         marker_cleared_at, auto_start, last_error_reason, created_at, updated_at, closed_at
+         marker_cleared_at, rollover_predecessor_attempt_id, privacy_status,
+         privacy_status_observed_at, auto_start, last_error_reason, created_at, updated_at, closed_at
     FROM broadcast_resources`
 
 function toBroadcastAttempt(row: BroadcastAttemptColumns): BroadcastAttemptRecord {
@@ -1340,6 +1376,9 @@ function toBroadcastAttempt(row: BroadcastAttemptColumns): BroadcastAttemptRecor
     scheduledStartTime: row.scheduled_start_time,
     attemptMarker: row.attempt_marker,
     markerClearedAt: row.marker_cleared_at,
+    rolloverPredecessorAttemptId: row.rollover_predecessor_attempt_id,
+    privacyStatus: row.privacy_status as BroadcastAttemptRecord['privacyStatus'],
+    privacyStatusObservedAt: row.privacy_status_observed_at,
     autoStart: row.auto_start === null ? null : row.auto_start === 1,
     lastErrorReason: row.last_error_reason,
     createdAt: row.created_at,

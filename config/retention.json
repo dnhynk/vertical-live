@@ -179,7 +179,7 @@
       "status": "present",
       "source": "youtube_api",
       "dataClass": "authorized_api_data",
-      "purpose": "broadcast/stream/live-chat resource ids plus the lifecycle bookkeeping that makes a reconcile possible (spec §9.1, §9.2, §9.3; columns fixed by T10 migration 003). The attempt columns are this host's own state, but the row is deleted as a unit, so they are declared under the stricter authorized-API-data rule rather than a weaker one of their own",
+      "purpose": "broadcast/stream/live-chat resource ids plus the lifecycle bookkeeping that makes a reconcile possible (spec §9.1, §9.2, §9.3; resource columns fixed by T10 migration 003 and candidate-specific rollover/visibility evidence added by T52 migration 008). The attempt columns are this host's own state, but the row is deleted as a unit, so they are declared under the stricter authorized-API-data rule rather than a weaker one of their own",
       "storedColumns": [
         "attempt_id",
         "strategy",
@@ -194,6 +194,9 @@
         "scheduled_start_time",
         "attempt_marker",
         "marker_cleared_at",
+        "rollover_predecessor_attempt_id",
+        "privacy_status",
+        "privacy_status_observed_at",
         "auto_start",
         "last_error_reason",
         "created_at",

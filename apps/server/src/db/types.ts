@@ -257,6 +257,8 @@ export interface BroadcastAttemptInput {
    * matches on: a scheduled time alone is not an identity (review round 2, B1).
    */
   readonly attemptMarker: string
+  /** Exact predecessor when this attempt was created as a rolling replacement. */
+  readonly rolloverPredecessorAttemptId?: string | null
 }
 
 /** One persisted broadcast attempt (`broadcast_resources`). */
@@ -275,6 +277,11 @@ export interface BroadcastAttemptRecord extends BroadcastAttemptInput {
   readonly lastErrorReason: string | null
   /** Set once the attempt marker is no longer in the description (BOARD A-18). */
   readonly markerClearedAt: string | null
+  /** Null for startup attempts; write-once provenance for a rolling replacement. */
+  readonly rolloverPredecessorAttemptId: string | null
+  /** Last visibility durably established from an API result or exact-id read-back. */
+  readonly privacyStatus: 'private' | 'unlisted' | 'public' | null
+  readonly privacyStatusObservedAt: string | null
   readonly createdAt: string
   readonly updatedAt: string
   readonly closedAt: string | null
@@ -293,6 +300,8 @@ export interface BroadcastAttemptUpdate {
   readonly autoStart?: boolean
   /** Stamps `markerClearedAt` with the store clock; never unsets it. */
   readonly markerCleared?: true
+  /** Records visibility established by a successful response or exact-id reconcile. */
+  readonly privacyStatus?: 'private' | 'unlisted' | 'public'
   /** `null` clears a previously recorded reason. */
   readonly lastErrorReason?: string | null
 }

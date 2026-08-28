@@ -47,6 +47,8 @@ describe('broadcast attempts', () => {
       broadcastId: null,
       liveChatId: null,
       autoStart: null,
+      rolloverPredecessorAttemptId: null,
+      privacyStatus: null,
       closedAt: null,
     })
     expect(temp.store.findOpenBroadcastAttempt()).toEqual(record)
@@ -143,6 +145,92 @@ describe('broadcast attempts', () => {
     expect(closed.closedAt).not.toBeNull()
     expect(closed.lastErrorReason).toBe('userBroadcastsExceedLimit')
     expect(temp.store.findOpenBroadcastAttempt()).toBeNull()
+  })
+
+  it('can stamp an evidence reason on an idempotently closed attempt without rewriting it', () => {
+    temp.store.beginBroadcastAttempt(ATTEMPT)
+    const closed = temp.store.closeBroadcastAttempt(ATTEMPT.attemptId, 'complete')
+
+    const evidenced = temp.store.closeBroadcastAttempt(
+      ATTEMPT.attemptId,
+      'complete',
+      'rollover_predecessor_complete',
+    )
+    const unchanged = temp.store.closeBroadcastAttempt(
+      ATTEMPT.attemptId,
+      'complete',
+      'synthetic_later_reason',
+    )
+
+    expect(evidenced.stage).toBe(closed.stage)
+    expect(evidenced.closedAt).toBe(closed.closedAt)
+    expect(evidenced.lastErrorReason).toBe('rollover_predecessor_complete')
+    expect(unchanged.lastErrorReason).toBe('rollover_predecessor_complete')
+  })
+
+  it('writes exact rollover provenance before resource mutation and owns one open candidate', () => {
+    temp.store.beginBroadcastAttempt({ ...ATTEMPT, strategy: 'rolling-experiment' })
+    temp.store.recordBroadcastCallResult(ATTEMPT.attemptId, {
+      stage: 'live',
+      streamId: 'synthetic-stream-1',
+      broadcastId: 'synthetic-broadcast-1',
+      liveChatId: 'synthetic-chat-1',
+    })
+
+    const replacement = temp.store.beginBroadcastAttempt({
+      ...ATTEMPT,
+      attemptId: 'attempt-0002',
+      strategy: 'rolling-experiment',
+      rolloverPredecessorAttemptId: ATTEMPT.attemptId,
+    })
+
+    expect(replacement).toMatchObject({
+      stage: 'planned',
+      streamId: null,
+      broadcastId: null,
+      rolloverPredecessorAttemptId: ATTEMPT.attemptId,
+    })
+    expect(() =>
+      temp.store.beginBroadcastAttempt({
+        ...ATTEMPT,
+        attemptId: 'attempt-0003',
+        strategy: 'rolling-experiment',
+        rolloverPredecessorAttemptId: ATTEMPT.attemptId,
+      }),
+    ).toThrow()
+
+    temp.store.closeBroadcastAttempt(replacement.attemptId, 'abandoned', 'broadcast_missing')
+    const retry = temp.store.beginBroadcastAttempt({
+      ...ATTEMPT,
+      attemptId: 'attempt-0003',
+      strategy: 'rolling-experiment',
+      rolloverPredecessorAttemptId: ATTEMPT.attemptId,
+    })
+
+    expect(retry.rolloverPredecessorAttemptId).toBe(ATTEMPT.attemptId)
+    expect(retry.closedAt).toBeNull()
+    expect(
+      temp.store
+        .listBroadcastAttempts()
+        .filter(
+          (attempt) =>
+            attempt.rolloverPredecessorAttemptId === ATTEMPT.attemptId && attempt.closedAt === null,
+        ),
+    ).toHaveLength(1)
+  })
+
+  it('durably records visibility established by an API result or read-back', () => {
+    temp.store.beginBroadcastAttempt(ATTEMPT)
+
+    const observed = temp.store.recordBroadcastCallResult(ATTEMPT.attemptId, {
+      privacyStatus: 'public',
+    })
+    const reopened = temp.reopen().getBroadcastAttempt(ATTEMPT.attemptId)
+
+    expect(observed.privacyStatus).toBe('public')
+    expect(observed.privacyStatusObservedAt).not.toBeNull()
+    expect(reopened?.privacyStatus).toBe('public')
+    expect(reopened?.privacyStatusObservedAt).toBe(observed.privacyStatusObservedAt)
   })
 
   it('refuses to repoint an attempt at another broadcast', () => {

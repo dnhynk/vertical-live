@@ -852,7 +852,22 @@ export class Supervisor {
     // coordinator heartbeat would degrade and take the run down for a reason
     // that has nothing to do with the swap. `#rollingOver` is what keeps two
     // swaps from overlapping, which is the thing the API actually refuses.
-    if (this.#state === 'live') void this.#rolloverIfDue()
+    if (this.#state === 'live') {
+      void this.#rolloverIfDue().catch((error: unknown) => {
+        // The rollover itself catches lifecycle failures and alerts. This final
+        // observer is deliberately at the detached-promise boundary so even an
+        // unexpected reporting/logger failure cannot become an unhandled
+        // rejection that exits `:8787` (T52 production incident).
+        try {
+          this.#logger.error('broadcast segment rollover task rejected', {
+            error: error instanceof Error ? error.message : String(error),
+          })
+        } catch {
+          // This is the last detached-promise observer. A broken logger cannot
+          // be allowed to manufacture another rejected background promise.
+        }
+      })
+    }
     return aggregate
   }
 

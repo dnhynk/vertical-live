@@ -186,6 +186,18 @@ export class BroadcastLifecycle {
   #adopted = false
   /** The attempt this process owns; see `#stillResumable` (T30). */
   #pickedUpAttemptId: string | null = null
+  /**
+   * Tail of the lifecycle-local mutation queue (T52). `pending_call` is a crash
+   * reconcile marker, not an in-process mutex: without this boundary two callers
+   * can both act on the same pre-call row and receive different external ids.
+   */
+  #mutationTail: Promise<void> = Promise.resolve()
+  /** Candidate whose older open rows have already been reconciled this process. */
+  #recoveryReviewedAttemptId: string | null = null
+  /** Older live row that an interrupted rollover must complete before go-live. */
+  #recoveryPredecessorAttemptId: string | null = null
+  /** Replacement that must regain configured visibility before it goes live. */
+  #recoveryReplacementAttemptId: string | null = null
 
   constructor(options: BroadcastLifecycleOptions) {
     this.#api = options.api
@@ -206,21 +218,40 @@ export class BroadcastLifecycle {
    * actually happened before anything else is attempted.
    */
   async resume(): Promise<BroadcastAttemptRecord | null> {
-    const open = this.#store.findOpenBroadcastAttempt()
-    if (open === null) {
-      return null
+    return this.#serializeMutation(() => this.#resume())
+  }
+
+  async #resume(): Promise<BroadcastAttemptRecord | null> {
+    // A terminal newest row must reveal the next older row before a new attempt
+    // is created. Otherwise every restart can leave a legitimate live predecessor
+    // ignored and create another resource (the production T52 topology).
+    while (true) {
+      const open = this.#store.findOpenBroadcastAttempt()
+      if (open === null) {
+        this.#recoveryReviewedAttemptId = null
+        this.#recoveryPredecessorAttemptId = null
+        this.#recoveryReplacementAttemptId = null
+        return null
+      }
+      this.#assertDurableRecoveryTopology(open)
+      let candidate = open
+      if (candidate.pendingCall !== null) {
+        this.#logger.warn('resuming an attempt with a call of unknown outcome', {
+          attemptId: candidate.attemptId,
+          pendingCall: candidate.pendingCall,
+          stage: candidate.stage,
+        })
+        candidate = await this.#reconcile(
+          candidate,
+          candidate.pendingCall,
+          candidate.pendingTransition,
+        )
+      }
+      const resumable = await this.#stillResumable(candidate)
+      if (resumable === null) continue
+      await this.#reviewOlderOpenAttempts(resumable)
+      return resumable
     }
-    if (open.pendingCall === null) {
-      return this.#stillResumable(open)
-    }
-    this.#logger.warn('resuming an attempt with a call of unknown outcome', {
-      attemptId: open.attemptId,
-      pendingCall: open.pendingCall,
-      stage: open.stage,
-    })
-    return this.#stillResumable(
-      await this.#reconcile(open, open.pendingCall, open.pendingTransition),
-    )
   }
 
   /**
@@ -244,7 +275,10 @@ export class BroadcastLifecycle {
    */
   async #stillResumable(attempt: BroadcastAttemptRecord): Promise<BroadcastAttemptRecord | null> {
     if (attempt.closedAt !== null) return null
-    if (attempt.broadcastId === null) return attempt
+    if (attempt.broadcastId === null) {
+      this.#pickedUpAttemptId = attempt.attemptId
+      return attempt
+    }
     // Asked once, when this process takes the attempt over. `resume()` also runs
     // on the way into `goLive()`, and an attempt this process began or has
     // already checked needs no second `liveBroadcasts.list` — that would spend a
@@ -288,10 +322,264 @@ export class BroadcastLifecycle {
     return null
   }
 
+  /**
+   * Reconciles the rows hidden behind the newest open attempt after a crash.
+   * Two open rows are normal for exactly one interval: a replacement is bound
+   * before its live predecessor is completed. More rows are historical evidence,
+   * not permission to rewrite ids or create another resource.
+   */
+  async #reviewOlderOpenAttempts(candidate: BroadcastAttemptRecord): Promise<void> {
+    if (this.#recoveryReviewedAttemptId === candidate.attemptId) return
+
+    this.#recoveryPredecessorAttemptId = null
+    this.#recoveryReplacementAttemptId = null
+    const predecessorId = candidate.rolloverPredecessorAttemptId
+    if (predecessorId === null || stageAtLeast(candidate.stage, 'live')) {
+      this.#recoveryReviewedAttemptId = candidate.attemptId
+      return
+    }
+
+    this.#recoveryReplacementAttemptId = candidate.attemptId
+    let predecessor = this.#store.getBroadcastAttempt(predecessorId)
+    if (predecessor === null) {
+      return this.#raiseSafeStop('rollover_predecessor_missing', {
+        candidateAttemptId: candidate.attemptId,
+        predecessorAttemptId: predecessorId,
+      })
+    }
+    if (predecessor.closedAt !== null) {
+      this.#recoveryReviewedAttemptId = candidate.attemptId
+      return
+    }
+    if (predecessor.pendingCall !== null) {
+      this.#logger.warn('reconciling the linked rollover predecessor', {
+        attemptId: predecessor.attemptId,
+        pendingCall: predecessor.pendingCall,
+        candidateAttemptId: candidate.attemptId,
+      })
+      predecessor = await this.#reconcile(
+        predecessor,
+        predecessor.pendingCall,
+        predecessor.pendingTransition,
+      )
+      if (predecessor.closedAt !== null) {
+        this.#store.closeBroadcastAttempt(
+          predecessor.attemptId,
+          'complete',
+          'rollover_predecessor_complete',
+        )
+        this.#recoveryReviewedAttemptId = candidate.attemptId
+        return
+      }
+    }
+
+    const broadcastId = requireId(predecessor.broadcastId, 'broadcastId')
+    const page = await this.#api.listBroadcasts({ ids: [broadcastId] }, { maxPages: 1 })
+    if (!page.complete) {
+      return this.#raiseSafeStop('open_attempt_reconcile_incomplete', {
+        attemptId: predecessor.attemptId,
+        broadcastId,
+        candidateAttemptId: candidate.attemptId,
+      })
+    }
+    const observed = page.items.find((item) => item.id === broadcastId) ?? null
+    if (observed === null) {
+      this.#store.closeBroadcastAttempt(
+        predecessor.attemptId,
+        'abandoned',
+        'rollover_predecessor_broadcast_missing',
+      )
+      this.#recoveryReviewedAttemptId = candidate.attemptId
+      return
+    }
+    const status = observed.lifeCycleStatus
+    if (status === 'complete') {
+      this.#store.closeBroadcastAttempt(
+        predecessor.attemptId,
+        'complete',
+        'rollover_predecessor_observed_complete',
+      )
+      this.#recoveryReviewedAttemptId = candidate.attemptId
+      return
+    }
+    if (status === 'revoked') {
+      this.#store.closeBroadcastAttempt(
+        predecessor.attemptId,
+        'abandoned',
+        'rollover_predecessor_broadcast_revoked',
+      )
+      this.#recoveryReviewedAttemptId = candidate.attemptId
+      return
+    }
+    if (!isLiveLifeCycleStatus(status)) {
+      return this.#raiseSafeStop(
+        status === null ? 'open_attempt_lifecycle_unknown' : 'open_attempt_lifecycle_ambiguous',
+        {
+          attemptId: predecessor.attemptId,
+          broadcastId,
+          lifeCycleStatus: status,
+          candidateAttemptId: candidate.attemptId,
+        },
+      )
+    }
+    this.#recoveryPredecessorAttemptId = predecessor.attemptId
+    this.#logger.warn('resuming an interrupted rollover before predecessor completion', {
+      candidateAttemptId: candidate.attemptId,
+      predecessorAttemptId: predecessor.attemptId,
+    })
+    this.#recoveryReviewedAttemptId = candidate.attemptId
+  }
+
+  /** Rejects ambiguous DB topology before any recovery read or mutation leaves the process. */
+  #assertDurableRecoveryTopology(candidate: BroadcastAttemptRecord): void {
+    const olderOpen = this.#store
+      .listOpenBroadcastAttempts()
+      .filter((attempt) => attempt.attemptId !== candidate.attemptId)
+    const predecessorId = candidate.rolloverPredecessorAttemptId
+    if (predecessorId === null) {
+      if (olderOpen.length > 0) {
+        const live = olderOpen.filter((attempt) => attempt.stage === 'live')
+        this.#raiseSafeStop(
+          live.length > 1 ? 'multiple_open_live_broadcasts' : 'rollover_provenance_missing',
+          {
+            candidateAttemptId: candidate.attemptId,
+            olderAttemptIds: olderOpen.map((attempt) => attempt.attemptId).join(','),
+          },
+        )
+      }
+      return
+    }
+
+    const predecessor = this.#store.getBroadcastAttempt(predecessorId)
+    if (predecessor === null) {
+      this.#raiseSafeStop('rollover_predecessor_missing', {
+        candidateAttemptId: candidate.attemptId,
+        predecessorAttemptId: predecessorId,
+      })
+    }
+    const competing = olderOpen.filter((attempt) => attempt.attemptId !== predecessorId)
+    if (competing.length > 0) {
+      const liveCount = olderOpen.filter((attempt) => attempt.stage === 'live').length
+      this.#raiseSafeStop(
+        liveCount > 1 ? 'multiple_open_live_broadcasts' : 'multiple_rollover_candidates',
+        {
+          candidateAttemptId: candidate.attemptId,
+          predecessorAttemptId: predecessorId,
+          competingAttemptIds: competing.map((attempt) => attempt.attemptId).join(','),
+        },
+      )
+    }
+    if (predecessor.streamId === null) {
+      this.#raiseSafeStop('rollover_predecessor_binding_missing', {
+        candidateAttemptId: candidate.attemptId,
+        predecessorAttemptId: predecessorId,
+      })
+    }
+    if (candidate.streamId !== null && candidate.streamId !== predecessor.streamId) {
+      this.#raiseSafeStop('rollover_stream_mismatch', {
+        candidateAttemptId: candidate.attemptId,
+        candidateStreamId: candidate.streamId,
+        predecessorAttemptId: predecessorId,
+        predecessorStreamId: predecessor.streamId,
+      })
+    }
+    if (predecessor.closedAt === null && predecessor.stage !== 'live') {
+      this.#raiseSafeStop('rollover_predecessor_not_live', {
+        candidateAttemptId: candidate.attemptId,
+        predecessorAttemptId: predecessorId,
+        predecessorStage: predecessor.stage,
+      })
+    }
+    if (predecessor.closedAt === null && candidate.stage === 'live') {
+      this.#raiseSafeStop('competing_live_broadcast_attempts', {
+        candidateAttemptId: candidate.attemptId,
+        candidateBroadcastId: candidate.broadcastId,
+        predecessorAttemptId: predecessorId,
+        predecessorBroadcastId: predecessor.broadcastId,
+      })
+    }
+  }
+
+  /** Completes the one evidence-backed live predecessor before a replacement goes live. */
+  async #completeRecoveryPredecessor(candidate: BroadcastAttemptRecord): Promise<void> {
+    const predecessorId = this.#recoveryPredecessorAttemptId
+    if (predecessorId === null || predecessorId === candidate.attemptId) return
+    if (candidate.rolloverPredecessorAttemptId !== predecessorId) {
+      return this.#raiseSafeStop('rollover_predecessor_link_mismatch', {
+        candidateAttemptId: candidate.attemptId,
+        linkedPredecessorAttemptId: candidate.rolloverPredecessorAttemptId,
+        recoveryPredecessorAttemptId: predecessorId,
+      })
+    }
+    const predecessor = this.#store.getBroadcastAttempt(predecessorId)
+    if (predecessor === null) {
+      return this.#raiseSafeStop('rollover_predecessor_missing', {
+        candidateAttemptId: candidate.attemptId,
+        predecessorAttemptId: predecessorId,
+      })
+    }
+    if (predecessor.closedAt !== null) {
+      this.#recoveryPredecessorAttemptId = null
+      return
+    }
+    this.#assertRolloverStreamMatches(candidate)
+    await this.#stopBroadcast(predecessor, 'rollover_predecessor_complete')
+    this.#recoveryPredecessorAttemptId = null
+  }
+
+  #assertRolloverStreamMatches(candidate: BroadcastAttemptRecord): void {
+    const predecessorId = candidate.rolloverPredecessorAttemptId
+    if (predecessorId === null) return
+    const predecessor = this.#store.getBroadcastAttempt(predecessorId)
+    if (predecessor === null || predecessor.streamId === null || candidate.streamId === null) {
+      this.#raiseSafeStop('rollover_predecessor_binding_missing', {
+        candidateAttemptId: candidate.attemptId,
+        candidateStreamId: candidate.streamId,
+        predecessorAttemptId: predecessorId,
+        predecessorStreamId: predecessor?.streamId ?? null,
+      })
+    }
+    if (candidate.streamId !== predecessor.streamId) {
+      this.#raiseSafeStop('rollover_stream_mismatch', {
+        candidateAttemptId: candidate.attemptId,
+        candidateStreamId: candidate.streamId,
+        predecessorAttemptId: predecessorId,
+        predecessorStreamId: predecessor.streamId,
+      })
+    }
+  }
+
+  /** Uses the exact predecessor's reusable ingestion stream; rollover never selects another. */
+  #ensureLinkedRolloverStream(candidate: BroadcastAttemptRecord): BroadcastAttemptRecord {
+    if (candidate.streamId !== null) return candidate
+    const predecessorId = candidate.rolloverPredecessorAttemptId
+    if (predecessorId === null) return candidate
+    const predecessor = this.#store.getBroadcastAttempt(predecessorId)
+    if (predecessor === null || predecessor.streamId === null) {
+      return this.#raiseSafeStop('rollover_predecessor_binding_missing', {
+        candidateAttemptId: candidate.attemptId,
+        predecessorAttemptId: predecessorId,
+        predecessorStreamId: predecessor?.streamId ?? null,
+      })
+    }
+    return this.#store.recordBroadcastCallResult(candidate.attemptId, {
+      stage: 'stream_ready',
+      streamId: predecessor.streamId,
+    })
+  }
+
   /** Creates or reuses the stream, creates or adopts the broadcast, binds them. */
   async ensureBound(): Promise<BroadcastBinding> {
-    let attempt = (await this.resume()) ?? this.#beginAttempt()
-    attempt = await this.#ensureStream(attempt)
+    return this.#serializeMutation(() => this.#ensureBoundLifecycle())
+  }
+
+  async #ensureBoundLifecycle(): Promise<BroadcastBinding> {
+    let attempt = (await this.#resume()) ?? this.#beginAttempt()
+    attempt =
+      attempt.rolloverPredecessorAttemptId === null
+        ? await this.#ensureStream(attempt)
+        : this.#ensureLinkedRolloverStream(attempt)
+    this.#assertRolloverStreamMatches(attempt)
     attempt = await this.#ensureBroadcast(attempt)
     // The broadcast id is durable from here on, so the marker has done its job and
     // comes back out before anything can expose the description (BOARD A-18).
@@ -308,7 +596,16 @@ export class BroadcastLifecycle {
    * defensive, and is reported as its own reason so the two are not confused).
    */
   async goLive(): Promise<BroadcastTarget> {
-    const bound = await this.#requireOpenAttempt()
+    return this.#serializeMutation(() => this.#goLiveLifecycle())
+  }
+
+  async #goLiveLifecycle(): Promise<BroadcastTarget> {
+    let bound = await this.#requireOpenAttempt()
+    await this.#completeRecoveryPredecessor(bound)
+    if (this.#recoveryReplacementAttemptId === bound.attemptId) {
+      bound = await this.#applyConfiguredPrivacy(bound)
+      this.#recoveryReplacementAttemptId = null
+    }
     const attempt = await this.#goLive(bound)
     const binding = this.#toBinding(attempt)
     if (binding.liveChatId === null) {
@@ -320,8 +617,10 @@ export class BroadcastLifecycle {
   }
 
   async ensureLive(): Promise<BroadcastTarget> {
-    await this.ensureBound()
-    return this.goLive()
+    return this.#serializeMutation(async () => {
+      await this.#ensureBoundLifecycle()
+      return this.#goLiveLifecycle()
+    })
   }
 
   /**
@@ -350,10 +649,14 @@ export class BroadcastLifecycle {
    * nothing here reads or writes a snapshot, an inbox row or a checkpoint.
    */
   async rolloverIfDue(): Promise<BroadcastBinding | null> {
+    return this.#serializeMutation(() => this.#rolloverIfDue())
+  }
+
+  async #rolloverIfDue(): Promise<BroadcastBinding | null> {
     const segmentMs = this.#config.segmentMs
     if (segmentMs === null) return null
 
-    const current = this.#store.findOpenBroadcastAttempt()
+    const current = await this.#resume()
     if (current === null) return null
 
     // A swap that stopped between the two halves — the old broadcast ended and
@@ -365,7 +668,13 @@ export class BroadcastLifecycle {
       this.#logger.warn('finishing a segment swap that did not reach live', {
         attemptId: current.attemptId,
       })
-      return this.#toBinding(await this.#goLive(current))
+      await this.#completeRecoveryPredecessor(current)
+      const prepared =
+        this.#recoveryReplacementAttemptId === current.attemptId
+          ? await this.#applyConfiguredPrivacy(current)
+          : current
+      this.#recoveryReplacementAttemptId = null
+      return this.#toBinding(await this.#goLive(prepared))
     }
 
     // Only a segment that actually reached `live` has run; anything earlier is
@@ -395,25 +704,41 @@ export class BroadcastLifecycle {
     // old broadcast complete and the new one stuck at `bound`. Off, it goes live
     // by explicit transition — and the stream is already `active`, which is the
     // precondition that transition actually needs.
-    let next = this.#beginAttempt()
+    return this.#performRollover(current, 'segment_elapsed', { ageMs })
+  }
+
+  /** One fixed rollover sequence shared by due and explicit requests. */
+  async #performRollover(
+    current: BroadcastAttemptRecord,
+    reason = 'explicit_request',
+    detail: Readonly<Record<string, HealthDetailValue>> = {},
+  ): Promise<BroadcastTarget> {
+    // Provenance is durable in the candidate's first local write, before any
+    // resource call and, critically, before the predecessor can be completed.
+    let next = this.#beginAttempt(current.attemptId)
     next = this.#store.updateBroadcastAttempt(next.attemptId, { autoStart: false })
-    next = await this.#ensureStream(next)
+    next = this.#ensureLinkedRolloverStream(next)
+    this.#assertRolloverStreamMatches(next)
     next = await this.#ensureBroadcast(next)
     next = await this.#clearAttemptMarker(next)
     next = await this.#ensureBound(next)
 
-    // 2. The old one ends first — the API refuses two live broadcasts.
-    await this.stopBroadcast(current)
-
-    // 3. And only now the new one starts.
+    await this.#stopBroadcast(current, 'rollover_predecessor_complete')
+    next = await this.#applyConfiguredPrivacy(next)
     next = await this.#goLive(next)
 
-    this.#alert('broadcast_rolled_over', 'segment_elapsed', {
+    const binding = this.#toBinding(next)
+    if (binding.liveChatId === null) {
+      throw new Error(
+        `broadcast ${binding.broadcastId} is live but reported no liveChatId; the chat listener cannot start`,
+      )
+    }
+    this.#alert('broadcast_rolled_over', reason, {
       previousBroadcastId: current.broadcastId,
       broadcastId: next.broadcastId,
-      ageMs,
+      ...detail,
     })
-    return this.#toBinding(next)
+    return { ...binding, liveChatId: binding.liveChatId }
   }
 
   /**
@@ -426,19 +751,39 @@ export class BroadcastLifecycle {
    * surface (spec §4, §12.5).
    */
   async publish(): Promise<BroadcastAttemptRecord> {
+    return this.#serializeMutation(() => this.#publish())
+  }
+
+  async #publish(): Promise<BroadcastAttemptRecord> {
     const attempt = await this.#requireOpenAttempt()
+    if (this.#config.privacyStatus === 'private') {
+      throw new Error(
+        'youtube.broadcast.privacyStatus is "private", so there is nothing to publish; set it to public or unlisted first',
+      )
+    }
+    return this.#publishAttempt(attempt)
+  }
+
+  /** Applies configured non-private visibility to one marker-cleared attempt. */
+  async #publishAttempt(attempt: BroadcastAttemptRecord): Promise<BroadcastAttemptRecord> {
     const broadcastId = requireId(attempt.broadcastId, 'broadcastId')
     if (attempt.markerClearedAt === null) {
       throw new BroadcastMarkerNotClearedError(broadcastId)
     }
     const privacyStatus = this.#config.privacyStatus
-    if (privacyStatus === 'private') {
-      throw new Error(
-        'youtube.broadcast.privacyStatus is "private", so there is nothing to publish; set it to public or unlisted first',
-      )
+    if (attempt.privacyStatus === privacyStatus) {
+      return attempt
     }
 
-    return this.#withRetries(
+    // A crash can land after YouTube applied the update but before the durable
+    // result write. Exact-id read-back makes that boundary idempotent even for a
+    // legacy/test row without a pending marker or visibility evidence.
+    const observed = await this.#readBroadcast(broadcastId)
+    if (observed?.privacyStatus === privacyStatus) {
+      return this.#store.updateBroadcastAttempt(attempt.attemptId, { privacyStatus })
+    }
+
+    const published = await this.#withRetries(
       attempt,
       'liveBroadcasts.update',
       async (current) => {
@@ -456,13 +801,21 @@ export class BroadcastLifecycle {
             `broadcast ${broadcastId} reports privacyStatus ${String(updated.privacyStatus)} after asking for ${privacyStatus}`,
           )
         }
-        this.#alert('broadcast_published', privacyStatus, { broadcastId })
-        return this.#store.recordBroadcastCallResult(current.attemptId, { lastErrorReason: null })
+        return this.#store.recordBroadcastCallResult(current.attemptId, {
+          privacyStatus,
+          lastErrorReason: null,
+        })
       },
-      // Setting the same privacy twice is harmless, so a retry is always allowed to
-      // run rather than being short-circuited by a row that records nothing about it.
-      () => false,
+      // Reconcile records both marker removal and configured privacy. Do not send
+      // a duplicate update when the first response was lost after application.
+      (current) => current.pendingCall === null && current.lastErrorReason === null,
     )
+    this.#alert('broadcast_published', privacyStatus, { broadcastId })
+    return published
+  }
+
+  async #applyConfiguredPrivacy(attempt: BroadcastAttemptRecord): Promise<BroadcastAttemptRecord> {
+    return this.#config.privacyStatus === 'private' ? attempt : this.#publishAttempt(attempt)
   }
 
   /**
@@ -537,6 +890,10 @@ export class BroadcastLifecycle {
    * refuses here rather than quietly rolling over.
    */
   async rollOver(): Promise<BroadcastTarget> {
+    return this.#serializeMutation(() => this.#rollOver())
+  }
+
+  async #rollOver(): Promise<BroadcastTarget> {
     if (this.#config.strategy !== 'rolling-experiment') {
       throw new Error(
         `rollOver() requires youtube.broadcast.strategy = "rolling-experiment" (spec §9.3); the configured strategy is "${this.#config.strategy}"`,
@@ -545,12 +902,11 @@ export class BroadcastLifecycle {
     this.#logger.warn('rolling over: selected production rolling strategy', {
       strategy: this.#config.strategy,
     })
-    const current = this.#store.findOpenBroadcastAttempt()
-    if (current !== null) {
-      await this.stopBroadcast(current)
+    const current = await this.#resume()
+    if (current === null || current.stage !== 'live') {
+      throw new Error('rollOver() requires one open live predecessor')
     }
-    this.#adopted = false
-    return this.ensureLive()
+    return this.#performRollover(current)
   }
 
   /**
@@ -558,6 +914,22 @@ export class BroadcastLifecycle {
    * is already complete, or was never created, closes without a call.
    */
   async stopBroadcast(attempt: BroadcastAttemptRecord): Promise<BroadcastAttemptRecord> {
+    return this.#serializeMutation(() => {
+      // The caller may have queued behind a rollover that already closed this
+      // row. Re-read after acquiring ownership instead of acting on its stale
+      // pre-lock snapshot.
+      const current = this.#store.getBroadcastAttempt(attempt.attemptId)
+      if (current === null) {
+        throw new Error(`unknown broadcast attempt ${attempt.attemptId}`)
+      }
+      return current.closedAt === null ? this.#stopBroadcast(current) : Promise.resolve(current)
+    })
+  }
+
+  async #stopBroadcast(
+    attempt: BroadcastAttemptRecord,
+    completionReason?: string,
+  ): Promise<BroadcastAttemptRecord> {
     if (attempt.broadcastId === null) {
       return this.#store.closeBroadcastAttempt(attempt.attemptId, 'abandoned', 'never_created')
     }
@@ -565,7 +937,7 @@ export class BroadcastLifecycle {
     // same reconcile-then-retry wrapper (review round 1, B4). Closing the attempt on
     // an *unknown* outcome was the bug: the row said `complete` while YouTube still
     // said `live`, and nothing had asked.
-    return this.#withRetries(
+    const stopped = await this.#withRetries(
       attempt,
       'liveBroadcasts.transition',
       async (current) => {
@@ -584,16 +956,22 @@ export class BroadcastLifecycle {
             throw error
           }
         }
-        return this.#store.closeBroadcastAttempt(current.attemptId, 'complete')
+        return this.#store.closeBroadcastAttempt(current.attemptId, 'complete', completionReason)
       },
       (current) => current.closedAt !== null && current.stage === 'complete',
     )
+    return completionReason === undefined
+      ? stopped
+      : this.#store.closeBroadcastAttempt(stopped.attemptId, 'complete', completionReason)
   }
 
   // ------------------------------------------------------------------- stages
 
-  #beginAttempt(): BroadcastAttemptRecord {
+  #beginAttempt(rolloverPredecessorAttemptId?: string): BroadcastAttemptRecord {
     this.#adopted = false
+    this.#recoveryReviewedAttemptId = null
+    this.#recoveryPredecessorAttemptId = null
+    this.#recoveryReplacementAttemptId = null
     const attemptId = this.#newAttemptId()
     // This process made it, so it is already picked up: `#stillResumable` has
     // nothing to ask YouTube about a row it just wrote.
@@ -604,6 +982,7 @@ export class BroadcastLifecycle {
       streamTitle: this.#config.stream.title,
       scheduledStartTime: this.#nextScheduledStartTime(),
       attemptMarker: attemptMarkerOf(attemptId),
+      ...(rolloverPredecessorAttemptId === undefined ? {} : { rolloverPredecessorAttemptId }),
     })
   }
 
@@ -685,11 +1064,17 @@ export class BroadcastLifecycle {
             enableMonitorStream: this.#config.enableMonitorStream,
           }),
         )
+        if (created.privacyStatus !== 'private') {
+          throw new Error(
+            `broadcast ${created.id} reports privacyStatus ${String(created.privacyStatus)} after private insert`,
+          )
+        }
         return this.#store.recordBroadcastCallResult(current.attemptId, {
           stage: 'broadcast_created',
           broadcastId: created.id,
           ...(created.liveChatId === null ? {} : { liveChatId: created.liveChatId }),
           autoStart: created.enableAutoStart ?? autoStart,
+          privacyStatus: 'private',
         })
       },
       (current) => current.broadcastId !== null,
@@ -1070,6 +1455,11 @@ export class BroadcastLifecycle {
             broadcastId: found.id,
             ...(found.liveChatId === null ? {} : { liveChatId: found.liveChatId }),
             ...(found.enableAutoStart === null ? {} : { autoStart: found.enableAutoStart }),
+            ...(found.privacyStatus === 'private' ||
+            found.privacyStatus === 'unlisted' ||
+            found.privacyStatus === 'public'
+              ? { privacyStatus: found.privacyStatus }
+              : {}),
           })
         }
         // A marker match whose scheduled time disagrees is not something to reason
@@ -1123,6 +1513,11 @@ export class BroadcastLifecycle {
         const privacyApplied = wanted === 'private' || observed?.privacyStatus === wanted
         return this.#store.recordBroadcastCallResult(attempt.attemptId, {
           markerCleared: true,
+          ...(observed?.privacyStatus === 'private' ||
+          observed?.privacyStatus === 'unlisted' ||
+          observed?.privacyStatus === 'public'
+            ? { privacyStatus: observed.privacyStatus }
+            : {}),
           ...(privacyApplied
             ? { lastErrorReason: null }
             : {
@@ -1290,13 +1685,23 @@ export class BroadcastLifecycle {
       seen.push(...page.items)
       complete = complete && page.complete
     }
-    const ours = seen.filter(
-      (candidate) =>
-        isAdoptableLifeCycleStatus(candidate.lifeCycleStatus) &&
-        (candidate.id === attempt.broadcastId ||
-          (attempt.streamId !== null && candidate.boundStreamId === attempt.streamId) ||
-          candidate.title === this.#config.title),
-    )
+    const ours = seen.filter((candidate) => {
+      if (!isAdoptableLifeCycleStatus(candidate.lifeCycleStatus)) return false
+      if (attempt.rolloverPredecessorAttemptId !== null) {
+        // A linked row is candidate-specific provenance. Its predecessor is
+        // intentionally live on the same stream and normally has the same title,
+        // so the generic recovery predicates below would select precisely the
+        // resource this rollover must preserve. Only the replacement's own
+        // write-once id is admissible; an insert limit before that id exists has
+        // no exact replacement to recover and therefore safe-stops.
+        return attempt.broadcastId !== null && candidate.id === attempt.broadcastId
+      }
+      return (
+        candidate.id === attempt.broadcastId ||
+        (attempt.streamId !== null && candidate.boundStreamId === attempt.streamId) ||
+        candidate.title === this.#config.title
+      )
+    })
     // Prefer one that is already carrying video: adopting it costs no transition.
     const candidate =
       ours.find((entry) => isLiveLifeCycleStatus(entry.lifeCycleStatus)) ?? ours[0] ?? null
@@ -1367,6 +1772,18 @@ export class BroadcastLifecycle {
     candidate: LiveBroadcastSummary,
     resolvedStreamId: string | null,
   ): Promise<BroadcastAttemptRecord> {
+    if (attempt.rolloverPredecessorAttemptId !== null && candidate.id !== attempt.broadcastId) {
+      // Defense in depth for every present and future caller: linked rollover
+      // provenance authorizes this row to recover only its own exact resource.
+      // Closing the candidate is conservative; the predecessor row/resource is
+      // deliberately not adopted, closed, rebound, or otherwise mutated.
+      return this.#requestSafeStop(attempt, 'rollover_recovery_candidate_unproven', {
+        candidateAttemptId: attempt.attemptId,
+        candidateBroadcastId: candidate.id,
+        replacementBroadcastId: attempt.broadcastId,
+        predecessorAttemptId: attempt.rolloverPredecessorAttemptId,
+      })
+    }
     const owner = this.#store
       .listBroadcastAttempts()
       .find((row) => row.broadcastId === candidate.id && row.closedAt === null)
@@ -1441,6 +1858,17 @@ export class BroadcastLifecycle {
     throw new BroadcastSafeStopRequiredError(
       reason,
       'no existing broadcast of this product could be recovered',
+    )
+  }
+
+  /** Ambiguous topology is not evidence that any one row may be closed. */
+  #raiseSafeStop(reason: string, detail: Readonly<Record<string, HealthDetailValue>>): never {
+    const at = this.#clock.nowUtcIso()
+    this.#alert('safe_stop_requested', reason, detail)
+    this.#safeStop({ at, reason, detail })
+    throw new BroadcastSafeStopRequiredError(
+      reason,
+      'open broadcast attempts could not be reconciled without guessing',
     )
   }
 
@@ -1567,7 +1995,7 @@ export class BroadcastLifecycle {
   }
 
   async #requireOpenAttempt(): Promise<BroadcastAttemptRecord> {
-    const attempt = await this.resume()
+    const attempt = await this.#resume()
     if (attempt === null) {
       throw new Error('no open broadcast attempt; call ensureBound() first')
     }
@@ -1611,6 +2039,26 @@ export class BroadcastLifecycle {
         resolve()
       }, delayMs)
     })
+  }
+
+  /**
+   * FIFO, failure-safe single-flight boundary for every public lifecycle mutation.
+   * Composite methods call private implementations while holding it, so there is
+   * no reentrant acquisition and therefore no self-wait deadlock.
+   */
+  async #serializeMutation<T>(work: () => Promise<T>): Promise<T> {
+    const previous = this.#mutationTail
+    let release: () => void = () => {}
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    this.#mutationTail = previous.then(() => gate)
+    await previous
+    try {
+      return await work()
+    } finally {
+      release()
+    }
   }
 }
 
