@@ -42,6 +42,8 @@ function persistBoundAttempt(
     readonly broadcastId: string
     readonly liveChatId: string
     readonly stage?: 'broadcast_created' | 'bound' | 'live'
+    readonly rolloverPredecessorAttemptId?: string
+    readonly privacyStatus?: 'private' | 'unlisted' | 'public'
   },
 ): void {
   h.temp.store.beginBroadcastAttempt({
@@ -50,6 +52,9 @@ function persistBoundAttempt(
     streamTitle: h.config.stream.title,
     scheduledStartTime: new Date(Date.parse(h.temp.clock.nowUtcIso()) + 120_000).toISOString(),
     attemptMarker: `vl-attempt:${input.attemptId}`,
+    ...(input.rolloverPredecessorAttemptId === undefined
+      ? {}
+      : { rolloverPredecessorAttemptId: input.rolloverPredecessorAttemptId }),
   })
   h.temp.store.recordBroadcastCallResult(input.attemptId, {
     stage: input.stage ?? 'bound',
@@ -58,6 +63,7 @@ function persistBoundAttempt(
     liveChatId: input.liveChatId,
     autoStart: false,
     markerCleared: true,
+    ...(input.privacyStatus === undefined ? {} : { privacyStatus: input.privacyStatus }),
   })
 }
 
@@ -1304,6 +1310,49 @@ describe('selected rolling production path (spec §9.3, retained enum label)', (
     ])
     expect(attempts[1]?.stage).toBe('complete')
   })
+
+  it('uses the fixed replacement-first order for an explicit rollOver request', async () => {
+    const h = await setUp({
+      config: { strategy: 'rolling-experiment', privacyStatus: 'unlisted' },
+    })
+    await h.lifecycle().ensureLive()
+    await h.lifecycle().publish()
+    const beforeIndex = h.server.requests.length
+
+    const replacement = await h.lifecycle().rollOver()
+
+    const requests = h.server.requests.slice(beforeIndex)
+    const markerClear = requests.findIndex(
+      (request) =>
+        request.method === 'liveBroadcasts.update' &&
+        (request.body as { snippet?: unknown }).snippet !== undefined,
+    )
+    const bind = requests.findIndex((request) => request.method === 'liveBroadcasts.bind')
+    const complete = requests.findIndex(
+      (request) =>
+        request.method === 'liveBroadcasts.transition' &&
+        request.query['broadcastStatus'] === 'complete',
+    )
+    const visibility = requests.findIndex(
+      (request) =>
+        request.method === 'liveBroadcasts.update' &&
+        (request.body as { status?: unknown }).status !== undefined,
+    )
+    const live = requests.findIndex(
+      (request) =>
+        request.method === 'liveBroadcasts.transition' &&
+        request.query['broadcastStatus'] === 'live',
+    )
+    expect(markerClear).toBeGreaterThanOrEqual(0)
+    expect(bind).toBeGreaterThan(markerClear)
+    expect(complete).toBeGreaterThan(bind)
+    expect(visibility).toBeGreaterThan(complete)
+    expect(live).toBeGreaterThan(visibility)
+    expect(h.server.broadcasts.get(replacement.broadcastId)?.privacyStatus).toBe('unlisted')
+    expect(
+      h.temp.store.getBroadcastAttempt(replacement.attemptId)?.rolloverPredecessorAttemptId,
+    ).not.toBeNull()
+  })
 })
 
 describe('the stream key never leaves the vault (acceptance 2)', () => {
@@ -1486,7 +1535,7 @@ describe('an attempt is only resumed while YouTube can still carry it (T30)', ()
     expect(untouched?.stage).toBe('live')
   })
 
-  it('recovers the exact T52 topology newest-first without resource spam', async () => {
+  it('safe-stops multiple unlinked replacement candidates before any API call', async () => {
     const h = await setUp({
       config: { strategy: 'rolling-experiment', segmentMs: 1, privacyStatus: 'public' },
     })
@@ -1512,31 +1561,18 @@ describe('an attempt is only resumed while YouTube can still carry it (T30)', ()
       broadcastId: newestBroadcast.id,
       liveChatId: newestBroadcast.liveChatId,
     })
-    const insertsBefore = h.server.requestsFor('liveBroadcasts.insert').length
+    const requestsBefore = h.server.requests.length
     const streamsBefore = h.server.streams.size
     const broadcastsBefore = h.server.broadcasts.size
 
-    const recovered = await h.restart().ensureLive()
+    await expect(h.restart().ensureLive()).rejects.toThrow(BroadcastSafeStopRequiredError)
 
-    expect(recovered.attemptId).toBe('attempt-0003')
-    expect(recovered.broadcastId).toBe(newestBroadcast.id)
-    expect(h.server.broadcasts.get(newestBroadcast.id)?.privacyStatus).toBe('public')
-    expect(h.server.broadcasts.get(oldest.broadcastId)?.lifeCycleStatus).toBe('complete')
-    expect(h.temp.store.getBroadcastAttempt(oldest.attemptId)?.stage).toBe('complete')
-    // The older non-terminal replacement has no terminal evidence, so it stays
-    // explicit and ignored rather than being rewritten or guessed closed.
-    expect(h.temp.store.getBroadcastAttempt('attempt-0002')?.closedAt).toBeNull()
-    expect(h.temp.store.getBroadcastAttempt('attempt-0002')?.broadcastId).toBe(middleBroadcast.id)
-    expect(h.server.requestsFor('liveBroadcasts.insert')).toHaveLength(insertsBefore)
+    expect(h.safeStops.at(-1)?.reason).toBe('rollover_provenance_missing')
+    for (const attemptId of [oldest.attemptId, 'attempt-0002', 'attempt-0003']) {
+      expect(h.temp.store.getBroadcastAttempt(attemptId)?.closedAt).toBeNull()
+    }
+    expect(h.server.requests).toHaveLength(requestsBefore)
     expect(h.server.streams.size).toBe(streamsBefore)
-    expect(h.server.broadcasts.size).toBe(broadcastsBefore)
-
-    // A second crash/restart selects the same live newest row and still creates
-    // nothing. This is the bounded-resource guarantee the incident lacked.
-    const second = await h.restart().ensureLive()
-    expect(second.attemptId).toBe(recovered.attemptId)
-    expect(second.broadcastId).toBe(recovered.broadcastId)
-    expect(h.server.requestsFor('liveBroadcasts.insert')).toHaveLength(insertsBefore)
     expect(h.server.broadcasts.size).toBe(broadcastsBefore)
   })
 
@@ -1554,6 +1590,7 @@ describe('an attempt is only resumed while YouTube can still carry it (T30)', ()
       streamId: predecessor.streamId,
       broadcastId: replacement.id,
       liveChatId: replacement.liveChatId,
+      rolloverPredecessorAttemptId: predecessor.attemptId,
     })
     const before = h.server.requestsFor('liveBroadcasts.insert').length
 
@@ -1579,6 +1616,7 @@ describe('an attempt is only resumed while YouTube can still carry it (T30)', ()
       streamId: predecessor.streamId,
       broadcastId: competing.id,
       liveChatId: competing.liveChatId,
+      rolloverPredecessorAttemptId: predecessor.attemptId,
     })
     h.temp.store.recordBroadcastCallResult('attempt-0002', { stage: 'live' })
     const before = h.server.requestsFor('liveBroadcasts.insert').length
@@ -1641,7 +1679,7 @@ describe('an attempt is only resumed while YouTube can still carry it (T30)', ()
     expect(h.server.broadcasts.size).toBe(before.broadcasts)
   })
 
-  it('republishes after a second crash observes the durable predecessor-close rule', async () => {
+  it('recovers a linked interrupted rollover through a second crash', async () => {
     const h = await setUp({
       config: { strategy: 'rolling-experiment', segmentMs: 1, privacyStatus: 'public' },
     })
@@ -1657,6 +1695,122 @@ describe('an attempt is only resumed while YouTube can still carry it (T30)', ()
       streamId: predecessor.streamId,
       broadcastId: replacement.id,
       liveChatId: replacement.liveChatId,
+      rolloverPredecessorAttemptId: predecessor.attemptId,
+    })
+    const predecessorAtYouTube = h.server.broadcasts.get(predecessor.broadcastId)
+    if (predecessorAtYouTube !== undefined) predecessorAtYouTube.lifeCycleStatus = 'complete'
+    const updatesBefore = h.server
+      .requestsFor('liveBroadcasts.update')
+      .filter((request) => (request.body as { status?: unknown }).status !== undefined).length
+
+    // First restart establishes and persists the exact predecessor's terminal
+    // evidence, then crashes before replacement visibility or go-live.
+    const firstRestart = h.restart()
+    const resumed = await firstRestart.resume()
+    expect(resumed?.attemptId).toBe('attempt-0002')
+    expect(h.temp.store.getBroadcastAttempt(predecessor.attemptId)).toMatchObject({
+      stage: 'complete',
+      lastErrorReason: 'rollover_predecessor_observed_complete',
+    })
+
+    const recovered = await h.restart().ensureLive()
+
+    expect(recovered.attemptId).toBe('attempt-0002')
+    expect(h.server.broadcasts.get(replacement.id)?.privacyStatus).toBe('public')
+    const privacyUpdates = h.server
+      .requestsFor('liveBroadcasts.update')
+      .filter((request) => (request.body as { status?: unknown }).status !== undefined)
+    expect(privacyUpdates).toHaveLength(updatesBefore + 1)
+  })
+
+  it('does not use an unrelated historical rollover to publish a startup candidate', async () => {
+    const h = await setUp({
+      config: { strategy: 'rolling-experiment', privacyStatus: 'public' },
+    })
+    const historical = await h.lifecycle().ensureLive()
+    await h.lifecycle().publish()
+    await h
+      .lifecycle()
+      .stopBroadcast(
+        h.temp.store.getBroadcastAttempt(historical.attemptId) as NonNullable<
+          ReturnType<typeof h.temp.store.getBroadcastAttempt>
+        >,
+      )
+    h.temp.store.closeBroadcastAttempt(
+      historical.attemptId,
+      'complete',
+      'rollover_predecessor_complete',
+    )
+
+    const startup = h.server.seedBroadcast({
+      boundStreamId: historical.streamId,
+      lifeCycleStatus: 'ready',
+      privacyStatus: 'private',
+    })
+    persistBoundAttempt(h, {
+      attemptId: 'attempt-startup-0002',
+      streamId: historical.streamId,
+      broadcastId: startup.id,
+      liveChatId: startup.liveChatId,
+      privacyStatus: 'private',
+    })
+    const updatesBefore = h.server
+      .requestsFor('liveBroadcasts.update')
+      .filter((request) => (request.body as { status?: unknown }).status !== undefined).length
+
+    const target = await h.restart().goLive()
+
+    expect(target.attemptId).toBe('attempt-startup-0002')
+    expect(h.server.broadcasts.get(startup.id)?.privacyStatus).toBe('private')
+    const updatesAfter = h.server
+      .requestsFor('liveBroadcasts.update')
+      .filter((request) => (request.body as { status?: unknown }).status !== undefined).length
+    expect(updatesAfter).toBe(updatesBefore)
+  })
+
+  it('safe-stops a linked predecessor on another stream without API or row mutation', async () => {
+    const h = await setUp({ config: { strategy: 'rolling-experiment', privacyStatus: 'public' } })
+    const predecessor = await h.lifecycle().ensureLive()
+    const otherStream = h.server.seedStream({ title: 'synthetic-other-binding' })
+    const replacement = h.server.seedBroadcast({
+      boundStreamId: otherStream.id,
+      lifeCycleStatus: 'ready',
+      privacyStatus: 'private',
+    })
+    persistBoundAttempt(h, {
+      attemptId: 'attempt-mismatch-0002',
+      streamId: otherStream.id,
+      broadcastId: replacement.id,
+      liveChatId: replacement.liveChatId,
+      rolloverPredecessorAttemptId: predecessor.attemptId,
+      privacyStatus: 'private',
+    })
+    const requestsBefore = h.server.requests.length
+    const rowsBefore = h.temp.store.listBroadcastAttempts()
+
+    await expect(h.restart().resume()).rejects.toThrow(BroadcastSafeStopRequiredError)
+
+    expect(h.safeStops.at(-1)?.reason).toBe('rollover_stream_mismatch')
+    expect(h.server.requests).toHaveLength(requestsBefore)
+    expect(h.temp.store.listBroadcastAttempts()).toEqual(rowsBefore)
+  })
+
+  it('reads back an already-public linked replacement without another visibility update', async () => {
+    const h = await setUp({
+      config: { strategy: 'rolling-experiment', privacyStatus: 'public' },
+    })
+    const predecessor = await h.lifecycle().ensureLive()
+    const replacement = h.server.seedBroadcast({
+      boundStreamId: predecessor.streamId,
+      lifeCycleStatus: 'ready',
+      privacyStatus: 'public',
+    })
+    persistBoundAttempt(h, {
+      attemptId: 'attempt-public-0002',
+      streamId: predecessor.streamId,
+      broadcastId: replacement.id,
+      liveChatId: replacement.liveChatId,
+      rolloverPredecessorAttemptId: predecessor.attemptId,
     })
     const predecessorAtYouTube = h.server.broadcasts.get(predecessor.broadcastId)
     if (predecessorAtYouTube !== undefined) predecessorAtYouTube.lifeCycleStatus = 'complete'
@@ -1671,12 +1825,53 @@ describe('an attempt is only resumed while YouTube can still carry it (T30)', ()
 
     const recovered = await h.restart().ensureLive()
 
-    expect(recovered.attemptId).toBe('attempt-0002')
-    expect(h.server.broadcasts.get(replacement.id)?.privacyStatus).toBe('public')
-    const privacyUpdates = h.server
+    expect(recovered.attemptId).toBe('attempt-public-0002')
+    expect(h.temp.store.getBroadcastAttempt(recovered.attemptId)?.privacyStatus).toBe('public')
+    const updatesAfter = h.server
       .requestsFor('liveBroadcasts.update')
-      .filter((request) => (request.body as { status?: unknown }).status !== undefined)
-    expect(privacyUpdates).toHaveLength(updatesBefore + 1)
+      .filter((request) => (request.body as { status?: unknown }).status !== undefined).length
+    expect(updatesAfter).toBe(updatesBefore)
+  })
+
+  it('reconciles an applied visibility update whose response was unknown without replay', async () => {
+    const h = await setUp({
+      config: { strategy: 'rolling-experiment', privacyStatus: 'public' },
+    })
+    const predecessor = await h.lifecycle().ensureLive()
+    const replacement = h.server.seedBroadcast({
+      boundStreamId: predecessor.streamId,
+      lifeCycleStatus: 'ready',
+      privacyStatus: 'public',
+    })
+    persistBoundAttempt(h, {
+      attemptId: 'attempt-unknown-0002',
+      streamId: predecessor.streamId,
+      broadcastId: replacement.id,
+      liveChatId: replacement.liveChatId,
+      rolloverPredecessorAttemptId: predecessor.attemptId,
+      privacyStatus: 'private',
+    })
+    h.temp.store.closeBroadcastAttempt(
+      predecessor.attemptId,
+      'complete',
+      'rollover_predecessor_complete',
+    )
+    h.temp.store.markBroadcastCallPending('attempt-unknown-0002', 'liveBroadcasts.update')
+    const updatesBefore = h.server
+      .requestsFor('liveBroadcasts.update')
+      .filter((request) => (request.body as { status?: unknown }).status !== undefined).length
+
+    const recovered = await h.restart().ensureLive()
+
+    expect(recovered.attemptId).toBe('attempt-unknown-0002')
+    expect(h.temp.store.getBroadcastAttempt(recovered.attemptId)).toMatchObject({
+      pendingCall: null,
+      privacyStatus: 'public',
+    })
+    const updatesAfter = h.server
+      .requestsFor('liveBroadcasts.update')
+      .filter((request) => (request.body as { status?: unknown }).status !== undefined).length
+    expect(updatesAfter).toBe(updatesBefore)
   })
 })
 

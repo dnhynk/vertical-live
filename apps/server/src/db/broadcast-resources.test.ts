@@ -47,6 +47,8 @@ describe('broadcast attempts', () => {
       broadcastId: null,
       liveChatId: null,
       autoStart: null,
+      rolloverPredecessorAttemptId: null,
+      privacyStatus: null,
       closedAt: null,
     })
     expect(temp.store.findOpenBroadcastAttempt()).toEqual(record)
@@ -164,6 +166,52 @@ describe('broadcast attempts', () => {
     expect(evidenced.closedAt).toBe(closed.closedAt)
     expect(evidenced.lastErrorReason).toBe('rollover_predecessor_complete')
     expect(unchanged.lastErrorReason).toBe('rollover_predecessor_complete')
+  })
+
+  it('writes exact rollover provenance before resource mutation and owns one candidate', () => {
+    temp.store.beginBroadcastAttempt({ ...ATTEMPT, strategy: 'rolling-experiment' })
+    temp.store.recordBroadcastCallResult(ATTEMPT.attemptId, {
+      stage: 'live',
+      streamId: 'synthetic-stream-1',
+      broadcastId: 'synthetic-broadcast-1',
+      liveChatId: 'synthetic-chat-1',
+    })
+
+    const replacement = temp.store.beginBroadcastAttempt({
+      ...ATTEMPT,
+      attemptId: 'attempt-0002',
+      strategy: 'rolling-experiment',
+      rolloverPredecessorAttemptId: ATTEMPT.attemptId,
+    })
+
+    expect(replacement).toMatchObject({
+      stage: 'planned',
+      streamId: null,
+      broadcastId: null,
+      rolloverPredecessorAttemptId: ATTEMPT.attemptId,
+    })
+    expect(() =>
+      temp.store.beginBroadcastAttempt({
+        ...ATTEMPT,
+        attemptId: 'attempt-0003',
+        strategy: 'rolling-experiment',
+        rolloverPredecessorAttemptId: ATTEMPT.attemptId,
+      }),
+    ).toThrow()
+  })
+
+  it('durably records visibility established by an API result or read-back', () => {
+    temp.store.beginBroadcastAttempt(ATTEMPT)
+
+    const observed = temp.store.recordBroadcastCallResult(ATTEMPT.attemptId, {
+      privacyStatus: 'public',
+    })
+    const reopened = temp.reopen().getBroadcastAttempt(ATTEMPT.attemptId)
+
+    expect(observed.privacyStatus).toBe('public')
+    expect(observed.privacyStatusObservedAt).not.toBeNull()
+    expect(reopened?.privacyStatus).toBe('public')
+    expect(reopened?.privacyStatusObservedAt).toBe(observed.privacyStatusObservedAt)
   })
 
   it('refuses to repoint an attempt at another broadcast', () => {

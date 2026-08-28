@@ -86,7 +86,15 @@ GitHub Actions run 33152179513 (implementation head 3b5fc398c0c86d50154370e4816e
 - 코디네이터 차단 지적 `msg_fab2f4f6a71e`: rolling replacement가 initial startup publish에 의존해 private로 남던 결함을 확인했다. lifecycle handoff 안에서 predecessor complete 뒤 configured visibility를 복원하도록 수정하고 public/unlisted/private·ordering·crash recovery·chat concurrency 회귀 테스트를 추가했다.
 - 코디네이터 topology 보강 `msg_0562085143c7`: 실제 두 older live rows와 newest broadcast-created row를 그대로 구성해 mutation 없는 safe-stop을 고정했다.
 
-## Review round <n>
+## Review round 1 — R-T52-1
 
 | finding | 처리(고침 SHA / 반박 근거) |
 |---|---|
+| [blocker] older-open/history heuristics can complete an unrelated predecessor and bypass startup publication | 고침(현재 fix commit): migration 008 adds write-once candidate→predecessor provenance in the replacement's first durable row. Recovery validates the exact linked row and same `streamId` before API/row mutation; missing linkage, extra candidates/live rows, missing predecessor, and mismatch safe-stop. Historical same-stream close reasons are no longer consulted. |
+| [major] recovery replays a configured visibility update already applied | 고침(현재 fix commit): each successful response or exact-id read-back persists `privacy_status` + observation time. Recovery reconciles a pending update and also reads back legacy/unrecorded visibility before mutation, so before/unknown-response/after crash boundaries issue at most one visibility update. |
+| [major] public `rollOver()` completes predecessor before replacement bind | 고침(현재 fix commit): due and explicit paths now share `#performRollover`: linked private replacement create → marker clear/bind on predecessor stream → predecessor complete → configured visibility → replacement live. |
+
+### Round 1 storage note
+
+- `008_rollover-provenance.sql` adds `rollover_predecessor_attempt_id`, `privacy_status`, and `privacy_status_observed_at` to `broadcast_resources`, plus single-candidate and complete-evidence guards.
+- `config/retention.json` and generated `docs/ops/data-map.md` describe the new lifecycle bookkeeping under the existing 30-day row retention policy; no identity, secret, contract, dependency, or lockfile surface changes.
