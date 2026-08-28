@@ -549,6 +549,25 @@ export class BroadcastLifecycle {
     }
   }
 
+  /** Uses the exact predecessor's reusable ingestion stream; rollover never selects another. */
+  #ensureLinkedRolloverStream(candidate: BroadcastAttemptRecord): BroadcastAttemptRecord {
+    if (candidate.streamId !== null) return candidate
+    const predecessorId = candidate.rolloverPredecessorAttemptId
+    if (predecessorId === null) return candidate
+    const predecessor = this.#store.getBroadcastAttempt(predecessorId)
+    if (predecessor === null || predecessor.streamId === null) {
+      return this.#raiseSafeStop('rollover_predecessor_binding_missing', {
+        candidateAttemptId: candidate.attemptId,
+        predecessorAttemptId: predecessorId,
+        predecessorStreamId: predecessor?.streamId ?? null,
+      })
+    }
+    return this.#store.recordBroadcastCallResult(candidate.attemptId, {
+      stage: 'stream_ready',
+      streamId: predecessor.streamId,
+    })
+  }
+
   /** Creates or reuses the stream, creates or adopts the broadcast, binds them. */
   async ensureBound(): Promise<BroadcastBinding> {
     return this.#serializeMutation(() => this.#ensureBoundLifecycle())
@@ -556,7 +575,10 @@ export class BroadcastLifecycle {
 
   async #ensureBoundLifecycle(): Promise<BroadcastBinding> {
     let attempt = (await this.#resume()) ?? this.#beginAttempt()
-    attempt = await this.#ensureStream(attempt)
+    attempt =
+      attempt.rolloverPredecessorAttemptId === null
+        ? await this.#ensureStream(attempt)
+        : this.#ensureLinkedRolloverStream(attempt)
     this.#assertRolloverStreamMatches(attempt)
     attempt = await this.#ensureBroadcast(attempt)
     // The broadcast id is durable from here on, so the marker has done its job and
@@ -695,7 +717,7 @@ export class BroadcastLifecycle {
     // resource call and, critically, before the predecessor can be completed.
     let next = this.#beginAttempt(current.attemptId)
     next = this.#store.updateBroadcastAttempt(next.attemptId, { autoStart: false })
-    next = await this.#ensureStream(next)
+    next = this.#ensureLinkedRolloverStream(next)
     this.#assertRolloverStreamMatches(next)
     next = await this.#ensureBroadcast(next)
     next = await this.#clearAttemptMarker(next)
