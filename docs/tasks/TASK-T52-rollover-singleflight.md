@@ -4,6 +4,7 @@
 - Branch: `dnhynk/t52-rollover-singleflight` · PR: #65
 - Orca: task `task_55c76aed6821` · dispatch `ctx_ad8cf70abb12`
 - Review fix: task `task_01e19e3a2abe` · dispatch `ctx_7e8030e89bb0`
+- Review fix round 2: task `task_527d55b4f54a` · dispatch `ctx_0e42dcc13bb1`
 - Spec sections read: §9.1, §9.2, §9.3, §9.4, §10.2, §11
 - BOARD decisions/assumptions relied on: D-21, D-25, A-15, A-18
 
@@ -100,3 +101,25 @@ GitHub Actions exact final head
 
 - `008_rollover-provenance.sql` adds `rollover_predecessor_attempt_id`, `privacy_status`, and `privacy_status_observed_at` to `broadcast_resources`, plus single-candidate and complete-evidence guards.
 - `config/retention.json` and generated `docs/ops/data-map.md` describe the new lifecycle bookkeeping under the existing 30-day row retention policy; no identity, secret, contract, dependency, or lockfile surface changes.
+
+## Review round 2 — R-T52-2
+
+Review: [GitHub review 5049431812](https://github.com/dnhynk/vertical-live/pull/65#pullrequestreview-5049431812)
+
+| finding | 처리(고침 SHA / 반박 근거) |
+|---|---|
+| [blocker] due/explicit replacement insert limit can adopt and then complete its own live predecessor, returning the completed predecessor as false success | 고침 `12021bd`: a row with `rollover_predecessor_attempt_id` may recover only its own exact write-once `broadcast_id`; same-stream/title generic adoption remains available only to unlinked startup recovery. `#adoptBroadcast` repeats the invariant defensively. Deterministic due and explicit `userBroadcastsExceedLimit` regressions require rejection + safe-stop evidence, one insert and two bounded list probes, zero transition/visibility mutation, an unchanged open/live predecessor in both DB and fake YouTube, and no `broadcast_recovered`/false target. |
+| [major] migration 008 permanently reserves a predecessor after its failed candidate closes | 고침 `12021bd`: the unique predecessor index now covers only `closed_at IS NULL`, preserving at most one open candidate while retaining every closed row's candidate-specific provenance. Store and real migration-runner regressions prove a populated 001–007 DB upgrades without guessed fields, a closed candidate coexists with one later open candidate, a second open candidate is rejected, and a restarted lifecycle successfully creates a distinct replacement on the exact predecessor stream after the failed candidate closes. |
+
+### Round 2 focused evidence
+
+```text
+npm test -- --run apps/server/src/youtube/broadcast/lifecycle.test.ts apps/server/src/db/broadcast-resources.test.ts apps/server/src/db/migrate.test.ts
+  PASS — 3 files, 121 tests
+npm test -- --run apps/server/src/youtube/broadcast/lifecycle.test.ts apps/server/src/db/broadcast-resources.test.ts apps/server/src/db/migrate.test.ts apps/server/src/privacy/data-map.test.ts apps/server/src/supervisor/supervisor.test.ts
+  PASS — 5 files, 170 tests
+npm run format:check
+  PASS — all matched files use Prettier
+```
+
+Pending for the final evidence commit: lint, typecheck, full test, build, accelerated `soak:ci`, fetch/rebase, and exact-final-head GitHub Actions verification.
