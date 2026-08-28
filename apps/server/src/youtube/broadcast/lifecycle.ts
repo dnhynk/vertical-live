@@ -196,6 +196,8 @@ export class BroadcastLifecycle {
   #recoveryReviewedAttemptId: string | null = null
   /** Older live row that an interrupted rollover must complete before go-live. */
   #recoveryPredecessorAttemptId: string | null = null
+  /** Replacement that must regain configured visibility before it goes live. */
+  #recoveryReplacementAttemptId: string | null = null
 
   constructor(options: BroadcastLifecycleOptions) {
     this.#api = options.api
@@ -228,6 +230,7 @@ export class BroadcastLifecycle {
       if (open === null) {
         this.#recoveryReviewedAttemptId = null
         this.#recoveryPredecessorAttemptId = null
+        this.#recoveryReplacementAttemptId = null
         return null
       }
       let candidate = open
@@ -328,10 +331,19 @@ export class BroadcastLifecycle {
     if (this.#recoveryReviewedAttemptId === candidate.attemptId) return
 
     this.#recoveryPredecessorAttemptId = null
+    this.#recoveryReplacementAttemptId = null
     const livePredecessors: BroadcastAttemptRecord[] = []
-    for (const original of this.#store.listOpenBroadcastAttempts()) {
-      if (original.attemptId === candidate.attemptId) continue
-
+    const olderOpen = this.#store
+      .listOpenBroadcastAttempts()
+      .filter((attempt) => attempt.attemptId !== candidate.attemptId)
+    if (olderOpen.length > 0) {
+      this.#recoveryReplacementAttemptId = candidate.attemptId
+    } else if (this.#hasDurableRolloverPredecessor(candidate)) {
+      // Covers a second crash after the predecessor row was closed but before
+      // the replacement privacy update/go-live completed.
+      this.#recoveryReplacementAttemptId = candidate.attemptId
+    }
+    for (const original of olderOpen) {
       let stale = original
       if (stale.pendingCall !== null) {
         this.#logger.warn('reconciling an older open attempt with an unknown call outcome', {
@@ -394,8 +406,12 @@ export class BroadcastLifecycle {
         })
       }
       if (status === 'complete') {
-        this.#store.closeBroadcastAttempt(stale.attemptId, 'complete', 'restart_observed_complete')
-        this.#alert('attempt_discarded', 'restart_observed_complete', {
+        this.#store.closeBroadcastAttempt(
+          stale.attemptId,
+          'complete',
+          'rollover_predecessor_observed_complete',
+        )
+        this.#alert('attempt_discarded', 'rollover_predecessor_observed_complete', {
           attemptId: stale.attemptId,
           broadcastId: stale.broadcastId,
           candidateAttemptId: candidate.attemptId,
@@ -470,8 +486,22 @@ export class BroadcastLifecycle {
       this.#recoveryPredecessorAttemptId = null
       return
     }
-    await this.#stopBroadcast(predecessor)
+    await this.#stopBroadcast(predecessor, 'rollover_predecessor_complete')
     this.#recoveryPredecessorAttemptId = null
+  }
+
+  #hasDurableRolloverPredecessor(candidate: BroadcastAttemptRecord): boolean {
+    if (candidate.streamId === null || stageAtLeast(candidate.stage, 'live')) return false
+    return this.#store
+      .listBroadcastAttempts()
+      .some(
+        (attempt) =>
+          attempt.attemptId !== candidate.attemptId &&
+          attempt.streamId === candidate.streamId &&
+          attempt.closedAt !== null &&
+          (attempt.lastErrorReason === 'rollover_predecessor_complete' ||
+            attempt.lastErrorReason === 'rollover_predecessor_observed_complete'),
+      )
   }
 
   /** Creates or reuses the stream, creates or adopts the broadcast, binds them. */
@@ -502,8 +532,12 @@ export class BroadcastLifecycle {
   }
 
   async #goLiveLifecycle(): Promise<BroadcastTarget> {
-    const bound = await this.#requireOpenAttempt()
+    let bound = await this.#requireOpenAttempt()
     await this.#completeRecoveryPredecessor(bound)
+    if (this.#recoveryReplacementAttemptId === bound.attemptId) {
+      bound = await this.#applyConfiguredPrivacy(bound)
+      this.#recoveryReplacementAttemptId = null
+    }
     const attempt = await this.#goLive(bound)
     const binding = this.#toBinding(attempt)
     if (binding.liveChatId === null) {
@@ -567,7 +601,12 @@ export class BroadcastLifecycle {
         attemptId: current.attemptId,
       })
       await this.#completeRecoveryPredecessor(current)
-      return this.#toBinding(await this.#goLive(current))
+      const prepared =
+        this.#recoveryReplacementAttemptId === current.attemptId
+          ? await this.#applyConfiguredPrivacy(current)
+          : current
+      this.#recoveryReplacementAttemptId = null
+      return this.#toBinding(await this.#goLive(prepared))
     }
 
     // Only a segment that actually reached `live` has run; anything earlier is
@@ -605,7 +644,12 @@ export class BroadcastLifecycle {
     next = await this.#ensureBound(next)
 
     // 2. The old one ends first — the API refuses two live broadcasts.
-    await this.#stopBroadcast(current)
+    await this.#stopBroadcast(current, 'rollover_predecessor_complete')
+
+    // Restore the configured visibility only after the internal marker is gone
+    // and the public predecessor has ended. Initial publication remains the
+    // startup/operator step; this path is only an already-public segment handoff.
+    next = await this.#applyConfiguredPrivacy(next)
 
     // 3. And only now the new one starts.
     next = await this.#goLive(next)
@@ -633,18 +677,23 @@ export class BroadcastLifecycle {
 
   async #publish(): Promise<BroadcastAttemptRecord> {
     const attempt = await this.#requireOpenAttempt()
+    if (this.#config.privacyStatus === 'private') {
+      throw new Error(
+        'youtube.broadcast.privacyStatus is "private", so there is nothing to publish; set it to public or unlisted first',
+      )
+    }
+    return this.#publishAttempt(attempt)
+  }
+
+  /** Applies configured non-private visibility to one marker-cleared attempt. */
+  async #publishAttempt(attempt: BroadcastAttemptRecord): Promise<BroadcastAttemptRecord> {
     const broadcastId = requireId(attempt.broadcastId, 'broadcastId')
     if (attempt.markerClearedAt === null) {
       throw new BroadcastMarkerNotClearedError(broadcastId)
     }
     const privacyStatus = this.#config.privacyStatus
-    if (privacyStatus === 'private') {
-      throw new Error(
-        'youtube.broadcast.privacyStatus is "private", so there is nothing to publish; set it to public or unlisted first',
-      )
-    }
 
-    return this.#withRetries(
+    const published = await this.#withRetries(
       attempt,
       'liveBroadcasts.update',
       async (current) => {
@@ -662,13 +711,18 @@ export class BroadcastLifecycle {
             `broadcast ${broadcastId} reports privacyStatus ${String(updated.privacyStatus)} after asking for ${privacyStatus}`,
           )
         }
-        this.#alert('broadcast_published', privacyStatus, { broadcastId })
         return this.#store.recordBroadcastCallResult(current.attemptId, { lastErrorReason: null })
       },
-      // Setting the same privacy twice is harmless, so a retry is always allowed to
-      // run rather than being short-circuited by a row that records nothing about it.
-      () => false,
+      // Reconcile records both marker removal and configured privacy. Do not send
+      // a duplicate update when the first response was lost after application.
+      (current) => current.pendingCall === null && current.lastErrorReason === null,
     )
+    this.#alert('broadcast_published', privacyStatus, { broadcastId })
+    return published
+  }
+
+  async #applyConfiguredPrivacy(attempt: BroadcastAttemptRecord): Promise<BroadcastAttemptRecord> {
+    return this.#config.privacyStatus === 'private' ? attempt : this.#publishAttempt(attempt)
   }
 
   /**
@@ -757,10 +811,11 @@ export class BroadcastLifecycle {
     })
     const current = this.#store.findOpenBroadcastAttempt()
     if (current !== null) {
-      await this.#stopBroadcast(current)
+      await this.#stopBroadcast(current, 'rollover_predecessor_complete')
     }
     this.#adopted = false
-    await this.#ensureBoundLifecycle()
+    const replacement = await this.#ensureBoundLifecycle()
+    this.#recoveryReplacementAttemptId = replacement.attemptId
     return this.#goLiveLifecycle()
   }
 
@@ -781,7 +836,10 @@ export class BroadcastLifecycle {
     })
   }
 
-  async #stopBroadcast(attempt: BroadcastAttemptRecord): Promise<BroadcastAttemptRecord> {
+  async #stopBroadcast(
+    attempt: BroadcastAttemptRecord,
+    completionReason?: string,
+  ): Promise<BroadcastAttemptRecord> {
     if (attempt.broadcastId === null) {
       return this.#store.closeBroadcastAttempt(attempt.attemptId, 'abandoned', 'never_created')
     }
@@ -789,7 +847,7 @@ export class BroadcastLifecycle {
     // same reconcile-then-retry wrapper (review round 1, B4). Closing the attempt on
     // an *unknown* outcome was the bug: the row said `complete` while YouTube still
     // said `live`, and nothing had asked.
-    return this.#withRetries(
+    const stopped = await this.#withRetries(
       attempt,
       'liveBroadcasts.transition',
       async (current) => {
@@ -808,10 +866,13 @@ export class BroadcastLifecycle {
             throw error
           }
         }
-        return this.#store.closeBroadcastAttempt(current.attemptId, 'complete')
+        return this.#store.closeBroadcastAttempt(current.attemptId, 'complete', completionReason)
       },
       (current) => current.closedAt !== null && current.stage === 'complete',
     )
+    return completionReason === undefined
+      ? stopped
+      : this.#store.closeBroadcastAttempt(stopped.attemptId, 'complete', completionReason)
   }
 
   // ------------------------------------------------------------------- stages
@@ -820,6 +881,7 @@ export class BroadcastLifecycle {
     this.#adopted = false
     this.#recoveryReviewedAttemptId = null
     this.#recoveryPredecessorAttemptId = null
+    this.#recoveryReplacementAttemptId = null
     const attemptId = this.#newAttemptId()
     // This process made it, so it is already picked up: `#stillResumable` has
     // nothing to ask YouTube about a row it just wrote.

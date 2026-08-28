@@ -145,6 +145,27 @@ describe('broadcast attempts', () => {
     expect(temp.store.findOpenBroadcastAttempt()).toBeNull()
   })
 
+  it('can stamp an evidence reason on an idempotently closed attempt without rewriting it', () => {
+    temp.store.beginBroadcastAttempt(ATTEMPT)
+    const closed = temp.store.closeBroadcastAttempt(ATTEMPT.attemptId, 'complete')
+
+    const evidenced = temp.store.closeBroadcastAttempt(
+      ATTEMPT.attemptId,
+      'complete',
+      'rollover_predecessor_complete',
+    )
+    const unchanged = temp.store.closeBroadcastAttempt(
+      ATTEMPT.attemptId,
+      'complete',
+      'synthetic_later_reason',
+    )
+
+    expect(evidenced.stage).toBe(closed.stage)
+    expect(evidenced.closedAt).toBe(closed.closedAt)
+    expect(evidenced.lastErrorReason).toBe('rollover_predecessor_complete')
+    expect(unchanged.lastErrorReason).toBe('rollover_predecessor_complete')
+  })
+
   it('refuses to repoint an attempt at another broadcast', () => {
     temp.store.beginBroadcastAttempt(ATTEMPT)
     temp.store.recordBroadcastCallResult(ATTEMPT.attemptId, {

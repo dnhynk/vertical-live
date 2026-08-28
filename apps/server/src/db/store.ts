@@ -1209,7 +1209,15 @@ export class PersistenceStore {
   ): BroadcastAttemptRecord {
     const current = this.#requireBroadcastAttempt(attemptId)
     if (current.closedAt !== null) {
-      return current
+      if (reason === undefined || current.lastErrorReason !== null) return current
+      this.#db
+        .prepare(
+          `UPDATE broadcast_resources
+              SET last_error_reason = ?, updated_at = ?
+            WHERE attempt_id = ?`,
+        )
+        .run(reason, this.#clock.nowUtcIso(), attemptId)
+      return this.#requireBroadcastAttempt(attemptId)
     }
     this.#db
       .prepare(
