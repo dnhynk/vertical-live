@@ -1,4 +1,4 @@
-import { CHIME_GAIN, MASTER_GAIN, bellHz, chimeHzFor, type AudioScore } from './score'
+import { CHIME_GAIN, MASTER_GAIN, chimeHzFor, noteHz, type AudioScore } from './score'
 
 /**
  * The Web Audio wiring for `score.ts`. Every decision about what to play lives
@@ -41,9 +41,13 @@ function audioContextCtor(): AudioContextCtor | null {
 export type AmbientState = 'unsupported' | 'suspended' | 'running' | 'stopped'
 
 /**
- * A drone, a filter and a slow bell, following whatever score it is given.
+ * A filter, a slow note and a chime, following whatever score it is given.
  *
- * The bell is scheduled one at a time rather than on a fixed grid: the interval
+ * There is no sustained voice. The graph holds nothing between events, so when
+ * nothing is happening the stream carries silence — which is what the first
+ * version got wrong, and no amount of choosing a nicer chord fixed.
+ *
+ * The note is scheduled one at a time rather than on a fixed grid: the interval
  * moves with the world, and a grid laid out in advance would keep playing the
  * old weather's pace for as long as it had been scheduled for.
  */
@@ -51,8 +55,6 @@ export class AmbientAudio {
   #context: AudioContext | null = null
   #master: GainNode | null = null
   #filter: BiquadFilterNode | null = null
-  #droneGain: GainNode | null = null
-  #voices: OscillatorNode[] = []
   #timer: ReturnType<typeof setTimeout> | null = null
   #score: AudioScore | null = null
   #step = 0
@@ -86,7 +88,7 @@ export class AmbientAudio {
     this.#score = score
     if (previous === null) {
       this.#build(context, score)
-      this.#scheduleBell()
+      this.#scheduleNote()
       return
     }
     if (previous.scoreId === score.scoreId) return
@@ -127,12 +129,9 @@ export class AmbientAudio {
     }
     const context = this.#context
     const master = this.#master
-    const voices = this.#voices
-    this.#voices = []
     this.#context = null
     this.#master = null
     this.#filter = null
-    this.#droneGain = null
     if (context === null) return
 
     if (master !== null) {
@@ -143,13 +142,6 @@ export class AmbientAudio {
     }
     setTimeout(
       () => {
-        for (const voice of voices) {
-          try {
-            voice.stop()
-          } catch {
-            // Already stopped; nothing to undo.
-          }
-        }
         void context.close().catch(() => {})
       },
       Math.round(FADE_OUT_SEC * 1000) + 50,
@@ -180,49 +172,14 @@ export class AmbientAudio {
     filter.Q.setValueAtTime(0.6, context.currentTime)
     filter.connect(master)
 
-    const droneGain = context.createGain()
-    droneGain.gain.setValueAtTime(score.droneGain, context.currentTime)
-    droneGain.connect(filter)
-
-    // Root, fifth, and the colour tone the score picks — a chord with a definite
-    // warmth rather than the bare open fifth the first version held, which is
-    // neither major nor minor and reads as hollow. Each voice is doubled a few
-    // cents apart so it breathes without beating.
-    for (const [ratio, detune] of this.#droneVoicing(score)) {
-      const osc = context.createOscillator()
-      osc.type = 'sine'
-      osc.frequency.setValueAtTime(score.rootHz * ratio, context.currentTime)
-      osc.detune.setValueAtTime(detune, context.currentTime)
-      osc.connect(droneGain)
-      osc.start()
-      this.#voices.push(osc)
-    }
-
     this.#master = master
     this.#filter = filter
-    this.#droneGain = droneGain
-  }
-
-  /** Frequency ratio and detune for each drone voice, in a fixed order. */
-  #droneVoicing(score: AudioScore): readonly (readonly [number, number])[] {
-    const colour = Math.pow(2, score.droneColourSemitones / 12)
-    return [
-      [1, -score.droneDetuneCents],
-      [1, score.droneDetuneCents],
-      [1.5, -score.droneDetuneCents],
-      [colour, score.droneDetuneCents],
-    ] as const
   }
 
   #retune(context: AudioContext, score: AudioScore): void {
-    const at = context.currentTime
-    this.#filter?.frequency.linearRampToValueAtTime(score.cutoffHz, at + RAMP_SEC)
-    this.#droneGain?.gain.linearRampToValueAtTime(score.droneGain, at + RAMP_SEC)
-    const voicing = this.#droneVoicing(score)
-    for (const [index, voice] of this.#voices.entries()) {
-      const ratio = voicing[index]?.[0] ?? 1
-      voice.frequency.linearRampToValueAtTime(score.rootHz * ratio, at + RAMP_SEC)
-    }
+    // Only the filter is held between events; everything else is created per
+    // note and per chime, so there is nothing else to move.
+    this.#filter?.frequency.linearRampToValueAtTime(score.cutoffHz, context.currentTime + RAMP_SEC)
   }
 
   /**
@@ -260,21 +217,21 @@ export class AmbientAudio {
     }
   }
 
-  #scheduleBell(): void {
+  #scheduleNote(): void {
     if (this.#stopped) return
     const score = this.#score
     const context = this.#context
     if (score === null || context === null) return
     this.#timer = setTimeout(
       () => {
-        this.#ringBell()
-        this.#scheduleBell()
+        this.#ringNote()
+        this.#scheduleNote()
       },
-      Math.round(score.bellIntervalSec * 1000),
+      Math.round(score.noteIntervalSec * 1000),
     )
   }
 
-  #ringBell(): void {
+  #ringNote(): void {
     const context = this.#context
     const filter = this.#filter
     const score = this.#score
@@ -285,13 +242,13 @@ export class AmbientAudio {
     // Sine, not triangle: the triangle's upper partials are what made this read
     // as a bell in an empty building rather than as a soft tone in a room.
     osc.type = 'sine'
-    osc.frequency.setValueAtTime(bellHz(score, this.#step), at)
+    osc.frequency.setValueAtTime(noteHz(score, this.#step), at)
 
     // Slow in, slow out. The first version's fast attack and three-second tail
     // was a struck bell; this is closer to a breath.
     const gain = context.createGain()
     gain.gain.setValueAtTime(0, at)
-    gain.gain.linearRampToValueAtTime(score.bellGain, at + 0.5)
+    gain.gain.linearRampToValueAtTime(score.noteGain, at + 0.5)
     gain.gain.exponentialRampToValueAtTime(0.0001, at + 2.6)
 
     osc.connect(gain)

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { SceneConditions } from '../visual/palette'
-import { CHIME_GAIN, MASTER_GAIN, SCALES, bellHz, chimeHzFor, scoreFor } from './score'
+import { CHIME_GAIN, MASTER_GAIN, SCALES, chimeHzFor, noteHz, scoreFor } from './score'
 
 function conditions(overrides: Partial<SceneConditions> = {}): SceneConditions {
   return {
@@ -31,13 +31,13 @@ describe('scoreFor', () => {
     const clear = scoreFor(conditions({ weatherId: 'clear' }))
     const rain = scoreFor(conditions({ weatherId: 'rain' }))
     expect(rain.cutoffHz).toBeLessThan(clear.cutoffHz)
-    expect(rain.bellIntervalSec).toBeGreaterThan(clear.bellIntervalSec)
+    expect(rain.noteIntervalSec).toBeGreaterThan(clear.noteIntervalSec)
   })
 
   it('lets mood change the pace and nothing else — a mood is not a key change', () => {
     const content = scoreFor(conditions({ emotionId: 'content' }))
     const sleepy = scoreFor(conditions({ emotionId: 'sleepy' }))
-    expect(sleepy.bellIntervalSec).toBeGreaterThan(content.bellIntervalSec)
+    expect(sleepy.noteIntervalSec).toBeGreaterThan(content.noteIntervalSec)
     expect(sleepy.rootHz).toBe(content.rootHz)
     expect(sleepy.scale).toBe(content.scale)
   })
@@ -50,10 +50,9 @@ describe('scoreFor', () => {
   it('goes quieter in a crisis, never louder or faster', () => {
     const awake = scoreFor(conditions({ resting: false }))
     const resting = scoreFor(conditions({ resting: true }))
-    expect(resting.droneGain).toBeLessThan(awake.droneGain)
-    expect(resting.bellGain).toBeLessThan(awake.bellGain)
+    expect(resting.noteGain).toBeLessThan(awake.noteGain)
     expect(resting.cutoffHz).toBeLessThan(awake.cutoffHz)
-    expect(resting.bellIntervalSec).toBeGreaterThan(awake.bellIntervalSec)
+    expect(resting.noteIntervalSec).toBeGreaterThan(awake.noteIntervalSec)
   })
 
   it('falls back rather than throwing on an identifier it has never seen', () => {
@@ -62,17 +61,44 @@ describe('scoreFor', () => {
     )
     expect(unknown.rootHz).toBeGreaterThan(0)
     expect(unknown.cutoffHz).toBeGreaterThan(0)
-    expect(unknown.bellIntervalSec).toBeGreaterThan(0)
+    expect(unknown.noteIntervalSec).toBeGreaterThan(0)
   })
 
   it('keeps every level under the master gain, which is itself quiet', () => {
     // The one failure that matters for a stream nobody asked sound from is being
-    // loud. Both voices together, at full master, stay well under unity.
+    // loud. Everything that can sound at once, at full master, stays well under
+    // unity.
     for (const phase of ['dawn', 'morning', 'day', 'afternoon', 'dusk', 'night']) {
       const score = scoreFor(conditions({ worldPhaseId: phase }))
-      expect((score.droneGain + score.bellGain) * MASTER_GAIN).toBeLessThan(0.1)
+      expect((score.noteGain + CHIME_GAIN) * MASTER_GAIN).toBeLessThan(0.1)
     }
     expect(MASTER_GAIN).toBeLessThan(0.2)
+  })
+
+  /**
+   * The complaint that produced this shape was about a sound that never stopped,
+   * not about which chord it was. There is no sustained voice in the score at
+   * all now, and the gap between notes is long enough that silence is the
+   * ordinary state rather than a pause.
+   */
+  it('has no sustained voice, and leaves long silence between notes', () => {
+    const score = scoreFor(conditions())
+    expect(score).not.toHaveProperty('droneGain')
+    expect(score).not.toHaveProperty('droneColourSemitones')
+    expect(score).not.toHaveProperty('droneDetuneCents')
+    expect(score.noteIntervalSec).toBeGreaterThanOrEqual(4)
+
+    for (const phase of ['dawn', 'morning', 'day', 'afternoon', 'dusk', 'night']) {
+      for (const weather of ['clear', 'cloudy', 'rain', 'snow', 'wind']) {
+        for (const emotion of ['happy', 'playful', 'content', 'sleepy', 'hungry', 'lonely']) {
+          const s = scoreFor(
+            conditions({ worldPhaseId: phase, weatherId: weather, emotionId: emotion }),
+          )
+          // A note decays inside ~2.6s, so this is real quiet, not overlap.
+          expect(s.noteIntervalSec).toBeGreaterThan(3)
+        }
+      }
+    }
   })
 
   /**
@@ -91,41 +117,25 @@ describe('scoreFor', () => {
       }
     }
   })
-
-  it('gives the drone a colour tone, so the chord is not a bare open fifth', () => {
-    // Root and fifth alone are neither major nor minor, which is what read as
-    // hollow on air. The score names a third interval for the drone to hold.
-    const score = scoreFor(conditions())
-    expect(score.droneColourSemitones).toBeGreaterThan(0)
-    expect(score.droneColourSemitones).not.toBe(7)
-    expect(score.droneColourSemitones).not.toBe(12)
-  })
-
-  it('keeps the drone detune small enough not to beat', () => {
-    // A wide detune on a held chord is a slow wobble, which is a horror cue.
-    for (const resting of [false, true]) {
-      expect(scoreFor(conditions({ resting })).droneDetuneCents).toBeLessThanOrEqual(5)
-    }
-  })
 })
 
-describe('bellHz', () => {
+describe('noteHz', () => {
   it('is seeded, not random: the same step is always the same pitch', () => {
     const score = scoreFor(conditions())
-    expect(bellHz(score, 7)).toBe(bellHz(score, 7))
+    expect(noteHz(score, 7)).toBe(noteHz(score, 7))
   })
 
   it('does not walk the scale in order', () => {
     const score = scoreFor(conditions())
-    const first = [0, 1, 2, 3, 4].map((step) => bellHz(score, step))
+    const first = [0, 1, 2, 3, 4].map((step) => noteHz(score, step))
     const ascending = [...first].sort((a, b) => a - b)
     expect(first).not.toEqual(ascending)
   })
 
-  it('stays above the drone and inside audible range', () => {
+  it('stays above the root and inside audible range', () => {
     const score = scoreFor(conditions())
     for (let step = 0; step < 64; step += 1) {
-      const hz = bellHz(score, step)
+      const hz = noteHz(score, step)
       expect(hz).toBeGreaterThan(score.rootHz)
       expect(hz).toBeLessThan(20_000)
     }
@@ -164,8 +174,8 @@ describe('chimeHzFor', () => {
     }
   })
 
-  it('stays quiet: a chime plus the bed is still under the master level', () => {
+  it('stays quiet: a chime over a note is still under the master level', () => {
     const score = scoreFor(conditions())
-    expect((score.droneGain + score.bellGain + CHIME_GAIN) * MASTER_GAIN).toBeLessThan(0.1)
+    expect((score.noteGain + CHIME_GAIN) * MASTER_GAIN).toBeLessThan(0.1)
   })
 })

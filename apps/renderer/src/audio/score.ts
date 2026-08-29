@@ -8,6 +8,12 @@ import type { SceneConditions } from '../visual/palette'
  * This module makes every decision and touches no Web Audio API, which is why it
  * is the part that has tests. `engine.ts` is the thin wiring that plays it.
  *
+ * **There is no sustained tone.** The first version held a drone under
+ * everything, and a held tone is oppressive however consonant it is — a room
+ * that never stops humming is a room something is wrong in. What plays now is
+ * silence, with a soft note every several seconds and one acknowledgement per
+ * command. The quiet between them is the point, not a gap in the design.
+ *
  * Three rules the sound follows, all of them from the spec rather than taste:
  *
  * - **It carries no information.** Spec §5.2 asks a first-time viewer to
@@ -63,29 +69,10 @@ export interface AudioScore {
   readonly scale: ScaleShape
   /** Lowpass cutoff on the whole mix, Hz. Weather and phase open or close it. */
   readonly cutoffHz: number
-  /** Seconds between one bell and the next. Longer is calmer. */
-  readonly bellIntervalSec: number
-  /** Peak gain of a single bell, before the master level. */
-  readonly bellGain: number
-  /** Steady gain of the drone, before the master level. */
-  readonly droneGain: number
-  /**
-   * Detune between the drone's paired voices, cents.
-   *
-   * Small. The first version used 9, and a drone beating that hard is the other
-   * half of why it read as eerie: a slow wobble on a held chord is a horror
-   * cue. A few cents is warmth; ten is unease.
-   */
-  readonly droneDetuneCents: number
-  /**
-   * Semitones above the root for the drone's colour tone.
-   *
-   * The first version stacked only root, fifth and octave. That chord has no
-   * third, so it is neither major nor minor — an open fifth is the most
-   * ambiguous sound in Western tuning and reads as hollow. A major sixth (9)
-   * gives it a definite, warm colour without the triad's jingle.
-   */
-  readonly droneColourSemitones: number
+  /** Seconds between one note and the next. Longer is calmer. */
+  readonly noteIntervalSec: number
+  /** Peak gain of a single note, before the master level. */
+  readonly noteGain: number
 }
 
 /**
@@ -137,7 +124,14 @@ const MOOD_INTERVAL_SCALE: Readonly<Record<string, number>> = Object.freeze({
   lonely: 1.3,
 })
 
-const BASE_BELL_INTERVAL_SEC = 6.5
+/**
+ * How far apart the soft notes sit before weather and mood move them.
+ *
+ * Long. With no tone underneath, this interval *is* the density of the piece,
+ * and the complaint that ended the drone was about constancy rather than
+ * timbre — so the default leans toward hearing nothing.
+ */
+const BASE_NOTE_INTERVAL_SEC = 11
 
 function clamp(value: number, low: number, high: number): number {
   return Math.min(high, Math.max(low, value))
@@ -163,10 +157,10 @@ export function scoreFor(conditions: SceneConditions): AudioScore {
   const restingInterval = conditions.resting ? 1.5 : 1
 
   const cutoffHz = clamp(phase.cutoffHz * weather.cutoffScale * restingCutoff, 220, 6000)
-  const bellIntervalSec = clamp(
-    BASE_BELL_INTERVAL_SEC * weather.intervalScale * moodScale * restingInterval,
-    2.5,
-    24,
+  const noteIntervalSec = clamp(
+    BASE_NOTE_INTERVAL_SEC * weather.intervalScale * moodScale * restingInterval,
+    4,
+    30,
   )
 
   return {
@@ -179,13 +173,8 @@ export function scoreFor(conditions: SceneConditions): AudioScore {
     rootHz: phase.rootHz,
     scale,
     cutoffHz,
-    bellIntervalSec,
-    bellGain: 0.13 * restingGain,
-    droneGain: 0.3 * restingGain,
-    droneDetuneCents: conditions.resting ? 2 : 4,
-    // A sixth over the root: warm and settled, and not the triad that would make
-    // it a jingle (spec §5.3).
-    droneColourSemitones: 9,
+    noteIntervalSec,
+    noteGain: 0.22 * restingGain,
   }
 }
 
@@ -197,8 +186,8 @@ export function scoreFor(conditions: SceneConditions): AudioScore {
  * - A viewer who typed something should hear the room notice. The screen already
  *   shows it, so this adds nothing §5.2 needs — it is the difference between a
  *   room and a recording.
- * - It is pitched **inside the current scale**, so an acknowledgement can never
- *   clash with the chord underneath it however many arrive at once.
+ * - It is pitched **inside the current scale**, so acknowledgements cannot clash
+ *   with each other or with a note however many arrive at once.
  * - `null` for anything that is not one of the free care commands. Paid events do
  *   not ring: spec §8.5 does not let money buy screen dominance and it does not
  *   get to buy a sound either, which is why nothing in this module reads a paid
@@ -209,7 +198,7 @@ export function chimeHzFor(score: AudioScore, commandName: string): number | nul
   if (degreeIndex === undefined) return null
   const degrees = score.scale.degrees
   const degree = degrees[degreeIndex % degrees.length] ?? 0
-  // One octave above the bells, so an acknowledgement reads as a separate voice
+  // One octave above the notes, so an acknowledgement reads as a separate voice
   // rather than as the ambient line happening to play.
   return score.rootHz * Math.pow(2, 3 + degree / 12)
 }
@@ -231,19 +220,19 @@ const FREE_COMMAND_DEGREE: Readonly<Record<string, number>> = Object.freeze({
 export const CHIME_GAIN = 0.1
 
 /**
- * The next bell's pitch, in Hz.
+ * The next note's pitch, in Hz.
  *
  * Seeded rather than random (CLAUDE.md §4): the same run replays the same
  * melody, so a soak or a replay is comparable and nothing here is a source of
- * nondeterminism. `step` is the bell's index since the run began.
+ * nondeterminism. `step` is the note's index since the run began.
  */
-export function bellHz(score: AudioScore, step: number): number {
+export function noteHz(score: AudioScore, step: number): number {
   // A small integer hash, so consecutive steps do not walk the scale in order
   // and the line does not sound like an exercise.
   const mixed = Math.imul(step + 1, 2654435761) >>> 0
   const degrees = score.scale.degrees
   const degree = degrees[mixed % degrees.length] ?? 0
-  // Two octaves above the drone, occasionally three: bells sit clear of the pad.
+  // Two octaves above the root, occasionally three.
   const octave = 2 + ((mixed >>> 8) % 2)
   return score.rootHz * Math.pow(2, octave + degree / 12)
 }
