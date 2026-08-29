@@ -339,8 +339,8 @@
     },
     "broadcast": {
       "strategy": "rolling-experiment",
-      "title": "Autonomous Vertical Live",
-      "description": "",
+      "title": "ちいさな生きものの24時間｜コメントで「ごはん」って送るだけ【LIVE】",
+      "description": "ちいさな生きものを、みんなで おせわする 24時間の LIVE です。\nチャットに つぎの ことばを おくると、がめんの なかに はんえいされます。\n\n・ごはん … たべものを あげる\n・あそぶ … いっしょに あそぶ\n・なでる … なでてあげる\n\n無料でもすべて達成できます。かきんは えんしゅつと ありがとうだけで、\nせいちょう・かくりつ・とうひょうには えいきょうしません。\n生きものが しんだり、もとに もどらなく なったり する ことは ありません。\n\n【なまえの ひょうじについて】\n\nチャットで「なのる」と おくると、あなたの YouTube チャンネル名を\nがめんに ひょうじします。おくらない かぎり、なにも ほぞんしません。\n\n・ほぞんするもの: つぎの 6つを、1つの きろくとして ほぞんします\n  (1) あなたの YouTube チャンネル ID\n  (2) ひょうじめい（なまえ）\n  (3) この システムが つくる ランダムな ID\n      （(1)や(2)から つくった ものでは ありません）\n  (4)「なのる」を おくった にちじ\n  (5) さいごに メッセージを おくった にちじ\n  (6) どの おしらせぶんに どういしたか（バージョン）\n  チャットの ないよう、コマンドの りれき、ひとりずつの かいすうは\n  ほぞんしません\n・つかいみち: つぎの 2つだけです\n  (1)「いま はんえいされた こうどう」の よこに なまえを だすこと\n  (2) おなじ ひとが つづけて おくった コマンドの まちじかん（クールダウン）と、\n      ぶんきの とうひょうを ひとり 1かいに すること\n  (2)では なまえでは なく、この システムが つくった ランダムな ID を つかいます。\n  ランキング・かきん・とうひょうの ゆうり ふりには つかいません\n・ほぞん きかん: メッセージを おくるたびに こうしんされ、\n  30にち かつどうが ないと じどうで さくじょされます\n・さくじょ ほうほう: チャットで「なまえけす」と おくると、すぐに さくじょします\n・「なのる」を おくっていない ひとの なまえ・チャンネル ID は\n  ほぞんも ひょうじも しません",
       "privacyStatus": "private",
       "selfDeclaredMadeForKids": false,
       "latencyPreference": "ultraLow",
@@ -366,6 +366,7 @@
       },
       "provisional": [
         "title",
+        "description",
         "scheduledStartLeadMs",
         "requestTimeoutMs",
         "autoStartWaitMs",
@@ -382,7 +383,7 @@
       "parts": ["id", "snippet"],
       "maxResults": 500,
       "readyPollIntervalMs": 250,
-      "grpcStreamMinStartIntervalMs": 25000,
+      "grpcStreamMinStartIntervalMs": 90000,
       "grpc": {
         "endpoint": "youtube.googleapis.com:443",
         "keepalive": {

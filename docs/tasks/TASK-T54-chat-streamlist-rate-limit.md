@@ -76,24 +76,105 @@ lastErrorAt    : 2026-08-28T20:20:19.560Z
 
 - floor 인상이 §7.5를 깨는 폭을 측정한 뒤, quota 증량 신청 트랙을 별도 티켓으로 연다.
 
-## 운영 조치 (2026-08-29, 티켓 구현 전)
+## Result (2026-08-29)
 
-Pacific quota day가 16:00 KST에 넘어가므로 그때 public 방송을 재개하되, 25초 floor 그대로는
-같은 벽을 다시 친다. 코드·설정 파일을 고치지 않고 **환경변수로만** floor를 올렸다.
+Plan 1(문서 확인)은 못 했고, **Plan 2는 신호를 먼저 고친 뒤에 됐다.** Plan 3은 안 했다.
 
-- User 범위 `VL_YOUTUBE_CHAT_GRPC_STREAM_MIN_START_INTERVAL_MS = 90000` (960회/일).
-  정상이었던 8/26·8/27(794·865회)과 같은 대역이고, 실패한 8/28(1,584회)의 60%다.
-- Windows 작업 `\VerticalLive\vl-resume-20260829`가 2026-08-29 16:00:00에 1회
-  `Start-VerticalLive.ps1 -Broadcast -Public`을 실행한다.
+### 왜 floor만 올려서는 안 됐는가
 
-**`config/default.json`은 여전히 25000이다.** 저장소만 읽으면 실행 중인 값을 알 수 없으므로,
-이 티켓이 머지될 때 config 기본값과 이 환경변수를 정합화하고 환경변수를 제거해야 한다.
-그 전까지 실행 값의 정본은 이 절이다.
+첫 시도로 25,000 → 90,000으로 올렸더니 3분 만에 방송이 다른 방식으로 죽기 시작했다.
 
-값 확인:
-
-```powershell
-[System.Environment]::GetEnvironmentVariable('VL_YOUTUBE_CHAT_GRPC_STREAM_MIN_START_INTERVAL_MS','User')
+```
+signalStaleAfterMs               30,000
+grpcStreamMinStartIntervalMs     90,000
+chat-source maxAttempts               3
 ```
 
-되돌리려면 같은 명령에 `SetEnvironmentVariable(..., $null, 'User')`를 쓰고 서버를 재기동한다.
+chat source는 floor를 **스트림을 닫은 채로** 기다린다. 그래서 90초 중 60초 동안
+`chat_transport`에 새 신호가 없고, supervisor는 그것을 관측 불가로 판정했다. 09:00:06Z
+`recovering:chat_transport`, 09:00:53Z `chat-source` 재시작 1/3 소모. 그때 실측된 상태는
+`lastErrorKind: null`, `consecutiveFailures: 0`, `waitReason: quota_start_pacing`,
+`waitDelayMs: 46,628` — **정상적으로, 설계대로 기다리는 중**이었다. 재시작은 pacing 시계를
+리셋하는 것 말고 아무것도 하지 않았다. T28이 찾은 것과 같은 모양이다: 판정이 자신이 기다리는
+대상보다 먼저 발사된다.
+
+### 수정: 의도된 pacing 대기는 `ok`다
+
+`youtube/chat/health.ts`의 `transport()`가 `quota_start_pacing` 대기를 읽는다. 대기가 자신의
+`delayMs` 안에 있고 실패가 없으면 `status: ok`, `reason: quota_start_pacing`을 낸다.
+floor를 지키느라 스트림을 닫고 있는 소스는 **동작 중인 소스**다.
+
+대기가 `delayMs + PACING_OVERRUN_GRACE_MS`(5,000ms, provisional)를 넘기면 다시 `unknown`으로
+돌아간다. 대기에 갇힌 소스는 진짜 고장이고 보여야 한다. `retryBudgetExhausted`와 의도적 정지는
+그보다 앞의 분기라 대기 뒤에 숨지 않는다.
+
+`ChatReconnectWaitObservation`에 `startedAtMonotonicMs`를 더했다. 경과 시간은 monotonic으로
+잰다(CLAUDE.md 4장).
+
+### 그래서 floor를 올릴 수 있게 됐다
+
+`grpcStreamMinStartIntervalMs`는 **90,000**이다. 하루 gRPC start가 3,456회에서 **960회**로
+줄어 관측된 한도(약 1,000회) 아래로 들어간다. 정상이었던 8/26·8/27이 794·865회였다.
+
+`budget.test.ts`는 이제 floor가 staleness 창보다 **길다**는 것과, 그것이 안전한 유일한 이유가
+신호 수정이라는 것을 **한 테스트 안에서 함께** 단언한다. 신호가 대기를 덮지 않게 되는 날
+이 테스트가 실패한다. 같은 파일에 예산 통과가 충분조건이 아니라는 기록도 남겼다 — 25,000ms는
+모든 예산 단언을 통과하면서 방송을 두 번 죽였다.
+
+### 실호스트 검증 (2026-08-29 19:01 KST)
+
+```
+transport   status=ok  reason=quota_start_pacing  connected=false  channelState=READY
+reconnect   gapMs 90,002  waitReason quota_start_pacing  waitDelayMs 79,384
+supervisor  status=ok  state=live  required family 6개 ok
+```
+
+배포 후 4분(약 3 pacing 주기) 동안 `unconfirmed`/`recovering`/`degraded:chat_transport`
+**0건**, `supervisor restart` **0건**. 수정 전에는 90초 안에 escalate 했다.
+
+### 같은 세션에서 함께 들어간 것
+
+**OBS 스트림 비트레이트 10,000 → 6,000 kbps.** 원인은 렌더가 아니라 송출이었다 —
+`renderSkippedRatio` 0, `outputSkippedFrames` 8,423/32,416(26%), `outputCongestion` 0.76~0.90,
+실제 전송 7.58 Mbit/s 대 요구 10 Mbit/s. 교체 뒤 18분 35초 동안 출력 손실 0/33,459,
+congestion 0, 실제 전송 6.01 Mbit/s. 이후 간헐적으로 0.58%까지 오르지만 required family가
+아니고 재시작을 유발하지 않는다. 근거와 재측정 조건은 `docs/ops/obs-setup.md`와
+`obs/profile.test.ts`에 있다.
+
+**방송 제목·설명.** 제목이 `Autonomous Vertical Live`(레포 이름)였다. 스펙 §5.3의 일본어 우선을
+따라 바꾸고, 비어 있던 `description`에 D-9 동의 전문과 명령 안내를 채웠다.
+
+### 환경변수를 쓰지 않는다
+
+처음에는 User 범위 `VL_YOUTUBE_CHAT_GRPC_STREAM_MIN_START_INTERVAL_MS`로 값을 올렸다. 16:00
+예약 재개는 그 값으로 떴지만(`gapMs` 89,866), 한 시간 뒤 다른 셸에서 수동 재기동하자 그 셸이
+변수를 상속하지 않아 조용히 25,000으로 되돌아갔다(`gapMs` 24,705). 기동 경로마다 값이 달라지는
+설정은 설정이 아니다. 값은 config에 있고 환경변수는 제거했다.
+
+### Gates (executed)
+
+```
+npm run format:check   All matched files use Prettier code style!
+npm run lint           eslint ok · 0 legacy imports · 4 install scripts reviewed
+npm run typecheck      tsc --build (no output)
+npm run test           156 files · 2,300 passed · 1 skipped
+npm run build          ok
+```
+
+### 열린 채로 남은 것
+
+- **Plan 3 미구현.** supervisor는 여전히 플랫폼 거절(`rateLimitExceeded`/`quotaExceeded`)에
+  `chat-source` 재시작을 발사한다. 960회/일이면 발동하지 않아야 하지만, 한도가 추정보다 낮거나
+  다른 이유로 chat이 거절당하면 3회 뒤 `safe_stopped`가 된다. 그 경로는 하드웨어를 계속
+  두드리지 않고 멈추는 안전한 실패이므로 오늘 배포에 포함하지 않았다 — 실패 경로를 실플랫폼에서
+  검증할 수 없는 변경을 라이브 방송에 얹지 않는다.
+- **A-T54-1**: `liveChatMessages.streamList`의 공식 한도 표를 찾지 못했고 Cloud Console 대조도
+  하지 않았다. "하루 약 1,000회"는 네 개 표본에서 읽은 관측이고, 90,000ms는 그 관측 기반
+  provisional 값이다. 깨끗한 24시간 표본으로 확인해야 닫힌다.
+- **`PACING_OVERRUN_GRACE_MS = 5,000`**은 타이머 여유를 위한 provisional 값이지 측정값이 아니다.
+- **제목·설명은 `nativeReview: pending`**이다. 공개 문구인데 일본어 원어민 검수를 받지 않았다.
+- **개인정보처리방침 URL이 빠져 있다.** `docs/ops/identity-consent.md` §2.2 전문의 마지막 줄이
+  URL을 요구하는데 값이 없어 그 줄을 넣지 않았다.
+- 제목·설명은 **새 방송에만** 적용된다. 실측: 재기동 뒤에도 `liveBroadcasts.update` 누적이 1회
+  그대로였다. 현재 공개 방송은 구 제목이며 다음 rollover나 사람이 Studio에서 바꿔야 한다.
+- quota 증량 신청 트랙.

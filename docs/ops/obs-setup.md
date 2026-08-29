@@ -152,7 +152,7 @@ npm run obs:probe
 | 비디오 코덱 | H.264 [S26] | H.264 (x264) | `basic.ini` `[AdvOut] Encoder=obs_x264` |
 | 해상도 | 1080p [S26] | 1080x1920 (세로 9:16, 스펙 §11) | `basic.ini` `[Video] BaseCX/BaseCY/OutputCX/OutputCY` |
 | 프레임레이트 | 30fps [S26] | 30 | `basic.ini` `[Video] FPSType=0`, `FPSCommon=30` |
-| 비디오 비트레이트 | 1080p @30fps H.264 권장 **10 Mbps** [S26] | 10000 kbps | `streamEncoder.json` `bitrate` |
+| 비디오 비트레이트 | [S26]의 1080p @30fps 권장은 **10 Mbps**지만, 이 호스트의 업링크가 그것을 못 낸다 (아래 주) | **6000 kbps** | `streamEncoder.json` `bitrate` |
 | 비트레이트 인코딩 | "Bitrate encoding: CBR" [S26] | CBR | `streamEncoder.json` `rate_control=CBR`, `use_bufsize=false` |
 | keyframe 간격 | "Recommended 2 seconds", "Do not exceed 4 seconds" [S26]; services.json `recommended.keyint = 2` | 2초 | `streamEncoder.json` `keyint_sec=2` |
 | B-frame | "2 B-Frames" [S26] | 2 | `streamEncoder.json` `bf=2` |
@@ -167,7 +167,8 @@ npm run obs:probe
 
 | 항목 | 값 | 근거 |
 |---|---|---|
-| 세로 1080x1920에 [S26]의 `1080p @30fps` 행 적용 | 10 Mbps | [S26]에는 세로 전용 행이 없다. 1080x1920은 1920x1080과 픽셀 수·프레임레이트가 같아 같은 행을 적용한다. 스펙 §11이 "9:16 1080p30 기본 프로파일"을 요구한다 |
+| 세로 1080x1920에 [S26]의 `1080p @30fps` 행 적용 | 해당 행을 적용한다 | [S26]에는 세로 전용 행이 없다. 1080x1920은 1920x1080과 픽셀 수·프레임레이트가 같아 같은 행을 적용한다. 스펙 §11이 "9:16 1080p30 기본 프로파일"을 요구한다 |
+| 비디오 비트레이트를 권장값 10 Mbps가 아닌 **6000 kbps**로 | 6000 kbps | 이 호스트의 업링크가 10 Mbps를 못 낸다. 2026-08-29 18분 표본에서 OBS는 1,080,533ms 동안 1,023,900,636 bytes(= **7.58 Mbit/s**)만 내보냈고, `outputCongestion` 0.76~0.90, 출력 프레임 32,416개 중 **8,423개(26%)를 버렸다**. 같은 구간 `renderSkipped`는 0이라 합성은 정상이었고 손실은 전부 송출 단계였다. 권장값은 그것을 실어나를 수 있는 회선에서만 상한이다. 26%를 버리는 10 Mbps보다 깨끗한 6 Mbps가 시청자에게 낫다. **올리기 전에 업링크를 다시 측정한다** — 이 숫자는 인코더가 아니라 회선의 것이다 |
 | H.264 profile | 미지정(`""`, 인코더 기본값) | [S26]은 H.264 profile을 명시하지 않는다. 근거 없는 값을 넣지 않는다 |
 | x264 preset | `veryfast` (OBS 기본값) | 호스트 CPU 여유는 Gate 2의 host·OBS baseline에서 실측해 확정한다 |
 | 소프트웨어 인코더(`obs_x264`) | 하드웨어 인코더 대신 | 하드웨어 인코더는 호스트 GPU에 의존한다. 이식 가능한 값으로 고정하고, 교체하더라도 CBR·`keyint_sec=2`·비트레이트·B-frame/reference frame은 유지한다. 실제 선택은 Gate 2 |

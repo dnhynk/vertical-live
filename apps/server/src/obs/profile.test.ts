@@ -83,10 +83,21 @@ describe('ops/obs profile — video and audio (spec §11 "화면", [S26])', () =
 describe('ops/obs profile — stream encoder ([S26])', () => {
   const encoder = readJson(join(PROFILE, 'streamEncoder.json'))
 
-  it('encodes H.264 CBR at the recommended 1080p30 bitrate', () => {
-    // [S26] "Recommended Bitrate setting (Mbps) H.264" for 1080p @30fps = 10 Mbps.
+  it('encodes H.264 CBR under what this host can actually send', () => {
+    // [S26] recommends 10 Mbps for 1080p @30fps, and the profile asked for it
+    // until 2026-08-29. The host could not deliver it: over an 18-minute sample
+    // OBS reported 1,023,900,636 bytes in 1,080,533 ms — 7.58 Mbit/s against a
+    // 10 Mbit/s ask — with outputCongestion 0.76..0.90 and 8,423 of 32,416
+    // output frames dropped (26%). renderSkipped was 0 the whole time, so the
+    // scene composited fine and the loss was entirely in getting frames out.
+    //
+    // A recommendation is a ceiling for a link that can carry it. 6 Mbps sits
+    // under the measured throughput with headroom, and a clean 6 Mbps reaches a
+    // viewer better than a 10 Mbps stream that drops a quarter of its frames.
+    // Re-measure before raising this: the number belongs to the uplink, not to
+    // the encoder.
     expect(encoder['rate_control']).toBe('CBR')
-    expect(encoder['bitrate']).toBe(10_000)
+    expect(encoder['bitrate']).toBe(6_000)
     // use_bufsize false makes obs-x264 set vbv buffer = bitrate (plugins/obs-x264/obs-x264.c).
     expect(encoder['use_bufsize']).toBe(false)
   })
