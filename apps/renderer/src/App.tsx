@@ -1,3 +1,4 @@
+import { useAmbientAudio } from './audio/useAmbientAudio'
 import Scene from './components/Scene'
 import Screen from './components/Screen'
 import Stage from './components/Stage'
@@ -16,6 +17,10 @@ export interface AppProps {
 }
 
 export default function App({ runtime }: AppProps) {
+  // Atmosphere only: spec §5.2 is a five-second test with the sound off, so
+  // nothing here is the only place anything is said (`audio/score.ts`).
+  useAmbientAudio(runtime)
+
   return (
     <Stage>
       <Scene runtime={runtime} />
