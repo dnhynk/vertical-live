@@ -4,6 +4,7 @@ import type { Clock } from '../../clock.js'
 import { silentLogger, type Logger } from '../../secrets/redaction.js'
 import { AuthRevokedError } from '../auth/token-manager.js'
 import { decideRetry, type BackoffPolicy } from '../quota/backoff.js'
+import { currentMidnightMs, nextMidnightMs } from '../quota/tracker.js'
 import { classifyYouTubeApiError } from '../quota/classify.js'
 import type { QuotaTracker } from '../quota/tracker.js'
 import type { ChatConfig } from './config.js'
@@ -323,8 +324,55 @@ export class GrpcChatSource {
     const lastStartedAt = this.#startPacingState.lastStartedAtMonotonicMs
     if (lastStartedAt === null) return
     const elapsedMs = this.#options.clock.monotonicMs() - lastStartedAt
-    const remainingMs = Math.max(0, this.#options.config.grpcStreamMinStartIntervalMs - elapsedMs)
+    const remainingMs = Math.max(0, this.#startIntervalMs() - elapsedMs)
     await this.#wait('quota_start_pacing', remainingMs)
+  }
+
+  /**
+   * How long to hold the stream closed before the next start.
+   *
+   * Two things decide it. **What the moment wants:** someone typed recently, so a
+   * viewer is sitting in front of a screen waiting for it to change, and the
+   * interval should be short; nobody has, and spec §2.1's zero-viewer world does
+   * not need fast polling — the creature lives on either way. **What the day can
+   * afford:** the platform refuses this method somewhere near a thousand calls a
+   * day (T54, A-T54-1), so the average rate has to stay under `dailyStartBudget`
+   * whatever the chat does.
+   *
+   * The average is enforced by comparing starts already spent against starts
+   * earned by this point in the quota day. While spending is no more than
+   * `burstStarts` ahead of that line, the wanted interval is used as it is —
+   * that is what lets a burst of chat be answered quickly. Past it the interval
+   * widens to whatever spreads the remaining allowance over the rest of the day,
+   * so the budget is approached and never blown. Nothing here can exceed
+   * `dailyStartBudget + burstStarts` in a day, which is the number to compare
+   * against the observations in `youtube/quota/budget.test.ts`.
+   *
+   * Without a quota tracker there is nothing to spend against, so the wanted
+   * interval stands: the guard exists to protect a real allowance, not to invent
+   * one.
+   */
+  #startIntervalMs(): number {
+    const { config, state, quota, clock } = this.#options
+    const lastUserEventMs = state.lastUserEventMonotonicMs
+    const active =
+      lastUserEventMs !== null && clock.monotonicMs() - lastUserEventMs <= config.activeWindowMs
+    const wanted = active
+      ? config.activeStreamMinStartIntervalMs
+      : config.grpcStreamMinStartIntervalMs
+    if (quota === undefined) return wanted
+
+    const spent = quota.snapshot().byMethod['liveChatMessages.streamList'] ?? 0
+    const nowMs = Date.parse(clock.nowUtcIso())
+    const dayStartMs = currentMidnightMs(nowMs)
+    const dayEndMs = nextMidnightMs(nowMs)
+    const dayMs = Math.max(1, dayEndMs - dayStartMs)
+    const earned = (config.dailyStartBudget * (nowMs - dayStartMs)) / dayMs
+    if (spent - earned <= config.burstStarts) return wanted
+
+    const remainingStarts = Math.max(1, config.dailyStartBudget - spent)
+    const sustainableMs = Math.max(0, dayEndMs - nowMs) / remainingStarts
+    return Math.max(wanted, sustainableMs)
   }
 
   async #wait(reason: ChatReconnectWaitReason, delayMs: number): Promise<void> {

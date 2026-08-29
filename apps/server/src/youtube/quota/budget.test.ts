@@ -97,10 +97,11 @@ describe('the repository defaults fit one day of quota', () => {
     streamPollsPerDay * quotaCostOf('liveStreams.list') +
     reconcilesPerDay * quotaCostOf('liveBroadcasts.list')
 
-  // T47 replaces the old 1.5/min host observation: the floor now covers every
-  // actual start, including response-then-error, empty, and token-retry paths.
-  // `ceil` includes a stream opened at any phase of the modeled day.
-  const grpcStartsPerDay = Math.ceil(MS_PER_DAY / chat.grpcStreamMinStartIntervalMs)
+  // Not derived from an interval any more (T54): the interval moves with whether
+  // anyone is typing, and what bounds the day is the budget guard in
+  // `grpc-source.ts`. The worst case it permits is the whole allowance plus the
+  // burst it may run ahead by, and that is the number the platform sees.
+  const grpcStartsPerDay = chat.dailyStartBudget + chat.burstStarts
   const chatUnits = grpcStartsPerDay * quotaCostOf('liveChatMessages.streamList')
 
   // Two 11-hour segments a day (D-21). Each: insert + bind + two transitions,
@@ -119,40 +120,49 @@ describe('the repository defaults fit one day of quota', () => {
   const budget = quota.dailyUnits - quota.reserveUnits
 
   it('projects the capped worst-case day inside the allowance, with the reserve untouched', () => {
-    expect(grpcStartsPerDay).toBe(960)
+    expect(grpcStartsPerDay).toBe(860)
     expect(healthUnits).toBe(4608)
     expect(rolloverUnits).toBe(636)
-    expect(projected).toBe(6204)
+    expect(projected).toBe(6104)
     expect(projected).toBeLessThanOrEqual(budget)
   })
 
   it('keeps more than one modeled rollover buffer as usable-budget headroom', () => {
     const usableBudgetHeadroom = budget - projected
-    expect(usableBudgetHeadroom).toBe(3296)
+    expect(usableBudgetHeadroom).toBe(3396)
     expect(usableBudgetHeadroom).toBeGreaterThan(rolloverUnits)
   })
 
   /**
-   * The two limits this floor sits between, and why it may exceed one of them.
+   * The two limits the pacing sits between, and how it satisfies both.
    *
    * The platform refuses `liveChatMessages.streamList` somewhere near a thousand
-   * calls a day - 794 and 865 were served, 1,584 and ~1,695 were refused - which
-   * is a start every 86 seconds or slower. The supervisor drops a signal nobody
-   * refreshed inside `signalStaleAfterMs`, and `chat_transport` is required, so
-   * for one day this floor could not be raised without turning every pacing wait
-   * into an apparent outage.
+   * calls a day - 794 and 865 were served, 1,584 and ~1,695 were refused. A
+   * viewer who has just typed, meanwhile, is waiting on the screen changing, and
+   * a ninety-second wait for that is not a product.
    *
-   * `youtube/chat/health.ts` closed that: a `quota_start_pacing` wait inside its
-   * own delay reports the transport `ok`, because a source honouring its floor
-   * is a source that is working. **That is the only reason a floor above the
-   * staleness window is safe**, so the two are asserted together - if the signal
-   * ever stops covering the wait, this pairing is where it shows up.
+   * Neither is met by picking one interval. The source runs a short interval
+   * while a user event is recent and a long one otherwise, and a budget guard
+   * bounds the day: it may run at most `burstStarts` ahead of the starts earned
+   * by this point in the quota day, and past that the interval widens to spread
+   * what is left over the rest of the day. So the worst case is
+   * `dailyStartBudget + burstStarts` - asserted here against the highest daily
+   * count the platform actually served.
+   *
+   * The floor may exceed `signalStaleAfterMs` because `youtube/chat/health.ts`
+   * reports a pacing wait inside its delay as `ok`. **That is the only reason a
+   * long interval is safe**, so the two are asserted together.
    */
-  it('paces under the platform limit, and only because a paced wait reports ok', () => {
-    const OBSERVED_DAILY_CEILING = 1000
-    expect(grpcStartsPerDay).toBeLessThan(OBSERVED_DAILY_CEILING)
+  it('bounds the day under what the platform served, and stays observable while it waits', () => {
+    const HIGHEST_DAY_SERVED = 865
+    const LOWEST_DAY_REFUSED = 1584
+    expect(grpcStartsPerDay).toBeLessThan(HIGHEST_DAY_SERVED)
+    expect(grpcStartsPerDay).toBeLessThan(LOWEST_DAY_REFUSED)
 
-    // Longer than the staleness window, on purpose.
+    // A viewer who just typed is answered well inside the idle floor.
+    expect(chat.activeStreamMinStartIntervalMs).toBeLessThan(chat.grpcStreamMinStartIntervalMs)
+
+    // The idle floor is longer than the staleness window, on purpose.
     expect(chat.grpcStreamMinStartIntervalMs).toBeGreaterThan(supervisor.signalStaleAfterMs)
 
     // And the transport signal covers exactly that gap.

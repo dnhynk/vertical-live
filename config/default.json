@@ -384,6 +384,10 @@
       "maxResults": 500,
       "readyPollIntervalMs": 250,
       "grpcStreamMinStartIntervalMs": 90000,
+      "activeStreamMinStartIntervalMs": 15000,
+      "activeWindowMs": 180000,
+      "dailyStartBudget": 800,
+      "burstStarts": 60,
       "grpc": {
         "endpoint": "youtube.googleapis.com:443",
         "keepalive": {
@@ -414,6 +418,10 @@
         "rest.minPollIntervalMs",
         "rest.requestTimeoutMs",
         "grpcStreamMinStartIntervalMs",
+        "activeStreamMinStartIntervalMs",
+        "activeWindowMs",
+        "dailyStartBudget",
+        "burstStarts",
         "reconnect",
         "fallback"
       ]

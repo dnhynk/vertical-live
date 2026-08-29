@@ -109,7 +109,16 @@ export interface ChatConfig {
   readonly parts: readonly string[]
   readonly maxResults: number
   /** Minimum interval between every actual gRPC stream start (T47). */
+  /** Floor between `streamList` starts while nobody has typed recently. */
   readonly grpcStreamMinStartIntervalMs: number
+  /** Floor while a user event is inside `activeWindowMs`. */
+  readonly activeStreamMinStartIntervalMs: number
+  /** How long after a user event the source keeps the short floor. */
+  readonly activeWindowMs: number
+  /** Starts the whole quota day may spend on average (T54, A-T54-1). */
+  readonly dailyStartBudget: number
+  /** Starts the source may run ahead of that average, so a burst answers fast. */
+  readonly burstStarts: number
   readonly grpc: ChatGrpcConfig
   readonly rest: ChatRestConfig
   readonly reconnect: ChatReconnectConfig
@@ -184,6 +193,14 @@ export function loadChatConfig(options: LoadChatConfigOptions = {}): ChatConfig 
         section['grpcStreamMinStartIntervalMs'],
       'youtube.chat.grpcStreamMinStartIntervalMs',
     ),
+    activeStreamMinStartIntervalMs: readTimerDelayOverride(
+      env['VL_YOUTUBE_CHAT_ACTIVE_STREAM_MIN_START_INTERVAL_MS'] ??
+        section['activeStreamMinStartIntervalMs'],
+      'youtube.chat.activeStreamMinStartIntervalMs',
+    ),
+    activeWindowMs: readPositiveInt(section['activeWindowMs'], 'youtube.chat.activeWindowMs'),
+    dailyStartBudget: readPositiveInt(section['dailyStartBudget'], 'youtube.chat.dailyStartBudget'),
+    burstStarts: readPositiveInt(section['burstStarts'], 'youtube.chat.burstStarts'),
     grpc: Object.freeze({
       endpoint: readString(grpc['endpoint'], 'youtube.chat.grpc.endpoint'),
       keepalive: Object.freeze({
