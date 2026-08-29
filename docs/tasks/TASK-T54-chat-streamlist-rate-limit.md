@@ -75,3 +75,25 @@ lastErrorAt    : 2026-08-28T20:20:19.560Z
 ## Follow-ups
 
 - floor 인상이 §7.5를 깨는 폭을 측정한 뒤, quota 증량 신청 트랙을 별도 티켓으로 연다.
+
+## 운영 조치 (2026-08-29, 티켓 구현 전)
+
+Pacific quota day가 16:00 KST에 넘어가므로 그때 public 방송을 재개하되, 25초 floor 그대로는
+같은 벽을 다시 친다. 코드·설정 파일을 고치지 않고 **환경변수로만** floor를 올렸다.
+
+- User 범위 `VL_YOUTUBE_CHAT_GRPC_STREAM_MIN_START_INTERVAL_MS = 90000` (960회/일).
+  정상이었던 8/26·8/27(794·865회)과 같은 대역이고, 실패한 8/28(1,584회)의 60%다.
+- Windows 작업 `\VerticalLive\vl-resume-20260829`가 2026-08-29 16:00:00에 1회
+  `Start-VerticalLive.ps1 -Broadcast -Public`을 실행한다.
+
+**`config/default.json`은 여전히 25000이다.** 저장소만 읽으면 실행 중인 값을 알 수 없으므로,
+이 티켓이 머지될 때 config 기본값과 이 환경변수를 정합화하고 환경변수를 제거해야 한다.
+그 전까지 실행 값의 정본은 이 절이다.
+
+값 확인:
+
+```powershell
+[System.Environment]::GetEnvironmentVariable('VL_YOUTUBE_CHAT_GRPC_STREAM_MIN_START_INTERVAL_MS','User')
+```
+
+되돌리려면 같은 명령에 `SetEnvironmentVariable(..., $null, 'User')`를 쓰고 서버를 재기동한다.
