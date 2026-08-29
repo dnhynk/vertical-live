@@ -203,6 +203,16 @@ export function quotaDayOf(instantMs: number, timeZone = QUOTA_RESET_TIME_ZONE):
   return `${pad(year, 4)}-${pad(month, 2)}-${pad(day, 2)}`
 }
 
+/** Instant (ms) of the most recent midnight in `timeZone` at or before `instantMs`. */
+export function currentMidnightMs(instantMs: number, timeZone = QUOTA_RESET_TIME_ZONE): number {
+  const { year, month, day } = zonedParts(instantMs, timeZone)
+  const wallDayUtc = Date.UTC(year, month - 1, day)
+  // Same two-step DST correction as `nextMidnightMs`.
+  let candidate = wallDayUtc + offsetMsAt(instantMs, timeZone)
+  candidate = wallDayUtc + offsetMsAt(candidate, timeZone)
+  return candidate
+}
+
 /** Instant (ms) of the next midnight in `timeZone` strictly after `instantMs`. */
 export function nextMidnightMs(instantMs: number, timeZone = QUOTA_RESET_TIME_ZONE): number {
   const { year, month, day } = zonedParts(instantMs, timeZone)

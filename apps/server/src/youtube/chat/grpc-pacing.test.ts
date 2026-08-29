@@ -132,6 +132,7 @@ describe('GrpcChatSource quota start pacing', () => {
     temp = createTempStore({ clock })
     const config = testChatConfig({
       grpcStreamMinStartIntervalMs: intervalMs,
+      activeStreamMinStartIntervalMs: intervalMs,
       reconnect: {
         initialDelayMs: 1_000,
         maxDelayMs: 1_000,
@@ -246,6 +247,7 @@ describe('GrpcChatSource quota start pacing', () => {
     ])
     const config = testChatConfig({
       grpcStreamMinStartIntervalMs: 25_000,
+      activeStreamMinStartIntervalMs: 25_000,
       readyPollIntervalMs: 1_000,
     })
     let target = {
@@ -302,6 +304,7 @@ describe('GrpcChatSource quota start pacing', () => {
     ])
     const config = testChatConfig({
       grpcStreamMinStartIntervalMs: 25_000,
+      activeStreamMinStartIntervalMs: 25_000,
       readyPollIntervalMs: 1_000,
     })
     const quota = new QuotaTracker({ clock })
@@ -411,6 +414,7 @@ describe('GrpcChatSource quota start pacing', () => {
     ])
     const base = testChatConfig({
       grpcStreamMinStartIntervalMs: 5000,
+      activeStreamMinStartIntervalMs: 5000,
       readyPollIntervalMs: 100,
       reconnect: {
         initialDelayMs: 100,
@@ -637,5 +641,163 @@ describe('GrpcChatSource quota start pacing', () => {
 
     h.source.stop()
     await running
+  })
+})
+
+/**
+ * T54 adaptive pacing. The floor is not one number: a viewer who just typed is
+ * waiting on the screen changing, and spec §2.1's zero-viewer world is not. What
+ * keeps that from spending the day's allowance in an hour is the budget guard,
+ * which is asserted here rather than trusted.
+ */
+describe('GrpcChatSource adaptive start pacing', () => {
+  let temp: TempStore | undefined
+
+  afterEach(() => {
+    temp?.dispose()
+    temp = undefined
+  })
+
+  const IDLE_MS = 90_000
+  const ACTIVE_MS = 15_000
+  const WINDOW_MS = 180_000
+  const BUDGET = 800
+  const BURST = 60
+
+  function createAdaptiveSource(
+    scripts: readonly Script[],
+    prespendStarts = 0,
+  ): {
+    source: GrpcChatSource
+    transport: VirtualTransport
+    state: ChatSourceState
+    quota: QuotaTracker
+    clock: FakeClock
+  } {
+    const clock = new FakeClock()
+    temp = createTempStore({ clock })
+    const config = testChatConfig({
+      grpcStreamMinStartIntervalMs: IDLE_MS,
+      activeStreamMinStartIntervalMs: ACTIVE_MS,
+      activeWindowMs: WINDOW_MS,
+      dailyStartBudget: BUDGET,
+      burstStarts: BURST,
+      reconnect: {
+        initialDelayMs: 1_000,
+        maxDelayMs: 1_000,
+        factor: 1,
+        jitterRatio: 0,
+        maxAttempts: 8,
+      },
+    })
+    const transport = new VirtualTransport(clock, scripts)
+    const sink = new ChatIngestSink({
+      inbox: storeInbox(temp.store),
+      clock,
+      parseCommand: testParseCommand,
+      sourceKey: TEST_SOURCE_KEY,
+      liveChatId: TEST_LIVE_CHAT_ID,
+      broadcastId: TEST_BROADCAST_ID,
+    })
+    const state = new ChatSourceState(clock, config.grpc.keepalive)
+    const quota = new QuotaTracker({ clock })
+    if (prespendStarts > 0) quota.record('liveChatMessages.streamList', prespendStarts)
+    const source = new GrpcChatSource({
+      transport,
+      sink,
+      state,
+      clock,
+      config,
+      auth: fixedTokens(),
+      liveChatId: TEST_LIVE_CHAT_ID,
+      quota,
+      random: () => 0,
+    })
+    return { source, transport, state, quota, clock }
+  }
+
+  function waitAfterFirstClose(h: { state: ChatSourceState }): { reason: string; delayMs: number } {
+    const wait = h.state.observe('token_x', 'READY').reconnect.wait
+    if (wait === null || wait === undefined) throw new Error('no pacing wait recorded')
+    return { reason: wait.reason, delayMs: wait.delayMs }
+  }
+
+  it('waits the idle floor when nobody has typed', async () => {
+    const h = createAdaptiveSource([
+      { response: { items: [], next_page_token: 'token_idle' } },
+      { response: { items: [], next_page_token: 'token_idle_2' } },
+    ])
+    const running = h.source.run()
+    await flushMicrotasks()
+
+    expect(waitAfterFirstClose(h)).toEqual({ reason: 'quota_start_pacing', delayMs: IDLE_MS })
+
+    h.source.stop()
+    await running
+  })
+
+  it('drops to the active floor once a user event has arrived', async () => {
+    const h = createAdaptiveSource([
+      { response: { items: [GRPC_MESSAGE], next_page_token: 'token_active' } },
+      { response: { items: [], next_page_token: 'token_active_2' } },
+    ])
+    const running = h.source.run()
+    await flushMicrotasks()
+
+    expect(waitAfterFirstClose(h)).toEqual({ reason: 'quota_start_pacing', delayMs: ACTIVE_MS })
+
+    h.source.stop()
+    await running
+  })
+
+  it('goes back to the idle floor once the user event falls outside the window', async () => {
+    // The stream stays open past `activeWindowMs`, so by the time the next start
+    // is paced the last user event is old news.
+    const h = createAdaptiveSource([
+      {
+        response: { items: [GRPC_MESSAGE], next_page_token: 'token_stale' },
+        endAfterMs: WINDOW_MS + 1,
+      },
+      { response: { items: [], next_page_token: 'token_stale_2' } },
+    ])
+    const running = h.source.run()
+    await flushMicrotasks()
+    await h.clock.advance(WINDOW_MS + 1)
+
+    expect(waitAfterFirstClose(h).delayMs).toBe(IDLE_MS)
+
+    h.source.stop()
+    await running
+  })
+
+  it('widens past the wanted floor when the day is already spent ahead of its line', async () => {
+    // FakeClock's epoch is 2026-01-01T00:00:00Z, which is 16 hours into the
+    // Pacific quota day that began at 2025-12-31T08:00:00Z. Two thirds of the
+    // day earns two thirds of the budget: 533 starts. Pre-spending 700 puts the
+    // source 167 ahead, past the 60 it is allowed to run ahead by, so the guard
+    // takes over: 8 hours left over the 99 starts still unspent is 290,909ms.
+    const h = createAdaptiveSource(
+      [
+        { response: { items: [GRPC_MESSAGE], next_page_token: 'token_over' } },
+        { response: { items: [], next_page_token: 'token_over_2' } },
+      ],
+      700,
+    )
+    const running = h.source.run()
+    await flushMicrotasks()
+
+    const wait = waitAfterFirstClose(h)
+    expect(wait.delayMs).toBeGreaterThan(ACTIVE_MS)
+    // The first start of the run spends one more, leaving 99.
+    expect(wait.delayMs).toBeCloseTo((8 * 60 * 60 * 1000) / (BUDGET - 701), 0)
+
+    h.source.stop()
+    await running
+  })
+
+  it('cannot exceed the budget plus the burst in a day, whatever the chat does', () => {
+    // The guard is what makes the shipped numbers comparable with the daily call
+    // counts the platform served and refused (`youtube/quota/budget.test.ts`).
+    expect(BUDGET + BURST).toBeLessThan(865)
   })
 })

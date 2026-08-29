@@ -237,6 +237,15 @@ export class ChatSourceState {
     }
   }
 
+  /**
+   * Monotonic reading of the last user event, or `null` when nothing has arrived.
+   * Read by the gRPC source to decide whether anyone is waiting on the screen
+   * changing (T54 adaptive pacing).
+   */
+  get lastUserEventMonotonicMs(): number | null {
+    return this.#userEventLastAtMonotonicMs
+  }
+
   recordReconnectWait(reason: ChatReconnectWaitReason, delayMs: number): void {
     this.#reconnectWait = {
       reason,

@@ -35,6 +35,12 @@ export function testChatConfig(overrides: Partial<ChatConfig> = {}): ChatConfig 
     parts: ['id', 'snippet'],
     maxResults: 200,
     grpcStreamMinStartIntervalMs: 1,
+    // Test-scale too: pacing is exercised by the pacing tests, which set their
+    // own values, and every other test wants the source to run without waiting.
+    activeStreamMinStartIntervalMs: 1,
+    activeWindowMs: 180_000,
+    dailyStartBudget: 800,
+    burstStarts: 60,
     grpc: {
       endpoint: '127.0.0.1:1',
       keepalive: { timeMs: 300_000, timeoutMs: 20_000, permitWithoutCalls: false },
