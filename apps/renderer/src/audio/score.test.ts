@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { SceneConditions } from '../visual/palette'
-import { MASTER_GAIN, SCALES, bellHz, scoreFor } from './score'
+import { CHIME_GAIN, MASTER_GAIN, SCALES, bellHz, chimeHzFor, scoreFor } from './score'
 
 function conditions(overrides: Partial<SceneConditions> = {}): SceneConditions {
   return {
@@ -75,14 +75,37 @@ describe('scoreFor', () => {
     expect(MASTER_GAIN).toBeLessThan(0.2)
   })
 
-  it('never picks a scale with a leading tone into the root', () => {
-    // A semitone below the octave is what makes a phrase resolve like a jingle,
-    // which spec §5.3 rules out along with 동요.
+  /**
+   * The first version shipped `hirajoshi` and `insen`, and the broadcast sounded
+   * haunted. Their minor seconds are why: a semitone held against a drone is the
+   * most unsettled interval there is. A scale with none cannot produce it, so
+   * this is checked rather than left to taste.
+   */
+  it('uses no scale containing a semitone, in any inversion or against the octave', () => {
     for (const scale of Object.values(SCALES)) {
-      expect(scale.degrees).not.toContain(11 - 12)
       expect(scale.degrees[0]).toBe(0)
+      const wrapped = [...scale.degrees, 12]
+      for (let i = 1; i < wrapped.length; i += 1) {
+        const step = (wrapped[i] as number) - (wrapped[i - 1] as number)
+        expect(step).toBeGreaterThan(1)
+      }
     }
-    expect(SCALES['lydian']?.degrees).toContain(11)
+  })
+
+  it('gives the drone a colour tone, so the chord is not a bare open fifth', () => {
+    // Root and fifth alone are neither major nor minor, which is what read as
+    // hollow on air. The score names a third interval for the drone to hold.
+    const score = scoreFor(conditions())
+    expect(score.droneColourSemitones).toBeGreaterThan(0)
+    expect(score.droneColourSemitones).not.toBe(7)
+    expect(score.droneColourSemitones).not.toBe(12)
+  })
+
+  it('keeps the drone detune small enough not to beat', () => {
+    // A wide detune on a held chord is a slow wobble, which is a horror cue.
+    for (const resting of [false, true]) {
+      expect(scoreFor(conditions({ resting })).droneDetuneCents).toBeLessThanOrEqual(5)
+    }
   })
 })
 
@@ -106,5 +129,43 @@ describe('bellHz', () => {
       expect(hz).toBeGreaterThan(score.rootHz)
       expect(hz).toBeLessThan(20_000)
     }
+  })
+})
+
+describe('chimeHzFor', () => {
+  it('rings a different note for each free command, and always the same one', () => {
+    const score = scoreFor(conditions())
+    const feed = chimeHzFor(score, 'FEED')
+    const play = chimeHzFor(score, 'PLAY')
+    const pet = chimeHzFor(score, 'PET')
+    expect(new Set([feed, play, pet]).size).toBe(3)
+    expect(chimeHzFor(score, 'FEED')).toBe(feed)
+  })
+
+  it('pitches inside the scale, so an acknowledgement cannot clash with the chord', () => {
+    const score = scoreFor(conditions())
+    for (const command of ['FEED', 'PLAY', 'PET']) {
+      const hz = chimeHzFor(score, command)
+      expect(hz).not.toBeNull()
+      const semitones = Math.round(12 * Math.log2((hz as number) / score.rootHz))
+      expect(score.scale.degrees).toContain(((semitones % 12) + 12) % 12)
+    }
+  })
+
+  /**
+   * Spec §8.5: a paid event does not buy screen dominance, and it does not buy a
+   * sound either. Nothing in this module reads a paid effect, and anything that
+   * is not a free care command gets no note at all.
+   */
+  it('refuses to ring for anything that is not a free care command', () => {
+    const score = scoreFor(conditions())
+    for (const name of ['SUPER_CHAT', 'GIFT', 'MEMBERSHIP', 'VOTE_A', 'JOIN', '']) {
+      expect(chimeHzFor(score, name)).toBeNull()
+    }
+  })
+
+  it('stays quiet: a chime plus the bed is still under the master level', () => {
+    const score = scoreFor(conditions())
+    expect((score.droneGain + score.bellGain + CHIME_GAIN) * MASTER_GAIN).toBeLessThan(0.1)
   })
 })

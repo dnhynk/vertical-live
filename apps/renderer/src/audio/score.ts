@@ -33,23 +33,26 @@ export interface ScaleShape {
 }
 
 /**
- * Six scales, none of them a major triad.
+ * Four scales, **none of which contains a semitone**.
  *
- * `hirajoshi` and `insen` are Japanese pentatonic scales, which is the right
- * default for a broadcast whose primary language and time base are Japanese
- * (spec §5.3). The others are modal and equally free of the leading tone that
- * makes a phrase sound like a jingle resolving.
+ * The first version used `hirajoshi` and `insen`, whose minor seconds are
+ * exactly what makes them sound haunted, and read as eerie on air. A scale with
+ * no semitone at all cannot: every pair of notes it can produce is consonant, so
+ * a slow line over a held chord comes out calm instead of uneasy.
+ *
+ * `yo` and `ritsu` are Japanese pentatonics, which is the right default for a
+ * broadcast whose primary language and time base are Japanese (spec §5.3).
+ * `major_pentatonic` and `sus_pentatonic` are the same shape rotated. None has
+ * the leading tone that would make a phrase resolve like a jingle (§5.3).
  */
 export const SCALES: Readonly<Record<string, ScaleShape>> = Object.freeze({
-  hirajoshi: { id: 'hirajoshi', degrees: [0, 2, 3, 7, 8] },
-  insen: { id: 'insen', degrees: [0, 1, 5, 7, 10] },
   yo: { id: 'yo', degrees: [0, 2, 5, 7, 9] },
-  dorian: { id: 'dorian', degrees: [0, 2, 3, 5, 7, 9, 10] },
-  lydian: { id: 'lydian', degrees: [0, 2, 4, 6, 7, 9, 11] },
-  aeolian: { id: 'aeolian', degrees: [0, 2, 3, 5, 7, 8, 10] },
+  ritsu: { id: 'ritsu', degrees: [0, 2, 5, 7, 10] },
+  major_pentatonic: { id: 'major_pentatonic', degrees: [0, 2, 4, 7, 9] },
+  sus_pentatonic: { id: 'sus_pentatonic', degrees: [0, 3, 5, 7, 10] },
 })
 
-const SCALE_FALLBACK = SCALES['hirajoshi'] as ScaleShape
+const SCALE_FALLBACK = SCALES['yo'] as ScaleShape
 
 /** The sound of one moment, in units `engine.ts` can apply directly. */
 export interface AudioScore {
@@ -66,8 +69,23 @@ export interface AudioScore {
   readonly bellGain: number
   /** Steady gain of the drone, before the master level. */
   readonly droneGain: number
-  /** Detune between the drone's two voices, cents. Wider beats slower. */
+  /**
+   * Detune between the drone's paired voices, cents.
+   *
+   * Small. The first version used 9, and a drone beating that hard is the other
+   * half of why it read as eerie: a slow wobble on a held chord is a horror
+   * cue. A few cents is warmth; ten is unease.
+   */
   readonly droneDetuneCents: number
+  /**
+   * Semitones above the root for the drone's colour tone.
+   *
+   * The first version stacked only root, fifth and octave. That chord has no
+   * third, so it is neither major nor minor — an open fifth is the most
+   * ambiguous sound in Western tuning and reads as hollow. A major sixth (9)
+   * gives it a definite, warm colour without the triad's jingle.
+   */
+  readonly droneColourSemitones: number
 }
 
 /**
@@ -162,11 +180,55 @@ export function scoreFor(conditions: SceneConditions): AudioScore {
     scale,
     cutoffHz,
     bellIntervalSec,
-    bellGain: 0.16 * restingGain,
-    droneGain: 0.32 * restingGain,
-    droneDetuneCents: conditions.resting ? 5 : 9,
+    bellGain: 0.13 * restingGain,
+    droneGain: 0.3 * restingGain,
+    droneDetuneCents: conditions.resting ? 2 : 4,
+    // A sixth over the root: warm and settled, and not the triad that would make
+    // it a jingle (spec §5.3).
+    droneColourSemitones: 9,
   }
 }
+
+/**
+ * The pitch a command's acknowledgement rings at, in Hz.
+ *
+ * Three reasons this exists and what bounds it:
+ *
+ * - A viewer who typed something should hear the room notice. The screen already
+ *   shows it, so this adds nothing §5.2 needs — it is the difference between a
+ *   room and a recording.
+ * - It is pitched **inside the current scale**, so an acknowledgement can never
+ *   clash with the chord underneath it however many arrive at once.
+ * - `null` for anything that is not one of the free care commands. Paid events do
+ *   not ring: spec §8.5 does not let money buy screen dominance and it does not
+ *   get to buy a sound either, which is why nothing in this module reads a paid
+ *   effect at all.
+ */
+export function chimeHzFor(score: AudioScore, commandName: string): number | null {
+  const degreeIndex = FREE_COMMAND_DEGREE[commandName]
+  if (degreeIndex === undefined) return null
+  const degrees = score.scale.degrees
+  const degree = degrees[degreeIndex % degrees.length] ?? 0
+  // One octave above the bells, so an acknowledgement reads as a separate voice
+  // rather than as the ambient line happening to play.
+  return score.rootHz * Math.pow(2, 3 + degree / 12)
+}
+
+/**
+ * Which step of the scale each free command speaks on (spec §7.1).
+ *
+ * Fixed rather than derived so the same command is always the same note: a
+ * regular viewer can learn that `ごはん` sounds like that, which is the point of
+ * giving them different pitches at all.
+ */
+const FREE_COMMAND_DEGREE: Readonly<Record<string, number>> = Object.freeze({
+  FEED: 0,
+  PLAY: 2,
+  PET: 4,
+})
+
+/** Peak gain of a command acknowledgement, before the master level. */
+export const CHIME_GAIN = 0.1
 
 /**
  * The next bell's pitch, in Hz.

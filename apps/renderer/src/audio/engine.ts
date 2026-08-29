@@ -1,4 +1,4 @@
-import { MASTER_GAIN, bellHz, type AudioScore } from './score'
+import { CHIME_GAIN, MASTER_GAIN, bellHz, chimeHzFor, type AudioScore } from './score'
 
 /**
  * The Web Audio wiring for `score.ts`. Every decision about what to play lives
@@ -184,14 +184,11 @@ export class AmbientAudio {
     droneGain.gain.setValueAtTime(score.droneGain, context.currentTime)
     droneGain.connect(filter)
 
-    // Root and fifth, each doubled and detuned: the beating between the pairs is
-    // what keeps a held chord from sounding like a test tone.
-    for (const [ratio, detune] of [
-      [1, -score.droneDetuneCents],
-      [1, score.droneDetuneCents],
-      [1.5, -score.droneDetuneCents],
-      [2, score.droneDetuneCents],
-    ] as const) {
+    // Root, fifth, and the colour tone the score picks — a chord with a definite
+    // warmth rather than the bare open fifth the first version held, which is
+    // neither major nor minor and reads as hollow. Each voice is doubled a few
+    // cents apart so it breathes without beating.
+    for (const [ratio, detune] of this.#droneVoicing(score)) {
       const osc = context.createOscillator()
       osc.type = 'sine'
       osc.frequency.setValueAtTime(score.rootHz * ratio, context.currentTime)
@@ -206,13 +203,60 @@ export class AmbientAudio {
     this.#droneGain = droneGain
   }
 
+  /** Frequency ratio and detune for each drone voice, in a fixed order. */
+  #droneVoicing(score: AudioScore): readonly (readonly [number, number])[] {
+    const colour = Math.pow(2, score.droneColourSemitones / 12)
+    return [
+      [1, -score.droneDetuneCents],
+      [1, score.droneDetuneCents],
+      [1.5, -score.droneDetuneCents],
+      [colour, score.droneDetuneCents],
+    ] as const
+  }
+
   #retune(context: AudioContext, score: AudioScore): void {
     const at = context.currentTime
     this.#filter?.frequency.linearRampToValueAtTime(score.cutoffHz, at + RAMP_SEC)
     this.#droneGain?.gain.linearRampToValueAtTime(score.droneGain, at + RAMP_SEC)
+    const voicing = this.#droneVoicing(score)
     for (const [index, voice] of this.#voices.entries()) {
-      const ratio = [1, 1, 1.5, 2][index] ?? 1
+      const ratio = voicing[index]?.[0] ?? 1
       voice.frequency.linearRampToValueAtTime(score.rootHz * ratio, at + RAMP_SEC)
+    }
+  }
+
+  /**
+   * Rings once for a command that just landed.
+   *
+   * The caller decides *when* — one ring per effect, never per render. This only
+   * refuses what should never ring: a stopped instance, a silent one, and any
+   * command that is not one of the free care commands (spec §8.5).
+   */
+  ring(commandName: string): void {
+    const context = this.#context
+    const filter = this.#filter
+    const score = this.#score
+    if (this.#stopped || context === null || filter === null || score === null) return
+    const hz = chimeHzFor(score, commandName)
+    if (hz === null) return
+
+    const at = context.currentTime
+    const osc = context.createOscillator()
+    osc.type = 'sine'
+    osc.frequency.setValueAtTime(hz, at)
+
+    const gain = context.createGain()
+    gain.gain.setValueAtTime(0, at)
+    gain.gain.linearRampToValueAtTime(CHIME_GAIN, at + 0.02)
+    gain.gain.exponentialRampToValueAtTime(0.0001, at + 1.1)
+
+    osc.connect(gain)
+    gain.connect(filter)
+    osc.start(at)
+    osc.stop(at + 1.2)
+    osc.onended = (): void => {
+      osc.disconnect()
+      gain.disconnect()
     }
   }
 
@@ -238,15 +282,17 @@ export class AmbientAudio {
 
     const at = context.currentTime
     const osc = context.createOscillator()
-    osc.type = 'triangle'
+    // Sine, not triangle: the triangle's upper partials are what made this read
+    // as a bell in an empty building rather than as a soft tone in a room.
+    osc.type = 'sine'
     osc.frequency.setValueAtTime(bellHz(score, this.#step), at)
 
-    // Percussive envelope: no attack click, a long tail that overlaps the next
-    // bell at every interval the score can produce.
+    // Slow in, slow out. The first version's fast attack and three-second tail
+    // was a struck bell; this is closer to a breath.
     const gain = context.createGain()
     gain.gain.setValueAtTime(0, at)
-    gain.gain.linearRampToValueAtTime(score.bellGain, at + 0.08)
-    gain.gain.exponentialRampToValueAtTime(0.0001, at + 3.2)
+    gain.gain.linearRampToValueAtTime(score.bellGain, at + 0.5)
+    gain.gain.exponentialRampToValueAtTime(0.0001, at + 2.6)
 
     osc.connect(gain)
     gain.connect(filter)
