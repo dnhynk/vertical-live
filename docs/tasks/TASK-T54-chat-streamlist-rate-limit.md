@@ -76,48 +76,80 @@ lastErrorAt    : 2026-08-28T20:20:19.560Z
 
 - floor 인상이 §7.5를 깨는 폭을 측정한 뒤, quota 증량 신청 트랙을 별도 티켓으로 연다.
 
-## Result — 부분 구현 (2026-08-29)
+## Result (2026-08-29) — pacing은 열린 채로 남았다
 
-Plan 1·2를 실행했고 **3(supervisor 재시작 억제)은 하지 않았다.**
+**Plan 2는 실패했다. floor를 올릴 수 없다.** 25,000 → 90,000으로 올렸더니 3분 만에 방송이
+다른 방식으로 죽기 시작했다.
 
-- `config/default.json`의 `youtube.chat.grpcStreamMinStartIntervalMs`를 25,000 → **90,000**으로
-  올렸다. 하루 gRPC start가 3,456회에서 **960회**로 줄고, 정상이었던 8/26·8/27(794·865회)과
-  같은 대역이며 거절당한 8/28(1,584회)의 60%다.
-- `youtube/quota/budget.test.ts`가 새 산술을 고정한다(projected 8,700 → **6,204**, headroom
-  800 → **3,296**). 같은 파일에 **예산을 통과해도 충분하지 않다**는 것을 기록했다 — 25,000ms는
-  모든 예산 단언을 통과하면서 방송을 두 번 죽였다. 그리고 하루 호출 수를 거절당한 관측치 아래로
-  묶는 단언을 새로 추가했다.
-- `youtube/chat/config.test.ts`의 고정값을 90,000으로 옮기고 이유를 적었다.
+```
+signalStaleAfterMs                 30,000
+grpcStreamMinStartIntervalMs       90,000   (시도한 값)
+chat-source maxAttempts                 3
+```
 
-**환경변수를 쓰지 않는다.** 처음에는 User 범위 `VL_YOUTUBE_CHAT_GRPC_STREAM_MIN_START_INTERVAL_MS`로
-올렸고 16:00 예약 재개는 그 값으로 떴지만(`gapMs` 89,866), 같은 날 17:00에 다른 셸에서 수동
-재기동하자 그 셸이 변수를 상속하지 않아 **조용히 25,000으로 되돌아갔다**(`gapMs` 24,705).
-기동 경로마다 값이 달라지는 설정은 설정이 아니다. 값은 config에 있고 환경변수는 제거했다.
+chat source는 floor를 **스트림을 닫은 채로** 기다린다. 그래서 90초 중 60초 동안
+`chat_transport`에 새 신호가 없고, supervisor는 그것을 관측 불가로 판정한다. 09:00:06Z에
+`recovering:chat_transport`, 09:00:53Z에 `chat-source` 재시작 1/3을 태웠다. 실측된 상태는
+`lastErrorKind: null`, `consecutiveFailures: 0`, `waitReason: quota_start_pacing`,
+`waitDelayMs: 46,628` — **정상적으로, 설계대로 기다리는 중**이었다. floor를 25,000으로
+되돌리고 서버를 교체해 `ok/live`·required 6개 `ok`·`gapMs 25,164`로 복귀했다.
 
-실호스트 확인(2026-08-29 17:02 KST, config 값만으로 기동): `/health` `status=ok`,
-`supervisor=live`, family 7개 전부 `ok`, `reconnect.gapMs = 89,567`,
-`waitReason = quota_start_pacing`, chat `consecutiveFailures = 0`.
+### 두 제약은 값 선택으로 동시에 만족되지 않는다
 
-### 같은 재기동에서 함께 고친 것
+| 제약 | 요구 |
+| --- | --- |
+| 플랫폼: `liveChatMessages.streamList` | 하루 약 1,000회 이하 = **86초 이상** 간격 |
+| supervisor: `chat_transport`는 required family | 신호가 **30초 안에** 갱신되어야 함 |
 
-방송이 살아난 뒤 `frame_loss`가 8분간 계속 진동했다. 원인은 렌더가 아니라 송출이었다 —
+`budget.test.ts`의 마지막 테스트가 이 모순을 고정한다. 그 테스트는 아래 수정이 들어가는 날
+실패해야 한다.
+
+### 그래서 무엇을 해야 하는가
+
+정보는 이미 health에 있다 — chat source가 `waitReason: quota_start_pacing`으로 "설계대로
+기다리는 중"이라고 보고한다. family 판정이 그것을 읽지 않고 "신호가 오래됐다"로만 본다.
+둘 중 하나가 필요하다.
+
+1. 의도된 pacing 대기 동안 `chat_transport` 신호를 신선하게 유지한다. 그러면 floor를 플랫폼
+   한도에 맞게 올릴 수 있다.
+2. supervisor가 플랫폼 거절과 의도된 대기에 `chat-source` 재시작을 발사하지 않게 한다
+   (원래의 Plan 3). chat source는 이미 자체 backoff와 retry budget을 갖고 있다.
+
+**어느 쪽도 하지 않았다.** 현재 shipped 값은 25,000이고, 이는 관측된 플랫폼 한도의 약 3.5배인
+하루 3,456회를 낸다. **방송은 여전히 약 11시간 뒤 `rateLimitExceeded`로 죽는다.** 8/24와
+8/28에 죽은 그대로다.
+
+### 이 사고에서 배운 것
+
+`budget.test.ts`에는 *broadcast* health poll이 staleness 창 안에 있는지 검사하는 테스트가
+이미 있었다("polls well inside the window that keeps its signal observable"). chat floor에는
+같은 검사가 없었고, 그래서 quota 산술만 보고 floor를 올린 변경을 테스트가 막지 못했다.
+지금은 있다.
+
+### 같은 날 함께 고쳐서 유지되는 것
+
+**OBS 스트림 비트레이트 10,000 → 6,000 kbps.** 원인은 렌더가 아니라 송출이었다 —
 `renderSkippedRatio` 0, `outputSkippedFrames` 8,423/32,416(26%), `outputCongestion` 0.76~0.90,
-실제 전송 7.58 Mbit/s(1,023,900,636 bytes / 1,080,533 ms) 대 요구 10 Mbit/s. OBS 스트림
-비트레이트를 6,000 kbps로 내렸고 `frame_loss=ok`가 됐다. 근거와 재측정 조건은
+실제 전송 7.58 Mbit/s 대 요구 10 Mbit/s. 교체 뒤 18분 35초 동안 출력 손실 0/33,459,
+congestion 0, 실제 전송 6.01 Mbit/s였다. 이후 관측에서 간헐적으로 0.58%까지 올라가지만
+required family가 아니고 재시작을 유발하지 않는다. 근거와 재측정 조건은
 `docs/ops/obs-setup.md`와 `obs/profile.test.ts`에 있다.
 
-### 방송 제목·설명
+**방송 제목·설명.** 제목이 `Autonomous Vertical Live`(레포 이름)였다. 스펙 §5.3의 일본어
+우선을 따라 바꾸고, 비어 있던 `description`에 D-9 동의 전문과 명령 안내를 채웠다.
 
-`youtube.broadcast.title`이 `Autonomous Vertical Live`(레포 이름)였다. 스펙 §5.3의 일본어 우선을
-따라 바꾸고, 비어 있던 `description`에 D-9 동의 전문과 명령 안내를 채웠다.
+- **`nativeReview: pending`** — 두 문구 모두 일본어 원어민 검수를 받지 않았다.
+- **개인정보처리방침 URL이 빠져 있다.** `docs/ops/identity-consent.md` §2.2 전문의 마지막 줄이
+  URL을 요구하는데 값이 없어 그 줄을 넣지 않았다. 사람이 정해야 닫힌다.
+- 제목·설명은 **새 방송에만** 적용된다. 실측: 재기동 뒤에도 `liveBroadcasts.update` 누적이
+  1회 그대로였다. 현재 공개 방송은 구 제목이며 다음 rollover나 사람이 Studio에서 바꿔야 한다.
 
-- **`nativeReview: pending`** — 두 문구 모두 일본어 원어민 검수를 받지 않았다. 공개 문구이므로
-  Gate 3 이전에 나머지 일본어 문자열과 함께 검수 대상이다.
-- **개인정보처리방침 URL이 빠져 있다.** `docs/ops/identity-consent.md` §2.2 전문은 마지막 줄에
-  URL을 요구하는데 아직 값이 없어 그 줄을 넣지 않았다. 사람이 URL을 정해야 닫힌다.
-- 제목·설명은 **새 방송에만** 적용된다. `liveBroadcasts.update`는 기존 attempt에 대해 재기동 시
-  다시 호출되지 않는다(실측: 재기동 뒤에도 `liveBroadcasts.update` 누적 50 = 1회 그대로).
-  현재 공개 방송 `fxPeEGBSiXM`은 구 제목이며, 다음 rollover나 사람이 Studio에서 바꿔야 한다.
+### 환경변수를 쓰지 않는다
+
+처음에는 User 범위 `VL_YOUTUBE_CHAT_GRPC_STREAM_MIN_START_INTERVAL_MS`로 값을 올렸다. 16:00
+예약 재개는 그 값으로 떴지만(`gapMs` 89,866), 한 시간 뒤 다른 셸에서 수동 재기동하자 그 셸이
+변수를 상속하지 않아 조용히 25,000으로 되돌아갔다(`gapMs` 24,705). 기동 경로마다 값이 달라지는
+설정은 설정이 아니다. 값은 config에 있고 환경변수는 제거했다.
 
 ### Gates (executed)
 
@@ -129,11 +161,10 @@ npm run test           156 files · 2,294 passed · 1 skipped
 npm run build          ok
 ```
 
-### 아직 안 한 것
+### 열린 채로 남은 것
 
-- Plan 3: supervisor가 플랫폼 거절(`rateLimitExceeded`/`quotaExceeded`)에 `chat-source`
-  재시작을 발사하지 않게 하는 교정. 90초가 벽 아래라면 발동하지 않지만, 다른 이유로 chat이
-  막히면 같은 방식으로 스택 전체가 죽는다.
-- Plan 1의 공식 문서 확인. `liveChatMessages.streamList`의 한도 표를 찾지 못했고 Cloud Console
-  대조도 하지 않았다. A-T54-1은 열려 있고 90,000은 관측 기반 provisional 값이다.
+- **플랫폼 한도 대응이 전혀 안 됐다.** 위 1 또는 2를 구현하기 전에는 방송이 약 11시간 주기로
+  `rateLimitExceeded`에 죽는다.
+- **A-T54-1**: `liveChatMessages.streamList`의 공식 한도 표를 찾지 못했고 Cloud Console 대조도
+  하지 않았다. "하루 약 1,000회"는 네 개 표본에서 읽은 관측이다.
 - quota 증량 신청 트랙.

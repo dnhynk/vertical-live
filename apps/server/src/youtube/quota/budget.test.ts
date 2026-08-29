@@ -19,9 +19,9 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000
  * A future change that shortens an interval or adds a call to the poll fails
  * here instead of eighteen hours later on the host.
  *
- * **Fitting the allowance is necessary and not sufficient.** T47's 25,000ms
- * floor passed every assertion below — 8,700 projected against 9,500 usable —
- * and still took the broadcast down twice, on 2026-08-24 and 2026-08-28. On
+ * **Fitting the allowance is necessary and not sufficient.** The 25,000ms floor
+ * passes every assertion below — 8,700 projected against 9,500 usable — and
+ * still took the broadcast down twice, on 2026-08-24 and 2026-08-28. On
  * 2026-08-29 a restart proved why: in the same Pacific day, with the local
  * counter at 4,712 of 10,000, `liveBroadcasts.insert`/`bind`/`transition`
  * all succeeded while `liveChatMessages.streamList` alone came back
@@ -29,8 +29,15 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000
  * carries a limit of its own that the shared unit budget does not describe, and
  * nothing in this file can see it. The daily call counts either side of the two
  * failures — 794 and 865 fine, 1,584 and ~1,695 refused — put that ceiling
- * somewhere near a thousand a day, which is what `grpcStartsPerDay` is now set
- * under. It is an observation, not a documented number (T54, A-T54-1).
+ * somewhere near a thousand a day (T54, A-T54-1).
+ *
+ * **Raising the floor to meet it is not available yet.** On 2026-08-29 the floor
+ * was raised to 90,000ms and the broadcast started dying a different way within
+ * three minutes: the chat source waits out its floor with the stream closed, so
+ * `chat_transport` went unobservable for the 60s the wait exceeds
+ * `signalStaleAfterMs`, the supervisor read a healthy deliberate wait as an
+ * outage and began spending `chat-source`'s three restarts. It burned one before
+ * the floor was put back. The last test in this file pins that conflict.
  */
 describe('the repository defaults fit one day of quota', () => {
   const quota = loadQuotaConfig()
@@ -66,31 +73,46 @@ describe('the repository defaults fit one day of quota', () => {
   const budget = quota.dailyUnits - quota.reserveUnits
 
   it('projects the capped worst-case day inside the allowance, with the reserve untouched', () => {
-    expect(grpcStartsPerDay).toBe(960)
+    expect(grpcStartsPerDay).toBe(3456)
     expect(healthUnits).toBe(4608)
     expect(rolloverUnits).toBe(636)
-    expect(projected).toBe(6204)
+    expect(projected).toBe(8700)
     expect(projected).toBeLessThanOrEqual(budget)
   })
 
   it('keeps more than one modeled rollover buffer as usable-budget headroom', () => {
     const usableBudgetHeadroom = budget - projected
-    expect(usableBudgetHeadroom).toBe(3296)
+    expect(usableBudgetHeadroom).toBe(800)
     expect(usableBudgetHeadroom).toBeGreaterThan(rolloverUnits)
   })
 
   /**
-   * The constraint the unit budget cannot express. Both days the broadcast died
-   * on `rateLimitExceeded` had crossed roughly a thousand `streamList` calls;
-   * both days it survived stayed under nine hundred. Until that ceiling is
-   * documented or measured against the Cloud Console (A-T54-1), the floor stays
-   * under the lower of the two observations that failed.
+   * The conflict, pinned. The platform refuses `liveChatMessages.streamList`
+   * somewhere near a thousand calls a day, which is a start every 86 seconds or
+   * slower. The supervisor drops a signal nobody refreshed inside
+   * `signalStaleAfterMs`, and `chat_transport` is required, so a floor at or
+   * above that window turns every deliberate pacing wait into an apparent
+   * outage — measured, not theorised, on 2026-08-29 at 90,000ms.
+   *
+   * The two cannot both be satisfied by choosing a number, so the shipped floor
+   * is chosen for observability and the platform limit stays unaddressed: the
+   * broadcast still dies on `rateLimitExceeded` roughly eleven hours in. Closing
+   * it needs the chat source to keep reporting fresh while it waits by design —
+   * it already knows it is waiting (`waitReason: quota_start_pacing`), the family
+   * judgement just does not read it — or the supervisor to stop firing restarts
+   * at platform refusals (T54 Plan 3).
+   *
+   * This test should start failing the day that lands. That is the point.
    */
-  it('opens fewer chat streams a day than the two days that were refused', () => {
-    const REFUSED_AT_OR_ABOVE = 1584
-    const SURVIVED_UP_TO = 865
-    expect(grpcStartsPerDay).toBeLessThan(REFUSED_AT_OR_ABOVE)
-    expect(grpcStartsPerDay).toBeLessThanOrEqual(SURVIVED_UP_TO * 1.2)
+  it('cannot pace under the platform limit without going unobservable', () => {
+    const OBSERVED_DAILY_CEILING = 1000
+    const spacingTheLimitWants = MS_PER_DAY / OBSERVED_DAILY_CEILING
+    expect(spacingTheLimitWants).toBeGreaterThan(supervisor.signalStaleAfterMs)
+
+    // So the floor is set by the staleness window, and the daily call count it
+    // implies is far above what the platform accepted.
+    expect(chat.grpcStreamMinStartIntervalMs).toBeLessThan(supervisor.signalStaleAfterMs)
+    expect(grpcStartsPerDay).toBeGreaterThan(OBSERVED_DAILY_CEILING)
   })
 
   /**
