@@ -44,6 +44,14 @@ export const PROVISIONAL_CONFIG_KEYS = [
 export interface RendererConfig {
   readonly mode: RendererMode
   /**
+   * Whether the generated ambient bed plays (`?audio=off` turns it off).
+   *
+   * On by default and switchable from the Browser Source URL, because the only
+   * way to silence a browser source otherwise is to change the OBS scene, and
+   * the person who needs the sound gone is usually mid-broadcast.
+   */
+  readonly audioEnabled: boolean
+  /**
    * The `/ws/renderer` URL **without** the token: this is the value anything on
    * screen or in a log may use.
    *
@@ -127,6 +135,19 @@ function readMode(params: URLSearchParams, log: RendererLog): RendererMode {
   // Browser Source URL must not put a debug panel on air.
   log.warn('config_mode_rejected')
   return 'broadcast'
+}
+
+/**
+ * `?audio=off` silences the generated bed. Anything else, including an absent
+ * parameter, leaves it on — a typo in the Browser Source URL must not silently
+ * take the sound off air, the same rule `readMode` follows for the dev panel.
+ */
+function readAudioEnabled(params: URLSearchParams, log: RendererLog): boolean {
+  const raw = params.get('audio')
+  if (raw === null || raw === 'on') return true
+  if (raw === 'off') return false
+  log.warn('config_audio_rejected')
+  return true
 }
 
 /**
@@ -223,6 +244,7 @@ export function readRendererConfig(options: ReadRendererConfigOptions): Renderer
   const wsUrl = readWsUrl(params, options.log)
   return {
     mode: readMode(params, options.log),
+    audioEnabled: readAudioEnabled(params, options.log),
     wsUrl,
     wsToken: readWsToken(params, options.log),
     apiUrl: apiUrlFrom(wsUrl),
