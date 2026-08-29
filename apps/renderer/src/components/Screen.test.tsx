@@ -440,9 +440,37 @@ describe('Screen (spec §5.2, §6.4, §8.4, §9.2, §12.3)', () => {
     expect(harness.container.textContent).not.toContain(SAMPLE_CONSENTED_ACTOR.channelRef)
   })
 
+  /**
+   * The public broadcast of 2026-08-29 carried this notice while
+   * `identityGateOpen` was false, so every `なのる` a viewer sent came back
+   * `consent_disabled`. The screen may only ask for commands the server takes.
+   */
+  it('says nothing about names while the server is refusing the consent commands', () => {
+    const harness = mount()
+    show(harness, { ...sampleSnapshot(), identityGateOpen: false })
+
+    expect(query(harness, 'cta-identity')).toBeNull()
+    expect(query(harness, 'cta-identity-notice')).toBeNull()
+    expect(query(harness, 'cta-consent-command-JOIN')).toBeNull()
+    expect(query(harness, 'cta-consent-command-LEAVE')).toBeNull()
+    // The free commands it does accept are still there.
+    expect(query(harness, 'cta-command-FEED')).not.toBeNull()
+  })
+
+  it('says nothing about names when the snapshot does not carry the gate at all', () => {
+    const harness = mount()
+    // A snapshot from a build that predates the field: absent, not false.
+    const withoutGate = sampleSnapshot()
+    expect(withoutGate).not.toHaveProperty('identityGateOpen')
+    show(harness, withoutGate)
+
+    expect(query(harness, 'cta-identity')).toBeNull()
+  })
+
   it('states how a name gets on screen and how it comes off, next to the CTA', () => {
     const harness = mount()
-    show(harness)
+    // Only while the server is accepting those commands (BOARD D-9, T55).
+    show(harness, { ...sampleSnapshot(), identityGateOpen: true })
 
     const notice = query(harness, 'cta-identity-notice')
     expect(notice?.textContent).toBe(

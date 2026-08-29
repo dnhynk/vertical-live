@@ -116,6 +116,20 @@ export const WorldSnapshotSchema = z.strictObject({
   inputMode: InputModeSchema,
   /** False disables the on-screen CTA while input or renderer ACK is unhealthy (spec §9.2). */
   interactionEnabled: z.boolean(),
+  /**
+   * Consent mode (BOARD D-9), which the renderer must not decide for itself.
+   *
+   * While the gate is closed the parser refuses `JOIN` and `LEAVE`
+   * (`consent_disabled`), so a screen that still invites them is inviting a
+   * command the server will reject — measured on the public broadcast of
+   * 2026-08-29, where the notice was on air the whole time the parser was
+   * refusing both spellings.
+   *
+   * Optional because snapshots written before this field existed do not carry
+   * it. Absent is read as closed, which is both the safe direction and the state
+   * every one of those builds was actually in.
+   */
+  identityGateOpen: z.boolean().optional(),
   broadcastLifecycle: BroadcastLifecycleSchema,
   creature: CreatureStateSchema,
   mission: MissionStateSchema.nullable(),

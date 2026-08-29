@@ -1622,6 +1622,9 @@ export class StateEngine {
       processedIngestSeq: processedSeq,
       inputMode: window.mode,
       interactionEnabled: this.#interactionEnabled,
+      // BOARD D-9: the screen may only invite the consent commands the parser
+      // will actually accept, and the parser reads this same flag.
+      identityGateOpen: this.#config.engine.identityGateOpen,
       broadcastLifecycle: this.#lifecycle(now),
       ...(showWindow ? { aggregateWindow: window } : {}),
     })

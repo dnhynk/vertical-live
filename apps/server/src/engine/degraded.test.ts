@@ -46,6 +46,10 @@ describe('degraded window', () => {
   it('publishes interactionEnabled=false when no renderer is attached', async () => {
     harness.engine.start()
     expect(harness.publisher.lastSnapshot?.interactionEnabled).toBe(true)
+    // BOARD D-9, T55: the screen may only invite the consent commands the parser
+    // accepts, so the gate the parser reads travels in the snapshot. Closed by
+    // default, and the renderer is not allowed to guess.
+    expect(harness.publisher.lastSnapshot?.identityGateOpen).toBe(false)
 
     harness.publisher.rendererCount = 0
     await harness.clock.advance(1_000)
