@@ -383,7 +383,7 @@
       "parts": ["id", "snippet"],
       "maxResults": 500,
       "readyPollIntervalMs": 250,
-      "grpcStreamMinStartIntervalMs": 90000,
+      "grpcStreamMinStartIntervalMs": 120000,
       "activeStreamMinStartIntervalMs": 15000,
       "activeWindowMs": 180000,
       "dailyStartBudget": 800,

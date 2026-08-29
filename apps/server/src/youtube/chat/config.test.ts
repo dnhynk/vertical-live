@@ -33,7 +33,7 @@ describe('loadChatConfig', () => {
     // Longer than `supervisor.signalStaleAfterMs` on purpose, which is only safe
     // because `health.ts` reports a pacing wait inside its delay as `ok`. The two
     // are asserted together in `youtube/quota/budget.test.ts`.
-    expect(config.grpcStreamMinStartIntervalMs).toBe(90_000)
+    expect(config.grpcStreamMinStartIntervalMs).toBe(120_000)
     expect(config.liveChatId).toBeNull()
     // Every number the official documentation does not fix must say so.
     expect(config.provisional).toContain('reconnect')
