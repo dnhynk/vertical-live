@@ -50,6 +50,16 @@ export interface CtaState {
   readonly enabled: boolean
   readonly commands: readonly CommandName[]
   readonly choice: ChoiceView | null
+  /**
+   * Whether the screen may invite the consent commands (BOARD D-9).
+   *
+   * The renderer does not decide this and does not infer it: while the gate is
+   * closed the parser refuses `JOIN` and `LEAVE`, so showing the notice would
+   * ask viewers for something the server rejects. A snapshot that does not carry
+   * the flag is read as closed — the safe direction, and the state the builds
+   * that predate the field were in.
+   */
+  readonly identityConsentOffered: boolean
 }
 
 export function selectCta(snapshot: WorldSnapshot | null): CtaState {
@@ -60,6 +70,7 @@ export function selectCta(snapshot: WorldSnapshot | null): CtaState {
   return {
     enabled,
     commands: FREE_CARE_COMMANDS,
+    identityConsentOffered: enabled && (snapshot?.identityGateOpen ?? false),
     choice:
       mission === null || closesAt === null || mission.choices.length === 0
         ? null

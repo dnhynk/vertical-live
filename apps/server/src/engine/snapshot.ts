@@ -26,6 +26,12 @@ export interface SnapshotContext {
   readonly inputMode: InputMode
   /** False disables the on-screen CTA while input or renderer ACK is unhealthy. */
   readonly interactionEnabled: boolean
+  /**
+   * Consent mode (BOARD D-9). Omitted rather than `false` when this process has
+   * no chat configured at all, so a snapshot never claims to know a gate state
+   * nothing told it.
+   */
+  readonly identityGateOpen?: boolean
   readonly broadcastLifecycle: BroadcastLifecycle
   /** The open tally window, when one should be on screen (spec §6.4). */
   readonly aggregateWindow?: AggregateWindow
@@ -40,6 +46,9 @@ export function buildSnapshot(state: WorldState, context: SnapshotContext): Worl
     worldTimeUtc: view.worldTimeUtc,
     inputMode: context.inputMode,
     interactionEnabled: context.interactionEnabled,
+    ...(context.identityGateOpen === undefined
+      ? {}
+      : { identityGateOpen: context.identityGateOpen }),
     broadcastLifecycle: context.broadcastLifecycle,
     creature: view.creature,
     mission: view.mission,

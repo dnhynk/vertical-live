@@ -52,6 +52,9 @@
             "interactionEnabled": {
               "type": "boolean"
             },
+            "identityGateOpen": {
+              "type": "boolean"
+            },
             "broadcastLifecycle": {
               "type": "string",
               "enum": [

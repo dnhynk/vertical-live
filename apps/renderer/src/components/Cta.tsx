@@ -20,7 +20,13 @@ import { CONSENT_RETENTION_DAYS } from '../read-model/identity'
  * - that everything is reachable for free (spec §8.5) — the note sits with the
  *   CTA, not only next to a paid surface, and nothing on this screen offers a
  *   paid alternative to it;
- * - how a name gets onto the screen and how it comes off again (BOARD D-9). The
+ * - how a name gets onto the screen and how it comes off again (BOARD D-9) —
+ *   **but only while the server is actually accepting those commands.** The gate
+ *   is closed by default, and with it closed the parser refuses both spellings
+ *   (`consent_disabled`), so the notice would be inviting viewers to send
+ *   something that gets thrown away. It was on air that way through the public
+ *   broadcast of 2026-08-29. `identityConsentOffered` comes from the snapshot;
+ *   the renderer never decides it. When it is offered, the
  *   notice is one line — only a viewer who sends the consent command is named,
  *   the withdrawal command deletes the record immediately, and 30 days without
  *   activity deletes it by itself — and the two commands are shown next to it in
@@ -98,41 +104,43 @@ export default function Cta({ cta, translate, alias }: CtaProps) {
         {translate('ui.cta.freeNote')}
       </p>
 
-      <div className="cta-identity" data-testid="cta-identity">
-        <p className="cta-identity-notice">
-          <span className="cta-identity-ja" data-testid="cta-identity-notice">
-            {translate('ui.identity.notice', {
-              join: consentCommandLabel('JOIN').ja,
-              leave: consentCommandLabel('LEAVE').ja,
-              days: CONSENT_RETENTION_DAYS,
-            })}
-          </span>
-          <span className="cta-identity-en" data-testid="cta-identity-notice-en">
-            {alias('ui.identity.notice', {
-              join: consentCommandLabel('JOIN').en,
-              leave: consentCommandLabel('LEAVE').en,
-              days: CONSENT_RETENTION_DAYS,
-            })}
-          </span>
-        </p>
+      {!cta.identityConsentOffered ? null : (
+        <div className="cta-identity" data-testid="cta-identity">
+          <p className="cta-identity-notice">
+            <span className="cta-identity-ja" data-testid="cta-identity-notice">
+              {translate('ui.identity.notice', {
+                join: consentCommandLabel('JOIN').ja,
+                leave: consentCommandLabel('LEAVE').ja,
+                days: CONSENT_RETENTION_DAYS,
+              })}
+            </span>
+            <span className="cta-identity-en" data-testid="cta-identity-notice-en">
+              {alias('ui.identity.notice', {
+                join: consentCommandLabel('JOIN').en,
+                leave: consentCommandLabel('LEAVE').en,
+                days: CONSENT_RETENTION_DAYS,
+              })}
+            </span>
+          </p>
 
-        <ul className="cta-identity-commands">
-          {CONSENT_COMMANDS.map((name) => {
-            const label = consentCommandLabel(name)
-            return (
-              <li
-                key={name}
-                className="cta-identity-command"
-                data-testid={`cta-consent-command-${name}`}
-              >
-                <span className="cta-text">{label.ja}</span>
-                <span className="cta-en">{label.en}</span>
-                <span className="cta-identity-meaning">{translate(label.meaningKey)}</span>
-              </li>
-            )
-          })}
-        </ul>
-      </div>
+          <ul className="cta-identity-commands">
+            {CONSENT_COMMANDS.map((name) => {
+              const label = consentCommandLabel(name)
+              return (
+                <li
+                  key={name}
+                  className="cta-identity-command"
+                  data-testid={`cta-consent-command-${name}`}
+                >
+                  <span className="cta-text">{label.ja}</span>
+                  <span className="cta-en">{label.en}</span>
+                  <span className="cta-identity-meaning">{translate(label.meaningKey)}</span>
+                </li>
+              )
+            })}
+          </ul>
+        </div>
+      )}
     </div>
   )
 }
