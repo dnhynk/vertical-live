@@ -8,8 +8,10 @@ import {
   CHAT_RECONNECT_SIGNAL,
   CHAT_TRANSPORT_SIGNAL,
   CHAT_USER_EVENTS_SIGNAL,
+  PACING_OVERRUN_GRACE_MS,
   buildChatHealthSignals,
   type ChatObservation,
+  type ChatReconnectWaitObservation,
 } from './health.js'
 import { ChatSourceState } from './state.js'
 
@@ -618,5 +620,104 @@ describe('consent signal', () => {
     )
     expect(signal.status).toBe('ok')
     expect(signal.detail).toMatchObject({ failures: 1, lastFailureKind: 'join' })
+  })
+})
+
+/**
+ * T54. The quota floor is honoured by holding the stream closed between starts,
+ * so for most of every cycle there is no connected transport and no error. That
+ * is the source working, and it has to read as working: on 2026-08-29 reporting
+ * it as `unknown` had the supervisor escalate a required family and spend one of
+ * `chat-source`'s three restarts on a healthy wait, which only reset the pacing
+ * clock.
+ */
+describe('a chat source waiting out its own quota pacing floor', () => {
+  const paced = (
+    overrides: Partial<ChatReconnectWaitObservation> = {},
+  ): Partial<ChatObservation> => ({
+    connected: false,
+    channelState: 'IDLE',
+    reconnect: {
+      ...observation().reconnect,
+      wait: {
+        reason: 'quota_start_pacing',
+        startedAt: '2026-08-29T09:00:00.000Z',
+        startedAtMonotonicMs: 0,
+        delayMs: 90_000,
+        ...overrides,
+      },
+    },
+  })
+
+  it('is ok while the wait is inside its own delay, and says which wait it is', () => {
+    const clock = new FakeClock({ monotonicStartMs: 60_000 })
+    const signal = byName(
+      buildChatHealthSignals(observation(paced()), clock),
+      CHAT_TRANSPORT_SIGNAL,
+    )
+    expect(signal.status).toBe('ok')
+    expect(signal.reason).toBe('quota_start_pacing')
+  })
+
+  it('is ok at the very end of the delay, inside the overrun grace', () => {
+    const clock = new FakeClock({ monotonicStartMs: 90_000 + PACING_OVERRUN_GRACE_MS })
+    const signal = byName(
+      buildChatHealthSignals(observation(paced()), clock),
+      CHAT_TRANSPORT_SIGNAL,
+    )
+    expect(signal.status).toBe('ok')
+  })
+
+  it('goes back to unknown once the wait overruns its delay — a stuck wait is a fault', () => {
+    const clock = new FakeClock({ monotonicStartMs: 90_001 + PACING_OVERRUN_GRACE_MS })
+    const signal = byName(
+      buildChatHealthSignals(observation(paced()), clock),
+      CHAT_TRANSPORT_SIGNAL,
+    )
+    expect(signal.status).toBe('unknown')
+    expect(signal.reason).toBe('reconnecting')
+  })
+
+  it('does not cover a failure backoff: only the quota floor is waiting by design', () => {
+    const clock = new FakeClock({ monotonicStartMs: 1_000 })
+    const signal = byName(
+      buildChatHealthSignals(observation(paced({ reason: 'failure_backoff' })), clock),
+      CHAT_TRANSPORT_SIGNAL,
+    )
+    expect(signal.status).toBe('unknown')
+    expect(signal.reason).toBe('reconnecting')
+  })
+
+  it('does not cover a wait that follows a failure', () => {
+    const clock = new FakeClock({ monotonicStartMs: 1_000 })
+    const signal = byName(
+      buildChatHealthSignals(observation({ ...paced(), consecutiveFailures: 1 }), clock),
+      CHAT_TRANSPORT_SIGNAL,
+    )
+    expect(signal.status).toBe('unknown')
+    expect(signal.reason).toBe('reconnecting')
+  })
+
+  it('never hides an exhausted retry budget or a deliberate stop behind the wait', () => {
+    const clock = new FakeClock({ monotonicStartMs: 1_000 })
+    const exhausted = byName(
+      buildChatHealthSignals(observation({ ...paced(), retryBudgetExhausted: true }), clock),
+      CHAT_TRANSPORT_SIGNAL,
+    )
+    expect(exhausted.status).toBe('degraded')
+    expect(exhausted.reason).toBe('retry_budget_exhausted')
+
+    const stopped = byName(
+      buildChatHealthSignals(
+        observation({
+          ...paced(),
+          stopped: { reason: 'stop_requested', at: '2026-08-29T09:00:00.000Z' },
+        }),
+        clock,
+      ),
+      CHAT_TRANSPORT_SIGNAL,
+    )
+    expect(stopped.status).toBe('degraded')
+    expect(stopped.reason).toBe('stop_requested')
   })
 })

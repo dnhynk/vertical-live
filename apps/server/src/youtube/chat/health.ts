@@ -93,8 +93,23 @@ export type ChatReconnectWaitReason = 'quota_start_pacing' | 'empty_end_backoff'
 export interface ChatReconnectWaitObservation {
   readonly reason: ChatReconnectWaitReason
   readonly startedAt: string
+  /** Monotonic start, so `transport()` can tell a running wait from a stuck one. */
+  readonly startedAtMonotonicMs: number
   readonly delayMs: number
 }
+
+/**
+ * How far past its own planned delay a pacing wait may run before it stops
+ * counting as "waiting by design".
+ *
+ * A wait that is still inside its delay is the source doing exactly what it was
+ * configured to do. A wait that has overrun is a source that is stuck, and that
+ * has to look unobservable again or nothing would ever notice it.
+ *
+ * `provisional` (BOARD A-15): a margin for timer and scheduling slack, not a
+ * measured threshold.
+ */
+export const PACING_OVERRUN_GRACE_MS = 5_000
 
 export interface ChatUserEventObservation {
   readonly lastAtUtc: string | null
@@ -161,7 +176,7 @@ export function buildChatHealthSignals(observation: ChatObservation, clock: Cloc
   const base = { component: 'youtube-chat' as const, observedAtUtc, observedAtMonotonicMs }
 
   const signals: HealthSignal[] = [
-    { ...base, name: CHAT_TRANSPORT_SIGNAL, ...transport(observation) },
+    { ...base, name: CHAT_TRANSPORT_SIGNAL, ...transport(observation, observedAtMonotonicMs) },
     { ...base, name: CHAT_KEEPALIVE_SIGNAL, ...keepalive(observation, observedAtMonotonicMs) },
     { ...base, name: CHAT_RECONNECT_SIGNAL, ...reconnect(observation) },
     { ...base, name: CHAT_USER_EVENTS_SIGNAL, ...userEvents(observation, observedAtMonotonicMs) },
@@ -195,8 +210,25 @@ type SignalBody = Pick<HealthSignal, 'status' | 'detail'> & { reason?: string }
  * is why the streak is still disqualifying here. On REST the question never
  * arises: every poll that answers is a response, so the poller keeping its
  * cadence is already `connected`.
+ *
+ * **A source waiting out its own quota pacing floor is up too** (T54). The floor
+ * exists because `liveChatMessages.streamList` refuses somewhere near a thousand
+ * calls a day, and honouring it means holding the stream closed between starts.
+ * Reporting that as `unknown` made the closed half of every cycle look like an
+ * outage: on 2026-08-29 a 90s floor against a 30s `signalStaleAfterMs` had the
+ * supervisor escalate `chat_transport` and spend one of `chat-source`'s three
+ * restarts on a source whose own health said `consecutiveFailures: 0`,
+ * `lastErrorKind: null`, `waitReason: quota_start_pacing`. Restarting it only
+ * reset the pacing clock and started the cycle again — the same shape as the
+ * T28 bug above, where a judgement fired before the thing it was waiting on was
+ * due.
+ *
+ * So a pacing wait that is still inside its own delay reports `ok`, with the
+ * reason naming it, and the moment it overruns that delay by
+ * `PACING_OVERRUN_GRACE_MS` it goes back to `unknown` — a source stuck in a wait
+ * is a real fault and still has to be visible.
  */
-function transport(observation: ChatObservation): SignalBody {
+function transport(observation: ChatObservation, nowMonotonicMs: number): SignalBody {
   const detail = {
     mode: observation.mode,
     liveChatId: observation.liveChatId,
@@ -219,6 +251,9 @@ function transport(observation: ChatObservation): SignalBody {
   }
   if (observation.connected) return { status: 'ok', detail }
   if (observation.mode === 'idle') return { status: 'unknown', reason: 'not_started', detail }
+  if (observation.consecutiveFailures === 0 && isPacingByDesign(observation, nowMonotonicMs)) {
+    return { status: 'ok', reason: 'quota_start_pacing', detail }
+  }
   // Connected, waiting for a first message that a quiet chat may never send.
   // `channelState` is non-null only on the gRPC path, so this cannot fire while
   // the poller is between attempts.
@@ -226,6 +261,14 @@ function transport(observation: ChatObservation): SignalBody {
     return { status: 'ok', detail }
   }
   return { status: 'unknown', reason: 'reconnecting', detail }
+}
+
+/** A `quota_start_pacing` wait that is running and has not overrun its delay. */
+function isPacingByDesign(observation: ChatObservation, nowMonotonicMs: number): boolean {
+  const wait = observation.reconnect.wait ?? null
+  if (wait === null || wait.reason !== 'quota_start_pacing') return false
+  const elapsedMs = nowMonotonicMs - wait.startedAtMonotonicMs
+  return elapsedMs >= 0 && elapsedMs <= wait.delayMs + PACING_OVERRUN_GRACE_MS
 }
 
 function keepalive(observation: ChatObservation, nowMonotonicMs: number): SignalBody {

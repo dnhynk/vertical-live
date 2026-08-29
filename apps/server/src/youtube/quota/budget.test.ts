@@ -3,8 +3,52 @@ import { describe, expect, it } from 'vitest'
 import { loadSupervisorConfig } from '../../supervisor/config.js'
 import { loadBroadcastConfig } from '../broadcast/config.js'
 import { loadChatConfig } from '../chat/config.js'
+import { FakeClock } from '../../testing/fake-clock.js'
+import {
+  CHAT_TRANSPORT_SIGNAL,
+  buildChatHealthSignals,
+  type ChatObservation,
+} from '../chat/health.js'
 import { quotaCostOf } from './costs.js'
 import { loadQuotaConfig } from './config.js'
+
+/** A source part-way through the shipped pacing floor, with nothing wrong. */
+function pacedObservation(floorMs: number): ChatObservation {
+  return {
+    mode: 'grpc',
+    liveChatId: 'chat_budget_test',
+    connected: false,
+    channelState: 'IDLE',
+    keepalive: { timeMs: 300_000, timeoutMs: 20_000, permitWithoutCalls: false },
+    lastResponseAtUtc: '2026-08-29T09:00:00.000Z',
+    lastResponseAtMonotonicMs: 0,
+    consecutiveFailures: 0,
+    retryBudgetExhausted: false,
+    lastError: null,
+    offlineAt: null,
+    stopped: null,
+    reconnect: {
+      count: 1,
+      lastAt: '2026-08-29T09:00:00.000Z',
+      gapMs: null,
+      resumedWithToken: true,
+      tokenRejected: false,
+      tokenRejections: 0,
+      lastTokenRejectedAt: null,
+      reconnectsWithoutToken: 0,
+      estimatedDuplicates: 0,
+      estimatedLostMessages: 0,
+      wait: {
+        reason: 'quota_start_pacing',
+        startedAt: '2026-08-29T09:00:00.000Z',
+        startedAtMonotonicMs: 0,
+        delayMs: floorMs,
+      },
+    },
+    pageToken: null,
+    userEvents: { lastAtUtc: null, lastAtMonotonicMs: null, total: 0 },
+  }
+}
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000
 
@@ -31,13 +75,15 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000
  * failures — 794 and 865 fine, 1,584 and ~1,695 refused — put that ceiling
  * somewhere near a thousand a day (T54, A-T54-1).
  *
- * **Raising the floor to meet it is not available yet.** On 2026-08-29 the floor
- * was raised to 90,000ms and the broadcast started dying a different way within
- * three minutes: the chat source waits out its floor with the stream closed, so
- * `chat_transport` went unobservable for the 60s the wait exceeds
- * `signalStaleAfterMs`, the supervisor read a healthy deliberate wait as an
- * outage and began spending `chat-source`'s three restarts. It burned one before
- * the floor was put back. The last test in this file pins that conflict.
+ * **Raising the floor needed the signal fixed first.** The first attempt on
+ * 2026-08-29 put the floor at 90,000ms and the broadcast started dying a
+ * different way within three minutes: the chat source waits out its floor with
+ * the stream closed, so `chat_transport` went unobservable for the 60s the wait
+ * exceeds `signalStaleAfterMs`, the supervisor read a healthy deliberate wait as
+ * an outage, and one of `chat-source`'s three restarts was spent before the
+ * floor was put back. `youtube/chat/health.ts` now reports a pacing wait that is
+ * inside its own delay as `ok`, which is what makes a floor above the staleness
+ * window safe. The test below holds those two together.
  */
 describe('the repository defaults fit one day of quota', () => {
   const quota = loadQuotaConfig()
@@ -73,46 +119,51 @@ describe('the repository defaults fit one day of quota', () => {
   const budget = quota.dailyUnits - quota.reserveUnits
 
   it('projects the capped worst-case day inside the allowance, with the reserve untouched', () => {
-    expect(grpcStartsPerDay).toBe(3456)
+    expect(grpcStartsPerDay).toBe(960)
     expect(healthUnits).toBe(4608)
     expect(rolloverUnits).toBe(636)
-    expect(projected).toBe(8700)
+    expect(projected).toBe(6204)
     expect(projected).toBeLessThanOrEqual(budget)
   })
 
   it('keeps more than one modeled rollover buffer as usable-budget headroom', () => {
     const usableBudgetHeadroom = budget - projected
-    expect(usableBudgetHeadroom).toBe(800)
+    expect(usableBudgetHeadroom).toBe(3296)
     expect(usableBudgetHeadroom).toBeGreaterThan(rolloverUnits)
   })
 
   /**
-   * The conflict, pinned. The platform refuses `liveChatMessages.streamList`
-   * somewhere near a thousand calls a day, which is a start every 86 seconds or
-   * slower. The supervisor drops a signal nobody refreshed inside
-   * `signalStaleAfterMs`, and `chat_transport` is required, so a floor at or
-   * above that window turns every deliberate pacing wait into an apparent
-   * outage — measured, not theorised, on 2026-08-29 at 90,000ms.
+   * The two limits this floor sits between, and why it may exceed one of them.
    *
-   * The two cannot both be satisfied by choosing a number, so the shipped floor
-   * is chosen for observability and the platform limit stays unaddressed: the
-   * broadcast still dies on `rateLimitExceeded` roughly eleven hours in. Closing
-   * it needs the chat source to keep reporting fresh while it waits by design —
-   * it already knows it is waiting (`waitReason: quota_start_pacing`), the family
-   * judgement just does not read it — or the supervisor to stop firing restarts
-   * at platform refusals (T54 Plan 3).
+   * The platform refuses `liveChatMessages.streamList` somewhere near a thousand
+   * calls a day - 794 and 865 were served, 1,584 and ~1,695 were refused - which
+   * is a start every 86 seconds or slower. The supervisor drops a signal nobody
+   * refreshed inside `signalStaleAfterMs`, and `chat_transport` is required, so
+   * for one day this floor could not be raised without turning every pacing wait
+   * into an apparent outage.
    *
-   * This test should start failing the day that lands. That is the point.
+   * `youtube/chat/health.ts` closed that: a `quota_start_pacing` wait inside its
+   * own delay reports the transport `ok`, because a source honouring its floor
+   * is a source that is working. **That is the only reason a floor above the
+   * staleness window is safe**, so the two are asserted together - if the signal
+   * ever stops covering the wait, this pairing is where it shows up.
    */
-  it('cannot pace under the platform limit without going unobservable', () => {
+  it('paces under the platform limit, and only because a paced wait reports ok', () => {
     const OBSERVED_DAILY_CEILING = 1000
-    const spacingTheLimitWants = MS_PER_DAY / OBSERVED_DAILY_CEILING
-    expect(spacingTheLimitWants).toBeGreaterThan(supervisor.signalStaleAfterMs)
+    expect(grpcStartsPerDay).toBeLessThan(OBSERVED_DAILY_CEILING)
 
-    // So the floor is set by the staleness window, and the daily call count it
-    // implies is far above what the platform accepted.
-    expect(chat.grpcStreamMinStartIntervalMs).toBeLessThan(supervisor.signalStaleAfterMs)
-    expect(grpcStartsPerDay).toBeGreaterThan(OBSERVED_DAILY_CEILING)
+    // Longer than the staleness window, on purpose.
+    expect(chat.grpcStreamMinStartIntervalMs).toBeGreaterThan(supervisor.signalStaleAfterMs)
+
+    // And the transport signal covers exactly that gap.
+    const clock = new FakeClock({ monotonicStartMs: chat.grpcStreamMinStartIntervalMs - 1 })
+    const signals = buildChatHealthSignals(
+      pacedObservation(chat.grpcStreamMinStartIntervalMs),
+      clock,
+    )
+    const transport = signals.find((signal) => signal.name === CHAT_TRANSPORT_SIGNAL)
+    expect(transport?.status).toBe('ok')
+    expect(transport?.reason).toBe('quota_start_pacing')
   })
 
   /**

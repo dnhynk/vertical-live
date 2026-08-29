@@ -238,7 +238,12 @@ export class ChatSourceState {
   }
 
   recordReconnectWait(reason: ChatReconnectWaitReason, delayMs: number): void {
-    this.#reconnectWait = { reason, startedAt: this.#clock.nowUtcIso(), delayMs }
+    this.#reconnectWait = {
+      reason,
+      startedAt: this.#clock.nowUtcIso(),
+      startedAtMonotonicMs: this.#clock.monotonicMs(),
+      delayMs,
+    }
   }
 
   clearReconnectWait(): void {
