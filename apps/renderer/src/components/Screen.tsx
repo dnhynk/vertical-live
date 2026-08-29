@@ -6,6 +6,7 @@ import { selectMode, selectSlots } from '../read-model/display'
 import { selectActionActorName } from '../read-model/identity'
 import type { RendererRuntime } from '../runtime'
 import { paletteFor } from '../visual/palette'
+import { safeAreaCssVariables } from '../visual/safe-area'
 import Cta from './Cta'
 import DevPanel from './DevPanel'
 import EffectLayer from './EffectLayer'
@@ -18,10 +19,12 @@ import ModeBadge from './ModeBadge'
  * This component owns the read-model subscription, so its commit is what marks
  * a revision as rendered; the frame loop then acknowledges it (spec §7.3(7)).
  *
- * The layout answers spec §5.2 top to bottom: what the creature needs now, the
- * creature itself with whatever is playing around it, then what just happened,
- * how far the day and the growth have come, when the next decision lands, and
- * finally how to join for free.
+ * The layout answers spec §5.2 inside the band `visual/safe-area.ts` measures —
+ * the rows of the frame the YouTube app does not draw its own UI over. Reading
+ * order there is not top to bottom but centre then floor: the creature and
+ * whatever is playing around it hold the middle, the three secondary slots run
+ * down the right column, and the current need and the free commands share one
+ * plate at the band's floor, immediately above the app's real chat input.
  *
  * The name of a consented viewer is the one value the DOM layer joins from two
  * messages: the slot's action comes from the snapshot and the name from the
@@ -56,27 +59,29 @@ export default function Screen({ runtime }: ScreenProps) {
       data-testid="screen"
       data-mode={runtime.config.mode}
       data-palette={palette.paletteId}
-      style={{ '--accent': palette.accent } as CSSProperties}
+      style={{ ...safeAreaCssVariables(), '--accent': palette.accent } as CSSProperties}
     >
       {snapshot === null ? (
         <HudWaiting translate={translate} />
       ) : (
-        <div className="screen-top">
-          <ModeBadge mode={selectMode(snapshot, nowMs)} translate={translate} alias={alias} />
-          <HudTop slots={selectSlots(snapshot, nowMs)} translate={translate} alias={alias} />
-        </div>
-      )}
-
-      <EffectLayer effects={activeEffects} translate={translate} alias={alias} />
-
-      {snapshot === null ? null : (
-        <div className="screen-bottom">
+        <>
+          <div className="screen-top">
+            <ModeBadge mode={selectMode(snapshot, nowMs)} translate={translate} alias={alias} />
+          </div>
           <HudBottom
             slots={selectSlots(snapshot, nowMs)}
             translate={translate}
             alias={alias}
             actorName={selectActionActorName(snapshot, activeEffects, actionRevision)}
           />
+        </>
+      )}
+
+      <EffectLayer effects={activeEffects} translate={translate} alias={alias} />
+
+      {snapshot === null ? null : (
+        <div className="screen-foot">
+          <HudTop slots={selectSlots(snapshot, nowMs)} translate={translate} alias={alias} />
           <Cta cta={cta} translate={translate} alias={alias} />
         </div>
       )}
