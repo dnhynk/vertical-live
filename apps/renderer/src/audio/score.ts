@@ -8,6 +8,12 @@ import type { SceneConditions } from '../visual/palette'
  * This module makes every decision and touches no Web Audio API, which is why it
  * is the part that has tests. `engine.ts` is the thin wiring that plays it.
  *
+ * **There is no sustained tone.** The first version held a drone under
+ * everything, and a held tone is oppressive however consonant it is — a room
+ * that never stops humming is a room something is wrong in. What plays now is
+ * silence, with a soft note every several seconds and one acknowledgement per
+ * command. The quiet between them is the point, not a gap in the design.
+ *
  * Three rules the sound follows, all of them from the spec rather than taste:
  *
  * - **It carries no information.** Spec §5.2 asks a first-time viewer to
@@ -33,23 +39,26 @@ export interface ScaleShape {
 }
 
 /**
- * Six scales, none of them a major triad.
+ * Four scales, **none of which contains a semitone**.
  *
- * `hirajoshi` and `insen` are Japanese pentatonic scales, which is the right
- * default for a broadcast whose primary language and time base are Japanese
- * (spec §5.3). The others are modal and equally free of the leading tone that
- * makes a phrase sound like a jingle resolving.
+ * The first version used `hirajoshi` and `insen`, whose minor seconds are
+ * exactly what makes them sound haunted, and read as eerie on air. A scale with
+ * no semitone at all cannot: every pair of notes it can produce is consonant, so
+ * a slow line over a held chord comes out calm instead of uneasy.
+ *
+ * `yo` and `ritsu` are Japanese pentatonics, which is the right default for a
+ * broadcast whose primary language and time base are Japanese (spec §5.3).
+ * `major_pentatonic` and `sus_pentatonic` are the same shape rotated. None has
+ * the leading tone that would make a phrase resolve like a jingle (§5.3).
  */
 export const SCALES: Readonly<Record<string, ScaleShape>> = Object.freeze({
-  hirajoshi: { id: 'hirajoshi', degrees: [0, 2, 3, 7, 8] },
-  insen: { id: 'insen', degrees: [0, 1, 5, 7, 10] },
   yo: { id: 'yo', degrees: [0, 2, 5, 7, 9] },
-  dorian: { id: 'dorian', degrees: [0, 2, 3, 5, 7, 9, 10] },
-  lydian: { id: 'lydian', degrees: [0, 2, 4, 6, 7, 9, 11] },
-  aeolian: { id: 'aeolian', degrees: [0, 2, 3, 5, 7, 8, 10] },
+  ritsu: { id: 'ritsu', degrees: [0, 2, 5, 7, 10] },
+  major_pentatonic: { id: 'major_pentatonic', degrees: [0, 2, 4, 7, 9] },
+  sus_pentatonic: { id: 'sus_pentatonic', degrees: [0, 3, 5, 7, 10] },
 })
 
-const SCALE_FALLBACK = SCALES['hirajoshi'] as ScaleShape
+const SCALE_FALLBACK = SCALES['yo'] as ScaleShape
 
 /** The sound of one moment, in units `engine.ts` can apply directly. */
 export interface AudioScore {
@@ -60,14 +69,10 @@ export interface AudioScore {
   readonly scale: ScaleShape
   /** Lowpass cutoff on the whole mix, Hz. Weather and phase open or close it. */
   readonly cutoffHz: number
-  /** Seconds between one bell and the next. Longer is calmer. */
-  readonly bellIntervalSec: number
-  /** Peak gain of a single bell, before the master level. */
-  readonly bellGain: number
-  /** Steady gain of the drone, before the master level. */
-  readonly droneGain: number
-  /** Detune between the drone's two voices, cents. Wider beats slower. */
-  readonly droneDetuneCents: number
+  /** Seconds between one note and the next. Longer is calmer. */
+  readonly noteIntervalSec: number
+  /** Peak gain of a single note, before the master level. */
+  readonly noteGain: number
 }
 
 /**
@@ -119,7 +124,14 @@ const MOOD_INTERVAL_SCALE: Readonly<Record<string, number>> = Object.freeze({
   lonely: 1.3,
 })
 
-const BASE_BELL_INTERVAL_SEC = 6.5
+/**
+ * How far apart the soft notes sit before weather and mood move them.
+ *
+ * Long. With no tone underneath, this interval *is* the density of the piece,
+ * and the complaint that ended the drone was about constancy rather than
+ * timbre — so the default leans toward hearing nothing.
+ */
+const BASE_NOTE_INTERVAL_SEC = 11
 
 function clamp(value: number, low: number, high: number): number {
   return Math.min(high, Math.max(low, value))
@@ -145,10 +157,10 @@ export function scoreFor(conditions: SceneConditions): AudioScore {
   const restingInterval = conditions.resting ? 1.5 : 1
 
   const cutoffHz = clamp(phase.cutoffHz * weather.cutoffScale * restingCutoff, 220, 6000)
-  const bellIntervalSec = clamp(
-    BASE_BELL_INTERVAL_SEC * weather.intervalScale * moodScale * restingInterval,
-    2.5,
-    24,
+  const noteIntervalSec = clamp(
+    BASE_NOTE_INTERVAL_SEC * weather.intervalScale * moodScale * restingInterval,
+    4,
+    30,
   )
 
   return {
@@ -161,27 +173,66 @@ export function scoreFor(conditions: SceneConditions): AudioScore {
     rootHz: phase.rootHz,
     scale,
     cutoffHz,
-    bellIntervalSec,
-    bellGain: 0.16 * restingGain,
-    droneGain: 0.32 * restingGain,
-    droneDetuneCents: conditions.resting ? 5 : 9,
+    noteIntervalSec,
+    noteGain: 0.22 * restingGain,
   }
 }
 
 /**
- * The next bell's pitch, in Hz.
+ * The pitch a command's acknowledgement rings at, in Hz.
+ *
+ * Three reasons this exists and what bounds it:
+ *
+ * - A viewer who typed something should hear the room notice. The screen already
+ *   shows it, so this adds nothing §5.2 needs — it is the difference between a
+ *   room and a recording.
+ * - It is pitched **inside the current scale**, so acknowledgements cannot clash
+ *   with each other or with a note however many arrive at once.
+ * - `null` for anything that is not one of the free care commands. Paid events do
+ *   not ring: spec §8.5 does not let money buy screen dominance and it does not
+ *   get to buy a sound either, which is why nothing in this module reads a paid
+ *   effect at all.
+ */
+export function chimeHzFor(score: AudioScore, commandName: string): number | null {
+  const degreeIndex = FREE_COMMAND_DEGREE[commandName]
+  if (degreeIndex === undefined) return null
+  const degrees = score.scale.degrees
+  const degree = degrees[degreeIndex % degrees.length] ?? 0
+  // One octave above the notes, so an acknowledgement reads as a separate voice
+  // rather than as the ambient line happening to play.
+  return score.rootHz * Math.pow(2, 3 + degree / 12)
+}
+
+/**
+ * Which step of the scale each free command speaks on (spec §7.1).
+ *
+ * Fixed rather than derived so the same command is always the same note: a
+ * regular viewer can learn that `ごはん` sounds like that, which is the point of
+ * giving them different pitches at all.
+ */
+const FREE_COMMAND_DEGREE: Readonly<Record<string, number>> = Object.freeze({
+  FEED: 0,
+  PLAY: 2,
+  PET: 4,
+})
+
+/** Peak gain of a command acknowledgement, before the master level. */
+export const CHIME_GAIN = 0.1
+
+/**
+ * The next note's pitch, in Hz.
  *
  * Seeded rather than random (CLAUDE.md §4): the same run replays the same
  * melody, so a soak or a replay is comparable and nothing here is a source of
- * nondeterminism. `step` is the bell's index since the run began.
+ * nondeterminism. `step` is the note's index since the run began.
  */
-export function bellHz(score: AudioScore, step: number): number {
+export function noteHz(score: AudioScore, step: number): number {
   // A small integer hash, so consecutive steps do not walk the scale in order
   // and the line does not sound like an exercise.
   const mixed = Math.imul(step + 1, 2654435761) >>> 0
   const degrees = score.scale.degrees
   const degree = degrees[mixed % degrees.length] ?? 0
-  // Two octaves above the drone, occasionally three: bells sit clear of the pad.
+  // Two octaves above the root, occasionally three.
   const octave = 2 + ((mixed >>> 8) % 2)
   return score.rootHz * Math.pow(2, octave + degree / 12)
 }
