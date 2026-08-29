@@ -84,54 +84,56 @@ body {
  * test to be read with the real mobile UI overlaid, so a layout that only works
  * on a bare frame is a layout that fails the test it exists to pass.
  *
- * The app draws its title and channel row across the top, the live chat and its
- * input across the bottom, and the like/share/comment column down the right.
+ * The numbers live in `visual/safe-area.ts` next to the measurement they came
+ * from, and `Screen` sets them on `.screen` as custom properties. They are not
+ * restated here: the surface being modelled is the app's regular watch page, and
+ * the previous set of constants silently modelled Shorts instead.
  *
- * `provisional` (BOARD A-15 sense): these three numbers are read off the app's
- * layout, not measured on a device. Gate 2's calibration (§14.2(1),
- * gate2-experiments.md 2장) is where they get confirmed or corrected — the
- * screenshots taken there are the evidence, and until then no number here is a
- * pass mark.
+ * Layout inside the band, in three regions:
+ *
+ *   mode   | rail     the input mode top left, the three secondary slots down
+ *   effect | rail     the right — the width Shorts would have taken;
+ *   ─────────────     the creature and whatever is playing fill the middle;
+ *   foot             the current need and the free commands sit on one plate at
+ *                    the band's floor, directly above the app's real chat input,
+ *                    so the eye goes need → command → the box you type it in.
  */
-:root {
-  --safe-top: 150px;
-  --safe-bottom: 460px;
-  --safe-right: 120px;
-}
-
 .screen {
   position: absolute;
   inset: 0;
-  display: flex;
-  flex-direction: column;
-  padding: var(--safe-top) 48px var(--safe-bottom);
-  gap: 18px;
+  display: grid;
+  grid-template-columns: 1fr var(--rail-width);
+  grid-template-rows: auto 1fr auto;
+  grid-template-areas:
+    'mode   rail'
+    'effect rail'
+    'foot   foot';
+  column-gap: 44px;
+  padding: var(--safe-top) var(--safe-inset-x) var(--safe-bottom-inset);
   pointer-events: none;
 }
 
-/* The action column only overlaps the lower half, so only that part gives way. */
-.screen-bottom {
-  padding-right: var(--safe-right);
-}
-
-/* --- shared card ---------------------------------------------------------- */
-
-.slot,
-.cta,
-.mode-badge {
+/*
+ * One plate, not five cards. Every slot used to carry its own translucent card,
+ * which read as a dashboard laid over a stream rather than as part of it; the
+ * secondary slots now sit on the scene with a text shadow for legibility and the
+ * only filled surface left is the one under the need and the commands, which is
+ * the block a first-time viewer is meant to read.
+ */
+.screen-foot {
+  grid-area: foot;
   background: var(--card);
   border: 2px solid var(--card-line);
   border-radius: var(--card-radius);
-  padding: 16px 22px;
-  backdrop-filter: blur(6px);
+  padding: 20px 30px 22px;
 }
 
 .slot-label {
   margin: 0 0 4px;
   display: flex;
   align-items: baseline;
-  gap: 10px;
-  font-size: 25px;
+  gap: 12px;
+  font-size: 34px;
   font-weight: 600;
   /* A two-line label in a narrow column pushed the value out of the card. */
   white-space: nowrap;
@@ -144,7 +146,7 @@ body {
 }
 
 .slot-label-en {
-  font-size: 22px;
+  font-size: 28px;
   font-weight: 700;
   letter-spacing: 0.22em;
   color: var(--accent);
@@ -156,7 +158,7 @@ body {
   display: flex;
   align-items: center;
   gap: 18px;
-  font-size: 46px;
+  font-size: 56px;
   font-weight: 700;
   flex-wrap: wrap;
 }
@@ -164,7 +166,7 @@ body {
 .slot-en,
 .slot-en-inline {
   margin: 8px 0 0;
-  font-size: 24px;
+  font-size: 30px;
   font-weight: 700;
   letter-spacing: 0.2em;
   color: var(--ink-dim);
@@ -172,13 +174,13 @@ body {
 
 .slot-en-inline {
   margin: 0;
-  font-size: 22px;
+  font-size: 28px;
 }
 
 .slot-count,
 .slot-time,
 .slot-stage {
-  font-size: 30px;
+  font-size: 34px;
   font-weight: 600;
   color: var(--ink-dim);
 }
@@ -188,7 +190,7 @@ body {
   padding: 4px 18px;
   border-radius: 999px;
   background: rgba(247, 243, 234, 0.1);
-  font-size: 26px;
+  font-size: 30px;
 }
 
 /*
@@ -204,7 +206,7 @@ body {
   padding: 4px 16px;
   border-radius: 999px;
   background: rgba(247, 243, 234, 0.1);
-  font-size: 28px;
+  font-size: 32px;
   font-weight: 700;
   white-space: nowrap;
   text-overflow: ellipsis;
@@ -217,17 +219,22 @@ body {
   color: var(--accent);
 }
 
-/* --- top: input mode + the current need or mission ------------------------ */
+/* --- top left: how input is being applied right now ----------------------- */
 
 .screen-top {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
+  grid-area: mode;
+  align-self: start;
+  justify-self: start;
+  /* Clear of the channel's crown badge, which the app draws at the left edge
+     down to y=174 (`visual/safe-area.ts`). */
+  max-width: 560px;
 }
 
 .mode-badge {
-  padding: 16px 26px;
-  align-self: flex-start;
+  background: var(--card);
+  border: 2px solid var(--card-line);
+  border-radius: var(--card-radius);
+  padding: 14px 24px;
   min-width: 420px;
 }
 
@@ -311,20 +318,34 @@ body {
   color: var(--ink-dim);
 }
 
+/*
+ * The need is the one line spec §5.2(1)+(2) is answered by, so it is the largest
+ * thing on the screen after the creature itself. It sits under the creature, not
+ * over it: stacked above, a headline this size clips the creature's head against
+ * the app's header scrim.
+ */
+.slot-need {
+  padding: 0 0 10px;
+}
+
 .slot-need .slot-value {
-  font-size: 76px;
-  line-height: 1.1;
+  font-size: 88px;
+  line-height: 1.05;
 }
 
 .slot-need .icon {
-  font-size: 96px;
+  font-size: 84px;
+}
+
+.slot-need .slot-en {
+  margin-top: 2px;
 }
 
 /* --- middle: whatever the world is playing right now ---------------------- */
 
 .effect-layer {
+  grid-area: effect;
   position: relative;
-  flex: 1;
   min-height: 0;
 }
 
@@ -380,6 +401,10 @@ body {
   justify-content: flex-start;
   gap: 24px;
   padding-top: 16px;
+}
+
+.effect-center > * {
+  max-width: 100%;
 }
 
 .effect-mission {
@@ -458,7 +483,9 @@ body {
 
 .paid-thanks {
   position: relative;
-  width: 620px;
+  /* The effect column is narrower than the frame now that the rail owns the
+     right edge, so the card fits the column rather than a fixed 620px. */
+  width: min(620px, 100%);
   padding: 30px 36px 26px;
   border-radius: 36px;
   background: rgba(9, 12, 15, 0.84);
@@ -588,36 +615,80 @@ body {
   }
 }
 
-/* --- bottom: the other three slots and the free call to action ------------ */
+/* --- right rail: the three secondary slots -------------------------------- */
 
-.screen-bottom {
+/*
+ * These three are the secondary read: §5.2 requires them, it does not require
+ * them to compete with the need or the commands. They run down the right column
+ * because that is the one column the watch page leaves empty for its whole
+ * height — the app's own busy edge is the left one, where it stacks gift labels.
+ *
+ * No card behind them. A text shadow does the legibility work a translucent
+ * plate used to do, at no cost to the scene behind it and without adding a
+ * fourth filled rectangle to a frame that already has the app's own two.
+ */
+.hud {
+  grid-area: rail;
+  align-self: start;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  /* Tight: the column has to clear the plate below it, and three slots at a size
+     that survives the downscale is all it fits. */
+  gap: 16px;
+  text-align: right;
+  text-shadow: 0 2px 14px rgba(0, 0, 0, 0.85);
 }
 
 .hud .slot {
-  padding: 12px 16px;
+  padding: 0;
+  border-top: 2px solid var(--card-line);
+  padding-top: 10px;
+}
+
+.hud .slot:first-child {
+  border-top: none;
+  padding-top: 0;
 }
 
 .hud .slot-label {
-  font-size: 20px;
-  gap: 8px;
+  /* Stacked, not inline: "反映された行動 LAST ACTION" on one 400px line clipped
+     itself against `white-space: nowrap`. */
+  display: block;
+  text-align: right;
+  margin-bottom: 2px;
+  font-size: 26px;
+  overflow: visible;
 }
 
-.hud {
-  display: grid;
-  /* One compact strip. These three are the secondary read (§5.2 requires them,
-     it does not require them to be large) and every pixel they give back is a
-     pixel the creature gets — measured against a host screenshot where the
-     lower body was hidden behind this row. */
-  grid-template-columns: 5fr 5fr 4fr;
-  grid-template-areas: 'action progress next';
-  gap: 12px;
-  align-items: stretch;
+.hud .slot-label-ja,
+.hud .slot-label-en {
+  display: block;
+}
+
+.hud .slot-label-en {
+  font-size: 22px;
+  line-height: 1.15;
+}
+
+.hud .slot-value {
+  justify-content: flex-end;
+  font-size: 42px;
+  row-gap: 2px;
+}
+
+.hud .slot-count,
+.hud .slot-time,
+.hud .slot-stage,
+.hud .slot-en-inline {
+  font-size: 26px;
+}
+
+.hud .slot-stage {
+  margin-left: 0;
 }
 
 .hud-waiting {
+  grid-area: foot;
   display: block;
   font-size: 48px;
   color: var(--ink-dim);
@@ -637,12 +708,12 @@ body {
 
 .slot-last-action .icon,
 .slot-progress .icon {
-  font-size: 52px;
+  font-size: 44px;
 }
 
 .progress-track {
-  margin-top: 16px;
-  height: 20px;
+  margin-top: 10px;
+  height: 14px;
   border-radius: 10px;
   background: rgba(247, 243, 234, 0.14);
   overflow: hidden;
@@ -657,8 +728,9 @@ body {
 .beat-marks {
   list-style: none;
   display: flex;
+  justify-content: flex-end;
   gap: 10px;
-  margin: 12px 0 0;
+  margin: 8px 0 0;
   padding: 0;
 }
 
@@ -675,12 +747,23 @@ body {
 
 .slot-next-choice .slot-value {
   flex-direction: column;
-  align-items: flex-start;
-  gap: 6px;
+  align-items: flex-end;
+  gap: 2px;
 }
 
 .slot-next-choice .slot-text {
   font-variant-numeric: tabular-nums;
+}
+
+/*
+ * The call to action, on the plate's lower half. It is the last thing in the
+ * safe band on purpose: below it is the app's own chat input, so the three words
+ * a viewer has to type sit directly above the box they type them into.
+ */
+.cta {
+  border-top: 2px solid var(--card-line);
+  margin-top: 10px;
+  padding-top: 12px;
 }
 
 .cta-head {
@@ -689,14 +772,19 @@ body {
   gap: 18px;
 }
 
+.cta-head .slot-label {
+  margin: 0;
+  font-size: 30px;
+}
+
 .cta-hint {
-  font-size: 24px;
+  font-size: 28px;
   color: var(--ink-dim);
 }
 
 .cta-choices {
   list-style: none;
-  margin: 0 0 18px;
+  margin: 0 0 16px;
   padding: 0;
   display: flex;
   gap: 14px;
@@ -730,40 +818,45 @@ body {
 
 .cta-commands {
   list-style: none;
-  margin: 10px 0 0;
+  margin: 12px 0 0;
   padding: 0;
   display: flex;
-  gap: 12px;
+  gap: 14px;
 }
 
+/*
+ * Shown as the literal string a viewer sends, because that is what it is: the
+ * accent is spent here and on the progress fill and nowhere else, so the one
+ * coloured thing on the screen is the one thing that asks for an action.
+ */
 .cta-command {
   flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 12px;
-  padding: 10px 10px;
+  padding: 14px 10px;
   border-radius: 999px;
   background: rgba(247, 243, 234, 0.1);
-  border: 2px solid var(--card-line);
-  font-size: 32px;
+  border: 2px solid var(--accent);
+  font-size: 52px;
   font-weight: 800;
   white-space: nowrap;
 }
 
 .cta-emoji {
-  font-size: 40px;
+  font-size: 48px;
 }
 
 .cta-en {
-  font-size: 20px;
+  font-size: 26px;
   letter-spacing: 0.16em;
   color: var(--ink-dim);
 }
 
 .cta-free-note {
-  margin: 10px 0 0;
-  font-size: 24px;
+  margin: 8px 0 0;
+  font-size: 30px;
   font-weight: 700;
   color: var(--accent);
   text-align: center;
@@ -774,10 +867,23 @@ body {
  * a standing disclosure, not a second invitation competing with the first, and a
  * viewer who never reads it is left exactly as anonymous as before.
  */
+/*
+ * Below the band, not on the plate (`visual/safe-area.ts` NOTICE_TOP). It is a
+ * standing disclosure rather than one of the four things §5.2 asks for in five
+ * seconds, and keeping it on the plate cost the creature the room it needs.
+ */
 .cta-identity {
-  margin: 10px 0 0;
-  padding: 10px 14px 0;
-  border-top: 2px solid var(--card-line);
+  position: absolute;
+  left: var(--safe-inset-x);
+  right: var(--safe-inset-x);
+  top: var(--notice-top);
+  max-height: var(--notice-max-height);
+  overflow: hidden;
+  margin: 0;
+  padding: 14px 22px;
+  background: var(--card);
+  border: 2px solid var(--card-line);
+  border-radius: 26px;
 }
 
 .cta-identity-notice {
@@ -787,19 +893,19 @@ body {
   gap: 4px;
   /* Sized so the whole notice fits on one line at 1080px wide (D-9: the screen
      carries one line, the channel description carries the full text). */
-  font-size: 17px;
+  font-size: 26px;
   font-weight: 600;
   color: var(--ink-dim);
 }
 
 .cta-identity-en {
-  font-size: 18px;
-  letter-spacing: 0.16em;
+  font-size: 24px;
+  letter-spacing: 0.12em;
 }
 
 .cta-identity-commands {
   list-style: none;
-  margin: 12px 0 0;
+  margin: 10px 0 0;
   padding: 0;
   display: flex;
   gap: 16px;
@@ -811,22 +917,25 @@ body {
   align-items: baseline;
   justify-content: center;
   gap: 10px;
-  padding: 8px 12px;
+  padding: 6px 12px;
   border-radius: 999px;
   border: 2px solid var(--card-line);
-  font-size: 28px;
+  font-size: 30px;
   font-weight: 700;
   white-space: nowrap;
 }
 
 .cta-identity-meaning {
-  font-size: 21px;
+  font-size: 24px;
   font-weight: 600;
   color: var(--ink-dim);
 }
 
 .cta-paused {
   text-align: center;
+  border-top: none;
+  margin-top: 0;
+  padding-top: 0;
 }
 
 .cta-paused-title {
