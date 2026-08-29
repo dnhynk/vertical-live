@@ -153,6 +153,22 @@ describe('the repository defaults fit one day of quota', () => {
    * reports a pacing wait inside its delay as `ok`. **That is the only reason a
    * long interval is safe**, so the two are asserted together.
    */
+  /**
+   * The idle floor is not free of the budget: it is what the source spends all
+   * the hours nobody is typing, and if that alone outruns `dailyStartBudget` the
+   * guard is permanently engaged and `burstStarts` is never available for the
+   * moments it exists for.
+   *
+   * Shipped at 90,000ms it did exactly that — 960 idle starts a day against a
+   * budget of 800 — and on the live host the source sat 121 starts ahead of its
+   * line with the burst locked out while a viewer was typing. Measured
+   * 2026-08-29: spent 322, earned 201, guard engaged, interval 124,803ms.
+   */
+  it('leaves the burst for activity: idling alone stays inside the daily budget', () => {
+    const idleStartsPerDay = MS_PER_DAY / chat.grpcStreamMinStartIntervalMs
+    expect(idleStartsPerDay).toBeLessThan(chat.dailyStartBudget)
+  })
+
   it('bounds the day under what the platform served, and stays observable while it waits', () => {
     const HIGHEST_DAY_SERVED = 865
     const LOWEST_DAY_REFUSED = 1584
