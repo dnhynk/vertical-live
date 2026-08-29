@@ -26,7 +26,10 @@ describe('loadChatConfig', () => {
     expect(config.enabled).toBe(false)
     expect(config.parts).toEqual(['id', 'snippet'])
     expect(config.grpc.endpoint).toBe('youtube.googleapis.com:443')
-    expect(config.grpcStreamMinStartIntervalMs).toBe(25_000)
+    // Raised from T47's 25,000 on 2026-08-29: that floor fit the unit budget and
+    // still hit `liveChatMessages.streamList`'s own rate limit twice. See
+    // `youtube/quota/budget.test.ts` for the observations behind 90,000.
+    expect(config.grpcStreamMinStartIntervalMs).toBe(90_000)
     expect(config.liveChatId).toBeNull()
     // Every number the official documentation does not fix must say so.
     expect(config.provisional).toContain('reconnect')

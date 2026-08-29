@@ -18,6 +18,19 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000
  * These are arithmetic, not opinion, so they are a test rather than a comment.
  * A future change that shortens an interval or adds a call to the poll fails
  * here instead of eighteen hours later on the host.
+ *
+ * **Fitting the allowance is necessary and not sufficient.** T47's 25,000ms
+ * floor passed every assertion below — 8,700 projected against 9,500 usable —
+ * and still took the broadcast down twice, on 2026-08-24 and 2026-08-28. On
+ * 2026-08-29 a restart proved why: in the same Pacific day, with the local
+ * counter at 4,712 of 10,000, `liveBroadcasts.insert`/`bind`/`transition`
+ * all succeeded while `liveChatMessages.streamList` alone came back
+ * `rateLimitExceeded` (gRPC RESOURCE_EXHAUSTED) after seven calls. That method
+ * carries a limit of its own that the shared unit budget does not describe, and
+ * nothing in this file can see it. The daily call counts either side of the two
+ * failures — 794 and 865 fine, 1,584 and ~1,695 refused — put that ceiling
+ * somewhere near a thousand a day, which is what `grpcStartsPerDay` is now set
+ * under. It is an observation, not a documented number (T54, A-T54-1).
  */
 describe('the repository defaults fit one day of quota', () => {
   const quota = loadQuotaConfig()
@@ -53,17 +66,31 @@ describe('the repository defaults fit one day of quota', () => {
   const budget = quota.dailyUnits - quota.reserveUnits
 
   it('projects the capped worst-case day inside the allowance, with the reserve untouched', () => {
-    expect(grpcStartsPerDay).toBe(3456)
+    expect(grpcStartsPerDay).toBe(960)
     expect(healthUnits).toBe(4608)
     expect(rolloverUnits).toBe(636)
-    expect(projected).toBe(8700)
+    expect(projected).toBe(6204)
     expect(projected).toBeLessThanOrEqual(budget)
   })
 
   it('keeps more than one modeled rollover buffer as usable-budget headroom', () => {
     const usableBudgetHeadroom = budget - projected
-    expect(usableBudgetHeadroom).toBe(800)
+    expect(usableBudgetHeadroom).toBe(3296)
     expect(usableBudgetHeadroom).toBeGreaterThan(rolloverUnits)
+  })
+
+  /**
+   * The constraint the unit budget cannot express. Both days the broadcast died
+   * on `rateLimitExceeded` had crossed roughly a thousand `streamList` calls;
+   * both days it survived stayed under nine hundred. Until that ceiling is
+   * documented or measured against the Cloud Console (A-T54-1), the floor stays
+   * under the lower of the two observations that failed.
+   */
+  it('opens fewer chat streams a day than the two days that were refused', () => {
+    const REFUSED_AT_OR_ABOVE = 1584
+    const SURVIVED_UP_TO = 865
+    expect(grpcStartsPerDay).toBeLessThan(REFUSED_AT_OR_ABOVE)
+    expect(grpcStartsPerDay).toBeLessThanOrEqual(SURVIVED_UP_TO * 1.2)
   })
 
   /**
